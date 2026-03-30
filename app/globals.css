@@ -3,6 +3,9 @@
   --foreground: #e4e4e7;
   --accent: #22c55e;
   --muted: #71717a;
+  --muted-light: #a1a1aa;
+  --panel: #13131a;
+  --border: #27272a;
 }
 
 * {
