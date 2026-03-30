@@ -1,14 +1,6 @@
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
-import { FlatCompat } from "@eslint/eslintrc";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-});
+import nextPlugin from "@next/eslint-plugin-next";
+import nextParser from "eslint-config-next/parser.js";
+import tsParser from "@typescript-eslint/parser";
 
 const config = [
   {
@@ -20,7 +12,33 @@ const config = [
       "next-env.d.ts",
     ],
   },
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+  {
+    files: ["**/*.{js,jsx,mjs,cjs}"],
+    languageOptions: {
+      parser: nextParser,
+      parserOptions: {
+        requireConfigFile: false,
+        sourceType: "module",
+        allowImportExportEverywhere: true,
+        babelOptions: {
+          presets: ["next/babel"],
+          caller: {
+            supportsTopLevelAwait: true,
+          },
+        },
+      },
+    },
+  },
+  {
+    files: ["**/*.{ts,tsx,mts,cts}"],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        sourceType: "module",
+      },
+    },
+  },
+  nextPlugin.flatConfig.coreWebVitals,
 ];
 
 export default config;

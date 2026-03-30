@@ -4,11 +4,11 @@
   "private": true,
   "description": "StreamPay Dashboard — Stellar wallet integration and stream management",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint .",
-    "test": "jest"
+    "dev": "node scripts/run-from-realpath.mjs next dev",
+    "build": "node scripts/run-from-realpath.mjs next build",
+    "start": "node scripts/run-from-realpath.mjs next start",
+    "lint": "node scripts/run-from-realpath.mjs eslint .",
+    "test": "node scripts/run-from-realpath.mjs jest"
   },
   "dependencies": {
     "next": "^15.0.0",
@@ -16,8 +16,10 @@
     "react-dom": "^18.3.0"
   },
   "devDependencies": {
+    "@next/eslint-plugin-next": "^15.5.12",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
+    "@typescript-eslint/parser": "^8.57.0",
     "@types/jest": "^29.5.12",
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.0",
