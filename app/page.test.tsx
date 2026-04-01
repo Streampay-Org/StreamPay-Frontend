@@ -28,4 +28,13 @@ describe("Home", () => {
       expect(screen.getByRole("heading", { name: action })).toBeInTheDocument();
     }
   });
+
+  it("renders the reusable stream status badge section", () => {
+    render(<Home />);
+    expect(screen.getByRole("heading", { name: /stream statuses/i })).toBeInTheDocument();
+    expect(screen.getAllByLabelText(/stream status: active/i)).toHaveLength(2);
+    expect(screen.getByLabelText(/stream status: draft/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/stream status: paused/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/stream status: ended/i)).toBeInTheDocument();
+  });
 });

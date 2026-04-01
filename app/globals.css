@@ -2,6 +2,18 @@
   --background: #0a0a0f;
   --foreground: #e4e4e7;
   --accent: #22c55e;
+  --badge-active-bg: #0f2d1e;
+  --badge-active-border: #22c55e;
+  --badge-active-text: #d3f9df;
+  --badge-draft-bg: #1e293b;
+  --badge-draft-border: #60a5fa;
+  --badge-draft-text: #dbeafe;
+  --badge-ended-bg: #2a1617;
+  --badge-ended-border: #f87171;
+  --badge-ended-text: #fee2e2;
+  --badge-paused-bg: #31230f;
+  --badge-paused-border: #fbbf24;
+  --badge-paused-text: #fef3c7;
   --muted: #71717a;
   --muted-light: #a1a1aa;
   --panel: #13131a;
@@ -30,4 +42,43 @@ a {
 
 a:hover {
   text-decoration: underline;
+}
+
+.status-badge {
+  align-items: center;
+  background: var(--status-badge-bg);
+  border: 1px solid var(--status-badge-border);
+  border-radius: 999px;
+  color: var(--status-badge-text);
+  display: inline-flex;
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  min-height: 2rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.status-badge--draft {
+  --status-badge-bg: var(--badge-draft-bg);
+  --status-badge-border: var(--badge-draft-border);
+  --status-badge-text: var(--badge-draft-text);
+}
+
+.status-badge--active {
+  --status-badge-bg: var(--badge-active-bg);
+  --status-badge-border: var(--badge-active-border);
+  --status-badge-text: var(--badge-active-text);
+}
+
+.status-badge--paused {
+  --status-badge-bg: var(--badge-paused-bg);
+  --status-badge-border: var(--badge-paused-border);
+  --status-badge-text: var(--badge-paused-text);
+}
+
+.status-badge--ended {
+  --status-badge-bg: var(--badge-ended-bg);
+  --status-badge-border: var(--badge-ended-border);
+  --status-badge-text: var(--badge-ended-text);
 }

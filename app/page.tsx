@@ -1,7 +1,9 @@
+import { StatusBadge, type StreamStatus } from "./components/StatusBadge";
 import { homeCopy, streamActionCopy } from "./content/copy";
 
 export default function Home() {
   const actions = Object.values(streamActionCopy);
+  const streamStatuses: StreamStatus[] = ["draft", "active", "paused", "ended"];
 
   return (
     <main
@@ -88,6 +90,64 @@ export default function Home() {
             <p style={{ color: "var(--muted-light)", lineHeight: 1.5 }}>{action.description}</p>
           </article>
         ))}
+      </section>
+
+      <section
+        aria-labelledby="stream-statuses"
+        style={{ display: "grid", gap: "1rem", maxWidth: "64rem", width: "100%" }}
+      >
+        <div>
+          <h2 id="stream-statuses" style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>
+            Stream statuses
+          </h2>
+          <p style={{ color: "var(--muted-light)", lineHeight: 1.5 }}>
+            Reusable badges keep stream lifecycle labels readable in both list and detail views.
+          </p>
+        </div>
+
+        <div
+          style={{
+            background: "var(--panel)",
+            border: "1px solid var(--border)",
+            borderRadius: "1rem",
+            padding: "1.25rem",
+          }}
+        >
+          <h3 style={{ fontSize: "1rem", marginBottom: "0.75rem" }}>List preview</h3>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
+            {streamStatuses.map((status) => (
+              <StatusBadge key={status} status={status} />
+            ))}
+          </div>
+        </div>
+
+        <article
+          style={{
+            background: "var(--panel)",
+            border: "1px solid var(--border)",
+            borderRadius: "1rem",
+            display: "grid",
+            gap: "0.75rem",
+            padding: "1.25rem",
+          }}
+        >
+          <div
+            style={{
+              alignItems: "center",
+              display: "flex",
+              gap: "0.75rem",
+              justifyContent: "space-between",
+            }}
+          >
+            <div>
+              <h3 style={{ fontSize: "1rem", marginBottom: "0.25rem" }}>Design Retainer Stream</h3>
+              <p style={{ color: "var(--muted-light)", lineHeight: 1.5 }}>
+                Example detail card showing the same badge in context.
+              </p>
+            </div>
+            <StatusBadge status="active" />
+          </div>
+        </article>
       </section>
     </main>
   );
