@@ -86,7 +86,7 @@ function StreamListSkeleton() {
   );
 }
 
-export function StreamsPageContent({
+function StreamsPageContent({
   state = "populated",
   streams = mockStreams,
 }: StreamsPageContentProps) {
@@ -136,14 +136,14 @@ export function StreamsPageContent({
           />
         ) : (
           <section aria-label="Active streams">
-  <ul>
-    {streams.map((stream) => (
-      <li key={stream.id}>
-        <StreamRow stream={stream} />
-      </li>
-    ))}
-  </ul>
-</section>
+            <ul>
+              {streams.map((stream) => (
+                <li key={stream.id}>
+                  <StreamRow stream={stream} />
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
       </section>
     </main>
