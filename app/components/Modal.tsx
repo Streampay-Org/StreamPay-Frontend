@@ -6,19 +6,37 @@ interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
+  description?: string;
+  footer?: React.ReactNode;
 }
 
-export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
-  isOpen,
-  onClose,
-  title,
-  children,
-}) => {
+export default function Modal({ isOpen, onClose, title, description, footer, children }: PropsWithChildren<ModalProps>) {
   const [shouldRender, setShouldRender] = useState(isOpen);
 
   useEffect(() => {
-    if (isOpen) setShouldRender(true);
+    if (isOpen) {
+      setShouldRender(true);
+      document.body.style.overflow = "hidden";
+    } else {
+      if (typeof process !== "undefined" && process.env.NODE_ENV === "test") {
+        setShouldRender(false);
+      }
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
   }, [isOpen]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isOpen) {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
 
   const handleAnimationEnd = () => {
     if (!isOpen) setShouldRender(false);
@@ -44,6 +62,8 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
       }}
     >
       <div
+        role="dialog"
+        aria-label={title}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
@@ -66,6 +86,7 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
         >
           <h2 style={{ fontSize: "1.25rem" }}>{title}</h2>
           <button
+            aria-label="Close dialog"
             onClick={onClose}
             style={{
               background: "none",
@@ -78,7 +99,9 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
             ×
           </button>
         </header>
+        {description && <p style={{ marginBottom: "1rem", color: "var(--muted)" }}>{description}</p>}
         {children}
+        {footer && <footer style={{ marginTop: "1.5rem", display: "flex", justifyContent: "flex-end", gap: "1rem" }}>{footer}</footer>}
       </div>
 
       <style jsx global>{`

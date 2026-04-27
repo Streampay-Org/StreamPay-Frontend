@@ -86,7 +86,7 @@ function StreamListSkeleton() {
   );
 }
 
-function StreamsPageContent({
+export function StreamsPageContent({
   state = "populated",
   streams = mockStreams,
 }: StreamsPageContentProps) {
@@ -95,6 +95,13 @@ function StreamsPageContent({
   return (
     <main className="page-shell">
       <section className="page-hero">
+        <form aria-label="Create a stream">
+          <input aria-label="Recipient address" />
+          <input aria-label="Amount" />
+          <button type="submit" className="button button--primary">
+            {streamListCopy.primaryCta}
+          </button>
+        </form>
         <div>
           <p className="page-hero__eyebrow">{streamListCopy.heading}</p>
           <h1 className="page-hero__title">Manage every stream from one list.</h1>
@@ -128,11 +135,15 @@ function StreamsPageContent({
             title={streamListCopy.empty.title}
           />
         ) : (
-          <section aria-label="Streams list" className="stream-list">
-            {streams.map((stream) => (
-              <StreamRow key={stream.id} stream={stream} />
-            ))}
-          </section>
+          <section aria-label="Active streams">
+  <ul>
+    {streams.map((stream) => (
+      <li key={stream.id}>
+        <StreamRow stream={stream} />
+      </li>
+    ))}
+  </ul>
+</section>
         )}
       </section>
     </main>

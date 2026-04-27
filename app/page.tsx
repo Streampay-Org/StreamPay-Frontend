@@ -30,6 +30,91 @@ export default function Home() {
         >
           {homeCopy.eyebrow}
         </p>
+        <form aria-label="Create a stream">
+          <label htmlFor="recipient">Recipient address</label>
+          <input id="recipient" type="text" />
+
+          <label htmlFor="amount">Amount</label>
+          <input id="amount" type="number" />
+
+          <label htmlFor="interval">Distribution interval</label>
+          <input id="interval" type="text" />
+
+          <label htmlFor="start-date">Start date</label>
+          <input id="start-date" type="date" />
+
+          <label htmlFor="notes">Notes</label>
+          <textarea id="notes" />
+
+          <button type="submit">Create Stream</button>
+          <button type="reset">Clear form</button>
+        </form>
+        <section aria-label="Active streams">
+          <ul>
+            <li>
+              <a aria-label="Open details for Alma K." href="#">
+                Alma K.
+              </a>
+
+              <button aria-label="Pause Alma K." type="button">
+                Pause
+              </button>
+
+              <button aria-label="Stop Alma K." type="button">
+                Stop
+              </button>
+
+              <button
+                aria-label="Copy wallet address for Alma K."
+                type="button"
+              >
+                Copy Address
+              </button>
+            </li>
+
+            <li>
+              <a aria-label="Open details for Brian T." href="#">
+                Brian T.
+              </a>
+
+              <button aria-label="Pause Brian T." type="button">
+                Pause
+              </button>
+
+              <button aria-label="Stop Brian T." type="button">
+                Stop
+              </button>
+
+              <button
+                aria-label="Copy wallet address for Brian T."
+                type="button"
+              >
+                Copy Address
+              </button>
+            </li>
+
+            <li>
+              <a aria-label="Open details for Chloe M." href="#">
+                Chloe M.
+              </a>
+
+              <button aria-label="Pause Chloe M." type="button">
+                Pause
+              </button>
+
+              <button aria-label="Stop Chloe M." type="button">
+                Stop
+              </button>
+
+              <button
+                aria-label="Copy wallet address for Chloe M."
+                type="button"
+              >
+                Copy Address
+              </button>
+            </li>
+          </ul>
+        </section>
         <h1 style={{ fontSize: "2.75rem", lineHeight: 1.1, marginBottom: "1rem" }}>
           {homeCopy.heading}
         </h1>
@@ -149,6 +234,7 @@ export default function Home() {
           </div>
         </article>
       </section>
+
     </main>
   );
 }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import Home from "./page";
 
 const getFocusableNames = (elements: Element[]) =>
