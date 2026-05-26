@@ -501,7 +501,13 @@ a:hover {
 }
 
 .toggle-button--active { background-color: var(--accent); }
-.toggle-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.toggle-button:not(:disabled):hover { background-color: #3f3f46; }
+.toggle-button:not(:disabled):active { transform: scale(0.96); }
+.toggle-button--active:not(:disabled):hover { background-color: var(--accent-hover); }
+.toggle-button:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 4px;
+}
 .toggle-button:disabled { cursor: not-allowed; opacity: 0.5; }
 
 .toggle-thumb {
@@ -516,6 +522,17 @@ a:hover {
 }
 
 .toggle-button--active .toggle-thumb { transform: translateX(20px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .toggle-button,
+  .toggle-thumb {
+    transition: none;
+  }
+
+  .toggle-button:not(:disabled):active {
+    transform: none;
+  }
+}
 
 .alert {
   border-radius: 0.75rem;
