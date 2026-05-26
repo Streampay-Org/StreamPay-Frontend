@@ -3,7 +3,7 @@ import { getClientIdentity, checkRateLimit, rateLimitResponse } from "@/app/lib/
 import { recordThrottle, recordRequest } from "@/app/lib/rate-limit-metrics";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { getCorrelationContext } from "@/app/lib/logger";
-import { tryAuthenticateRequest } from "@/app/lib/auth";
+import { hasConfiguredJwtSecret, tryAuthenticateRequest } from "@/app/lib/auth";
 
 function createErrorResponse(code: string, message: string, status: number) {
   const context = getCorrelationContext();
@@ -21,6 +21,10 @@ export async function GET(request: Request) {
     return rateLimitResponse(result.retryAfter!);
   }
   recordRequest(url.pathname);
+
+  if (!hasConfiguredJwtSecret()) {
+    return createErrorResponse("UNAUTHORIZED", "Missing or invalid authorization header", 401);
+  }
 
   const actor = tryAuthenticateRequest(request);
   if (!actor) {

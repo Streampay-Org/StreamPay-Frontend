@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import type { AuditActorRole } from "@/app/types/audit";
 
 export const JWT_SECRET = process.env.JWT_SECRET || "streampay-dev-secret-do-not-use-in-prod";
+const DEV_JWT_SECRET = "streampay-dev-secret-do-not-use-in-prod";
 
 const VALID_ROLES = new Set<AuditActorRole>([
   "user",
@@ -47,6 +48,13 @@ function normalizeRole(role: string | undefined): AuditActorRole {
   return "user";
 }
 
+export function hasConfiguredJwtSecret(): boolean {
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET === DEV_JWT_SECRET) {
+    return false;
+  }
+  return true;
+}
+
 export function tryAuthenticateRequest(request: Request): AuthenticatedActor | null {
   const authHeader = request.headers?.get?.("authorization") ?? null;
   if (!authHeader?.startsWith("Bearer ")) {
@@ -55,7 +63,9 @@ export function tryAuthenticateRequest(request: Request): AuthenticatedActor | n
 
   const token = authHeader.slice(7);
   try {
-    const verified = jwt.verify(token, JWT_SECRET) as TokenClaims;
+    const verified = jwt.verify(token, process.env.JWT_SECRET || DEV_JWT_SECRET, {
+      algorithms: ["HS256"],
+    }) as TokenClaims;
     if (!verified.sub) {
       return null;
     }
