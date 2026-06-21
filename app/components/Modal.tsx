@@ -9,9 +9,16 @@ import React, {
   useState,
 } from "react";
 
+/** Props for the {@link Modal} component. */
 interface ModalProps {
+  /** Controls whether the modal is visible. When `false` the modal fades out
+   *  and unmounts after the exit animation completes. */
   isOpen: boolean;
+  /** Callback invoked when the user dismisses the modal (backdrop click,
+   *  close-button click, or Escape key). */
   onClose: () => void;
+  /** Text rendered as the accessible dialog heading and used as the
+   *  `aria-labelledby` target. */
   title: string;
 }
 
@@ -42,6 +49,8 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
   }, [isOpen]);
 
   useEffect(() => {
+    if (!shouldRender) return;
+
     if (isOpen) {
       previouslyFocusedElementRef.current = document.activeElement as HTMLElement | null;
       dialogRef.current?.focus();
@@ -50,7 +59,7 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
 
     previouslyFocusedElementRef.current?.focus();
     previouslyFocusedElementRef.current = null;
-  }, [isOpen]);
+  }, [isOpen, shouldRender]);
 
   const handleAnimationEnd = () => {
     if (!isOpen) setShouldRender(false);

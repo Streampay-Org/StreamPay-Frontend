@@ -1,7 +1,12 @@
+/** Props for the {@link EmptyState} component. */
 type EmptyStateProps = {
+  /** Short category label rendered above the title (e.g. "Streams"). */
   eyebrow: string;
+  /** Primary heading (used as the accessible section label). */
   title: string;
+  /** Supporting text that explains the empty state or guides the user. */
   description: string;
+  /** Label for the primary call-to-action button. */
   actionLabel: string;
 };
 

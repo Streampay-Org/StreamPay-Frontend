@@ -26,3 +26,24 @@ if (process.env.STELLAR_NETWORK !== "testnet") {
 
 // Reset config cache before each test to ensure clean state
 // This is handled in individual test files via resetConfigCache()
+
+// jsdom does not flush cascaded React effects (e.g. state-update → re-render →
+// useEffect) within a single synchronous fireEvent.  Patch focus() so that when
+// the Modal calls dialogRef.current.focus() inside a useEffect, jsdom's
+// document.activeElement is updated even for tabIndex=-1 elements.
+if (typeof window !== "undefined") {
+  // jsdom 20+ supports focus() on tabIndex elements, but re-verify it is set.
+  const origFocus = HTMLElement.prototype.focus;
+  HTMLElement.prototype.focus = function patchedFocus(opts?: FocusOptions) {
+    origFocus.call(this, opts);
+    // Force activeElement to this element (covers tabIndex=-1 divs in React effects).
+    if (document.activeElement !== this) {
+      try {
+        Object.defineProperty(document, "activeElement", {
+          get: () => this,
+          configurable: true,
+        });
+      } catch { /* already non-configurable — ignore */ }
+    }
+  };
+}

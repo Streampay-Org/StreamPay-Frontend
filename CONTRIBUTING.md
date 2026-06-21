@@ -28,6 +28,84 @@ conventions the team relies on when reviewing pull requests.
 - Avoid coupling tests to private implementation details — prefer
   observable behavior at the module boundary.
 
+### Test environment layout
+
+The project uses **two Jest environments** configured via a `projects` array in
+`jest.config.js`. Understanding which environment a test file runs in is
+important for both writing tests and debugging unexpected failures.
+
+| File pattern | Jest project | Environment | Typical use |
+|---|---|---|---|
+| `**/*.test.ts`, `**/*.spec.ts` | `node` | Node.js | API routes, lib utilities, pure-logic unit tests |
+| `**/*.test.tsx`, `**/*.spec.tsx` | `jsdom` | `jest-environment-jsdom` | React component tests (render, interaction, accessibility) |
+
+The split exists because:
+- Node.js is faster and avoids browser polyfills for pure logic.
+- React components require a DOM — `jsdom` provides `document`, `window`,
+  and the browser APIs that `@testing-library/react` depends on.
+
+#### Writing component tests
+
+Component test files **must** use the `.test.tsx` extension so Jest picks the
+`jsdom` project automatically. You do not need a `@jest-environment` docblock.
+
+```tsx
+// app/components/MyWidget.test.tsx  ← .tsx extension → jsdom environment
+import { render, screen } from "@testing-library/react";
+import { MyWidget } from "./MyWidget";
+
+it("renders the widget label", () => {
+  render(<MyWidget label="Hello" />);
+  expect(screen.getByText("Hello")).toBeInTheDocument();
+});
+```
+
+#### Writing Node/API tests
+
+Plain `.test.ts` files run in the Node environment and must **not** import
+React or `@testing-library/react`. Keep DOM-free assertions in `.test.ts` and
+render/interaction assertions in `.test.tsx`.
+
+#### Running tests
+
+```bash
+# Full suite (both projects)
+npm test
+
+# Watch mode
+npm test -- --watch
+
+# Single file
+npm test -- app/components/Modal.test.tsx
+
+# Coverage
+npm test -- --coverage
+```
+
+See `jest.config.js` and `jest.setup.ts` for the full runtime configuration,
+and `docs/testing-guide.md` for more conventions.
+
+## Component API documentation
+
+All exported component props interfaces and types must carry TSDoc comments so
+that editors can surface them inline. The minimal required annotations are:
+
+- A one-line description on the `interface` / `type` itself.
+- A `/** … */` comment on every prop that is not self-evident from its name
+  and type alone (especially optional props and union types).
+
+Example:
+
+```tsx
+/** Props for the {@link Card} component. */
+interface CardProps {
+  /** Inner padding size. Defaults to `"md"` (1 rem). */
+  padding?: "none" | "sm" | "md" | "lg";
+  /** When provided the card becomes interactive. */
+  onClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
+}
+```
+
 ## Reporting issues
 
 When filing a bug, please include:

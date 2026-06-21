@@ -44,13 +44,25 @@ const ICONS: Record<ErrorVariant, ReactNode> = {
   ),
 };
 
+/** Props for the {@link ErrorRecovery} component. */
 type ErrorRecoveryProps = {
+  /** Visual and semantic variant that selects the icon and CSS modifier:
+   *  - `"not-found"` — 404 / missing resource
+   *  - `"server"` — 5xx / StreamPay-owned error
+   *  - `"outage"` — external Stellar network degradation */
   variant: ErrorVariant;
+  /** Small all-caps label displayed above the heading (e.g. "Error 404"). */
   eyebrow: string;
+  /** Primary recovery heading (`<h1>`). */
   heading: string;
+  /** Explanatory paragraph rendered below the heading. */
   body: string;
+  /** Helper note shown below the action buttons (e.g. a status-page link). */
   helperNote: string;
+  /** Rendered as the first (primary) action button. Pass a `<Link>` or
+   *  `<button>` element. */
   primaryAction: ReactNode;
+  /** Rendered as the second (secondary) action button. */
   secondaryAction: ReactNode;
   /** Optional support reference (e.g. error digest) shown for follow-up. */
   reference?: string;
