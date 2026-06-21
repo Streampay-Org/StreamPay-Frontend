@@ -1,3 +1,6 @@
+/**
+ * @jest-environment jsdom
+ */
 import { render } from "@testing-library/react";
 const { screen, fireEvent } = require("@testing-library/react") as any;
 import "@testing-library/jest-dom";

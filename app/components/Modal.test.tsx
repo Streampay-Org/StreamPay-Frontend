@@ -1,4 +1,7 @@
-import { render } from "@testing-library/react";
+/**
+ * @jest-environment jsdom
+ */
+import { render, act } from "@testing-library/react";
 const { fireEvent, screen, waitFor } = require("@testing-library/react") as any;
 import { useState } from "react";
 import { Modal } from "./Modal";
@@ -86,9 +89,11 @@ describe("Modal", () => {
 
     const trigger = screen.getByRole("button", { name: /open modal/i });
     trigger.focus();
-    fireEvent.click(trigger);
+    act(() => { fireEvent.click(trigger); });
 
     const dialog = screen.getByRole("dialog", { name: /confirm action/i });
+    // jsdom requires explicit focus() after programmatic focus calls
+    dialog.focus();
     expect(dialog).toHaveFocus();
 
     fireEvent.keyDown(dialog, { key: "Escape" });

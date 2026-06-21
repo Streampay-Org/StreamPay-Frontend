@@ -6,6 +6,11 @@ import { render, screen } from "@testing-library/react";
 import StreamDetailPage from "./page";
 import { notFound } from "next/navigation";
 
+// Mock next/server (needed transitively by app/lib/errors/index.ts)
+jest.mock("next/server", () => ({
+  NextResponse: { json: (body: unknown, init?: { status?: number }) => ({ status: init?.status ?? 200, body }) },
+}));
+
 // Mock next/navigation
 jest.mock("next/navigation", () => ({
   notFound: jest.fn(),

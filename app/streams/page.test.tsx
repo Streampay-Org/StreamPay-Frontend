@@ -1,3 +1,9 @@
+/**
+ * @jest-environment jsdom
+ */
+jest.mock("next/server", () => ({
+  NextResponse: { json: (body: unknown, init?: { status?: number }) => ({ status: init?.status ?? 200, body }) },
+}));
 import { render } from "@testing-library/react";
 const { screen } = require("@testing-library/react") as any;
 import { StreamsPageContent } from "./StreamsPageContent";

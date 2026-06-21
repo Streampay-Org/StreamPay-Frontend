@@ -1,3 +1,6 @@
+/**
+ * @jest-environment jsdom
+ */
 import { render } from "@testing-library/react";
 const { screen } = require("@testing-library/react") as any;
 import Home from "./page";
@@ -29,7 +32,7 @@ describe("Home", () => {
   it("renders clear wallet and stream action CTAs", () => {
     render(<Home />);
     expect(screen.getByRole("link", { name: /connect wallet/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /view stream actions/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /how it works/i })).toBeInTheDocument();
   });
 
   it("renders the standardized stream action labels", () => {

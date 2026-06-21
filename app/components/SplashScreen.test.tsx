@@ -1,3 +1,6 @@
+/**
+ * @jest-environment jsdom
+ */
 import { render, act } from "@testing-library/react";
 const { screen } = require("@testing-library/react") as any;
 import "@testing-library/jest-dom";
