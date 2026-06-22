@@ -1,3 +1,6 @@
+"use client";
+
+import { useRouter } from "next/navigation";
 import { EmptyState } from "../components/EmptyState";
 import { StreamRow, type StreamRowData } from "../components/StreamRow";
 
@@ -90,7 +93,10 @@ export function StreamsPageContent({
   state = "populated",
   streams = mockStreams,
 }: StreamsPageContentProps) {
+  const router = useRouter();
   const isEmpty = state === "empty" || streams.length === 0;
+
+  const goToNewStream = () => router.push("/streams/new");
 
   return (
     <main className="page-shell">
@@ -104,7 +110,7 @@ export function StreamsPageContent({
           <button className="button button--secondary" type="button">
             Export History
           </button>
-          <button className="button button--primary" type="button">
+          <button className="button button--primary" type="button" onClick={goToNewStream}>
             {streamListCopy.primaryCta}
           </button>
         </div>
@@ -131,6 +137,7 @@ export function StreamsPageContent({
             description={streamListCopy.empty.description}
             eyebrow={streamListCopy.empty.eyebrow}
             title={streamListCopy.empty.title}
+            onAction={goToNewStream}
           />
         ) : (
           <section aria-label="Streams list" className="stream-list">

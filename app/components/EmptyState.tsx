@@ -3,9 +3,10 @@ type EmptyStateProps = {
   title: string;
   description: string;
   actionLabel: string;
+  onAction?: () => void;
 };
 
-export function EmptyState({ eyebrow, title, description, actionLabel }: EmptyStateProps) {
+export function EmptyState({ eyebrow, title, description, actionLabel, onAction }: EmptyStateProps) {
   return (
     <section className="empty-state" aria-labelledby="empty-state-title">
       <p className="empty-state__eyebrow">{eyebrow}</p>
@@ -13,7 +14,7 @@ export function EmptyState({ eyebrow, title, description, actionLabel }: EmptySt
         {title}
       </h2>
       <p className="empty-state__description">{description}</p>
-      <button className="button button--primary" type="button">
+      <button className="button button--primary" type="button" onClick={onAction}>
         {actionLabel}
       </button>
     </section>
