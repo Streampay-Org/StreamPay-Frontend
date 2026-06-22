@@ -4,6 +4,7 @@
  */
 
 import { getConfig } from './config';
+import { isValidStellarPublicKey } from './wallet-link';
 
 export interface StellarAsset {
   code: string;
@@ -26,7 +27,7 @@ export function parseAssetString(assetStr: string): StellarAsset {
 
   if (assetStr.includes(':')) {
     const [code, issuer] = assetStr.split(':');
-    if (code && issuer && issuer.length === 56 && issuer.startsWith('G')) {
+    if (code && issuer && isValidStellarPublicKey(issuer)) {
       return { code: code.toUpperCase(), issuer, isNative: false };
     }
   }
