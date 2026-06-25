@@ -59,6 +59,8 @@ interface OptionalEnvVars {
   ANOMALY_CREATION_THRESHOLD?: string;
   /** Anomaly detection threshold for settlement rate spike */
   ANOMALY_SETTLE_THRESHOLD?: string;
+  /** Anomaly detection threshold for stream cancel burst */
+  ANOMALY_CANCEL_THRESHOLD?: string;
 }
 
 /**
@@ -74,6 +76,7 @@ export interface ValidatedConfig {
   anomalyThresholds: {
     creationBurstLimit: number;
     settleRateLimit: number;
+    cancelBurstLimit: number;
   };
 }
 
@@ -342,10 +345,12 @@ function validateInternalServiceAuth(
  */
 function validateAnomalyThresholds(
   creationThreshold?: string,
-  settleThreshold?: string
-): { creationBurstLimit: number; settleRateLimit: number } {
+  settleThreshold?: string,
+  cancelThreshold?: string
+): { creationBurstLimit: number; settleRateLimit: number; cancelBurstLimit: number } {
   const creationBurstLimit = creationThreshold ? Number(creationThreshold) : 50;
   const settleRateLimit = settleThreshold ? Number(settleThreshold) : 20;
+  const cancelBurstLimit = cancelThreshold ? Number(cancelThreshold) : 5;
   
   if (isNaN(creationBurstLimit) || creationBurstLimit <= 0) {
     throw new ConfigValidationError(
@@ -359,7 +364,13 @@ function validateAnomalyThresholds(
     );
   }
   
-  return { creationBurstLimit, settleRateLimit };
+  if (isNaN(cancelBurstLimit) || cancelBurstLimit <= 0) {
+    throw new ConfigValidationError(
+      'ANOMALY_CANCEL_THRESHOLD must be a positive number'
+    );
+  }
+  
+  return { creationBurstLimit, settleRateLimit, cancelBurstLimit };
 }
 
 /**
@@ -386,7 +397,8 @@ export function validateConfig(): ValidatedConfig {
   // Validate anomaly thresholds
   const anomalyThresholds = validateAnomalyThresholds(
     env.ANOMALY_CREATION_THRESHOLD,
-    env.ANOMALY_SETTLE_THRESHOLD
+    env.ANOMALY_SETTLE_THRESHOLD,
+    env.ANOMALY_CANCEL_THRESHOLD
   );
 
   const internalServiceAuth = validateInternalServiceAuth(env);

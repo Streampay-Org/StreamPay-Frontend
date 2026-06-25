@@ -62,5 +62,5 @@ export async function GET(request: Request) {
       meta: { hasNext, nextCursor, total: db.activity.size },
       links: { self: `/api/v1/activity?limit=${limit}` },
     });
-  });
+  }
 }
