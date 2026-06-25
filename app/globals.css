@@ -1733,3 +1733,198 @@ a:hover {
   font-size: var(--text-base);
   margin-bottom: var(--space-1);
 }
+
+/* Follow Button */
+.follow-button {
+  padding: 0.5rem 1.25rem;
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 2px solid var(--color-primary, #3b82f6);
+  background: transparent;
+  color: var(--color-primary, #3b82f6);
+  min-width: 96px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.follow-button--following {
+  background: var(--color-primary, #3b82f6);
+  color: white;
+}
+
+.follow-button--loading {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.follow-button__spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Perfil Page */
+.perfil-page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+.perfil-page__header {
+  text-align: center;
+}
+
+.perfil-page__avatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  margin: 0 auto 1rem;
+}
+
+.perfil-page__name {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.perfil-page__handle {
+  color: var(--color-muted, #6b7280);
+  margin: 0.25rem 0;
+}
+
+.perfil-page__bio {
+  margin: 0.75rem 0;
+  color: var(--color-text, #374151);
+}
+
+.perfil-page__stats {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  margin: 1.5rem 0;
+}
+
+.perfil-page__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.perfil-page__stat-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.perfil-page__stat-label {
+  font-size: 0.875rem;
+  color: var(--color-muted, #6b7280);
+}
+
+/* Comunidad Page */
+.comunidad-page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+.comunidad-page__tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1.5rem 0;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.comunidad-page__tab {
+  padding: 0.75rem 1.5rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-weight: 500;
+  color: var(--color-muted, #6b7280);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.comunidad-page__tab--active {
+  color: var(--color-primary, #3b82f6);
+  border-bottom-color: var(--color-primary, #3b82f6);
+}
+
+.comunidad-page__post-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.comunidad-page__post {
+  padding: 1rem;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 0.75rem;
+}
+
+.comunidad-page__post-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.comunidad-page__post-author {
+  font-weight: 600;
+  display: block;
+}
+
+.comunidad-page__post-handle {
+  font-size: 0.875rem;
+  color: var(--color-muted, #6b7280);
+}
+
+.comunidad-page__post-content {
+  margin: 0.5rem 0;
+  line-height: 1.5;
+}
+
+.comunidad-page__post-time {
+  font-size: 0.75rem;
+  color: var(--color-muted, #6b7280);
+}
+
+/* Empty State */
+.comunidad-page__empty {
+  text-align: center;
+  padding: 3rem 1.5rem;
+}
+
+.comunidad-page__empty-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.comunidad-page__empty-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+
+.comunidad-page__empty-text {
+  color: var(--color-muted, #6b7280);
+  margin-bottom: 1.5rem;
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+}
