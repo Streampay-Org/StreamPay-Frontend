@@ -78,6 +78,11 @@ export interface ValidatedConfig {
     settleRateLimit: number;
     cancelBurstLimit: number;
   };
+  internalServiceAuth?: {
+    currentKeyId: string;
+    keys: Record<string, string>;
+    allowedClockSkewSeconds: number;
+  };
 }
 
 /**
@@ -230,6 +235,11 @@ function validateStellarNetwork(network: StellarNetwork): StellarNetworkProfile 
 
 /**
  * Validate JWT secret
+ *
+ * Security hardening (issue #223):
+ * - Outside development/test: missing or short secret throws immediately
+ *   (fail-fast at boot — no silent fallback to a hardcoded placeholder).
+ * - The dev placeholder is only tolerated in NODE_ENV=development|test.
  */
 function validateJwtSecret(secret: string | undefined): string {
   if (!secret) {
@@ -238,21 +248,24 @@ function validateJwtSecret(secret: string | undefined): string {
     );
   }
   
-  if (secret === 'streampay-dev-secret-do-not-use-in-prod' && process.env.NODE_ENV === 'production') {
+  const env   = process.env.NODE_ENV ?? "development";
+  const isDev = env === "development" || env === "test";
+
+  if (secret === 'streampay-dev-secret-do-not-use-in-prod' && !isDev) {
     throw new ConfigValidationError(
-      'Production environment cannot use default JWT_SECRET. ' +
-      'Set a secure JWT_SECRET environment variable.'
+      'Production environment cannot use default JWT_SECRET'
     );
   }
   
   if (secret.length < 32) {
     throw new ConfigValidationError(
-      'JWT_SECRET must be at least 32 characters for security'
+      'JWT_SECRET must be at least 32 characters'
     );
   }
   
   return secret;
 }
+
 
 function validateInternalServiceAuth(
   env: RequiredEnvVars & OptionalEnvVars
@@ -411,6 +424,7 @@ export function validateConfig(): ValidatedConfig {
     internalAuthToken: env.INTERNAL_AUTH_TOKEN,
     allowedOrigins,
     anomalyThresholds,
+    internalServiceAuth,
   };
   
   return config;

@@ -62,9 +62,9 @@ export const AnomalyDetector = {
     }
 
     // Rule 3: High submission failure rate
-    const failureRate = snapshot.stellarSubmissionsTotal > 0 
-      ? snapshot.stellarSubmissionsFailed / snapshot.stellarSubmissionsTotal 
-      : 0;
+    const total = snapshot.stellarSubmissionsTotal ?? 0;
+    const failed = snapshot.stellarSubmissionsFailed ?? 0;
+    const failureRate = total > 0 ? failed / total : 0;
     if (failureRate > (config.submissionFailureThreshold ?? 0.05)) {
       alerts.push({
         tenantId: snapshot.tenantId,
@@ -77,11 +77,12 @@ export const AnomalyDetector = {
     }
 
     // Rule 4: DLQ Growth
-    if (snapshot.dlqDepth !== undefined && snapshot.dlqDepth > (config.maxDlqDepth ?? 10)) {
+    const dlq = snapshot.dlqDepth ?? 0;
+    if (dlq > (config.maxDlqDepth ?? 10)) {
       alerts.push({
         tenantId: snapshot.tenantId,
         ruleName: "DLQ_DEPTH_EXCEEDED" as any,
-        observedValue: snapshot.dlqDepth,
+        observedValue: dlq,
         threshold: config.maxDlqDepth ?? 10,
         severity: "high",
         detectedAt: new Date().toISOString(),
