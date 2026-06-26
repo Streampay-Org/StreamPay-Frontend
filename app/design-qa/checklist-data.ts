@@ -149,6 +149,44 @@ export const CHECKLIST_SECTIONS: ChecklistSection[] = [
     ],
   },
   {
+    id: "microcopy",
+    title: "Microcopy and Content Quality",
+    description:
+      "Copy should make stream setup, wallet actions, and on-chain status understandable without internal jargon.",
+    items: [
+      {
+        id: "copy-1",
+        item: "Error messages are written in plain language, name what happened, and give the next useful action instead of exposing raw API, wallet, or contract errors.",
+        annotation: "Relevant pages: /, /streams, /activity, /settings",
+      },
+      {
+        id: "copy-2",
+        item: "Primary button copy starts with a clear verb and matches the action result, such as Create stream, Pause stream, Resume stream, Withdraw funds, or Save settings.",
+        annotation: "Relevant pages: /, /streams, /settings",
+      },
+      {
+        id: "copy-3",
+        item: "Empty states explain why the screen is empty and include one helpful next step or CTA instead of generic placeholder text.",
+        annotation: "Relevant pages: /, /streams, /activity",
+      },
+      {
+        id: "copy-4",
+        item: "Loading and pending states describe what is happening now, especially for wallet approval and on-chain transaction submission.",
+        annotation: "Relevant pages: /, /streams, /activity",
+      },
+      {
+        id: "copy-5",
+        item: "Status labels use consistent tense and naming across StreamRow, StatusBadge, activity entries, and confirmation dialogs.",
+        annotation: "Relevant pages: /streams, /activity",
+      },
+      {
+        id: "copy-6",
+        item: "Money amounts, recipients, and dates are repeated in confirmation and success copy so users can verify the exact stream outcome.",
+        annotation: "Relevant pages: /, /streams, /activity",
+      },
+    ],
+  },
+  {
     id: "devmode",
     title: "Figma Dev Mode and Component Naming",
     items: [

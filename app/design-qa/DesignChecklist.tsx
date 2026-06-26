@@ -100,7 +100,7 @@ export function DesignChecklist({ screen }: { screen?: string }) {
             </p>
           )}
           <p className="checklist-header__meta">
-            {TOTAL_ITEMS} items · a11y, interactive states, 8px grid, empty/loading/error, money actions, Stellar/Soroban
+            {TOTAL_ITEMS} items · a11y, interactive states, 8px grid, empty/loading/error, microcopy, money actions, Stellar/Soroban
           </p>
         </div>
         <button className="button button--secondary checklist-reset-btn" onClick={handleReset} type="button">
@@ -146,6 +146,9 @@ export function DesignChecklist({ screen }: { screen?: string }) {
                         {idx + 1}
                       </span>
                       <p className="checklist-item__text">{item.item}</p>
+                      {item.annotation && (
+                        <p className="checklist-item__annotation">{item.annotation}</p>
+                      )}
                       <div className="checklist-item__actions" role="group" aria-label={`Answer for item ${idx + 1}`}>
                         <AnswerButton value="yes" current={answer} label="Yes" itemId={item.id} onChange={(v) => setAnswer(item.id, v)} />
                         <AnswerButton value="no" current={answer} label="No" itemId={item.id} onChange={(v) => setAnswer(item.id, v)} />
