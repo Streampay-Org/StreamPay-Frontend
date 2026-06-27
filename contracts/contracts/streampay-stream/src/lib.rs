@@ -169,27 +169,6 @@ impl Contract {
         Ok(())
     }
 
-    /// Creates a funded stream and escrows `total_amount` from `sender`.
-    ///
-    /// **Token transfer**: `total_amount` is transferred from `sender` to the
-    /// contract address immediately, regardless of `draft`.
-    ///
-    /// If `draft = false` the stream is `Active` immediately with
-    /// `start_time = now` and `end_time = now + duration`.
-    /// If `draft = true` the stream is `Draft`; `start_time`, `end_time`, and
-    /// `last_update` are all zero until `start_stream` is called.
-    ///
-    /// Returns the new stream's numeric ID.
-    ///
-    /// # Errors
-    /// - [`Error::ContractPaused`] if the global pause flag is set.
-    /// - [`Error::InvalidAmount`] if `total_amount <= 0`.
-    /// - [`Error::TokenNotAllowed`] if the token has been blocked by the admin.
-    /// - [`Error::InvalidTimeRange`] if `duration == 0` or if
-    ///   `now + duration` overflows `u64` (active streams only).
-    ///
-    /// # Auth
-    /// Requires authorisation from `sender`.
     /// Creates a funded active stream and escrows `total_amount` from `sender`.
     ///
     /// **Token transfer**: `total_amount` is transferred from `sender` to the
@@ -203,6 +182,17 @@ impl Contract {
     /// - [`Error::InvalidState`] if `sender == recipient`.
     /// - [`Error::TokenNotAllowed`] if the token has been blocked by the admin.
     /// - [`Error::InvalidTimeRange`] if `end_time <= start_time` or `start_time < now`.
+    ///
+    /// # Arguments
+    /// - `sender` - The account funding the escrow and authorising the transfer.
+    /// - `recipient` - The account allowed to withdraw vested funds.
+    /// - `token` - The token contract address to escrow.
+    /// - `total_amount` - The total token amount streamed over the time window.
+    /// - `start_time` - Ledger timestamp when accrual begins.
+    /// - `end_time` - Ledger timestamp when the full amount is vested.
+    ///
+    /// # Returns
+    /// The newly allocated stream ID.
     ///
     /// # Auth
     /// Requires authorisation from `sender`.
@@ -324,7 +314,7 @@ impl Contract {
         withdrawable_amount(env.ledger().timestamp(), &stream)
     }
 
-    /// Returns the stream balance (vested amount) at a given ledger timestamp.
+    /// Returns the stream balance (vested amount) at the current ledger timestamp.
     ///
     /// This is a view function that computes how much of the stream has vested
     /// based on linear accrual from start_time to end_time. It uses overflow-safe
@@ -338,12 +328,43 @@ impl Contract {
     ///
     /// The vested amount as an i128, always in the range `[0, total_amount]`.
     /// Returns `Err(Error::Overflow)` if arithmetic overflows on extreme inputs.
+    ///
+    /// # Errors
+    /// - [`Error::NotFound`] if `stream_id` does not exist.
+    /// - [`Error::Overflow`] if the vested-amount computation overflows.
+    ///
+    /// # Auth
+    /// No authorisation is required; this is a read-only view.
     pub fn stream_balance(env: Env, stream_id: u64) -> Result<i128, Error> {
         let stream = get_existing_stream(&env, stream_id)?;
         stream_balance_amount(&env, &stream)
     }
 
-    /// Withdraws accrued escrow to the recipient.
+    /// Withdraws accrued escrow to the stream recipient.
+    ///
+    /// The recipient may withdraw any positive amount up to the currently
+    /// withdrawable vested balance. If this withdrawal releases the full stream
+    /// amount, the stream transitions to [`StreamStatus::Settled`] and emits the
+    /// settlement event after the transfer.
+    ///
+    /// # Arguments
+    /// - `stream_id` - The stream to withdraw from.
+    /// - `amount` - The positive token amount to transfer to the recipient.
+    ///
+    /// # Returns
+    /// The amount withdrawn.
+    ///
+    /// # Errors
+    /// - [`Error::ContractPaused`] if the global pause flag is set.
+    /// - [`Error::InvalidAmount`] if `amount <= 0`.
+    /// - [`Error::NotFound`] if `stream_id` does not exist.
+    /// - [`Error::AlreadySettled`] if the stream is already settled.
+    /// - [`Error::InvalidState`] if the stream is neither active nor paused.
+    /// - [`Error::Overflow`] if the vested-amount computation overflows.
+    /// - [`Error::OverWithdraw`] if `amount` exceeds the withdrawable balance.
+    ///
+    /// # Auth
+    /// Requires authorisation from the stream's `recipient`.
     pub fn withdraw(env: Env, stream_id: u64, amount: i128) -> Result<i128, Error> {
         require_not_paused(&env)?;
         if amount <= 0 {
@@ -397,6 +418,19 @@ impl Contract {
     /// Only the stream sender may call this. On pause, status is set to Paused
     /// and pause_time is recorded. Vested amount remains withdrawable but does
     /// not increase while paused.
+    ///
+    /// # Arguments
+    /// - `stream_id` - The active stream to pause.
+    ///
+    /// # Returns
+    /// The updated paused stream record.
+    ///
+    /// # Errors
+    /// - [`Error::NotFound`] if `stream_id` does not exist.
+    /// - [`Error::InvalidState`] if the stream is not active.
+    ///
+    /// # Auth
+    /// Requires authorisation from the stream's `sender`.
     pub fn pause(env: Env, stream_id: u64) -> Result<Stream, Error> {
         let mut stream = get_existing_stream(&env, stream_id)?;
         stream.sender.require_auth();
@@ -421,6 +455,22 @@ impl Contract {
     /// Only the stream sender may call this. On resume, the end_time is extended
     /// by the paused duration so the remaining streamable amount is preserved.
     /// Status is set back to Active.
+    ///
+    /// # Arguments
+    /// - `stream_id` - The paused stream to resume.
+    ///
+    /// # Returns
+    /// The updated active stream record.
+    ///
+    /// # Errors
+    /// - [`Error::NotFound`] if `stream_id` does not exist.
+    /// - [`Error::InvalidState`] if the stream is not paused.
+    /// - [`Error::InvalidTimeRange`] if ledger time precedes the recorded
+    ///   pause time, or if extending `end_time`/`total_paused_duration`
+    ///   overflows `u64`.
+    ///
+    /// # Auth
+    /// Requires authorisation from the stream's `sender`.
     pub fn resume(env: Env, stream_id: u64) -> Result<Stream, Error> {
         let mut stream = get_existing_stream(&env, stream_id)?;
         stream.sender.require_auth();
@@ -468,6 +518,11 @@ impl Contract {
     /// - [`Error::NotFound`] if `stream_id` does not exist.
     /// - [`Error::InvalidState`] if the stream is in `Draft` or cancelled state,
     ///   or if the current ledger timestamp has not yet reached `end_time`.
+    ///
+    /// # Auth
+    /// No authorisation is required; settlement is permissionless after the
+    /// stream reaches `end_time` because funds can only be paid to the recorded
+    /// recipient.
     pub fn settle(env: Env, stream_id: u64) -> Result<(), Error> {
         require_not_paused(&env)?;
         let mut stream = get_existing_stream(&env, stream_id)?;
