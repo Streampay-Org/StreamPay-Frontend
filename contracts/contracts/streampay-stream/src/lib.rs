@@ -4,6 +4,7 @@ mod error;
 mod events;
 mod release;
 mod storage;
+mod time;
 
 pub use error::Error;
 use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env};
@@ -230,16 +231,12 @@ impl Contract {
             return Err(Error::TokenNotAllowed);
         }
 
-        if end_time <= start_time {
-            return Err(Error::InvalidTimeRange);
-        }
-
-        let now = env.ledger().timestamp();
+        let duration = time::checked_duration(start_time, end_time)?;
+        let now = time::ledger_timestamp(&env);
         if start_time < now {
             return Err(Error::InvalidTimeRange);
         }
 
-        let duration = end_time - start_time;
         let id = storage::next_stream_id(&env);
         let contract_address = env.current_contract_address();
 
@@ -290,13 +287,11 @@ impl Contract {
             return Err(Error::InvalidState);
         }
 
-        let now = env.ledger().timestamp();
+        let now = time::ledger_timestamp(&env);
         stream.status = StreamStatus::Active;
         stream.start_time = now;
         stream.last_update = now;
-        stream.end_time = now
-            .checked_add(stream.duration)
-            .ok_or(Error::InvalidTimeRange)?;
+        stream.end_time = time::checked_add_timestamp(now, stream.duration)?;
 
         storage::set_stream(&env, stream_id, &stream);
         events::started(&env, stream_id, stream.start_time, stream.end_time, stream.start_time);
@@ -321,7 +316,7 @@ impl Contract {
     /// - [`Error::Overflow`] if the vested-amount computation overflows.
     pub fn withdrawable(env: Env, stream_id: u64) -> Result<i128, Error> {
         let stream = get_existing_stream(&env, stream_id)?;
-        withdrawable_amount(env.ledger().timestamp(), &stream)
+        withdrawable_amount(time::ledger_timestamp(&env), &stream)
     }
 
     /// Returns the stream balance (vested amount) at a given ledger timestamp.
@@ -362,7 +357,7 @@ impl Contract {
             return Err(Error::InvalidState);
         }
 
-        let now = env.ledger().timestamp();
+        let now = time::ledger_timestamp(&env);
         let available = withdrawable_amount(now, &stream)?;
         if amount > available {
             return Err(Error::OverWithdraw);
@@ -405,7 +400,7 @@ impl Contract {
             return Err(Error::InvalidState);
         }
 
-        let now = env.ledger().timestamp();
+        let now = time::ledger_timestamp(&env);
         
         stream.last_update = now;
         stream.status = StreamStatus::Paused;
@@ -429,22 +424,15 @@ impl Contract {
             return Err(Error::InvalidState);
         }
 
-        let now = env.ledger().timestamp();
-        let paused_duration = now
-            .checked_sub(stream.pause_time)
-            .ok_or(Error::InvalidTimeRange)?;
+        let now = time::ledger_timestamp(&env);
+        let paused_duration = time::checked_pause_duration(now, stream.pause_time)?;
 
         // Track total paused duration for accrual calculations
-        stream.total_paused_duration = stream
-            .total_paused_duration
-            .checked_add(paused_duration)
-            .ok_or(Error::InvalidTimeRange)?;
+        stream.total_paused_duration =
+            time::checked_add_timestamp(stream.total_paused_duration, paused_duration)?;
 
         // Extend end_time by the paused duration to preserve unstreamed time
-        stream.end_time = stream
-            .end_time
-            .checked_add(paused_duration)
-            .ok_or(Error::InvalidTimeRange)?;
+        stream.end_time = time::checked_add_timestamp(stream.end_time, paused_duration)?;
         
         stream.last_update = now;
         stream.status = StreamStatus::Active;
@@ -480,7 +468,7 @@ impl Contract {
             return Err(Error::InvalidState);
         }
 
-        let now = env.ledger().timestamp();
+        let now = time::ledger_timestamp(&env);
         if now < stream.end_time {
             return Err(Error::InvalidState);
         }
@@ -533,7 +521,7 @@ fn withdrawable_amount(now: u64, stream: &Stream) -> Result<i128, Error> {
 }
 
 fn stream_balance_amount(env: &Env, stream: &Stream) -> Result<i128, Error> {
-    release::vested_amount(stream, env.ledger().timestamp())
+    release::vested_amount(stream, time::ledger_timestamp(env))
 }
 
 fn require_admin(env: &Env, caller: &Address) -> Result<(), Error> {
