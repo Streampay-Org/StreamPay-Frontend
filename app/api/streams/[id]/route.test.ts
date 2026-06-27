@@ -77,6 +77,62 @@ describe("Stream Details Route - GET /api/streams/:id and mutations", () => {
     }
   });
 
+  it("adds ETag and cache-control headers to GET responses", async () => {
+    const req = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "GET",
+      headers: { "x-tenant-id": tenantId },
+    });
+
+    const res = await GET(req, { params: Promise.resolve({ id: streamId }) });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("etag")).toBe(`W/"2026-04-28T10:30:00Z"`);
+    expect(res.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+    expect(res.headers.get("X-Cache")).toBe("MISS");
+  });
+
+  it("returns 304 Not Modified when If-None-Match matches the stream ETag", async () => {
+    const req = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "GET",
+      headers: {
+        "x-tenant-id": tenantId,
+        "If-None-Match": `W/"2026-04-28T10:30:00Z"`,
+      },
+    });
+
+    const res = await GET(req, { params: Promise.resolve({ id: streamId }) });
+
+    expect(res.status).toBe(304);
+    expect(res.headers.get("etag")).toBe(`W/"2026-04-28T10:30:00Z"`);
+    expect(res.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+    expect(res.headers.get("X-Cache")).toBe("MISS");
+    await expect(res.text()).resolves.toBe("");
+  });
+
+  it("returns 304 when If-None-Match is wildcard or contains the stream ETag in a list", async () => {
+    const wildcardReq = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "GET",
+      headers: {
+        "x-tenant-id": tenantId,
+        "If-None-Match": "*",
+      },
+    });
+
+    const wildcardRes = await GET(wildcardReq, { params: Promise.resolve({ id: streamId }) });
+    expect(wildcardRes.status).toBe(304);
+
+    const listReq = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "GET",
+      headers: {
+        "x-tenant-id": tenantId,
+        "If-None-Match": `W/"other", W/"2026-04-28T10:30:00Z"`,
+      },
+    });
+
+    const listRes = await GET(listReq, { params: Promise.resolve({ id: streamId }) });
+    expect(listRes.status).toBe(304);
+  });
+
   it("enforces cross-tenant isolation on DB reads", async () => {
     const req = new Request(`http://localhost/api/streams/${streamId}`, {
       method: "GET",

@@ -8,6 +8,8 @@ import { streamCache } from "@/app/lib/cache";
 
 type Context = { params: Promise<{ id: string }> };
 
+const REVALIDATION_CACHE_CONTROL = "public, max-age=0, must-revalidate";
+
 function createErrorResponse(code: string, message: string, status: number) {
   const context = getCorrelationContext();
   return NextResponse.json({ error: { code, message, request_id: context?.request_id } }, { status });
@@ -15,6 +17,40 @@ function createErrorResponse(code: string, message: string, status: number) {
 
 function errorResponse(code: string, message: string, status: number) {
   return createErrorResponse(code, message, status);
+}
+
+function getStreamEtag(stream: { id?: string; updatedAt?: string }) {
+  const version = stream.updatedAt ?? stream.id ?? "unknown";
+  return `W/"${version}"`;
+}
+
+function ifNoneMatchMatches(headerValue: string | null, etag: string) {
+  if (!headerValue) {
+    return false;
+  }
+
+  return headerValue
+    .split(",")
+    .map((candidate) => candidate.trim())
+    .some((candidate) => candidate === "*" || candidate === etag);
+}
+
+function streamResponse(request: Request, stream: any, id: string, cacheStatus: "HIT" | "MISS") {
+  const etag = getStreamEtag(stream);
+  const headers = {
+    "Cache-Control": REVALIDATION_CACHE_CONTROL,
+    ETag: etag,
+    "X-Cache": cacheStatus,
+  };
+
+  if (ifNoneMatchMatches(request.headers.get("if-none-match"), etag)) {
+    return new NextResponse(null, { status: 304, headers });
+  }
+
+  return NextResponse.json(
+    { data: stream, links: { self: `/api/v1/streams/${id}` } },
+    { headers }
+  );
 }
 
 function getRequestUrl(request: Request, fallbackPath: string): URL {
@@ -59,10 +95,7 @@ export async function GET(
   // Check cache first
   const cachedStream = streamCache.get(tenant, id);
   if (cachedStream) {
-    return NextResponse.json(
-      { data: cachedStream, links: { self: `/api/v1/streams/${id}` } },
-      { headers: { "X-Cache": "HIT" } }
-    );
+    return streamResponse(request, cachedStream, id, "HIT");
   }
 
   // Fetch from DB using findOne
@@ -74,10 +107,7 @@ export async function GET(
   // Set cache on read miss
   streamCache.set(tenant, id, stream);
 
-  return NextResponse.json(
-    { data: stream, links: { self: `/api/v1/streams/${id}` } },
-    { headers: { "X-Cache": "MISS" } }
-  );
+  return streamResponse(request, stream, id, "MISS");
 }
 
 export async function POST(
