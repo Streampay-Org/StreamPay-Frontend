@@ -48,10 +48,26 @@ export class StreamService {
       idempotencyStore.set(idempotencyKey, stream);
     }
 
-    // Emit event for real-time updates
+    // Durably record the event in the transactional outbox in the same step as
+    // the state change above, so it survives a crash and is delivered
+    // at-least-once by the outbox worker. The id is derived from the stream and
+    // its new updatedAt timestamp so a retried action does not enqueue a
+    // duplicate. The inline emit below remains for low-latency live (SSE)
+    // subscribers; the outbox is the durable safety net.
+    const settled = (stream.status as string) === "settled" || stream.status === "ended";
     const { eventBus } = require("./event-bus");
+    eventBus.enqueueStreamUpdated(streamId, stream, {
+      id: `stream.updated:${streamId}:${stream.updatedAt}`,
+    });
+    if (settled) {
+      eventBus.enqueueSettleFinished(streamId, stream, {
+        id: `settle.finished:${streamId}:${stream.updatedAt}`,
+      });
+    }
+
+    // Emit inline for real-time updates (best-effort, low latency).
     eventBus.emitStreamUpdated(streamId, stream);
-    if ((stream.status as string) === "settled" || stream.status === "ended") {
+    if (settled) {
       eventBus.emitSettleFinished(streamId, stream);
     }
 
