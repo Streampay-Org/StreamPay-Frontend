@@ -1,6 +1,10 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { EmptyState } from "../components/EmptyState";
 import { PageError } from "../components/PageError";
 import { StreamRow, type StreamRowData } from "../components/StreamRow";
+
 
 export type StreamsViewState = "empty" | "loading" | "populated" | "error";
 
@@ -102,6 +106,29 @@ export function StreamsPageContent({
   errorMessage,
   onRetry,
 }: StreamsPageContentProps) {
+  type DensityMode = "compact" | "comfortable";
+
+  const DENSITY_STORAGE_KEY = "streampay.density";
+
+  const [density, setDensity] = useState<DensityMode>(() => {
+    if (typeof window === "undefined") return "comfortable";
+
+    try {
+      const value = window.localStorage.getItem(DENSITY_STORAGE_KEY);
+      return value === "compact" || value === "comfortable" ? value : "comfortable";
+    } catch {
+      return "comfortable";
+    }
+  });
+
+  useEffect(() => {
+    // Keep localStorage in sync with state.
+    try {
+      window.localStorage.setItem(DENSITY_STORAGE_KEY, density);
+    } catch {
+      // Ignore storage errors (private mode, blocked storage, etc.)
+    }
+  }, [density]);
   const isEmpty = state === "empty" || streams.length === 0;
 
   return (
@@ -112,10 +139,23 @@ export function StreamsPageContent({
           <h1 className="page-hero__title">Manage every stream from one list.</h1>
           <p className="page-hero__description">{streamListCopy.description}</p>
         </div>
-        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
           <button className="button button--secondary" type="button">
             Export History
           </button>
+          <div className="density-toggle" aria-label="Streams list density">
+            <span className="density-toggle__label">Density</span>
+            <button
+              type="button"
+              className={`density-toggle__switch ${density === "compact" ? "density-toggle__switch--compact" : ""}`}
+              role="switch"
+              aria-checked={density === "compact"}
+              onClick={() => setDensity((d) => (d === "compact" ? "comfortable" : "compact"))}
+            >
+              <span className="density-toggle__thumb" aria-hidden="true" />
+              <span className="sr-only">{density === "compact" ? "Compact density" : "Comfortable density"}</span>
+            </button>
+          </div>
           <button className="button button--primary" type="button">
             {streamListCopy.primaryCta}
           </button>
@@ -154,9 +194,9 @@ export function StreamsPageContent({
             title={streamListCopy.empty.title}
           />
         ) : (
-          <section aria-label="Streams list" className="stream-list">
+          <section aria-label="Streams list" className={`stream-list ${density === "compact" ? "stream-list--compact" : ""}`}>
             {streams.map((stream) => (
-              <StreamRow key={stream.id} stream={stream} />
+              <StreamRow key={stream.id} stream={stream} density={density} />
             ))}
           </section>
         )}

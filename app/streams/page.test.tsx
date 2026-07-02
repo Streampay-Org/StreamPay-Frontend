@@ -6,7 +6,14 @@ import { render } from "@testing-library/react";
 const { screen } = require("@testing-library/react") as any;
 import { StreamsPageContent } from "./StreamsPageContent";
 
+const STORAGE_KEY = "streampay.density";
+
+
 describe("StreamsPageContent", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
   it("renders the empty state", () => {
     render(<StreamsPageContent state="empty" streams={[]} />);
 
