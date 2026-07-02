@@ -28,9 +28,13 @@ export type StreamRowData = {
 
 type StreamRowProps = {
   stream: StreamRowData;
+  density?: "compact" | "comfortable";
 };
 
-export function StreamRow({ stream }: StreamRowProps) {
+export function StreamRow({ stream, density = "comfortable" }: StreamRowProps) {
+  // Density is controlled by StreamsPageContent and affects only layout spacing.
+  // Keeping it as a prop avoids extra re-renders beyond StreamRow itself.
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<StreamPayError | null>(null);
   const [isIncidentMode] = useState(false);
@@ -101,7 +105,10 @@ export function StreamRow({ stream }: StreamRowProps) {
   };
 
   return (
-    <article className="stream-row" aria-labelledby={`${stream.id}-recipient`}>
+    <article
+      className={`stream-row ${density === "compact" ? "stream-row--compact" : ""}`}
+      aria-labelledby={`${stream.id}-recipient`}
+    >
       {/* Dynamic polite status messenger announcement node layer for assistive tech */}
       <div className="sr-only" aria-live="polite" role="status">
         {srAnnouncement}
@@ -158,7 +165,7 @@ export function StreamRow({ stream }: StreamRowProps) {
         />
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", alignItems: "flex-end" }}>
+      <div className="stream-row__action-wrap">
         <button
           ref={actionButtonRef}
           className={`button button--secondary stream-row__action ${isProcessing ? "button--busy" : ""}`}
