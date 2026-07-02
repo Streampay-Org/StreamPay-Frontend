@@ -32,6 +32,36 @@ describe("StreamsPageContent", () => {
     expect(screen.getByRole("button", { name: /export history/i })).toBeInTheDocument();
   });
 
+  it("formats raw stream rates into human-readable display values", () => {
+    render(
+      <StreamsPageContent
+        state="populated"
+        streams={[
+          {
+            id: "stream-per-second",
+            nextAction: "Pause",
+            rate: "0.0001388889 XLM / second",
+            recipient: "Hourly Recipient",
+            schedule: "second",
+            status: "active",
+          },
+          {
+            id: "stream-raw-month",
+            nextAction: "Start",
+            rate: "50",
+            recipient: "Monthly Recipient",
+            schedule: "month",
+            status: "draft",
+            token: "USDC",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("0.50 XLM / hour")).toHaveClass("stream-row__accrued--animated");
+    expect(screen.getByText("50 USDC / month")).not.toHaveClass("stream-row__accrued--animated");
+  });
+
   it("renders calendar-month edge case schedule messaging", () => {
     render(
       <StreamsPageContent

@@ -6,6 +6,7 @@ import { StreamProgress } from "./StreamProgress";
 import { MiniBurnDown } from "./MiniBurnDown";
 import { ErrorToast } from "./ErrorToast";
 import { fetchWithIdempotency } from "../../lib/apiClient";
+import { formatStreamingRate } from "../../lib/format-rate";
 import { isStreamPayError, formatErrorForDisplay } from "../lib/errors";
 import type { StreamPayError } from "../lib/errors";
 
@@ -16,6 +17,8 @@ export type StreamRowData = {
   recipient: string;
   schedule: string;
   status: StreamStatus;
+  /** Asset symbol used when API responses keep the rate amount separate from token metadata. */
+  token?: string;
   /** Amount already accrued (display units). Used by StreamProgress. */
   accruedAmount?: number;
   /** Total stream amount (display units). Used by StreamProgress. */
@@ -37,6 +40,10 @@ export function StreamRow({ stream }: StreamRowProps) {
   const [errorMsg, setErrorMsg] = useState("");
   // Local notification state for polite screen reader announcements (#219)
   const [srAnnouncement, setSrAnnouncement] = useState("");
+  const formattedRate = formatStreamingRate(stream.rate, {
+    asset: stream.token,
+    sourceInterval: stream.schedule,
+  });
 
   // Ref hook to preserve active keyboard focus target parameters across button re-renders
   const actionButtonRef = useRef<HTMLButtonElement>(null);
@@ -120,8 +127,11 @@ export function StreamRow({ stream }: StreamRowProps) {
       <div className="stream-row__meta">
         <div>
           <dt>Rate</dt>
-          <dd className={stream.status === "active" ? "stream-row__accrued--animated" : ""}>
-            {stream.rate}
+          <dd
+            className={stream.status === "active" ? "stream-row__accrued--animated" : ""}
+            title={formattedRate === stream.rate ? undefined : stream.rate}
+          >
+            {formattedRate}
           </dd>
         </div>
         <div>
