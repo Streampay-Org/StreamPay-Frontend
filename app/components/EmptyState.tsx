@@ -1,14 +1,18 @@
+import type { ReactNode } from "react";
+
 type EmptyStateProps = {
   eyebrow: string;
   title: string;
   description: string;
   actionLabel: string;
   onAction?: () => void;
+  /** Optional secondary CTA/help content shown with the primary action. */
+  children?: ReactNode;
   /** Optional first-time guidance steps to display below the description. */
   guidanceSteps?: string[];
 };
 
-export function EmptyState({ eyebrow, title, description, actionLabel, onAction, guidanceSteps }: EmptyStateProps) {
+export function EmptyState({ eyebrow, title, description, actionLabel, onAction, children, guidanceSteps }: EmptyStateProps) {
   return (
     <section className="empty-state" aria-labelledby="empty-state-title">
       <p className="empty-state__eyebrow">{eyebrow}</p>
@@ -28,6 +32,7 @@ export function EmptyState({ eyebrow, title, description, actionLabel, onAction,
       <button className="button button--primary" type="button" onClick={onAction}>
         {actionLabel}
       </button>
+      {children}
     </section>
   );
 }

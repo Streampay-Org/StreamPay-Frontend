@@ -1,5 +1,9 @@
+"use client";
+
+import { useCallback, useRef, useState } from "react";
 import { EmptyState } from "../components/EmptyState";
 import { PageError } from "../components/PageError";
+import { StreamPrimer } from "../components/StreamPrimer";
 import { StreamRow, type StreamRowData } from "../components/StreamRow";
 
 export type StreamsViewState = "empty" | "loading" | "populated" | "error";
@@ -11,6 +15,7 @@ const streamListCopy = {
     actionLabel: "Create Your First Stream",
     description: "No streams yet. Create one to start paying collaborators and vendors on a steady schedule.",
     eyebrow: "Streams",
+    primerLabel: "What is a payment stream?",
     title: "Your streams list is empty",
   },
   heading: "Streams",
@@ -103,6 +108,13 @@ export function StreamsPageContent({
   onRetry,
 }: StreamsPageContentProps) {
   const isEmpty = state === "empty" || streams.length === 0;
+  const [isPrimerOpen, setIsPrimerOpen] = useState(false);
+  const primerLinkRef = useRef<HTMLAnchorElement>(null);
+
+  const closePrimer = useCallback(() => {
+    setIsPrimerOpen(false);
+    primerLinkRef.current?.focus();
+  }, []);
 
   return (
     <main className="page-shell">
@@ -147,12 +159,29 @@ export function StreamsPageContent({
             onRetry={onRetry}
           />
         ) : isEmpty ? (
-          <EmptyState
-            actionLabel={streamListCopy.empty.actionLabel}
-            description={streamListCopy.empty.description}
-            eyebrow={streamListCopy.empty.eyebrow}
-            title={streamListCopy.empty.title}
-          />
+          <>
+            <EmptyState
+              actionLabel={streamListCopy.empty.actionLabel}
+              description={streamListCopy.empty.description}
+              eyebrow={streamListCopy.empty.eyebrow}
+              title={streamListCopy.empty.title}
+            >
+              <a
+                aria-controls={isPrimerOpen ? "stream-primer-dialog" : undefined}
+                aria-haspopup="dialog"
+                className="button button--secondary"
+                href="#stream-primer-dialog"
+                onClick={(event) => {
+                  event.preventDefault();
+                  setIsPrimerOpen(true);
+                }}
+                ref={primerLinkRef}
+              >
+                {streamListCopy.empty.primerLabel}
+              </a>
+            </EmptyState>
+            {isPrimerOpen && <StreamPrimer onClose={closePrimer} />}
+          </>
         ) : (
           <section aria-label="Streams list" className="stream-list">
             {streams.map((stream) => (

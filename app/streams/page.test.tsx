@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 const { screen } = require("@testing-library/react") as any;
 import { StreamsPageContent } from "./StreamsPageContent";
 
@@ -12,6 +12,24 @@ describe("StreamsPageContent", () => {
 
     expect(screen.getByRole("heading", { name: /your streams list is empty/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /create your first stream/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /what is a payment stream/i })).toBeInTheDocument();
+  });
+
+  it("opens the stream primer from the empty state and restores focus on close", async () => {
+    render(<StreamsPageContent state="empty" streams={[]} />);
+
+    const primerLink = screen.getByRole("link", { name: /what is a payment stream/i });
+    primerLink.focus();
+    fireEvent.click(primerLink);
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    const closeButton = screen.getByRole("button", { name: /close onboarding/i });
+    expect(closeButton).toHaveFocus();
+
+    fireEvent.click(closeButton);
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(primerLink).toHaveFocus();
   });
 
   it("renders the loading skeleton state", () => {

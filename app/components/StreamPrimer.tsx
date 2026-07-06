@@ -44,6 +44,7 @@ export const StreamPrimer = ({ onClose }: StreamPrimerProps) => {
 
   return (
     <div
+      id="stream-primer-dialog"
       role="dialog"
       aria-modal="true"
       aria-labelledby="primer-title"
