@@ -2,6 +2,9 @@
   "name": "streampay-frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20 <21"
+  },
   "description": "StreamPay Dashboard â€” Stellar wallet integration and stream management",
   "scripts": {
     "dev": "node scripts/run-from-realpath.mjs next dev",
@@ -11,19 +14,21 @@
     "test": "node scripts/run-from-realpath.mjs jest",
     "test:e2e": "node scripts/run-from-realpath.mjs jest --runInBand --testPathPattern=e2e\\.test\\.ts$",
     "test:e2e:coverage": "node scripts/run-from-realpath.mjs jest --runInBand --testPathPattern=stream-lifecycle.e2e --coverage --collectCoverageFrom='app/api/streams/**/*.ts' --forceExit",
-    "reconcile": "node scripts/run-from-realpath.mjs ts-node scripts/reconcile-streams.ts"
+    "reconcile": "node scripts/run-from-realpath.mjs ts-node scripts/reconcile-streams.ts",
+    "recon:cli": "node scripts/run-from-realpath.mjs ts-node scripts/recon-cli.ts"
   },
   "dependencies": {
     "jsonwebtoken": "^9.0.3",
     "next": "^15.5.19",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "reacts-cli": "^1.0.2",
     "uuid": "^11.1.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@next/eslint-plugin-next": "^15.5.12",
+    "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
     "@types/jest": "^29.5.14",

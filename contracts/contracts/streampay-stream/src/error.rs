@@ -1,6 +1,6 @@
 //! # Contract error codes
 //!
-//! Every error returned by the StreamPay contract is one of the
+//! Every error returned by the `StreamPay` contract is one of the
 //! discriminants in [`Error`]. The backend maps these codes one-to-one
 //! into the public Problem+JSON error envelope, so:
 //!
@@ -14,7 +14,7 @@
 
 use soroban_sdk::contracterror;
 
-/// Stable StreamPay contract error codes for backend Problem+JSON mapping.
+/// Stable `StreamPay` contract error codes for backend Problem+JSON mapping.
 ///
 /// Discriminants are part of the public contract API and must not be reused.
 #[contracterror]
@@ -43,4 +43,8 @@ pub enum Error {
     Overflow = 10,
     /// 11: Sender has exceeded the maximum number of active streams.
     StreamLimitExceeded = 11,
+    /// 12: Stream sender and recipient are the same address.
+    SelfStream = 12,
+    /// 13: Contract has already been initialised.
+    AlreadyInitialized = 13,
 }

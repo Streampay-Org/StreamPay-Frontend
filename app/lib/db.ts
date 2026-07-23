@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import type { ActivityEvent, ExportJob, Stream, User } from "@/app/types/openapi";
+import type { ActivityTimelineStore } from "@/app/lib/repositories/activity-timeline";
 import { createInMemoryPersistenceStore } from "@/app/lib/repositories/in-memory";
 import {
   createPostgresPersistenceStore,
@@ -58,6 +59,7 @@ export interface ExportRepository {
 }
 
 export interface PersistenceStore {
+  readonly activityTimeline: ActivityTimelineStore;
   readonly exportRepository: ExportRepository;
   readonly idempotencyStore: IdempotencyStore;
   readonly kind: "memory" | "postgres";
@@ -146,6 +148,9 @@ export const db = {
   get activity() {
     return createStoreProxy(() => getStore().streamRepository.activity);
   },
+  get activityTimeline() {
+    return getStore().activityTimeline;
+  },
   get exportAudit() {
     return getStore().exportRepository.audit;
   },
@@ -206,9 +211,26 @@ export const IDEMPOTENCY_TTL_MS = 86_400_000;
  * Uses the same deterministic JSON serialisation as the rest of the stack.
  */
 export function computeFingerprint(method: string, path: string, body: unknown): string {
-  const normalised = JSON.stringify(body ?? null);
+  const normalised = JSON.stringify(sortKeys(body ?? null));
   const payload = `${method}:${path}:${normalised}`;
   return createHash("sha256").update(payload).digest("hex");
+}
+
+function sortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortKeys);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.keys(value as Record<string, unknown>)
+      .sort((left, right) => left.localeCompare(right))
+      .reduce<Record<string, unknown>>((accumulator, key) => {
+        accumulator[key] = sortKeys((value as Record<string, unknown>)[key]);
+        return accumulator;
+      }, {});
+  }
+
+  return value;
 }
 
 /**
@@ -288,6 +310,7 @@ export function resetDb(
 ): void {
   const store = getStore();
   if (store.kind === "memory") {
+    store.activityTimeline.reset();
     store.streamRepository.reset();
     store.idempotencyStore.reset();
     store.exportRepository.reset();
@@ -320,6 +343,38 @@ export function decodeCursor(cursor: string): string {
   } catch {
     throw new Error("Invalid cursor: malformed base64");
   }
+}
+
+export function encodeCompositeCursor(timestamp: string, id: string): string {
+  const payload = `${timestamp}|${id}`;
+  return Buffer.from(payload).toString("base64");
+}
+
+export function decodeCompositeCursor(cursor: string): { timestamp: string; id: string } {
+  if (!cursor || typeof cursor !== "string") {
+    throw new Error("Invalid cursor: must be non-empty string");
+  }
+  let decoded: string;
+  try {
+    decoded = Buffer.from(cursor, "base64").toString("utf8");
+  } catch {
+    throw new Error("Invalid cursor: malformed base64");
+  }
+  const separatorIndex = decoded.indexOf("|");
+  if (separatorIndex === -1) {
+    throw new Error("Invalid cursor: malformed composite key");
+  }
+  const timestamp = decoded.slice(0, separatorIndex);
+  const id = decoded.slice(separatorIndex + 1);
+  // Guard: timestamp must be ISO-8601 and id must match the stream-id format
+  // to prevent cursor-injection with crafted payloads.
+  if (!/^\d{4}-\d{2}-\d{2}T[\d:.Z+-]+$/.test(timestamp)) {
+    throw new Error("Invalid cursor: timestamp segment is not a valid ISO-8601 string");
+  }
+  if (!/^[\w-]{1,128}$/.test(id)) {
+    throw new Error("Invalid cursor: id segment contains disallowed characters");
+  }
+  return { timestamp, id };
 }
 
 export { createInMemoryPersistenceStore, createPostgresPersistenceStore, POSTGRES_SCHEMA_SKETCH, POSTGRES_ROLLOUT_NOTES };
