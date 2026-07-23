@@ -8,6 +8,7 @@ import type {
   StreamRepository,
 } from "@/app/lib/db";
 import type { ActivityEvent, ExportJob, Stream, User } from "@/app/types/openapi";
+import type { ActivityTimelineStore } from "@/app/lib/repositories/activity-timeline";
 
 export interface SqlExecutor {
   query<TResult = unknown>(
@@ -90,6 +91,19 @@ create table export_audit_records (
 create index export_audit_records_export_happened_at_idx
   on export_audit_records (export_id, happened_at desc, id desc);
 
+create table webhook_subscriptions (
+  id text primary key,
+  url text not null,
+  event_types jsonb not null,
+  secret text null,
+  description text null,
+  status text not null default 'active',
+  created_at timestamptz not null,
+  updated_at timestamptz not null
+);
+
+create index webhook_subscriptions_status_idx on webhook_subscriptions (status, updated_at desc);
+create index webhook_subscriptions_event_types_gin_idx on webhook_subscriptions using gin (event_types);
 -- Transactional outbox for webhook events
 create table webhook_outbox (
   id text primary key,
@@ -251,11 +265,22 @@ function unsupported(resourceName: string, methodName: string): Error {
   );
 }
 
+class UnsupportedActivityTimelineStore implements ActivityTimelineStore {
+  get length(): number { throw unsupported("activity_timeline", "length"); }
+  append(): void { throw unsupported("activity_timeline", "append"); }
+  query(): any { throw unsupported("activity_timeline", "query"); }
+  getLagMs(): number { throw unsupported("activity_timeline", "getLagMs"); }
+  backfill(): void { throw unsupported("activity_timeline", "backfill"); }
+  getLatestProjectedTimestamp(): string | null { throw unsupported("activity_timeline", "getLatestProjectedTimestamp"); }
+  reset(): void { throw unsupported("activity_timeline", "reset"); }
+}
+
 export function createPostgresPersistenceStore(
   config: PostgresStoreConfig,
 ): PersistenceStore {
   return {
     kind: "postgres",
+    activityTimeline: new UnsupportedActivityTimelineStore(),
     streamRepository: new PostgresStreamRepository(config.executor),
     idempotencyStore: new PostgresIdempotencyStore(config.executor),
     exportRepository: new PostgresExportRepository(config.executor),
