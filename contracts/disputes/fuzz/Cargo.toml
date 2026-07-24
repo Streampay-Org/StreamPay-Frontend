@@ -1,0 +1,70 @@
+# This crate is intentionally excluded from the parent workspace so that
+# cargo-fuzz can manage its own build profile and dependency resolution.
+# Adding `[workspace]` here prevents Cargo from walking up to
+# `contracts/Cargo.toml` and trying to merge these configs.
+[workspace]
+
+[package]
+name = "streampay-disputes-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# ── cargo-fuzz profile overrides ──────────────────────────────────────────────
+#
+# cargo-fuzz runs targets in release mode under a libFuzzer sandbox.  Retaining
+# debug symbols means crash reproducers include the function names and line
+# numbers a reviewer needs to triage a failure without recompiling from source.
+[profile.release]
+debug = true
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
+#
+# `libfuzzer-sys` wires our `fuzz_target!` macro to the libFuzzer
+# `LLVMFuzzerTestOneInput` C entry point; no other test infrastructure is
+# needed.  `arbitrary` provides `derive(Arbitrary)` so the fuzzer engine can
+# map raw byte sequences onto the typed `DisputeInput` struct.
+[dependencies]
+arbitrary     = { version = "1", default-features = false, features = ["derive"] }
+libfuzzer-sys = "0.4"
+
+# soroban-sdk is pinned to "23" to match the parent workspace
+# (`contracts/Cargo.toml` sets `soroban-sdk = "23"` in
+# `[workspace.dependencies]`).  The `testutils` feature is required so the
+# harness can use `Env::default()`, `Address::generate`, and the ledger-time
+# helpers inside the test host.
+soroban-sdk = { version = "23", features = ["testutils"] }
+
+# The fuzz crate depends directly on the production contract crate so it
+# exercises the real compiled entrypoints — `try_cancel_stream`,
+# `try_pause`, `try_resume`, `try_settle` — rather than a local copy.
+# The compiler will fail if the contract's public API ever drifts away from
+# what this target exercises, which is the intended safety net.
+streampay-stream = { path = "../../contracts/streampay-stream" }
+
+# ── Fuzz target binary ────────────────────────────────────────────────────────
+#
+# `[[bin]]` declares one cargo-fuzz target; the binary name is what gets passed
+# to `cargo fuzz run <name>`. The path points at the `fuzz_target!` invocation.
+[[bin]]
+name = "main"
+path = "targets/main.rs"
+
+# ── Lint overrides ────────────────────────────────────────────────────────────
+#
+# The parent workspace enforces `panic = "deny"` / `unwrap_used = "deny"` /
+# `expect_used = "deny"` to keep Soroban WASM contracts panic-free.  This fuzz
+# crate is excluded from the workspace (see `[workspace]` above), so workspace
+# lints do not propagate automatically.  We re-declare them explicitly so the
+# harness is held to the same standard as production code — the fuzzer's job
+# is to prove that the dispute operations are panic-free, which requires the
+# harness itself to be panic-free in steady-state branches.
+[lints.rust]
+unwrap_used = "deny"
+expect_used = "deny"
+panic       = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic       = "deny"
