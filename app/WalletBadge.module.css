@@ -1,0 +1,262 @@
+/* WalletBadge.module.css - Responsive design system styles for WalletBadge (v7) */
+
+.badge {
+  /* Spacing & Typography Tokens */
+  --wb-gap: var(--spacing-sm, 0.5rem);
+  --wb-pad-y: var(--spacing-xs, 0.4rem);
+  --wb-pad-x: var(--spacing-md, 0.8rem);
+  --wb-font-size: var(--text-sm, 0.875rem);
+  --wb-font-weight: var(--font-medium, 500);
+  --wb-radius: var(--radius-full, 9999px);
+
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wb-gap);
+  padding: var(--wb-pad-y) var(--wb-pad-x);
+  border-radius: var(--wb-radius);
+  border: 1px solid var(--border, #374151);
+  background-color: var(--panel, #1f2937);
+  color: var(--foreground, #f9fafb);
+  font-size: var(--wb-font-size);
+  font-weight: var(--wb-font-weight);
+  user-select: none;
+  position: relative;
+  max-width: 100%;
+  box-sizing: border-box;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Touch target for interactive badge (WCAG 2.1 AA min 44px height) */
+.badgeInteractive {
+  cursor: pointer;
+  min-height: var(--size-44, 44px);
+}
+
+.badgeInteractive:hover {
+  border-color: var(--muted-light, #6b7280);
+  background-color: var(--panel-elevated, #27272a);
+}
+
+.badgeInteractive:focus-visible {
+  outline: 2px solid var(--accent, #22c55e);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--background, #1f2937);
+}
+
+.badgeInteractive:focus:not(:focus-visible) {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Status dot indicator — size increased to 10px so the color-blind-safe
+   pattern overlay is clearly legible (the ::before pseudo-element from
+   the .cb-pattern system overlays a distinct SVG texture per state). */
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+  position: relative;
+  transition: background-color 0.2s ease;
+}
+
+.dotConnected {
+  background-color: var(--accent, #10b981);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+}
+
+.dotConnecting,
+.dotDisconnecting {
+  background-color: var(--system-warning-border, #f59e0b);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
+  animation: wallet-badge-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes wallet-badge-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.85);
+  }
+}
+
+/* JS-driven motion modifiers (Issue #1078) */
+.badgeAnimated {
+  /* default — animations enabled via .dotConnecting / transitions */
+}
+
+.badgeStatic .dotConnecting,
+.badgeStatic .dotDisconnecting {
+  animation: none !important;
+  opacity: 1;
+  transform: none;
+}
+
+.dotError {
+  background-color: var(--system-error-border, #ef4444);
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+}
+
+.dotDisconnected {
+  background-color: var(--muted, #9ca3af);
+}
+
+/* Main label text */
+.label {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+
+.providerPrefix {
+  opacity: 0.8;
+  margin-right: var(--spacing-xs, 0.25rem);
+}
+
+/* Network tag */
+.network {
+  font-size: var(--text-xs, 0.75rem);
+  padding: var(--spacing-2xs, 0.15rem) var(--spacing-sm, 0.45rem);
+  border-radius: var(--radius-sm, 4px);
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--muted-light, #9ca3af);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* Balance tag */
+.balance {
+  font-weight: var(--font-semibold, 600);
+  white-space: nowrap;
+}
+
+/* Disconnect button with min 44px x 44px touch target (WCAG 2.1 AA) */
+.disconnect {
+  background: none;
+  border: none;
+  color: var(--muted-light, #9ca3af);
+  cursor: pointer;
+  font-size: var(--text-sm, 0.875rem);
+  padding: var(--spacing-sm, 0.5rem);
+  margin-left: var(--spacing-3xs, 0.1rem);
+  min-width: var(--size-44, 44px);
+  min-height: var(--size-44, 44px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  line-height: 1;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.disconnect:hover {
+  color: var(--system-error-text, #ef4444);
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+.disconnect:focus-visible {
+  outline: 2px solid var(--accent, #22c55e);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--background, #1f2937);
+}
+
+.disconnect:focus:not(:focus-visible) {
+  outline: none;
+  box-shadow: none;
+}
+
+/* ─────────────────────────────────────────────────────────────
+ * Responsive Breakpoint Audit Specifications (Issue #1072)
+ * ───────────────────────────────────────────────────────────── */
+
+.kbdHint {
+  /* Responsive display for keyboard shortcut hint */
+}
+
+
+/* Mobile / Narrow Viewport (< 480px / 30rem) */
+@media (max-width: 29.9375rem) {
+  .badge {
+    --wb-pad-y: var(--spacing-xs-mobile, 0.35rem);
+    --wb-pad-x: var(--spacing-md-mobile, 0.65rem);
+    --wb-gap: var(--spacing-xs-mobile, 0.35rem);
+    --wb-font-size: var(--text-sm-mobile, 0.8125rem);
+  }
+
+  .label {
+    max-width: 120px;
+  }
+
+  /* Hide secondary network badge on narrow viewports to avoid header overflow */
+  .network {
+    display: none;
+  }
+
+  .providerPrefix {
+    display: none;
+  }
+
+  .kbdHint {
+    display: none;
+  }
+}
+
+/* Phablet / Tablet (480px to 1023px) */
+@media (min-width: 30rem) and (max-width: 63.9375rem) {
+  .label {
+    max-width: 200px;
+  }
+
+  .network {
+    display: inline-block;
+  }
+
+  .providerPrefix {
+    display: inline;
+  }
+}
+
+/* Desktop & Wide Viewports (>= 1024px / 64rem) */
+@media (min-width: 64rem) {
+  .badge {
+    --wb-pad-y: var(--spacing-sm-desktop, 0.45rem);
+    --wb-pad-x: var(--spacing-lg-desktop, 0.9rem);
+    --wb-gap: var(--spacing-md-desktop, 0.6rem);
+  }
+
+  .label {
+    max-width: 300px;
+  }
+
+  .network {
+    display: inline-block;
+  }
+
+  .providerPrefix {
+    display: inline;
+  }
+}
+
+/* Prefers Reduced Motion — CSS-level static fallback (Issue #1078) */
+@media (prefers-reduced-motion: reduce) {
+  .badge,
+  .dot,
+  .disconnect {
+    transition: none !important;
+  }
+
+  .dotConnecting,
+  .dotDisconnecting {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+  }
+}

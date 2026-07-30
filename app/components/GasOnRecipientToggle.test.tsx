@@ -4,7 +4,7 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { GasOnRecipientToggle, GAS_ON_RECIPIENT_FEE_XLM } from '../GasOnRecipientToggle';
+import { GasOnRecipientToggle, GAS_ON_RECIPIENT_FEE_XLM } from './GasOnRecipientToggle';
 
 describe('GasOnRecipientToggle', () => {
   it('renders the toggle and description', () => {

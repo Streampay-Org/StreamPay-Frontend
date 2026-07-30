@@ -272,7 +272,10 @@ export async function POST(request: NextRequest) {
     setIdempotency(idempotencyStore, idempotencyTokenValue, fingerprint, 201, payload);
   }
 
-  logger.info("Batch streams created", { count: createdStreams.length });
+  logger.info("Batch streams created", {
+    count: createdStreams.length,
+    request_id: getCorrelationContext()?.request_id,
+  });
 
   return NextResponse.json(payload, { status: 201 });
 }

@@ -4,82 +4,85 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ThemeToggle } from "./ThemeToggle";
+
+// Use jest.mock with inline factory to avoid hoisting issues
+jest.mock("../utils/theme-noflash", () => ({
+  __esModule: true,
+  setTheme: jest.fn(),
+  setHighContrast: jest.fn(),
+  getHighContrast: jest.fn(() => false),
+  themeNoFlash: jest.fn(),
+}));
+
+// Import the mock to get typed references
 import * as themeNoFlash from "../utils/theme-noflash";
 
 describe("ThemeToggle", () => {
   beforeEach(() => {
-    // Mock localStorage
+    jest.clearAllMocks();
     const store: Record<string, string> = {};
     const localStorageMock = {
-      getItem: jest.fn((key: string) => store[key] || null),
-      setItem: jest.fn((key: string, value: string) => {
-        store[key] = value.toString();
-      }),
-      removeItem: jest.fn((key: string) => {
-        delete store[key];
-      }),
-      clear: jest.fn(() => {
-        for (const key in store) {
-          delete store[key];
-        }
-      })
+      getItem: jest.fn((key: string) => store[key] ?? null),
+      setItem: jest.fn((key: string, value: string) => { store[key] = String(value); }),
+      removeItem: jest.fn((key: string) => { delete store[key]; }),
+      clear: jest.fn(() => { Object.keys(store).forEach(k => delete store[k]); }),
     };
-    Object.defineProperty(window, 'localStorage', {
-      value: localStorageMock,
-      writable: true
-    });
-    
-    // Mock matchMedia
-    Object.defineProperty(window, 'matchMedia', {
+    Object.defineProperty(window, "localStorage", { value: localStorageMock, writable: true });
+    Object.defineProperty(window, "matchMedia", {
       writable: true,
-      value: jest.fn().mockImplementation(query => ({
-        matches: false,
-        media: query,
-        onchange: null,
-        addListener: jest.fn(), // Deprecated
-        removeListener: jest.fn(), // Deprecated
-        addEventListener: jest.fn(),
-        removeEventListener: jest.fn(),
-        dispatchEvent: jest.fn(),
+      value: jest.fn().mockImplementation(_query => ({
+        matches: false, media: _query, onchange: null,
+        addListener: jest.fn(), removeListener: jest.fn(),
+        addEventListener: jest.fn(), removeEventListener: jest.fn(), dispatchEvent: jest.fn(),
       })),
     });
+    document.documentElement.classList.remove("high-contrast");
   });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
+  afterEach(() => { jest.restoreAllMocks(); });
 
-  it("renders with system as default when no localStorage value", () => {
+  it("renders with system as default", () => {
     render(<ThemeToggle />);
-    const systemRadio = screen.getByLabelText("System") as HTMLInputElement;
-    expect(systemRadio.checked).toBe(true);
+    expect((screen.getByLabelText("System") as HTMLInputElement).checked).toBe(true);
   });
 
-  it("renders with light when light is in localStorage", () => {
+  it("renders with light when in localStorage", () => {
     window.localStorage.setItem("streampay-theme", "light");
     render(<ThemeToggle />);
-    const lightRadio = screen.getByLabelText("Light") as HTMLInputElement;
-    expect(lightRadio.checked).toBe(true);
+    expect((screen.getByLabelText("Light") as HTMLInputElement).checked).toBe(true);
   });
 
-  it("calls setTheme and updates state when selecting dark", () => {
-    const setThemeSpy = jest.spyOn(themeNoFlash, 'setTheme').mockImplementation(() => {});
+  it("calls setTheme when selecting dark", () => {
     render(<ThemeToggle />);
-    
-    const darkRadio = screen.getByLabelText("Dark");
-    fireEvent.click(darkRadio);
-    
-    expect(setThemeSpy).toHaveBeenCalledWith("dark");
-    expect((darkRadio as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByLabelText("Dark"));
+    expect(themeNoFlash.setTheme).toHaveBeenCalledWith("dark");
   });
-  
-  it("removes localStorage item when system is selected", () => {
+
+  it("removes localStorage when system selected", () => {
     window.localStorage.setItem("streampay-theme", "light");
     render(<ThemeToggle />);
-    
-    const systemRadio = screen.getByLabelText("System");
-    fireEvent.click(systemRadio);
-    
+    fireEvent.click(screen.getByLabelText("System"));
     expect(window.localStorage.removeItem).toHaveBeenCalledWith("streampay-theme");
+  });
+
+  describe("high-contrast", () => {
+    it("renders checkbox", () => {
+      render(<ThemeToggle />);
+      expect(screen.getByLabelText("High contrast mode")).toBeInTheDocument();
+    });
+
+    it("defaults unchecked", () => {
+      render(<ThemeToggle />);
+      expect((screen.getByLabelText("High contrast mode") as HTMLInputElement).checked).toBe(false);
+    });
+
+    it("toggles on click", () => {
+      render(<ThemeToggle />);
+      const cb = screen.getByLabelText("High contrast mode") as HTMLInputElement;
+      fireEvent.click(cb);
+      expect(themeNoFlash.setHighContrast).toHaveBeenCalledWith(true);
+      fireEvent.click(cb);
+      expect(themeNoFlash.setHighContrast).toHaveBeenCalledWith(false);
+    });
   });
 });

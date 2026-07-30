@@ -31,7 +31,7 @@ export interface VestingEvent {
  * Escapes special characters in ICS text fields according to RFC 5545.
  * Characters that need escaping: \ , ; : and newlines
  */
-function escapeIcsText(text: string): string {
+export function escapeIcsText(text: string): string {
   return text
     .replace(/\\/g, '\\\\')
     .replace(/;/g, '\\;')
@@ -43,7 +43,7 @@ function escapeIcsText(text: string): string {
  * Formats a Date object to ICS datetime format (YYYYMMDDTHHMMSSZ).
  * Uses UTC time to ensure consistency across timezones.
  */
-function formatIcsDate(date: Date): string {
+export function formatIcsDate(date: Date): string {
   return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 }
 
@@ -51,7 +51,7 @@ function formatIcsDate(date: Date): string {
  * Generates a unique UID for an ICS event.
  * Format: <stream-id>-<timestamp>@streampay.io
  */
-function generateEventUid(streamId: string, timestamp: Date): string {
+export function generateEventUid(streamId: string, timestamp: Date): string {
   const timeStr = timestamp.getTime().toString();
   return `${streamId}-${timeStr}@streampay.io`;
 }
@@ -82,13 +82,13 @@ function eventToIcs(event: VestingEvent): string {
  * Parses a stream rate string to extract amount and period.
  * Expected formats: "120 XLM / month", "32 XLM / week", "18 XLM / day"
  */
-function parseRate(rate: string): { amount: string; period: 'day' | 'week' | 'month' } | null {
-  const match = rate.match(/^(\d+(?:\.\d+)?)\s+(\w+)\s*\/\s*(day|week|month)$/i);
+export function parseRate(rate: string): { amount: string; period: 'day' | 'week' | 'month' } | null {
+  const match = rate.match(/^(\d+(?:\.\d+)?)\s*\w+\s*\/\s*(day|week|month)$/i);
   if (!match) return null;
 
   return {
     amount: match[1],
-    period: match[3].toLowerCase() as 'day' | 'week' | 'month',
+    period: match[2].toLowerCase() as 'day' | 'week' | 'month',
   };
 }
 
@@ -102,7 +102,8 @@ export function calculateVestingDates(
   createdAt: string,
   status: string,
   token: string = 'XLM',
-  maxEvents: number = 52 // Limit to 1 year of events for weekly streams
+  maxEvents: number = 52, // Limit to 1 year of events for weekly streams
+  includePast: boolean = true
 ): VestingEvent[] {
   const parsedRate = parseRate(rate);
   if (!parsedRate) {
@@ -125,8 +126,8 @@ export function calculateVestingDates(
     const eventStart = new Date(startDate.getTime() + i * periodMs[parsedRate.period]);
     const eventEnd = new Date(eventStart.getTime() + 60 * 60 * 1000); // 1 hour duration
 
-    // Skip past events
-    if (eventEnd < now) continue;
+    // Skip past events if includePast is false
+    if (!includePast && eventEnd < now) continue;
 
     // For ended streams, don't generate future events
     if (isEnded && eventStart > now) break;

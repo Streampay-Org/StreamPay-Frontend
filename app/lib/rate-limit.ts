@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getCorrelationContext } from "./logger";
 import { RATE_LIMITS, getLimitForRoute, LimitType } from "./rate-limit-config";
 import { getRateLimitStore } from "./rate-limit-store";
 
@@ -75,7 +76,12 @@ export async function checkRateLimit(
   const store = getRateLimitStore();
   const config = RATE_LIMITS[limitType];
 
-  const result = await store.check(identity.value, config.limit, config.windowMs);
+  // Key per limit tier so one endpoint class cannot drain another's bucket.
+  const result = await store.check(
+    `${limitType}:${identity.value}`,
+    config.limit,
+    config.windowMs,
+  );
 
   return {
     allowed: result.allowed,
@@ -85,11 +91,13 @@ export async function checkRateLimit(
 }
 
 export function rateLimitResponse(retryAfter: number) {
+  const requestId = getCorrelationContext()?.request_id ?? `req-${crypto.randomUUID()}`;
   return NextResponse.json(
     {
       error: {
         code: "rate_limit_exceeded",
         message: "Rate limit exceeded. Please try again later.",
+        request_id: requestId,
       },
     },
     {

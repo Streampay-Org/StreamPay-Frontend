@@ -1,37 +1,24 @@
-"use client";
-
-import { useState, useEffect } from "react";
 import { StatusBadge, type StreamStatus } from "./components/StatusBadge";
-import { StreamPrimer } from "./components/StreamPrimer";
 import { homeCopy, streamActionCopy } from "./content/copy";
+import OnboardingManager from "./components/OnboardingManager";
 
-const ONBOARDING_KEY = "streampay_onboarding_dismissed";
-
+/**
+ * Home — landing page for StreamPay.
+ *
+ * Converted to a React Server Component (issue #85) to improve initial
+ * render performance. Only the onboarding visibility state (which requires
+ * reading from `localStorage`) has been extracted into a tiny client
+ * component (`OnboardingManager`), keeping the bulk of this page as a
+ * zero-JavaScript static render.
+ */
 export default function Home() {
   const actions = Object.values(streamActionCopy);
   const streamStatuses: StreamStatus[] = ["draft", "active", "paused", "ended"];
 
-  const [onboardingVisible, setOnboardingVisible] = useState(false);
-
-  useEffect(() => {
-    const dismissed = localStorage.getItem(ONBOARDING_KEY);
-    if (!dismissed) {
-      setOnboardingVisible(true);
-    }
-  }, []);
-
-  const handleDismissOnboarding = () => {
-    setOnboardingVisible(false);
-    localStorage.setItem(ONBOARDING_KEY, "true");
-  };
-
-  const handleShowOnboarding = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setOnboardingVisible(true);
-  };
-
   return (
     <main className="home">
+      <OnboardingManager />
+
       <div className="home__intro">
         <p className="home__eyebrow">{homeCopy.eyebrow}</p>
         <h1 className="home__title">{homeCopy.heading}</h1>

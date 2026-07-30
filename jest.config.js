@@ -4,7 +4,8 @@ const createJestConfig = nextJest({ dir: "./" });
 
 /** @type {import('jest').Config} */
 const config = {
-  testEnvironment: "node",
+  testEnvironment: "jsdom",
+  setupFiles: ["<rootDir>/jest.polyfills.js"],
   setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
   testMatch: ["**/*.test.{ts,tsx}", "**/*.spec.{ts,tsx}"],
   collectCoverageFrom: [

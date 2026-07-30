@@ -37,35 +37,13 @@ export interface StreamState {
 }
 
 /**
- * Vested amount snapshot.
- *
- * @property vestedAmount - Amount that has vested (earned) at this moment.
- * @property totalAmount  - The principal (total amount locked at stream creation).
+ * Invariant: Sum of vested = principal.
+ * Conservation of value: deposited = withdrawn + escrow
  */
-export interface VestedState {
-  vestedAmount: number;
-  totalAmount: number;
-}
-
-// ── Invariant checks ──────────────────────────────────────────────────────────
-
-/**
- * Invariant: conservation of value.
- *
- * Asserts that `deposited === withdrawn + escrow` (within floating-point
- * epsilon). This ensures no funds are created or destroyed by stream
- * operations.
- *
- * @param state - Current stream balance snapshot.
- * @returns     `true` if the invariant holds.
- *
- * @example
- * ```ts
- * checkConservationOfValue({ deposited: 100, withdrawn: 40, escrow: 60 }); // true
- * checkConservationOfValue({ deposited: 100, withdrawn: 40, escrow: 50 }); // false
- * ```
- */
-export function checkConservationOfValue(state: StreamState): boolean {
+export function checkSumOfVestedEqualsPrincipal(state: StreamState): boolean {
+  // Using a small epsilon for floating point math if needed,
+  // but for Stellar/Soroban we usually use bigints or fixed precision.
+  // Here we assume basic numbers with truncation handling elsewhere.
   return Math.abs(state.deposited - (state.withdrawn + state.escrow)) < 0.0000001;
 }
 
@@ -196,25 +174,24 @@ export function calculateVestedAmount(
   now: number,
   pausedRanges: Array<[number, number]> = [],
 ): number {
-  // Clamp now
-  const nowClamped = Math.max(startTime, Math.min(now, endTime));
-  
-  // Calculate total paused duration
-  let totalPausedDuration = 0;
-  for (const [pausedAt, resumedAt] of pausedRanges) {
-    const effectivePausedStart = Math.max(startTime, pausedAt);
-    const effectivePausedEnd = Math.min(endTime, Math.max(effectivePausedStart, resumedAt));
-    totalPausedDuration += effectivePausedEnd - effectivePausedStart;
-  }
-  
-  // Calculate elapsed time excluding paused duration
+  if (now < startTime) return 0;
+  if (now >= endTime) return totalAmount;
+
   const totalDuration = endTime - startTime;
-  if (totalDuration <= 0) {
-    return totalAmount;
+  if (totalDuration <= 0) return totalAmount;
+
+  let activeTime = now - startTime;
+
+  for (const [pauseStart, pauseEnd] of pausedRanges) {
+    const pauseBegin = Math.max(pauseStart, startTime);
+    const pauseFinish = Math.min(pauseEnd, now);
+
+    if (pauseBegin < pauseFinish) {
+      activeTime -= pauseFinish - pauseBegin;
+    }
   }
-  
-  const elapsed = Math.max(0, (nowClamped - startTime) - totalPausedDuration);
-  
-  // Vested = totalAmount * elapsed / totalDuration (truncated to avoid over-allocation)
-  return Math.floor((totalAmount * elapsed) / totalDuration);
+
+  const vestedAmount = (totalAmount * Math.max(0, activeTime)) / totalDuration;
+
+  return Math.max(0, Math.min(totalAmount, Math.floor(vestedAmount)));
 }

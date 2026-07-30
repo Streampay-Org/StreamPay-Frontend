@@ -69,7 +69,18 @@ The public API surface is protected by an explicit `ALLOWED_ORIGINS` allowlist. 
 - No `Access-Control-Allow-Origin` header is reflected for disallowed browser origins.
 - The API does not enable credentialed CORS by default, so bearer tokens remain the expected auth mechanism.
 
-### 4. Secret Redaction in Logging
+### 4. JWKS Endpoint and JWT Rotation
+
+A public JWKS endpoint is now available at `/\.well-known/jwks.json` for verification of signed JWTs. The endpoint returns the configured signing keys and their key IDs, enabling downstream consumers to validate tokens without sharing the secret material directly.
+
+To support key rotation, the auth layer now:
+- signs new tokens with a configurable `kid` header,
+- accepts tokens signed with the current secret and an optional previous secret,
+- exposes the current and previous keys through the JWKS document when configured.
+
+This allows gradual migration to a new signing secret while preserving compatibility for already-issued tokens.
+
+### 5. Secret Redaction in Logging
 
 **File:** `app/lib/logger.ts`
 
@@ -89,7 +100,7 @@ logger.info('Configuration loaded', {
 });
 ```
 
-### 4. String Literal Removal
+### 6. String Literal Removal
 
 All hardcoded network passphrases and Horizon URLs have been removed from:
 
@@ -98,7 +109,7 @@ All hardcoded network passphrases and Horizon URLs have been removed from:
 - `app/api/identity/me/route.ts` - Now uses `getConfig().jwtSecret`
 - `detector.ts` - Now uses `getConfig().anomalyThresholds`
 
-### 5. CI Guardrails
+### 7. CI Guardrails
 
 **File:** `.github/workflows/ci.yml`
 
@@ -109,7 +120,7 @@ CI is enforced to use testnet only:
 - Fails if mainnet configuration detected
 - Fails if production JWT_SECRET detected
 
-### 6. UI Safety Labels
+### 8. UI Safety Labels
 
 **File:** `app/components/NetworkBadge.tsx`
 

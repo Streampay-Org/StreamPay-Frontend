@@ -51,7 +51,7 @@ describe("POST /api/webhooks/dlq", () => {
     expect(res.status).toBe(400);
     const body = (res as unknown as { body: { error: { code: string } } }).body;
     expect(body.error.code).toBe("BAD_REQUEST");
-    expect(typeof body.error.request_id).toBe("string");
+    expect(typeof (body.error as any).request_id).toBe("string");
   });
 
   it("returns 400 canonical error when body is a string (not an object)", async () => {
@@ -73,7 +73,7 @@ describe("POST /api/webhooks/dlq", () => {
     expect(res.status).toBe(500);
     const body = (res as unknown as { body: { error: { code: string } } }).body;
     expect(body.error.code).toBe("WEBHOOK_PROCESSING_FAILED");
-    expect(typeof body.error.request_id).toBe("string");
+    expect(typeof (body.error as any).request_id).toBe("string");
   });
 
   it("error envelope always has code, message, request_id", async () => {

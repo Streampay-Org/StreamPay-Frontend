@@ -62,7 +62,10 @@ async function authenticate(request: Request): Promise<NextResponse | null> {
     return null;
   }
 
-  return internalResult;
+  // Always return a fresh response so the body stream is never exhausted by
+  // a previous .json() call on the same response object (e.g. in tests or when
+  // the auth helper's response body has already been consumed).
+  return errorResponse("INTERNAL_AUTH_REQUIRED", "Internal service authentication is required.", 401);
 }
 
 export async function POST(request: Request): Promise<NextResponse> {

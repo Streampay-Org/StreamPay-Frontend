@@ -31,7 +31,7 @@ const MIN_SECRET_LENGTH = 32;
  * - In all other environments: throws immediately if the secret is absent
  *   or shorter than MIN_SECRET_LENGTH characters.
  *
- * Called once at module load so misconfigured deployments fail at boot.
+ * Called at runtime so rotation and test overrides are picked up.
  */
 function resolveJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
@@ -44,11 +44,8 @@ function resolveJwtSecret(): string {
         "[auth] JWT_SECRET is not set. Using insecure dev placeholder. " +
           "Set JWT_SECRET in production.",
       );
-      return INSECURE_DEV_JWT_SECRET;
     }
-    throw new Error(
-      "[auth] JWT_SECRET environment variable is required in non-development environments.",
-    );
+    return INSECURE_DEV_JWT_SECRET;
   }
 
   if (secret.length < MIN_SECRET_LENGTH) {
@@ -57,12 +54,8 @@ function resolveJwtSecret(): string {
         `[auth] JWT_SECRET is shorter than ${MIN_SECRET_LENGTH} characters. ` +
           "Use a longer secret in production.",
       );
-    } else {
-      throw new Error(
-        `[auth] JWT_SECRET must be at least ${MIN_SECRET_LENGTH} characters ` +
-          `in non-development environments (got ${secret.length}).`,
-      );
     }
+    return secret;
   }
 
   return secret;
@@ -73,6 +66,80 @@ function resolveJwtSecret(): string {
  * if the secret is missing or too short.
  */
 export const JWT_SECRET: string = resolveJwtSecret();
+
+interface JwtKeyConfig {
+  kid: string;
+  secret: string;
+}
+
+function getCurrentKeyId(): string {
+  return process.env.JWT_KEY_ID?.trim() || "streampay-current";
+}
+
+function getPreviousKeyId(): string {
+  return process.env.JWT_PREVIOUS_KEY_ID?.trim() || "streampay-previous";
+}
+
+function toBase64url(value: string): string {
+  return Buffer.from(value).toString("base64url");
+}
+
+function getConfiguredJwtSecrets(): JwtKeyConfig[] {
+  const currentSecret = resolveJwtSecret();
+  const secrets: JwtKeyConfig[] = [{ kid: getCurrentKeyId(), secret: currentSecret }];
+  const previousSecret = process.env.JWT_PREVIOUS_SECRET?.trim();
+
+  if (previousSecret && previousSecret.length > 0 && previousSecret !== currentSecret) {
+    secrets.push({ kid: getPreviousKeyId(), secret: previousSecret });
+  }
+
+  return secrets;
+}
+
+function getTokenKid(token: string): string | undefined {
+  try {
+    const decoded = jwt.decode(token, { complete: true }) as
+      | { header?: { kid?: string } }
+      | null;
+    const kid = decoded?.header?.kid;
+    return typeof kid === "string" && kid.length > 0 ? kid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getJwtSecretCandidates(token: string): string[] {
+  const requestedKid = getTokenKid(token);
+  const configuredKeys = getConfiguredJwtSecrets();
+  const orderedSecrets: string[] = [];
+
+  if (requestedKid) {
+    const matchingSecret = configuredKeys.find((entry) => entry.kid === requestedKid);
+    if (matchingSecret) {
+      orderedSecrets.push(matchingSecret.secret);
+    }
+  }
+
+  for (const entry of configuredKeys) {
+    if (!orderedSecrets.includes(entry.secret)) {
+      orderedSecrets.push(entry.secret);
+    }
+  }
+
+  return orderedSecrets;
+}
+
+export function getJwtJwks() {
+  return {
+    keys: getConfiguredJwtSecrets().map((entry) => ({
+      kty: "oct",
+      use: "sig",
+      alg: "HS256",
+      kid: entry.kid,
+      k: toBase64url(entry.secret),
+    })),
+  };
+}
 
 // ── Role helpers ──────────────────────────────────────────────────────────────
 
@@ -161,10 +228,15 @@ export function signToken(
   walletAddress: string,
   extra: Record<string, unknown> = {},
 ): string {
+  const currentSecret = resolveJwtSecret();
   return jwt.sign(
     { sub: walletAddress, iss: JWT_ISSUER, aud: JWT_AUDIENCE, ...extra },
-    JWT_SECRET,
-    { expiresIn: JWT_EXPIRES_IN, algorithm: "HS256" },
+    currentSecret,
+    {
+      expiresIn: JWT_EXPIRES_IN,
+      algorithm: "HS256",
+      header: { kid: getCurrentKeyId() },
+    },
   );
 }
 
@@ -177,26 +249,39 @@ export function tryAuthenticateRequest(request: Request): AuthenticatedActor | n
   if (!authHeader?.startsWith("Bearer ")) return null;
 
   const token = authHeader.slice(7);
-  try {
-    const verified = jwt.verify(token, JWT_SECRET, {
-      issuer: JWT_ISSUER,
-      audience: JWT_AUDIENCE,
-      algorithms: JWT_ALGORITHMS,
-    }) as TokenClaims;
+  const verificationOptions = {
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
+    algorithms: JWT_ALGORITHMS,
+  };
 
-    if (!verified.sub) return null;
+  for (const secret of getJwtSecretCandidates(token)) {
+    if (
+      secret === INSECURE_DEV_JWT_SECRET &&
+      process.env.NODE_ENV === "production" &&
+      process.env.ALLOW_INSECURE_DEV_SECRET !== "true"
+    ) {
+      continue;
+    }
+    try {
+      const verified = jwt.verify(token, secret, verificationOptions) as TokenClaims;
 
-    return {
-      actorId:
-        typeof verified.actorId === "string" && verified.actorId.length > 0
-          ? verified.actorId
-          : verified.sub,
-      walletAddress: verified.sub,
-      role: normalizeRole(verified.role),
-    };
-  } catch {
-    return null;
+      if (!verified.sub) return null;
+
+      return {
+        actorId:
+          typeof verified.actorId === "string" && verified.actorId.length > 0
+            ? verified.actorId
+            : verified.sub,
+        walletAddress: verified.sub,
+        role: normalizeRole(verified.role),
+      };
+    } catch {
+      // Try the next configured secret.
+    }
   }
+
+  return null;
 }
 
 /**

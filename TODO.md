@@ -1,10 +1,14 @@
-# TODO
+# TODO — Streams dense layout toggle
 
-## Task: NatSpec docs for storage helpers
-
-- [ ] Create branch `task/storage-docs`
-- [ ] Add `///` NatSpec documentation (with `# Errors` and `# Returns`) for every `pub fn` in `contracts/contracts/streampay-stream/src/storage.rs`
-- [ ] Run `cargo doc -p streampay-stream` and confirm it passes with no missing-docs warnings
-- [ ] Commit with message `task: NatSpec docs for storage helpers`
-- [ ] (PR) Include `cargo doc` output/notes
+- [ ] Add density state + toggle UI in `app/streams/StreamsPageContent.tsx` with localStorage persistence (`streampay.density`)
+- [ ] Pass density to `app/components/StreamRow.tsx` and apply compact class
+- [ ] Add compact CSS rules in `app/globals.css` (reduce padding/gaps for `.stream-row--compact` and related layouts)
+- [ ] Update `app/streams/page.test.tsx` to cover:
+  - [ ] comfortable mode (default) -> non-compact
+  - [ ] compact mode -> compact class
+  - [ ] toggle interaction updates localStorage
+  - [ ] keyboard accessibility (role="switch" + aria-checked)
+- [ ] Run `npm test -- app/streams/page.test.tsx` and ensure passing
+- [ ] Commit changes with message: `feat: add dense-mode toggle to streams list`
+- [ ] Provide manual visual testing notes for PR
 

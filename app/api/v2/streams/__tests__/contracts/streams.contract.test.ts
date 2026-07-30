@@ -13,6 +13,8 @@
 
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/v2/streams/route";
+import { GET as GET_SINGLE } from "@/app/api/v2/streams/[id]/route";
+import { getStore } from "@/app/lib/db";
 import { loadAllFixtures, type PactInteraction } from "./pact-helpers";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -27,13 +29,22 @@ function makeNextRequest(interaction: PactInteraction): NextRequest {
   if (interaction.request.body) {
     init.body = JSON.stringify(interaction.request.body);
   }
-  return new NextRequest(url, init);
+  return new NextRequest(url, init as any);
 }
 
 async function callHandler(
   interaction: PactInteraction
 ): Promise<Response> {
   const req = makeNextRequest(interaction);
+  const path = interaction.request.path;
+
+  if (path.startsWith("/api/v2/streams/") && path !== "/api/v2/streams") {
+    const id = path.replace("/api/v2/streams/", "");
+    if (interaction.request.method === "GET") {
+      return GET_SINGLE(req, { params: Promise.resolve({ id }) });
+    }
+  }
+
   switch (interaction.request.method) {
     case "GET":
       return GET(req);
@@ -41,6 +52,28 @@ async function callHandler(
       return POST(req);
     default:
       throw new Error(`Unhandled method: ${interaction.request.method}`);
+  }
+}
+
+function setupProviderState(providerState: string) {
+  const { streamRepository } = getStore();
+  if (providerState.includes("stream stream_abc123 exists")) {
+    let status = "active";
+    if (providerState.includes("ended")) status = "ended";
+    if (providerState.includes("paused")) status = "paused";
+    if (providerState.includes("active")) status = "active";
+
+    streamRepository.streams.set("stream_abc123", {
+      id: "stream_abc123",
+      recipient: "GABC1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234",
+      rate: "120",
+      schedule: "month",
+      status,
+      nextAction: status === "active" ? "pause" : status === "ended" ? "withdraw" : "start",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      token: "XLM",
+    });
   }
 }
 
@@ -53,6 +86,7 @@ describe("Pact contract verifier — /api/v2/streams", () => {
     describe(`${fixture.consumer.name} → ${fixture.provider.name}`, () => {
       for (const interaction of fixture.interactions) {
         it(interaction.description, async () => {
+          setupProviderState(interaction.providerState ?? "");
           const response = await callHandler(interaction);
 
           // ── Status code ──────────────────────────────────────────────────

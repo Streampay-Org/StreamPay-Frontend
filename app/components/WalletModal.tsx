@@ -138,6 +138,34 @@ export function WalletModal({ isOpen, onClose, onSelect }: WalletModalProps) {
           );
         })}
       </div>
+      <div
+        style={{
+          marginTop: "1.25rem",
+          paddingTop: "0.75rem",
+          borderTop: "1px solid var(--border)",
+          fontSize: "0.8rem",
+          color: "var(--muted-light)",
+          textAlign: "center",
+          lineHeight: 1.4,
+        }}
+      >
+        <span>Need help? View our </span>
+        <a
+          href="https://docs.streampay.io/wallet-compatibility"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="wallet compatibility docs"
+          style={{
+            color: "var(--accent)",
+            textDecoration: "underline",
+            transition: "color 0.2s",
+          }}
+          onMouseOver={(e) => (e.currentTarget.style.color = "var(--foreground)")}
+          onMouseOut={(e) => (e.currentTarget.style.color = "var(--accent)")}
+        >
+          wallet compatibility docs
+        </a>
+      </div>
     </Modal>
   );
 }

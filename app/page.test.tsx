@@ -6,6 +6,11 @@ import { render } from "@testing-library/react";
 const { screen } = require("@testing-library/react") as any;
 import Home from "./page";
 
+// OnboardingManager reads localStorage; ensure a clean slate per test.
+beforeEach(() => {
+  localStorage.clear();
+});
+
 describe("Home", () => {
   it("renders the updated stream action heading", () => {
     render(<Home />);
@@ -16,10 +21,14 @@ describe("Home", () => {
     ).toBeInTheDocument();
   });
 
-  it("does not rely on manual tab index overrides", () => {
+  it("does not rely on manual tab index overrides on interactive elements", () => {
     const { container } = render(<Home />);
 
-    expect(container.querySelectorAll("[tabindex]")).toHaveLength(0);
+    // tabindex="-1" on the dialog container is intentional (programmatic focus
+    // management for the WelcomeTour modal). What we guard against is
+    // tabindex > 0, which creates an unpredictable tab order.
+    const positiveTabIndex = container.querySelectorAll("[tabindex]:not([tabindex='-1'])");
+    expect(positiveTabIndex).toHaveLength(0);
   });
 
   it("renders stream action cards", () => {
@@ -33,7 +42,7 @@ describe("Home", () => {
   it("renders clear wallet and stream action CTAs", () => {
     render(<Home />);
     expect(screen.getByRole("link", { name: /connect wallet/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /view stream actions/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /how it works/i })).toBeInTheDocument();
   });
 
   it("renders the standardized stream action labels", () => {
@@ -50,5 +59,13 @@ describe("Home", () => {
     expect(screen.getByLabelText(/stream status: draft/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/stream status: paused/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/stream status: ended/i)).toBeInTheDocument();
+  });
+
+  it("does not import StreamPrimer (unused component removed in issue #85)", () => {
+    // The component tree rendered by Home must not contain any element with a
+    // role or label associated with StreamPrimer. This guards against the
+    // unused import being re-introduced.
+    render(<Home />);
+    expect(screen.queryByTestId("stream-primer")).toBeNull();
   });
 });

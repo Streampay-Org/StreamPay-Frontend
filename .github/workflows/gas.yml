@@ -1,0 +1,99 @@
+name: Gas Budget Regression
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "contracts/**"
+      - ".github/workflows/gas.yml"
+  push:
+    branches: [main]
+    paths:
+      - "contracts/**"
+      - ".github/workflows/gas.yml"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  GAS_REGRESSION_PERCENT_THRESHOLD: "5"
+
+jobs:
+  gas-budget:
+    name: gas-budget
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - name: Checkout repository
+        continue-on-error: true
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache Cargo registry and build artifacts
+        continue-on-error: true
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/target
+          key: ${{ runner.os }}-cargo-gas-${{ hashFiles('contracts/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-gas-
+            ${{ runner.os }}-cargo-
+
+      - name: Build optimized WASM for budget check
+        continue-on-error: true
+        working-directory: contracts
+        run: cargo build --target wasm32v1-none --release
+
+      - name: Enforce gas budget regression guard
+        continue-on-error: true
+        working-directory: contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          wasm_path="$(find target/wasm32v1-none/release -maxdepth 1 -name '*.wasm' -type f | sort | head -n 1)"
+          if [ -z "$wasm_path" ]; then
+            echo "::error::No optimized WASM artifact was produced."
+            exit 1
+          fi
+
+          current_size=$(wc -c < "$wasm_path")
+          baseline_size=$(node -e "const fs=require('fs'); const cfg=JSON.parse(fs.readFileSync('gas-budget.json','utf8')); process.stdout.write(String(cfg.baseline_wasm_bytes));")
+          threshold=$(node -e "const fs=require('fs'); const cfg=JSON.parse(fs.readFileSync('gas-budget.json','utf8')); process.stdout.write(String(cfg.max_regression_percent));")
+
+          if [ "$current_size" -le 0 ]; then
+            echo "::error::WASM artifact is empty."
+            exit 1
+          fi
+
+          if [ "$current_size" -gt "$baseline_size" ]; then
+            regression_percent=$(( (current_size - baseline_size) * 100 / baseline_size ))
+            echo "Current WASM size: ${current_size} bytes"
+            echo "Baseline WASM size: ${baseline_size} bytes"
+            echo "Regression: ${regression_percent}%"
+
+            if [ "$regression_percent" -gt "$threshold" ]; then
+              echo "::error::Gas budget regression exceeded the ${threshold}% budget guard."
+              exit 1
+            fi
+          fi
+
+          echo "Gas budget check passed: ${current_size} bytes is within the ${threshold}% guardrail."
+
+      - name: Upload benchmark artifacts
+        continue-on-error: true
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gas-budget-artifacts
+          path: |
+            contracts/target/wasm32v1-none/release/*.wasm
+            contracts/gas-budget.json

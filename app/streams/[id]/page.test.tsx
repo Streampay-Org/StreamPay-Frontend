@@ -25,7 +25,7 @@ describe("StreamDetailPage Server Component & Flow", () => {
     expect(screen.getByRole("heading", { name: /stream summary/i })).toBeInTheDocument();
     expect(screen.getByText("stream-ada")).toBeInTheDocument();
     expect(screen.getByText("Ada Creative Studio")).toBeInTheDocument();
-    expect(screen.getByText("120 XLM / month")).toBeInTheDocument();
+    expect(screen.getAllByText("120 XLM / month")[0]).toBeInTheDocument();
     expect(screen.getByText("ada@example.com")).toBeInTheDocument();
 
     // Verify next action mirrors StreamRow behavior ("Pause" for active)
@@ -69,7 +69,7 @@ describe("StreamDetailPage Server Component & Flow", () => {
 
     expect(screen.getByText("stream-kemi")).toBeInTheDocument();
     expect(screen.getByText("Kemi Onboarding Support")).toBeInTheDocument();
-    expect(screen.getByText("32 XLM / week")).toBeInTheDocument();
+    expect(screen.getAllByText("32 XLM / week")[0]).toBeInTheDocument();
 
     // Next action for draft stream is "Start"
     expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
@@ -87,7 +87,7 @@ describe("StreamDetailPage Server Component & Flow", () => {
 
     expect(screen.getByText("stream-yusuf")).toBeInTheDocument();
     expect(screen.getByText("Yusuf QA Partnership")).toBeInTheDocument();
-    expect(screen.getByText("18 XLM / day")).toBeInTheDocument();
+    expect(screen.getAllByText("18 XLM / day")[0]).toBeInTheDocument();
 
     // Next action for ended stream is "Withdraw"
     expect(screen.getByRole("button", { name: "Withdraw" })).toBeInTheDocument();

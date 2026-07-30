@@ -1,0 +1,435 @@
+/* ── Color-Blind Safe Patterns (v7) ─────────────────────────────────────────
+ *
+ * Distinct SVG-based texture overlays for each stream lifecycle state so
+ * users with colour-vision deficiency (protanopia / deuteranopia / tritanopia
+ * / achromatopsia) can distinguish states by shape and texture **in addition
+ * to** colour and glyphs.
+ *
+ * Pattern vocabulary — each uses a unique geometric signature:
+ *   • active    → diagonal stripes (///)  — conveys "flowing / in motion"
+ *   • draft     → spaced dots (···)       — conveys "not started / pending"
+ *   • paused    → horizontal bars (≡)     — conveys "paused / held"
+ *   • ended     → crosshatch (×××)        — conveys "complete / locked"
+ *   • cancelled → reverse-diagonal (\\\)  — conveys "cancelled / aborted"
+ *
+ * Rendering strategy:
+ *   Each pattern is a tiny, tileable SVG encoded as a data URI and applied
+ *   via `background-image`.  The fill uses a low-opacity `currentColor` so
+ *   the overlay inherits the theme-aware status token and remains legible
+ *   under dark / light / high-contrast themes.
+ *
+ *   Applied as a **top-layer overlay** via a pseudo-element so the original
+ *   colour fill remains fully visible underneath; the overlay only *adds*
+ *   texture, never replaces colour.
+ *
+ * Accessibility:
+ *   • `prefers-reduced-motion` — no animation, pattern is static.
+ *   • `prefers-contrast: more` — pattern opacity is *increased* so the
+ *     texture remains clearly visible against boosted backgrounds.
+ *   • All patterns remain distinguishable in grayscale (print /
+ *     achromatopsia simulators) because the *geometry* differs, not just
+ *     the spacing.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+@layer patterns {
+  /* ── Pattern tokens + SVG pattern data URIs ───────────────────────────── */
+
+  :root {
+    /* Base pattern opacity — subtle enough to not obscure text, strong
+       enough to register under colour-blind simulators. */
+    --cb-pattern-opacity: 0.18;
+
+    /* Pattern tile size — small enough to read at a glance even on compact
+       rows, large enough that the geometry is unambiguous. */
+    --cb-pattern-tile: 10px;
+
+    /* Stroke weight for line-based patterns. */
+    --cb-pattern-stroke: 2px;
+
+    /* ── Raw SVG pattern data URIs ──────────────────────────────────────── */
+
+    /* active — 45° diagonal stripes (flowing) */
+    --cb-pattern-active: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><line x1='-2' y1='2' x2='2' y2='-2' stroke='black' stroke-width='2' stroke-linecap='square'/><line x1='3' y1='12' x2='12' y2='3' stroke='black' stroke-width='2' stroke-linecap='square'/><line x1='8' y1='12' x2='12' y2='8' stroke='black' stroke-width='2' stroke-linecap='square'/></svg>");
+
+    /* draft — spaced dots (pending) */
+    --cb-pattern-draft: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><circle cx='5' cy='5' r='1.6' fill='black'/></svg>");
+
+    /* paused — horizontal bars (held) */
+    --cb-pattern-paused: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><rect x='0' y='2.5' width='10' height='1.6' fill='black'/><rect x='0' y='6.5' width='10' height='1.6' fill='black'/></svg>");
+
+    /* ended — crosshatch / X pattern (complete, locked) */
+    --cb-pattern-ended: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><line x1='-1' y1='-1' x2='11' y2='11' stroke='black' stroke-width='1.6' stroke-linecap='square'/><line x1='11' y1='-1' x2='-1' y2='11' stroke='black' stroke-width='1.6' stroke-linecap='square'/></svg>");
+
+    /* cancelled — reverse-diagonal stripes (aborted) */
+    --cb-pattern-cancelled: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><line x1='12' y1='2' x2='8' y2='-2' stroke='black' stroke-width='2' stroke-linecap='square'/><line x1='7' y1='12' x2='-2' y2='3' stroke='black' stroke-width='2' stroke-linecap='square'/><line x1='12' y1='8' x2='2' y2='-2' stroke='black' stroke-width='2' stroke-linecap='square'/></svg>");
+  }
+
+  /* High-contrast mode — punch up the texture so it cuts through. */
+  @media (prefers-contrast: more) {
+    :root {
+      --cb-pattern-opacity: 0.38;
+      --cb-pattern-stroke: 2.5px;
+    }
+  }
+
+  /* ── Utility classes: apply a pattern overlay to any element ──────────── */
+
+  .cb-pattern,
+  .cb-pattern--active,
+  .cb-pattern--draft,
+  .cb-pattern--paused,
+  .cb-pattern--ended,
+  .cb-pattern--withdrawn,
+  .cb-pattern--cancelled {
+    position: relative;
+    isolation: isolate;
+  }
+
+  /* Shared overlay pseudo-element. */
+  .cb-pattern::before,
+  .cb-pattern--active::before,
+  .cb-pattern--draft::before,
+  .cb-pattern--paused::before,
+  .cb-pattern--ended::before,
+  .cb-pattern--withdrawn::before,
+  .cb-pattern--cancelled::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-repeat: repeat;
+    background-size: var(--cb-pattern-tile) var(--cb-pattern-tile);
+    opacity: var(--cb-pattern-opacity);
+    /* Blend with the status colour underneath so the pattern inherits the
+       semantic hue rather than forcing a fixed black overlay. */
+    mix-blend-mode: multiply;
+    /* Clip to rounded corners of the host element. */
+    border-radius: inherit;
+    -webkit-mask-image: inherit;
+    mask-image: inherit;
+  }
+
+  /* Status-specific pattern assignments. */
+  .cb-pattern--active::before {
+    background-image: var(--cb-pattern-active);
+  }
+  .cb-pattern--draft::before {
+    background-image: var(--cb-pattern-draft);
+  }
+  .cb-pattern--paused::before {
+    background-image: var(--cb-pattern-paused);
+  }
+  .cb-pattern--ended::before,
+  .cb-pattern--withdrawn::before {
+    background-image: var(--cb-pattern-ended);
+  }
+  .cb-pattern--cancelled::before {
+    background-image: var(--cb-pattern-cancelled);
+  }
+
+  /* Ensure actual content sits *above* the pattern overlay. */
+  .cb-pattern > *,
+  .cb-pattern--active > *,
+  .cb-pattern--draft > *,
+  .cb-pattern--paused > *,
+  .cb-pattern--ended > *,
+  .cb-pattern--withdrawn > *,
+  .cb-pattern--cancelled > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* ── StreamRow card-level pattern ─────────────────────────────────────── */
+
+  .stream-row--active .stream-row__pattern,
+  .stream-row--draft .stream-row__pattern,
+  .stream-row--paused .stream-row__pattern,
+  .stream-row--ended .stream-row__pattern,
+  .stream-row--cancelled .stream-row__pattern,
+  .stream-row--withdrawn .stream-row__pattern {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-repeat: repeat;
+    background-size: 14px 14px;
+    opacity: 0.09;
+    border-radius: inherit;
+    mix-blend-mode: overlay;
+    z-index: 0;
+  }
+
+  @media (prefers-contrast: more) {
+    .stream-row--active .stream-row__pattern,
+    .stream-row--draft .stream-row__pattern,
+    .stream-row--paused .stream-row__pattern,
+    .stream-row--ended .stream-row__pattern,
+    .stream-row--cancelled .stream-row__pattern,
+    .stream-row--withdrawn .stream-row__pattern {
+      opacity: 0.22;
+    }
+  }
+
+  .stream-row--active .stream-row__pattern {
+    background-image: var(--cb-pattern-active);
+  }
+  .stream-row--draft .stream-row__pattern {
+    background-image: var(--cb-pattern-draft);
+  }
+  .stream-row--paused .stream-row__pattern {
+    background-image: var(--cb-pattern-paused);
+  }
+  .stream-row--ended .stream-row__pattern {
+    background-image: var(--cb-pattern-ended);
+  }
+  .stream-row--withdrawn .stream-row__pattern {
+    background-image: var(--cb-pattern-ended);
+  }
+  .stream-row--cancelled .stream-row__pattern {
+    background-image: var(--cb-pattern-cancelled);
+  }
+
+  /* ── StatusBadge pattern ────────────────────────────────────────────────
+   * Patterns are applied *under* the badge text using a background layer.
+   * Uses `background-color` + `background-image` in the same declaration
+   * so both the semantic fill colour and the texture render together. */
+
+  .status-badge.cb-pattern--active::before,
+  .status-badge.cb-pattern--draft::before,
+  .status-badge.cb-pattern--paused::before,
+  .status-badge.cb-pattern--ended::before,
+  .status-badge.cb-pattern--withdrawn::before,
+  .status-badge.cb-pattern--cancelled::before,
+  .receipt-status-badge.cb-pattern--active::before,
+  .receipt-status-badge.cb-pattern--draft::before,
+  .receipt-status-badge.cb-pattern--paused::before,
+  .receipt-status-badge.cb-pattern--ended::before,
+  .receipt-status-badge.cb-pattern--withdrawn::before,
+  .receipt-status-badge.cb-pattern--cancelled::before {
+    /* Slightly lighter opacity inside the small badge so the glyph + text
+       remain clearly legible. */
+    opacity: calc(var(--cb-pattern-opacity) * 0.7);
+    background-size: 8px 8px;
+  }
+
+  /* ── WalletBadge dot pattern ─────────────────────────────────────────────
+   * The wallet status dot is a small (10px) circle.  We shrink the tile size
+   * so at least one full repeat of the pattern fits inside the dot, and bump
+   * opacity slightly to compensate for the smaller surface area.
+   *
+   * Pattern mapping (each wallet state maps to a unique geometric texture):
+   *   • disconnected → draft (spaced dots ···)   — "waiting / not connected"
+   *   • connecting   → active (diagonal stripes)  — "in motion / flowing"
+   *   • connected    → ended (crosshatch ×××)     — "established / complete"
+   *   • error        → cancelled (reverse-diagonal) — "failed / aborted"
+   *   • disconnecting→ paused (horizontal bars ≡) — "pausing / transitioning" */
+
+  .wallet-badge__dot.cb-pattern::before {
+    background-size: 8px 8px;
+    opacity: calc(var(--cb-pattern-opacity) * 0.85);
+    border-radius: 50%;
+  }
+
+  /* ── StreamProgress fill pattern ────────────────────────────────────────
+   * The progress bar fill uses the texture as a second background layer so
+   * the pattern is only visible on the coloured fill portion, not the track. */
+
+  .stream-progress__fill.cb-pattern,
+  .stream-progress__fill.cb-pattern--active,
+  .stream-progress__fill.cb-pattern--draft,
+  .stream-progress__fill.cb-pattern--paused,
+  .stream-progress__fill.cb-pattern--ended,
+  .stream-progress__fill.cb-pattern--withdrawn,
+  .stream-progress__fill.cb-pattern--cancelled {
+    background-blend-mode: multiply;
+  }
+
+  .stream-progress__fill.cb-pattern--active,
+  .stream-row--active .stream-progress__fill {
+    background-image:
+      var(--cb-pattern-active),
+      var(--progress-fill, var(--stream-status-active-bg));
+    background-repeat: repeat, no-repeat;
+    background-size:
+      var(--cb-pattern-tile) var(--cb-pattern-tile),
+      auto;
+  }
+
+  .stream-progress__fill.cb-pattern--paused,
+  .stream-row--paused .stream-progress__fill {
+    background-image:
+      var(--cb-pattern-paused),
+      var(--progress-fill, var(--stream-status-paused-bg));
+    background-repeat: repeat, no-repeat;
+    background-size:
+      var(--cb-pattern-tile) var(--cb-pattern-tile),
+      auto;
+  }
+
+  .stream-progress__fill.cb-pattern--ended,
+  .stream-row--ended .stream-progress__fill,
+  .stream-row--withdrawn .stream-progress__fill {
+    background-image:
+      var(--cb-pattern-ended),
+      var(--progress-fill, var(--stream-status-ended-bg));
+    background-repeat: repeat, no-repeat;
+    background-size:
+      var(--cb-pattern-tile) var(--cb-pattern-tile),
+      auto;
+  }
+
+  .stream-progress__fill.cb-pattern--cancelled,
+  .stream-row--cancelled .stream-progress__fill {
+    background-image:
+      var(--cb-pattern-cancelled),
+      var(--progress-fill, var(--stream-status-cancelled-bg));
+    background-repeat: repeat, no-repeat;
+    background-size:
+      var(--cb-pattern-tile) var(--cb-pattern-tile),
+      auto;
+  }
+
+  .stream-progress__fill.cb-pattern--draft,
+  .stream-row--draft .stream-progress__fill {
+    background-image:
+      var(--cb-pattern-draft),
+      var(--progress-fill, var(--stream-status-draft-bg));
+    background-repeat: repeat, no-repeat;
+    background-size:
+      var(--cb-pattern-tile) var(--cb-pattern-tile),
+      auto;
+  }
+
+  /* ── StreamTypeChip pattern ─────────────────────────────────────────────
+   * The chip uses the shared cb-pattern--* utility classes.  Tile size is
+   * reduced to 8px so the texture is readable even in the compact chip
+   * footprint.  Opacity is kept at the same reduced level as the StatusBadge
+   * so the type label and amount remain fully legible on top. */
+
+  .stream-type-chip.cb-pattern--active::before,
+  .stream-type-chip.cb-pattern--draft::before,
+  .stream-type-chip.cb-pattern--paused::before,
+  .stream-type-chip.cb-pattern--ended::before,
+  .stream-type-chip.cb-pattern--withdrawn::before,
+  .stream-type-chip.cb-pattern--cancelled::before {
+    opacity: calc(var(--cb-pattern-opacity) * 0.7);
+    background-size: 8px 8px;
+  }
+
+  /* ── MiniBurnDown pattern colour hint ─────────────────────────────────── */
+
+  .stream-row__burndown--active {
+    color: var(--stream-status-active-border);
+  }
+  .stream-row__burndown--paused {
+    color: var(--stream-status-paused-border);
+  }
+  .stream-row__burndown--ended {
+    color: var(--stream-status-ended-border);
+  }
+  .stream-row__burndown--draft {
+    color: var(--stream-status-draft-border);
+  }
+  .stream-row__burndown--cancelled {
+    color: var(--stream-status-cancelled-border);
+  }
+  .stream-row__burndown--withdrawn {
+    color: var(--stream-status-ended-border);
+  }
+
+  /* ── Print fallback ─────────────────────────────────────────────────────
+   * Under print / grayscale rendering, patterns become more opaque so
+   * status differentiation survives a black-and-white printout. */
+
+  @media print {
+    .stream-row--active .stream-row__pattern,
+    .stream-row--draft .stream-row__pattern,
+    .stream-row--paused .stream-row__pattern,
+    .stream-row--ended .stream-row__pattern,
+    .stream-row--cancelled .stream-row__pattern,
+    .stream-row--withdrawn .stream-row__pattern {
+      opacity: 0.45;
+      mix-blend-mode: multiply;
+    }
+  }
+
+  /* ── CreateStreamForm status patterns ───────────────────────────────────
+   * Apply colour-blind safe texture overlays to the form's submit button
+   * and status indicator so users with CVD can distinguish idle, submitting,
+   * and success states by shape in addition to colour.
+   *
+   * Pattern mapping:
+   *   • idle   (default)  → no pattern — the button uses the accent fill.
+   *   • busy   (submit)   → draft dots (···) — "processing / pending".
+   *   • success            → active diagonals (///) — "complete / live".
+   * ───────────────────────────────────────────────────────────────────── */
+
+  /* Status indicator strip — thin bar above the form section that visually
+     communicates the current form state. */
+  .create-stream-status {
+    position: relative;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    overflow: hidden;
+    margin-bottom: 1.5rem;
+  }
+
+  .create-stream-status::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-repeat: repeat;
+    background-size: var(--cb-pattern-tile) var(--cb-pattern-tile);
+    opacity: var(--cb-pattern-opacity);
+    mix-blend-mode: multiply;
+    border-radius: inherit;
+  }
+
+  .create-stream-status--draft {
+    background: var(--stream-status-draft-bg, var(--muted));
+  }
+  .create-stream-status--draft::before {
+    background-image: var(--cb-pattern-draft);
+  }
+
+  .create-stream-status--active {
+    background: var(--stream-status-active-bg, var(--accent));
+  }
+  .create-stream-status--active::before {
+    background-image: var(--cb-pattern-active);
+  }
+
+  /* Submit button pattern overlay — applied via pseudo-element so the
+     button text and background colour remain intact. */
+  .button--primary.cb-pattern--draft::before,
+  .button--primary.cb-pattern--active::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-repeat: repeat;
+    background-size: 8px 8px;
+    opacity: calc(var(--cb-pattern-opacity) * 0.6);
+    mix-blend-mode: multiply;
+    border-radius: inherit;
+  }
+
+  .button--primary.cb-pattern--draft::before {
+    background-image: var(--cb-pattern-draft);
+  }
+  .button--primary.cb-pattern--active::before {
+    background-image: var(--cb-pattern-active);
+  }
+
+  @media (prefers-contrast: more) {
+    .create-stream-status::before,
+    .button--primary.cb-pattern--draft::before,
+    .button--primary.cb-pattern--active::before {
+      opacity: calc(var(--cb-pattern-opacity) * 1.4);
+    }
+  }
+}

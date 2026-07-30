@@ -49,7 +49,7 @@ const STREAM_USDC: OnChainStream = {
  * Restored automatically by afterEach → jest.restoreAllMocks().
  */
 function mockFetch(impl: (id: string) => Promise<OnChainStream | null>) {
-  return jest.spyOn(onChainClient, 'fetchStream').mockImplementation(impl);
+  return jest.spyOn(onChainClient, 'fetchStream').mockImplementation(impl as any);
 }
 
 // ─── Suite ───────────────────────────────────────────────────────────────────

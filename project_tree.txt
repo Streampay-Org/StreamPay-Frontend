@@ -1,0 +1,856 @@
+.
+├── app
+│   ├── activity
+│   │   ├── page.test.tsx
+│   │   └── page.tsx
+│   ├── api
+│   │   ├── activity
+│   │   │   ├── route.test.ts
+│   │   │   └── route.ts
+│   │   ├── admin
+│   │   │   ├── circuit-breaker
+│   │   │   │   ├── route.test.ts
+│   │   │   │   └── route.ts
+│   │   │   ├── jobs
+│   │   │   │   ├── route.test.ts
+│   │   │   │   └── route.ts
+│   │   │   ├── pause
+│   │   │   │   └── route.ts
+│   │   │   ├── pause-by-sender
+│   │   │   │   ├── route.test.ts
+│   │   │   │   └── route.ts
+│   │   │   ├── quotas
+│   │   │   │   ├── [id]
+│   │   │   │   │   └── route.ts
+│   │   │   │   └── route.ts
+│   │   │   ├── rotate
+│   │   │   │   └── route.ts
+│   │   │   ├── streams
+│   │   │   │   └── health
+│   │   │   │       └── route.ts
+│   │   │   ├── upgrade
+│   │   │   │   └── route.ts
+│   │   │   └── webhooks
+│   │   │       └── redeliver
+│   │   │           ├── route.test.ts
+│   │   │           └── route.ts
+│   │   ├── audit
+│   │   │   ├── export
+│   │   │   │   ├── route.test.ts
+│   │   │   │   └── route.ts
+│   │   │   ├── route.test.ts
+│   │   │   └── route.ts
+│   │   ├── auth
+│   │   │   └── wallet
+│   │   │       ├── route.test.ts
+│   │   │       └── route.ts
+│   │   ├── debug
+│   │   │   └── kms-sign
+│   │   │       ├── route.test.ts
+│   │   │       └── route.ts
+│   │   ├── exports
+│   │   │   ├── exports.test.ts
+│   │   │   ├── [id]
+│   │   │   │   └── route.ts
+│   │   │   └── route.ts
+│   │   ├── healthz
+│   │   │   ├── route.test.ts
+│   │   │   └── route.ts
+│   │   ├── identity
+│   │   │   └── me
+│   │   │       ├── delete
+│   │   │       │   └── route.ts
+│   │   │       ├── route.test.ts
+│   │   │       └── route.ts
+│   │   ├── indexer
+│   │   │   └── status
+│   │   │       └── route.ts
+│   │   ├── internal
+│   │   │   ├── cleanup
+│   │   │   │   └── idempotency
+│   │   │   │       ├── route.test.ts
+│   │   │   │       └── route.ts
+│   │   │   └── reconciliation
+│   │   │       ├── diff
+│   │   │       │   └── [id]
+│   │   │       │       ├── route.test.ts
+│   │   │       │       └── route.ts
+│   │   │       ├── nightly
+│   │   │       │   ├── route.test.ts
+│   │   │       │   └── route.ts
+│   │   │       ├── route.test.ts
+│   │   │       └── route.ts
+│   │   ├── metrics
+│   │   │   ├── route.test.ts
+│   │   │   └── route.ts
+│   │   ├── notifications
+│   │   │   └── preferences
+│   │   │       └── route.ts
+│   │   ├── orgs
+│   │   │   ├── [orgId]
+│   │   │   │   ├── audit
+│   │   │   │   │   └── route.ts
+│   │   │   │   ├── members
+│   │   │   │   │   ├── route.test.ts
+│   │   │   │   │   └── route.ts
+│   │   │   │   ├── route.ts
+│   │   │   │   └── token-allowlist
+│   │   │   │       ├── route.test.ts
+│   │   │   │       └── route.ts
+│   │   │   └── route.ts
+│   │   ├── readyz
+│   │   │   ├── route.test.ts
+│   │   │   └── route.ts
+│   │   ├── streams
+│   │   │   ├── batch
+│   │   │   │   ├── route.test.ts
+│   │   │   │   └── route.ts
+│   │   │   ├── concurrency.test.ts
+│   │   │   ├── dryrun
+│   │   │   │   └── route.ts
+│   │   │   ├── events
+│   │   │   │   ├── route.test.ts
+│   │   │   │   └── route.ts
+│   │   │   ├── [id]
+│   │   │   │   ├── approvals
+│   │   │   │   │   ├── [approvalId]
+│   │   │   │   │   │   └── approve
+│   │   │   │   │   │       └── route.ts
+│   │   │   │   │   └── route.ts
+│   │   │   │   ├── cancel
+│   │   │   │   │   └── route.ts
+│   │   │   │   ├── events
+│   │   │   │   │   ├── route.test.ts
+│   │   │   │   │   └── route.ts
+│   │   │   │   ├── pause
+│   │   │   │   │   ├── route.test.ts
+│   │   │   │   │   └── route.ts
+│   │   │   │   ├── route.test.ts
+│   │   │   │   ├── route.ts
+│   │   │   │   ├── settle
+│   │   │   │   │   └── route.ts
+│   │   │   │   ├── start
+│   │   │   │   │   ├── route.test.ts
+│   │   │   │   │   └── route.ts
+│   │   │   │   ├── stop
+│   │   │   │   │   └── route.ts
+│   │   │   │   ├── webhooks
+│   │   │   │   │   └── test
+│   │   │   │   │       ├── route.test.ts
+│   │   │   │   │       └── route.ts
+│   │   │   │   └── withdraw
+│   │   │   │       ├── route.test.ts
+│   │   │   │       └── route.ts
+│   │   │   ├── import
+│   │   │   │   └── route.ts
+│   │   │   ├── preview
+│   │   │   │   ├── route.ts
+│   │   │   │   └── __tests__
+│   │   │   │       └── route.test.ts
+│   │   │   ├── privileged-audit.test.ts
+│   │   │   ├── README.md
+│   │   │   ├── route.ts
+│   │   │   ├── search
+│   │   │   │   └── route.ts
+│   │   │   ├── start-stop-idempotency.test.ts
+│   │   │   ├── stream-lifecycle.e2e.test.ts
+│   │   │   ├── template
+│   │   │   │   └── route.ts
+│   │   │   ├── __tests__
+│   │   │   │   └── rateLimiterConsistency.test.ts
+│   │   │   └── v1-contract.test.ts
+│   │   ├── v2
+│   │   │   └── streams
+│   │   │       ├── batch
+│   │   │       │   ├── route.test.ts
+│   │   │       │   └── route.ts
+│   │   │       ├── [id]
+│   │   │       │   ├── route.test.ts
+│   │   │       │   └── route.ts
+│   │   │       ├── route.test.ts
+│   │   │       ├── route.ts
+│   │   │       ├── __tests__
+│   │   │       │   └── contracts
+│   │   │       │       ├── fixtures
+│   │   │       │       │   ├── stream-active.json
+│   │   │       │       │   ├── stream-create.json
+│   │   │       │       │   ├── stream-ended.json
+│   │   │       │       │   ├── stream-list.json
+│   │   │       │       │   └── stream-paused.json
+│   │   │       │       ├── pact-helpers.ts
+│   │   │       │       ├── README.md
+│   │   │       │       └── streams.contract.test.ts
+│   │   │       └── v2-streams-quota.test.ts
+│   │   └── webhooks
+│   │       ├── deliveries
+│   │       │   ├── route.test.ts
+│   │       │   └── route.ts
+│   │       ├── dlq
+│   │       │   ├── [dlqId]
+│   │       │   │   └── replay
+│   │       │   │       └── route.ts
+│   │       │   ├── route.test.ts
+│   │       │   └── route.ts
+│   │       ├── health
+│   │       │   ├── route.test.ts
+│   │       │   └── route.ts
+│   │       └── rotate
+│   │           ├── route.test.ts
+│   │           └── route.ts
+│   ├── components
+│   │   ├── ActivityTimeline.tsx
+│   │   ├── BatchPauseModal.test.tsx
+│   │   ├── BatchPauseModal.tsx
+│   │   ├── BottomNav.test.tsx
+│   │   ├── BottomNav.tsx
+│   │   ├── CancelStreamModal.test.tsx
+│   │   ├── CancelStreamModal.tsx
+│   │   ├── Card.test.tsx
+│   │   ├── Card.tsx
+│   │   ├── CompareStreamsModal.tsx
+│   │   ├── ConfirmCancel.test.ts
+│   │   ├── ConfirmCancel.tsx
+│   │   ├── CopyAddress.test.tsx
+│   │   ├── CopyAddress.tsx
+│   │   ├── EmptyState.test.tsx
+│   │   ├── EmptyState.tsx
+│   │   ├── ErrorBanner.tsx
+│   │   ├── ErrorRecovery.test.tsx
+│   │   ├── ErrorRecovery.tsx
+│   │   ├── ErrorToast.tsx
+│   │   ├── EventTimeline.test.tsx
+│   │   ├── EventTimeline.tsx
+│   │   ├── Explainer.tsx
+│   │   ├── GasOnRecipientToggle.test.tsx
+│   │   ├── GasOnRecipientToggle.tsx
+│   │   ├── MiniBurnDown.test.tsx
+│   │   ├── MiniBurnDown.tsx
+│   │   ├── Modal.test.tsx
+│   │   ├── Modal.tsx
+│   │   ├── NetworkBadge.tsx
+│   │   ├── PageError.test.tsx
+│   │   ├── PageError.tsx
+│   │   ├── PaymentTimeline.tsx
+│   │   ├── PushOptIn.test.ts
+│   │   ├── PushOptIn.tsx
+│   │   ├── ReceiptBuilder.test.tsx
+│   │   ├── ReceiptBuilder.tsx
+│   │   ├── ReceiptShareCard.test.tsx
+│   │   ├── ReceiptShareCard.tsx
+│   │   ├── ResetFiltersButton.tsx
+│   │   ├── settings
+│   │   │   ├── NotificationGroup.tsx
+│   │   │   ├── NotificationSettings.tsx
+│   │   │   ├── SettingItem.test.tsx
+│   │   │   ├── SettingItem.tsx
+│   │   │   └── ToggleSwitch.tsx
+│   │   ├── Skeleton.tsx
+│   │   ├── SortDropdown.tsx
+│   │   ├── SplashScreen.test.tsx
+│   │   ├── SplashScreen.tsx
+│   │   ├── StatusBadge.test.tsx
+│   │   ├── StatusBadge.tsx
+│   │   ├── StickyStreamHeader.test.tsx
+│   │   ├── StickyStreamHeader.tsx
+│   │   ├── StreamNotes.tsx
+│   │   ├── StreamPreview.test.tsx
+│   │   ├── StreamPreview.tsx
+│   │   ├── StreamPrimer.tsx
+│   │   ├── StreamProgress.test.tsx
+│   │   ├── StreamProgress.tsx
+│   │   ├── StreamReceipt.tsx
+│   │   ├── StreamRow.tsx
+│   │   ├── SwitchNetwork.test.tsx
+│   │   ├── SwitchNetwork.tsx
+│   │   ├── Tabs.test.tsx
+│   │   ├── Tabs.tsx
+│   │   ├── TagChips.tsx
+│   │   ├── ThemeToggle.test.tsx
+│   │   ├── ThemeToggle.tsx
+│   │   ├── Timestamp.test.ts
+│   │   ├── Timestamp.tsx
+│   │   ├── ToastProvider.test.tsx
+│   │   ├── ToastProvider.tsx
+│   │   ├── WalletBalance.test.tsx
+│   │   ├── WalletBalance.tsx
+│   │   ├── WalletModal.test.tsx
+│   │   ├── WalletModal.tsx
+│   │   └── WelcomeTour.tsx
+│   ├── contacts
+│   │   ├── page.test.tsx
+│   │   └── page.tsx
+│   ├── content
+│   │   └── copy.ts
+│   ├── dashboard
+│   │   ├── QuickDeposit.test.tsx
+│   │   └── QuickDeposit.tsx
+│   ├── design-qa
+│   │   ├── checklist-data.ts
+│   │   ├── DesignChecklist.tsx
+│   │   └── page.tsx
+│   ├── error.tsx
+│   ├── globals.css
+│   ├── hooks
+│   │   ├── useDraft.ts
+│   │   └── useToast.ts
+│   ├── layout.tsx
+│   ├── lib
+│   │   ├── admin-guard.test.ts
+│   │   ├── admin-guard.ts
+│   │   ├── amount.test.ts
+│   │   ├── amount.ts
+│   │   ├── anon-receipt.test.ts
+│   │   ├── anon-receipt.ts
+│   │   ├── api-version.test.ts
+│   │   ├── api-version.ts
+│   │   ├── assets.test.ts
+│   │   ├── assets.ts
+│   │   ├── audit-log.purge.test.ts
+│   │   ├── audit-log.test.ts
+│   │   ├── audit-log.ts
+│   │   ├── auth.ts
+│   │   ├── cache.test.ts
+│   │   ├── cache.ts
+│   │   ├── cancel-stream.ts
+│   │   ├── config
+│   │   │   ├── bootstrap.ts
+│   │   │   ├── config.test.ts
+│   │   │   ├── index.ts
+│   │   │   └── stellar.ts
+│   │   ├── correlation-middleware.test.ts
+│   │   ├── correlation-middleware.ts
+│   │   ├── cors.test.ts
+│   │   ├── cors.ts
+│   │   ├── db.ts
+│   │   ├── dtos
+│   │   │   ├── audit.dto.test.ts
+│   │   │   └── audit.dto.ts
+│   │   ├── errors
+│   │   │   ├── codes.test.ts
+│   │   │   ├── codes.ts
+│   │   │   ├── handler.test.ts
+│   │   │   ├── handler.ts
+│   │   │   ├── index.test.ts
+│   │   │   ├── index.ts
+│   │   │   ├── mapper.test.ts
+│   │   │   ├── mapper.ts
+│   │   │   ├── security.test.ts
+│   │   │   ├── server.ts
+│   │   │   └── types.ts
+│   │   ├── event-bus.ts
+│   │   ├── exportCsv.ts
+│   │   ├── health.test.ts
+│   │   ├── health.ts
+│   │   ├── idempotency.test.ts
+│   │   ├── idempotency.ts
+│   │   ├── internal-service-auth.test.ts
+│   │   ├── internal-service-auth.ts
+│   │   ├── kms
+│   │   │   ├── aws-signer.ts
+│   │   │   ├── factory.ts
+│   │   │   ├── local-signer.ts
+│   │   │   ├── __tests__
+│   │   │   │   └── kms.test.ts
+│   │   │   └── types.ts
+│   │   ├── logger.test.ts
+│   │   ├── logger.ts
+│   │   ├── migration
+│   │   │   ├── engine.test.ts
+│   │   │   ├── engine.ts
+│   │   │   └── schema.ts
+│   │   ├── org-db.ts
+│   │   ├── org-policy.test.ts
+│   │   ├── org-policy.ts
+│   │   ├── org-quota-metrics.ts
+│   │   ├── org-quota-store.ts
+│   │   ├── org-quota.ts
+│   │   ├── org-token-allowlist.test.ts
+│   │   ├── org-types.ts
+│   │   ├── preflight-estimate.ts
+│   │   ├── privacy.test.ts
+│   │   ├── privacy.ts
+│   │   ├── queue.test.ts
+│   │   ├── queue.ts
+│   │   ├── quotas.test.ts
+│   │   ├── quotas.ts
+│   │   ├── rate-limit-config.ts
+│   │   ├── rate-limit-metrics.ts
+│   │   ├── rate-limit-store.ts
+│   │   ├── rate-limit.test.ts
+│   │   ├── rate-limit.ts
+│   │   ├── receipt-theme.test.ts
+│   │   ├── receipt-theme.ts
+│   │   ├── recipient-withdraw.ts
+│   │   ├── repositories
+│   │   │   ├── activity-timeline.test.ts
+│   │   │   ├── activity-timeline.ts
+│   │   │   ├── in-memory.test.ts
+│   │   │   ├── in-memory.ts
+│   │   │   └── postgres.ts
+│   │   ├── route.test.ts
+│   │   ├── schedules.test.ts
+│   │   ├── schedules.ts
+│   │   ├── sep41-token-client.ts
+│   │   ├── state-machine.test.ts
+│   │   ├── state-machine.ts
+│   │   ├── stellarClient.test.ts
+│   │   ├── stellarClient.ts
+│   │   ├── stellar.ts
+│   │   ├── stream-events.test.ts
+│   │   ├── stream-events.ts
+│   │   ├── stream-invariants.test.ts
+│   │   ├── stream-invariants.ts
+│   │   ├── stream-service.ts
+│   │   ├── stream-validation.test.ts
+│   │   ├── stream-validation.ts
+│   │   ├── token-allowlist.test.ts
+│   │   ├── token-allowlist.ts
+│   │   ├── wallet-link.ts
+│   │   ├── webhook-delivery.hmac.test.ts
+│   │   ├── webhook-delivery.integration.test.ts
+│   │   ├── webhook-delivery-store.ts
+│   │   ├── webhook-delivery.test.ts
+│   │   ├── webhook-delivery.ts
+│   │   ├── webhook-delivery-worker.ts
+│   │   ├── webhook-outbox.test.ts
+│   │   ├── webhook-outbox.ts
+│   │   ├── webhook-secrets.test.ts
+│   │   ├── webhook-secrets.ts
+│   │   ├── webhook-store.test.ts
+│   │   ├── webhook-store.ts
+│   │   ├── webhook.ts
+│   │   ├── withdraw-finality.test.ts
+│   │   ├── withdraw-finality.ts
+│   │   ├── worker.test.ts
+│   │   └── worker.ts
+│   ├── not-found.tsx
+│   ├── onboarding
+│   │   ├── page.test.ts
+│   │   └── page.tsx
+│   ├── page.test.tsx
+│   ├── page.tsx
+│   ├── settings
+│   │   ├── notifications
+│   │   │   └── page.tsx
+│   │   └── page.tsx
+│   ├── state
+│   │   ├── recentRecipients.ts
+│   │   └── walletPrefs.ts
+│   ├── streams
+│   │   ├── [id]
+│   │   │   ├── events
+│   │   │   │   ├── page.test.tsx
+│   │   │   │   └── page.tsx
+│   │   │   ├── page.test.tsx
+│   │   │   ├── page.tsx
+│   │   │   ├── receipt
+│   │   │   │   ├── error.test.tsx
+│   │   │   │   ├── error.tsx
+│   │   │   │   ├── loading.test.tsx
+│   │   │   │   ├── loading.tsx
+│   │   │   │   ├── page.test.tsx
+│   │   │   │   └── page.tsx
+│   │   │   ├── StreamDetailClient.test.ts
+│   │   │   └── StreamDetailClient.tsx
+│   │   ├── new
+│   │   │   ├── components
+│   │   │   │   ├── RateField.test.tsx
+│   │   │   │   ├── RateField.tsx
+│   │   │   │   ├── RecentRecipients.test.tsx
+│   │   │   │   ├── RecentRecipients.tsx
+│   │   │   │   ├── RecipientList.tsx
+│   │   │   │   ├── StepIndicator.test.tsx
+│   │   │   │   ├── StepIndicator.tsx
+│   │   │   │   └── TotalsBar.tsx
+│   │   │   ├── multi.test.tsx
+│   │   │   ├── multi.tsx
+│   │   │   ├── page.tsx
+│   │   │   └── preview
+│   │   │       └── page.tsx
+│   │   ├── page.test.tsx
+│   │   ├── page.tsx
+│   │   ├── schedule.test.ts
+│   │   ├── schedule.ts
+│   │   └── StreamsPageContent.tsx
+│   ├── styles
+│   │   ├── focus.css
+│   │   └── icons.css
+│   ├── types
+│   │   ├── audit.ts
+│   │   ├── openapi.ts
+│   │   └── org.ts
+│   ├── utils
+│   │   ├── federation.test.ts
+│   │   ├── federation.ts
+│   │   ├── ics.test.ts
+│   │   ├── ics.ts
+│   │   ├── theme-noflash.test.ts
+│   │   └── theme-noflash.ts
+│   └── .well-known
+│       └── jwks.json
+│           ├── route.test.ts
+│           └── route.ts
+├── CHANGELOG.md
+├── container-hardening.test.ts
+├── contracts
+│   ├── Cargo.lock
+│   ├── Cargo.toml
+│   ├── CHANGELOG.md
+│   ├── .clippy.toml
+│   ├── contracts
+│   │   └── streampay-stream
+│   │       ├── benches
+│   │       │   └── entrypoints.rs
+│   │       ├── Cargo.toml
+│   │       ├── coverage-output.txt
+│   │       ├── fuzz
+│   │       │   ├── Cargo.toml
+│   │       │   └── fuzz_targets
+│   │       │       └── create.rs
+│   │       ├── Makefile
+│   │       ├── proptest-regressions
+│   │       │   └── prop_test.txt
+│   │       ├── README.md
+│   │       ├── src
+│   │       │   ├── allowlist.rs
+│   │       │   ├── coverage_test.rs
+│   │       │   ├── error.rs
+│   │       │   ├── events.rs
+│   │       │   ├── lib.rs
+│   │       │   ├── limits.rs
+│   │       │   ├── prop_test.rs
+│   │       │   ├── release.rs
+│   │       │   ├── storage.rs
+│   │       │   ├── test.rs
+│   │       │   ├── upgrade.rs
+│   │       │   ├── views_integration_test.rs
+│   │       │   └── views.rs
+│   │       ├── test-output.txt
+│   │       └── test_snapshots
+│   │           └── test
+│   │               └── test.1.json
+│   ├── .gitignore
+│   └── README.md
+├── contracts-test-output.txt
+├── CONTRIBUTING.md
+├── coverage-output.txt
+├── design
+│   ├── branding
+│   │   └── issue-65-streampay-stellar-logo-wordmark-header.md
+│   ├── chart-sparkline-kit
+│   │   ├── build_chart_kit.py
+│   │   ├── chart-sparkline-kit-overview.png
+│   │   ├── chart-sparkline-kit.pdf
+│   │   ├── chart-sparkline-kit-states-a11y.png
+│   │   ├── chart-style-spec.md
+│   │   ├── quality-report.json
+│   │   └── README.md
+│   ├── component-library-v1
+│   │   ├── a11y-focus-ring-spec.png
+│   │   ├── build_component_library.py
+│   │   ├── component-library-overview.png
+│   │   ├── component-library-spec.md
+│   │   ├── component-library-v1.pdf
+│   │   ├── quality-report.json
+│   │   └── README.md
+│   ├── error-pages-figma
+│   │   ├── build_error_pages.py
+│   │   ├── design-crit-notes.md
+│   │   ├── error-404-page.png
+│   │   ├── error-5xx-page.png
+│   │   ├── error-mobile-variant.png
+│   │   ├── error-pages-figma.pdf
+│   │   ├── error-pages-spec.md
+│   │   ├── error-stellar-outage-page.png
+│   │   ├── implementation-placeholder.md
+│   │   ├── quality-report.json
+│   │   ├── README.md
+│   │   └── usability-test-one-pager.md
+│   ├── export-pack
+│   │   ├── build_review_pack.py
+│   │   ├── handoff-notes.md
+│   │   ├── previews
+│   │   │   ├── 01-exec-summary.png
+│   │   │   ├── 02-home-hero.png
+│   │   │   ├── 03-streams-list.png
+│   │   │   ├── 04-create-stream.png
+│   │   │   ├── 05-stream-detail.png
+│   │   │   ├── 06-settle-withdraw-modal.png
+│   │   │   ├── 07-activity.png
+│   │   │   └── 08-product-tbd-handoff.png
+│   │   ├── quality-report.json
+│   │   └── streampay-stellar-v1-review-pack.pdf
+│   ├── handoff
+│   │   └── issue-67
+│   │       ├── backlog.md
+│   │       ├── compliance_annex.md
+│   │       ├── design_spec.md
+│   │       ├── README.md
+│   │       └── roadmap.md
+│   ├── hero-cta-variants
+│   │   └── hero-cta-variant-spec.md
+│   ├── README.md
+│   ├── settings-skeleton
+│   │   ├── build_settings_skeleton.py
+│   │   ├── network-switch-modal.png
+│   │   ├── quality-report.json
+│   │   ├── README.md
+│   │   ├── settings-overview.png
+│   │   ├── settings-skeleton.pdf
+│   │   └── settings-spec.md
+│   ├── streams-search-filter
+│   │   ├── benchmarks
+│   │   │   ├── BREX.md
+│   │   │   ├── brex_snapshot.svg
+│   │   │   ├── MERCURY.md
+│   │   │   └── mercury_snapshot.svg
+│   │   ├── BENCHMARKS.md
+│   │   ├── COMPONENT_SPECS.md
+│   │   ├── DESIGN_CRIT_AGENDA.md
+│   │   ├── DESIGN_CRIT_FINAL_ANNOUNCEMENT.md
+│   │   ├── DESIGN_CRIT_FRAME_CHECKLIST.md
+│   │   ├── DESIGN_CRIT_INVITE.md
+│   │   ├── DESIGN_CRIT_NOTES.md
+│   │   ├── DESIGN_CRIT_SLACK.md
+│   │   ├── EXPORT_INSTRUCTIONS.md
+│   │   ├── FIGMA_ACTIONS.md
+│   │   ├── FIGMA_SKELETON.md
+│   │   ├── HANDOFF_FINAL.md
+│   │   ├── HANDOFF_README.md
+│   │   ├── INVITES
+│   │   │   ├── design_crit_20260430_1000.ics
+│   │   │   ├── usability_slot_20260429_1100.ics
+│   │   │   ├── usability_slot_20260429_1400.ics
+│   │   │   └── usability_slot_20260430_0930.ics
+│   │   ├── mockups
+│   │   │   ├── desktop_default.svg
+│   │   │   ├── desktop_filtered.svg
+│   │   │   ├── mobile_filter_sheet.svg
+│   │   │   └── mobile_list.svg
+│   │   ├── README.md
+│   │   ├── REDLINES.md
+│   │   ├── review_package.zip
+│   │   ├── STAKEHOLDER_SLACK.md
+│   │   ├── USABILITY_CAL_INVITE.md
+│   │   ├── USABILITY_DM_MESSAGES.md
+│   │   ├── USABILITY_DM_PERSONALIZED.md
+│   │   ├── USABILITY_DM_TEMPLATE.md
+│   │   ├── USABILITY_EMAIL_TEMPLATE.md
+│   │   ├── USABILITY_READY_TO_SEND.md
+│   │   ├── USABILITY_RESULTS.md
+│   │   ├── USABILITY_SCRIPT.md
+│   │   ├── USABILITY_SESSION_CHECKLIST.md
+│   │   └── WCAG_SELF_CHECK.md
+│   ├── success-feedback-patterns
+│   │   ├── build_success_feedback.py
+│   │   ├── quality-report.json
+│   │   ├── README.md
+│   │   ├── success-edge-and-a11y.png
+│   │   ├── success-feedback-patterns.pdf
+│   │   ├── success-feedback-spec.md
+│   │   ├── success-full-page-patterns.png
+│   │   └── success-toast-patterns.png
+│   └── usability-testing
+│       ├── accessibility-notes.md
+│       ├── consent-template.md
+│       ├── design-review-checklist.md
+│       ├── live-balance-and-pending-settlement-status.md
+│       ├── README.md
+│       ├── recruitment-screener.md
+│       └── task-script.md
+├── design_handoff_stellar_address.md
+├── detector.test.ts
+├── detector.ts
+├── Dockerfile
+├── docs
+│   ├── adr
+│   │   ├── 0001-temporal-durable-workflows.md
+│   │   └── 001-org-stream-ownership.md
+│   ├── api
+│   │   ├── multi-recipient-stream.md
+│   │   └── wallet-mru.md
+│   ├── api-client-usage.md
+│   ├── api-v2-migration.md
+│   ├── architecture.md
+│   ├── audit-log.md
+│   ├── backend-contributing.md
+│   ├── BODY-SIZE-LIMITS.md
+│   ├── contract-events-panel.md
+│   ├── contract-smoke-tests.md
+│   ├── copy-address-accessibility.md
+│   ├── DEPLOYMENT-CHECKLIST.md
+│   ├── deprecation-notice-template.md
+│   ├── design-qa-checklist.md
+│   ├── error-codes.md
+│   ├── errors.md
+│   ├── FIGMA-BREAKPOINTS-MODAL-SPEC.md
+│   ├── glossary.md
+│   ├── horizon-indexer.md
+│   ├── ICS-EXPORT-API.md
+│   ├── IMPLEMENTATION-SUMMARY.md
+│   ├── internal-service-auth.md
+│   ├── invariants.md
+│   ├── ISSUE-75-BREAKPOINTS-SUMMARY.md
+│   ├── k8s-security.md
+│   ├── live-events-protocol.md
+│   ├── local-stellar.md
+│   ├── network-security.md
+│   ├── observability-tracing-guide.md
+│   ├── payout-math.md
+│   ├── persistent-store-interface.md
+│   ├── PRIVACY.md
+│   ├── rate-limits.md
+│   ├── reconciliation-runbook.md
+│   ├── request-fingerprinting.md
+│   ├── runbooks
+│   │   └── RUNBOOK_SETTLEMENT_FAILURES.md
+│   ├── SDK.md
+│   ├── SECURITY-CI-SETUP.md
+│   ├── SECURITY-SCANNING-GUIDE.md
+│   ├── slo-burn-alerts.md
+│   ├── STATE_MACHINE.md
+│   ├── STORAGE_LAYOUT.md
+│   ├── stream-state-glossary.md
+│   ├── supported-assets.md
+│   ├── testing-guide.md
+│   ├── THEME_NO_FLASH.md
+│   ├── toast-queue.md
+│   ├── uiux
+│   │   ├── figma-cover-and-handoff-policy.md
+│   │   └── grantfox-ux-bundle.md
+│   ├── webhook-delivery.md
+│   └── withdrawal-finality-slo.md
+├── .editorconfig
+├── .env.example
+├── .env.testnet.example
+├── escrow-invariants.test.ts
+├── escrow-invariants.ts
+├── eslint.config.mjs
+├── .eslintrc.json
+├── .github
+│   ├── PULL_REQUEST_TEMPLATE.md
+│   ├── security-exemptions.json
+│   └── workflows
+│       ├── ci.yml
+│       ├── clippy.yml
+│       └── security.yml
+├── .gitignore
+├── global.d.ts
+├── IMPLEMENTATION_COMPLETE.md
+├── jest.config.js
+├── jest.setup.ts
+├── lib
+│   ├── anomalyDetector.test.ts
+│   ├── anomalyDetector.ts
+│   ├── apiClient.test.ts
+│   ├── apiClient.ts
+│   ├── bodySize.test.ts
+│   ├── bodySize.ts
+│   ├── chaos.test.ts
+│   ├── chaos.ts
+│   ├── dbClient.isolation.test.ts
+│   ├── dbClient.ts
+│   ├── feeBump.ts
+│   ├── fingerprint-audit.test.ts
+│   ├── fingerprint-audit.ts
+│   ├── fingerprint.test.ts
+│   ├── fingerprint.ts
+│   ├── format-bigint.test.ts
+│   ├── format-bigint.ts
+│   ├── indexer.test.ts
+│   ├── indexer.ts
+│   ├── jwks.test.ts
+│   ├── jwks.ts
+│   ├── lastSeen.test.ts
+│   ├── lastSeen.ts
+│   ├── ledger-time.test.ts
+│   ├── ledger-time.ts
+│   ├── Onchainclient.chaos.test.ts
+│   ├── onChainClient.ts
+│   ├── rateLimitIp.test.ts
+│   ├── rateLimitIp.ts
+│   ├── requestId.test.ts
+│   ├── safe-json.test.ts
+│   ├── safe-json.ts
+│   ├── sdk
+│   │   ├── index.test.ts
+│   │   └── index.ts
+│   ├── sloMonitor.test.ts
+│   └── sloMonitor.ts
+├── mapping.ts
+├── middleware.test.ts
+├── middleware.ts
+├── __mocks__
+│   └── next
+│       ├── link.js
+│       ├── navigation.js
+│       └── router.js
+├── next.config.ts
+├── next-env.d.ts
+├── openapi.json
+├── operations
+│   ├── alerts
+│   │   ├── README.md
+│   │   └── streams.yaml
+│   ├── deploy-grantfox.sh
+│   ├── deploy-testnet.sh
+│   ├── grantfox-build.sh
+│   └── make-grantfox-deploys.sh
+├── package.json
+├── package-lock.json
+├── privacy.test.ts
+├── project_tree.txt
+├── pr_payload.json
+├── public
+│   └── assets
+│       └── splash-icon.png
+├── README.md
+├── scripts
+│   ├── backfill-activity-timeline.ts
+│   ├── backfill-indexer.ts
+│   ├── build-grantfox-contract.sh
+│   ├── deploy-grantfox-contract.sh
+│   ├── gas-regression.sh
+│   ├── purge-audit.test.ts
+│   ├── purge-audit.ts
+│   ├── reconcile-streams.ts
+│   ├── reconciliation
+│   │   ├── reconcile.test.ts
+│   │   ├── reconcile.ts
+│   │   └── types.ts
+│   ├── recon-cli.test.ts
+│   ├── recon-cli.ts
+│   ├── run-from-realpath.mjs
+│   ├── seed-streams.js
+│   ├── smoke-contract.sh
+│   ├── smoke-contract.test.ts
+│   ├── stellar-dev-lib.js
+│   ├── stellar-dev.sh
+│   ├── stellar-dev.test.ts
+│   ├── validate-openapi.mjs
+│   └── validate-security.mjs
+├── SECURITY.md
+├── SETTINGS_TABS_IMPLEMENTATION.md
+├── spike
+│   └── temporal
+│       ├── child-workflow.ts
+│       ├── sleep-until-workflow.ts
+│       ├── workflow-logic.test.ts
+│       └── workflow-logic.ts
+├── STREAM_MIGRATION_GUIDE.md
+├── STREAM_MIGRATION_IMPLEMENTATION.md
+├── TABS_COMPONENT_API.md
+├── tests
+│   ├── contract.test.ts
+│   ├── __snapshots__
+│   │   └── streamsShape.test.ts.snap
+│   ├── sqli.test.ts
+│   ├── streamsShape.test.ts
+│   └── withdraw.feeBump.test.ts
+├── tsconfig.json
+├── tsconfig.tsbuildinfo
+├── types.ts
+├── VERIFICATION.md
+└── WEBHOOK-IMPLEMENTATION-SUMMARY.md
+
+164 directories, 690 files

@@ -5,6 +5,11 @@ import { db, resetDb } from "@/app/lib/db";
 import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
 import * as orgPolicyModule from "@/app/lib/org-policy";
 
+jest.mock("@/app/lib/org-policy", () => ({
+  __esModule: true,
+  ...jest.requireActual("@/app/lib/org-policy"),
+}));
+
 describe("Stream Start Route - POST /api/streams/:id/start", () => {
   const streamId = "stream-ada";
   const outsiderAddr = "GOUTSIDER6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW";

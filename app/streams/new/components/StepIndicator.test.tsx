@@ -160,4 +160,65 @@ describe("StepIndicator", () => {
     expect(steps[1]).not.toHaveAttribute("aria-current");
     expect(steps[2]).not.toHaveAttribute("aria-current");
   });
+
+  describe("progressbar", () => {
+    it("exposes a progressbar with aria-valuenow/min/max reflecting the current step", () => {
+      render(<StepIndicator steps={defaultSteps} currentStep={1} />);
+
+      const progressbar = screen.getByRole("progressbar");
+      expect(progressbar).toHaveAttribute("aria-valuenow", "2");
+      expect(progressbar).toHaveAttribute("aria-valuemin", "1");
+      expect(progressbar).toHaveAttribute("aria-valuemax", "3");
+    });
+
+    it("sets aria-valuenow to 1 on the first step", () => {
+      render(<StepIndicator steps={defaultSteps} currentStep={0} />);
+
+      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "1");
+    });
+
+    it("sets aria-valuenow to the total step count on the last step", () => {
+      render(<StepIndicator steps={defaultSteps} currentStep={2} />);
+
+      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "3");
+    });
+
+    it("includes the current step's label in aria-valuetext", () => {
+      render(<StepIndicator steps={defaultSteps} currentStep={1} />);
+
+      expect(screen.getByRole("progressbar")).toHaveAttribute(
+        "aria-valuetext",
+        "Step 2 of 3: Recipients"
+      );
+    });
+
+    it("has an accessible name distinct from the nav landmark", () => {
+      render(<StepIndicator steps={defaultSteps} currentStep={0} />);
+
+      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-label", "Wizard progress");
+    });
+
+    it("is visually hidden but present in the accessibility tree", () => {
+      const { container } = render(<StepIndicator steps={defaultSteps} currentStep={0} />);
+
+      const progressbar = container.querySelector('[role="progressbar"]');
+      expect(progressbar).toHaveClass("sr-only");
+    });
+
+    it("does not render a progressbar for an empty steps array", () => {
+      render(<StepIndicator steps={[]} currentStep={0} />);
+
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    });
+
+    it("reflects a single step as 1 of 1", () => {
+      const singleStep = [{ id: "done", label: "Done" }];
+      render(<StepIndicator steps={singleStep} currentStep={0} />);
+
+      const progressbar = screen.getByRole("progressbar");
+      expect(progressbar).toHaveAttribute("aria-valuenow", "1");
+      expect(progressbar).toHaveAttribute("aria-valuemax", "1");
+      expect(progressbar).toHaveAttribute("aria-valuetext", "Step 1 of 1: Done");
+    });
+  });
 });

@@ -27,6 +27,7 @@ import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { webhookDeliveryWorker } from "@/app/lib/webhook-delivery-worker";
 import { webhookDeliveryStore } from "@/app/lib/webhook-delivery-store";
 import { logger, withCorrelationContext, getCorrelationContext } from "@/app/lib/logger";
+import { withTimeout, WEBHOOK_TIMEOUT_MS } from "@/src/middleware/timeout";
 
 function errorResponse(code: string, message: string, status: number) {
   const ctx = getCorrelationContext();
@@ -68,6 +69,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ dlqId: string }> },
 ) {
+  return withTimeout(WEBHOOK_TIMEOUT_MS, request, async () => {
   const { dlqId } = await params;
 
   const correlation_id =
@@ -149,5 +151,6 @@ export async function POST(
         delivery: `/api/webhooks/deliveries?endpoint_id=${dlqEntry.endpointId}`,
       },
     });
+  });
   });
 }

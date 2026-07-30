@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { CopyAddress } from "./CopyAddress";
 
 describe("CopyAddress", () => {
@@ -28,7 +28,7 @@ describe("CopyAddress", () => {
     it("renders truncated address with copy button by default", () => {
       render(<CopyAddress value={mockAddress} />);
       
-      const truncatedText = screen.getByText(/GAHJJJ\.\.\.K7G/);
+      const truncatedText = screen.getByText(/GAHJJJ\.\.\.AKZK7G/);
       const copyButton = screen.getByRole("button", { name: /copy to clipboard/i });
       
       expect(truncatedText).toBeInTheDocument();
@@ -38,14 +38,14 @@ describe("CopyAddress", () => {
     it("renders full address when it's too short to truncate", () => {
       render(<CopyAddress value={mockShortAddress} />);
       
-      const fullText = screen.getByText(mockShortAddress);
+      const fullText = screen.getAllByText(mockShortAddress)[0];
       expect(fullText).toBeInTheDocument();
     });
 
     it("respects custom truncateChars prop", () => {
       render(<CopyAddress value={mockAddress} truncateChars={4} />);
       
-      const truncatedText = screen.getByText(/GAHJ\.\.\.K7G/);
+      const truncatedText = screen.getByText(/GAHJ\.\.\.ZK7G/);
       expect(truncatedText).toBeInTheDocument();
     });
 
@@ -107,7 +107,9 @@ describe("CopyAddress", () => {
         expect(copyButton).toHaveTextContent("Copied");
       });
       
-      jest.advanceTimersByTime(2000);
+      act(() => {
+        jest.advanceTimersByTime(2000);
+      });
       
       await waitFor(() => {
         expect(copyButton).toHaveTextContent("Copy");
@@ -162,9 +164,9 @@ describe("CopyAddress", () => {
 
   describe("Edge Cases", () => {
     it("handles empty string", () => {
-      render(<CopyAddress value="" />);
+      const { container } = render(<CopyAddress value="" />);
       
-      const wrapper = screen.getByText("");
+      const wrapper = container.querySelector(".receipt-address-wrap");
       expect(wrapper).toBeInTheDocument();
     });
 

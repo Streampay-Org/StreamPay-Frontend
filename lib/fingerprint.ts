@@ -1,229 +1,124 @@
+import { createHash } from 'node:crypto';
+import { logger } from '../app/lib/logger';
+
 /**
- * Request fingerprinting for fraud signal correlation.
+ * Normalizes the client IP address from request headers.
+ * Following specification: x-forwarded-for (first hop), x-real-ip,
+ * cf-connecting-ip, true-client-ip.
  *
- * Builds a stable SHA-256 hash from non-volatile request signals so operators
- * can correlate suspicious activity without storing raw IP or User-Agent values
- * in audit metadata. Volatile values (request IDs, timestamps, cookies, auth
- * tokens, and bodies) are intentionally excluded.
- *
- * Uses the Web Crypto API so the module stays Edge-runtime compatible.
+ * @param headers - Request headers
+ * @returns Normalized IP string, or "unknown"
  */
-
-export const REQUEST_FINGERPRINT_HEADER = 'x-request-fingerprint';
-
-export const REQUEST_FINGERPRINT_AUDIT_ACTION = 'request.fingerprint.captured';
-
-export interface RequestFingerprintSignals {
-  acceptEncoding: string;
-  acceptLanguage: string;
-  clientIp: string;
-  method: string;
-  pathname: string;
-  userAgent: string;
-}
-
-export type RequestFingerprintAuditHook = (
-  request: Request,
-  fingerprint: string,
-) => void | Promise<void>;
-
-let auditCaptureHook: RequestFingerprintAuditHook | null = null;
-
-/**
- * Registers a Node-side audit hook. Edge middleware cannot import the audit log
- * store directly, so production deployments register this hook from server code.
- */
-export function setRequestFingerprintAuditHook(
-  hook: RequestFingerprintAuditHook | null,
-): void {
-  auditCaptureHook = hook;
-}
-
-export function getRequestFingerprintAuditHook(): RequestFingerprintAuditHook | null {
-  return auditCaptureHook;
-}
-
-const CLIENT_IP_HEADERS = [
-  'x-forwarded-for',
-  'x-real-ip',
-  'cf-connecting-ip',
-  'true-client-ip',
-] as const;
-
-function normalizeWhitespace(value: string): string {
-  return value.trim().replace(/\s+/g, ' ');
-}
-
-function normalizeMethod(method: string): string {
-  return method.trim().toUpperCase();
-}
-
-function normalizePathname(pathname: string): string {
-  const trimmed = pathname.trim();
-  if (trimmed.length <= 1) {
-    return trimmed || '/';
+function getClientIp(headers: Headers): string {
+  const forwardedFor = headers.get('x-forwarded-for');
+  if (forwardedFor) {
+    // The first IP in the list is the client IP
+    return forwardedFor.split(',')[0].trim().toLowerCase();
   }
-  return trimmed.replace(/\/+$/, '') || '/';
-}
-
-function normalizeUserAgent(userAgent: string): string {
-  return normalizeWhitespace(userAgent).toLowerCase();
-}
-
-function normalizeAcceptLanguage(acceptLanguage: string): string {
-  const primary = acceptLanguage.split(',')[0] ?? '';
-  return normalizeWhitespace(primary).toLowerCase();
-}
-
-function normalizeAcceptEncoding(acceptEncoding: string): string {
-  const values = acceptEncoding
-    .split(',')
-    .map((value) => normalizeWhitespace(value).toLowerCase())
-    .filter(Boolean)
-    .sort((left, right) => left.localeCompare(right));
-  return values.join(',');
-}
-
-/**
- * Extract the best-effort client IP from trusted proxy headers.
- * Only the first hop in X-Forwarded-For is used to avoid spoofing chains.
- */
-export function extractClientIp(headers: Headers): string {
-  for (const headerName of CLIENT_IP_HEADERS) {
-    const raw = headers.get(headerName);
-    if (!raw) {
-      continue;
-    }
-
-    const candidate =
-      headerName === 'x-forwarded-for'
-        ? raw.split(',')[0]?.trim() ?? ''
-        : raw.trim();
-
-    if (candidate) {
-      return candidate.toLowerCase();
-    }
-  }
+  const xRealIp = headers.get('x-real-ip');
+  if (xRealIp) return xRealIp.trim().toLowerCase();
+  const cfConnectingIp = headers.get('cf-connecting-ip');
+  if (cfConnectingIp) return cfConnectingIp.trim().toLowerCase();
+  const trueClientIp = headers.get('true-client-ip');
+  if (trueClientIp) return trueClientIp.trim().toLowerCase();
 
   return 'unknown';
 }
 
-export function extractRequestPathname(request: Request): string {
-  const nextPathname = (request as { nextUrl?: { pathname: string } }).nextUrl?.pathname;
-  if (nextPathname) {
-    return normalizePathname(nextPathname);
-  }
+export const REQUEST_FINGERPRINT_HEADER = 'x-request-fingerprint';
+export const REQUEST_FINGERPRINT_AUDIT_ACTION = 'request.fingerprint.captured';
 
-  return normalizePathname(new URL(request.url).pathname);
-}
+type AuditHookFn = (request: Request, fingerprint: string) => Promise<void> | void;
+let activeAuditHook: AuditHookFn | null = null;
 
-export function extractFingerprintSignals(request: Request): RequestFingerprintSignals {
-  const headers = request.headers;
-
-  return {
-    acceptEncoding: normalizeAcceptEncoding(headers.get('accept-encoding') ?? ''),
-    acceptLanguage: normalizeAcceptLanguage(headers.get('accept-language') ?? ''),
-    clientIp: extractClientIp(headers),
-    method: normalizeMethod(request.method),
-    pathname: extractRequestPathname(request),
-    userAgent: normalizeUserAgent(headers.get('user-agent') ?? ''),
-  };
-}
-
-export function normalizeFingerprintSignals(
-  signals: RequestFingerprintSignals,
-): RequestFingerprintSignals {
-  return {
-    acceptEncoding: normalizeAcceptEncoding(signals.acceptEncoding),
-    acceptLanguage: normalizeAcceptLanguage(signals.acceptLanguage),
-    clientIp: signals.clientIp.trim().toLowerCase() || 'unknown',
-    method: normalizeMethod(signals.method),
-    pathname: normalizePathname(signals.pathname),
-    userAgent: normalizeUserAgent(signals.userAgent),
-  };
-}
-
-function buildFingerprintPayload(signals: RequestFingerprintSignals): string {
-  const normalized = normalizeFingerprintSignals(signals);
-  const payload = {
-    acceptEncoding: normalized.acceptEncoding,
-    acceptLanguage: normalized.acceptLanguage,
-    clientIp: normalized.clientIp,
-    method: normalized.method,
-    pathname: normalized.pathname,
-    userAgent: normalized.userAgent,
-  };
-
-  return JSON.stringify(payload);
-}
-
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((value) => value.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-export async function computeRequestFingerprint(
-  signals: RequestFingerprintSignals,
-): Promise<string> {
-  const payload = buildFingerprintPayload(signals);
-  const encoded = new TextEncoder().encode(payload);
-  const digest = await crypto.subtle.digest('SHA-256', encoded);
-  return bytesToHex(new Uint8Array(digest));
-}
-
-export async function computeRequestFingerprintFromRequest(
-  request: Request,
-): Promise<string> {
-  return computeRequestFingerprint(extractFingerprintSignals(request));
+export function setRequestFingerprintAuditHook(hook: AuditHookFn | null): void {
+  activeAuditHook = hook;
 }
 
 export function getRequestFingerprintFromHeaders(headers: Headers): string | null {
-  const fingerprint = headers.get(REQUEST_FINGERPRINT_HEADER)?.trim().toLowerCase() ?? '';
-  if (!/^[a-f0-9]{64}$/.test(fingerprint)) {
-    return null;
+  return headers.get(REQUEST_FINGERPRINT_HEADER);
+}
+
+export function extractRequestPathname(request: Request): string {
+  try {
+    return new URL(request.url).pathname;
+  } catch {
+    return '';
   }
-  return fingerprint;
+}
+
+/**
+ * Normalizes request signals to generate a stable, non-volatile fingerprint.
+ *
+ * @param request - The incoming request
+ * @returns SHA-256 hash string
+ */
+export function generateFingerprint(request: Request): string {
+  try {
+    const url = new URL(request.url);
+    const method = request.method.toUpperCase();
+    // Normalize path: trailing slashes removed
+    let pathname = url.pathname;
+    if (pathname.endsWith('/') && pathname.length > 1) {
+      pathname = pathname.slice(0, -1);
+    }
+    pathname = pathname.toLowerCase();
+
+    const clientIp = getClientIp(request.headers);
+    const userAgent = request.headers.get('user-agent')?.trim().toLowerCase() || '';
+    const acceptLanguage = request.headers.get('accept-language')?.split(',')[0].trim().toLowerCase() || '';
+    const acceptEncoding = request.headers.get('accept-encoding')
+      ?.split(',')
+      .map((s) => s.trim().toLowerCase())
+      .sort()
+      .join(',') || '';
+
+    const fingerprintString = [
+      method,
+      pathname,
+      clientIp,
+      userAgent,
+      acceptLanguage,
+      acceptEncoding,
+    ].join('|');
+
+    return createHash('sha256').update(fingerprintString).digest('hex');
+  } catch (error) {
+    logger.warn('Failed to compute request fingerprint', { error });
+    return 'fingerprint-error';
+  }
+}
+
+export async function computeRequestFingerprintFromRequest(request: Request): Promise<string> {
+  return generateFingerprint(request);
 }
 
 export function buildRequestFingerprintLogContext(
   request: Request,
-  fingerprint: string,
-): Record<string, string> {
-  const requestId =
-    request.headers.get('x-request-id') ??
-    request.headers.get('x-correlation-id') ??
-    crypto.randomUUID();
-
+  fingerprint: string
+): Record<string, unknown> {
   return {
-    event: 'request.fingerprint.captured',
-    method: normalizeMethod(request.method),
+    type: 'request.fingerprint',
+    method: request.method.toUpperCase(),
     pathname: extractRequestPathname(request),
-    request_fingerprint: fingerprint,
-    request_id: requestId,
+    requestFingerprint: fingerprint,
   };
 }
 
-export function attachRequestFingerprintMetadata(
-  request: Request,
-  metadata?: Record<string, string | number | boolean | null>,
-): Record<string, string | number | boolean | null> {
-  const requestFingerprint = getRequestFingerprintFromHeaders(request.headers);
-
-  return {
-    ...metadata,
-    requestFingerprint: requestFingerprint ?? null,
-  };
-}
-
-export async function captureRequestFingerprint(
-  request: Request,
-): Promise<string> {
-  const fingerprint = await computeRequestFingerprintFromRequest(request);
-
-  if (auditCaptureHook) {
-    await auditCaptureHook(request, fingerprint);
+/**
+ * Captures and returns the request fingerprint.
+ *
+ * @param request - The incoming request
+ * @returns SHA-256 hash string
+ */
+export async function captureRequestFingerprint(request: Request): Promise<string> {
+  const fp = generateFingerprint(request);
+  if (activeAuditHook) {
+    try {
+      await activeAuditHook(request, fp);
+    } catch (err) {
+      logger.warn('Request fingerprint audit hook error', { error: err });
+    }
   }
-
-  return fingerprint;
+  return fp;
 }

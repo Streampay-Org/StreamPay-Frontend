@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import SplashScreen from "./components/SplashScreen";
 import { ToastProvider } from "./components/ToastProvider";
+import { CommandPaletteWrapper } from "./components/CommandPaletteWrapper";
+import { ShortcutsOverlayWrapper } from "./components/ShortcutsOverlayWrapper";
+import { SplashScreenWrapper } from "./components/SplashScreenWrapper";
+import { AppBottomNav } from "./components/AppBottomNav";
 import { getThemeScript } from "./utils/theme-noflash";
 
 export const metadata: Metadata = {
@@ -24,8 +27,11 @@ export default function RootLayout({
       </head>
       <body>
         <ToastProvider>
-          <SplashScreen />
+          <SplashScreenWrapper />
+          <CommandPaletteWrapper />
+          <ShortcutsOverlayWrapper />
           {children}
+          <AppBottomNav />
         </ToastProvider>
       </body>
     </html>

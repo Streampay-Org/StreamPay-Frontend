@@ -188,6 +188,82 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     expect(res.headers.get("Connection")).toBe("keep-alive");
     expect(res.headers.get("X-Request-ID")).toBeTruthy();
     expect(res.headers.get("X-Correlation-ID")).toBeTruthy();
+
+    await res.body?.cancel();
+  });
+
+  it("emits stream updates over the SSE stream for the subscribed stream", async () => {
+    const { streamRepository } = getStore();
+    const walletAddress = "GD7H...3J4K";
+
+    streamRepository.streams.set("stream-ada", {
+      id: "stream-ada",
+      recipient: walletAddress,
+      rate: "120 XLM / month",
+      schedule: "Pays every 30 days",
+      status: "active",
+      nextAction: "pause",
+      createdAt: "2026-04-01T09:00:00Z",
+      updatedAt: "2026-04-28T10:30:00Z",
+      token: "XLM",
+    });
+
+    const token = createAuthToken(walletAddress);
+    const req = new Request("http://localhost/api/streams/stream-ada/events", {
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-tenant-id": "tenant-1",
+      },
+    }) as any;
+
+    const res = await GET(req, { params: Promise.resolve({ id: "stream-ada" }) });
+    expect(res.body).toBeTruthy();
+
+    const reader = res.body!.getReader();
+    const payload = { status: "active", updatedAt: "2026-04-28T10:30:00Z" };
+    eventBus.emitStreamUpdated("stream-ada", payload);
+
+    const { value, done } = await reader.read();
+    expect(done).toBe(false);
+    const chunk = new TextDecoder().decode(value);
+    expect(chunk).toContain("event: stream:updated");
+    expect(chunk).toContain(JSON.stringify(payload));
+
+    await reader.cancel();
+  });
+
+  it("cleans up listeners when the SSE client disconnects", async () => {
+    const { streamRepository } = getStore();
+    const walletAddress = "GD7H...3J4K";
+
+    streamRepository.streams.set("stream-ada", {
+      id: "stream-ada",
+      recipient: walletAddress,
+      rate: "120 XLM / month",
+      schedule: "Pays every 30 days",
+      status: "active",
+      nextAction: "pause",
+      createdAt: "2026-04-01T09:00:00Z",
+      updatedAt: "2026-04-28T10:30:00Z",
+      token: "XLM",
+    });
+
+    const token = createAuthToken(walletAddress);
+    const req = new Request("http://localhost/api/streams/stream-ada/events", {
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-tenant-id": "tenant-1",
+      },
+    }) as any;
+
+    const res = await GET(req, { params: Promise.resolve({ id: "stream-ada" }) });
+    const reader = res.body!.getReader();
+    await reader.cancel();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(eventBus.listenerCount("stream:updated:stream-ada")).toBe(0);
+    expect(eventBus.listenerCount("settle:finished:stream-ada")).toBe(0);
   });
 
   it("returns 200 and establishes SSE for admin user (any stream)", async () => {
@@ -216,6 +292,8 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const res = await GET(req, { params: Promise.resolve({ id: "stream-ada" }) });
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("text/event-stream");
+
+    await res.body?.cancel();
   });
 
   it("includes correlation IDs in response headers", async () => {

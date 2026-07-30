@@ -39,6 +39,10 @@ npx ts-node scripts/purge-audit.ts --older-than-days 2555 --execute
 
 The CLI prints a JSON result containing the cutoff timestamp, purge count,
 retained count, request id, and before/after hash-chain integrity flags.
+Use `--help` to view the supported arguments, `--older-than-days` to choose
+the retention threshold, and `--execute` to perform the purge after a dry-run
+review. The parser trims whitespace around numeric and request-id values so
+operator inputs are handled consistently.
 
 ## Access matrix
 

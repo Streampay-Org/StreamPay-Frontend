@@ -1,4 +1,3 @@
-const { jest } = require("@jest/globals");
 
 module.exports = {
   useRouter: jest.fn(() => ({

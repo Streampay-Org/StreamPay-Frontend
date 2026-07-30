@@ -69,6 +69,11 @@ export class WebhookDeliveryWorker {
           webhookDeliveryStore.getDelivery(deliveryId)?.attempts ?? [],
         );
 
+        if (result.error?.includes("Circuit breaker open")) {
+          webhookDeliveryStore.moveToDLQ(deliveryId, result.error);
+          return { success: false, deliveryId, attempts: 0, dlqed: true };
+        }
+
         const attemptRecord: WebhookDeliveryAttempt = {
           attemptNumber: attempt,
           timestamp:     new Date().toISOString(),

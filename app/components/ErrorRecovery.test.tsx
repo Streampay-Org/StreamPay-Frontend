@@ -2,8 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render } from "@testing-library/react";
-const { screen } = require("@testing-library/react") as any;
+import { render, screen } from "@testing-library/react";
 import Link from "next/link";
 import { ErrorRecovery } from "./ErrorRecovery";
 
@@ -19,9 +18,9 @@ describe("ErrorRecovery", () => {
       </Link>
     ),
     secondaryAction: (
-      <a className="button button--secondary" href="/settings">
+      <Link className="button button--secondary" href="/settings">
         Contact support
-      </a>
+      </Link>
     ),
   };
 

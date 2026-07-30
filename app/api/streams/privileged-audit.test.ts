@@ -12,6 +12,7 @@ function buildRequest(requestId: string, actorId: string, role: string) {
       "x-request-id": requestId,
       "x-streampay-actor-id": actorId,
       "x-streampay-actor-role": role,
+      "idempotency-key": `idempotency-${requestId}`,
     },
     method: "POST",
   });

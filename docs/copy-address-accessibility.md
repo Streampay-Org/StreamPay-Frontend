@@ -12,7 +12,7 @@ The `CopyAddress` component provides inline copy-to-clipboard functionality for 
 
 ### 2. Operable
 - **Keyboard Accessible**: The copy button is a native `<button>` element, fully keyboard accessible
-- **Focus Indicators**: Inherits focus styles from `app/styles/focus.css` (2px solid accent color with offset)
+- **Focus Indicators**: Inherits the shared keyboard focus ring from `app/styles/focus.css` (2px solid accent color with a background-safe offset and no visible ring for mouse-only focus)
 - **Timing**: The "Copied" success state automatically resets after 2 seconds, but doesn't interfere with user control
 - **No Seizure Risk**: No flashing or strobing content
 

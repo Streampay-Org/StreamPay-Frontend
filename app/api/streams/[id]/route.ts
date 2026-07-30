@@ -1,12 +1,46 @@
 import { NextResponse } from "next/server";
-import { db, getStore } from "@/app/lib/db";
+import { db } from "@/app/lib/db";
+import { computeETag, ifNoneMatchMatches } from "@/app/lib/etag";
 import { getCorrelationContext } from "@/app/lib/logger";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { streamCache } from "@/app/lib/cache";
 
+/**
+ * Resolve the active Stellar network identifier for cache scoping.
+ *
+ * Falls back to the string `"default"` when `STELLAR_NETWORK` is unset so
+ * `streamCache` never stores entries under the literal `undefined` segment.
+ */
+function currentNetwork(): string {
+  const network = process.env.STELLAR_NETWORK?.trim();
+  return network && network.length > 0 ? network : "default";
+}
+
 type Context = { params: Promise<{ id: string }> };
+
+/**
+ * Headers we attach to every successful stream GET response.
+ *
+ * - `ETag`: strong validator; SHA-256 over a canonical serialization of the
+ *   stream + tenant, so any change to the resource (or a tenant swap) flips it.
+ * - `Cache-Control: private, max-age=0, must-revalidate`:
+ *     • `private` — never let a shared cache (e.g. CDN) reuse the response
+ *       since the body is tenant-scoped.
+ *     • `max-age=0, must-revalidate` — forces intermediaries to revalidate via
+ *       ETag on every request instead of trusting the freshness lifetime.
+ * - `X-Cache`: HIT/MISS observability for the in-memory stream cache.
+ */
+const CACHE_CONTROL_PRIVATE_REVALIDATE = "private, max-age=0, must-revalidate";
+
+function buildCacheHeaders(etag: string, cacheStatus: "HIT" | "MISS"): Record<string, string> {
+  return {
+    ETag: etag,
+    "Cache-Control": CACHE_CONTROL_PRIVATE_REVALIDATE,
+    "X-Cache": cacheStatus,
+  };
+}
 
 function createErrorResponse(code: string, message: string, status: number) {
   const context = getCorrelationContext();
@@ -44,7 +78,6 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { streamRepository } = getStore();
   const { id } = await params;
   const rateLimited = await enforceRateLimit(request, "GET", `/api/streams/${id}`);
   if (rateLimited) {
@@ -56,27 +89,45 @@ export async function GET(
     return errorResponse("MISSING_TENANT", "Tenant ID header is required", 400);
   }
 
-  // Check cache first
-  const cachedStream = streamCache.get(tenant, id);
+  // Network-scoped cache check: a testnet entry cannot leak into a mainnet request.
+  const cachedStream = streamCache.get(tenant, id, currentNetwork());
+  let stream: any | null = null;
+  let cacheStatus: "HIT" | "MISS" = "MISS";
+
   if (cachedStream) {
-    return NextResponse.json(
-      { data: cachedStream, links: { self: `/api/v1/streams/${id}` } },
-      { headers: { "X-Cache": "HIT" } }
-    );
+    stream = cachedStream;
+    cacheStatus = "HIT";
+  } else {
+    // Fetch from DB using findOne (tenant-scoped, returns null on wrong tenant).
+    stream = db.streams.findOne ? db.streams.findOne(tenant, id) : null;
+    if (!stream) {
+      return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
+    }
+    // Populate the network-scoped cache so the next request on the same
+    // network short-circuits without hitting the persistence store.
+    streamCache.set(tenant, id, stream, currentNetwork());
   }
 
-  // Fetch from DB using findOne
-  const stream = db.streams.findOne ? db.streams.findOne(tenant, id) : null;
-  if (!stream) {
-    return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
-  }
+  // Compute a strong ETag keyed on both tenant and stream content so that:
+  //   (a) any field change flips the tag, and
+  //   (b) the same id owned by two tenants yields two distinct tags
+  //       (prevents cross-tenant cache poisoning via shared proxies).
+  const etag = computeETag(tenant, stream);
 
-  // Set cache on read miss
-  streamCache.set(tenant, id, stream);
+  // Short-circuit on `If-None-Match` (RFC 7232 §3.2).
+  // 304 carries no body but must still emit ETag + Cache-Control so the
+  // client can update its own freshness bookkeeping.
+  const ifNoneMatch = request.headers.get("if-none-match");
+  if (ifNoneMatchMatches(ifNoneMatch, etag)) {
+    return new NextResponse(null, {
+      status: 304,
+      headers: buildCacheHeaders(etag, cacheStatus),
+    });
+  }
 
   return NextResponse.json(
     { data: stream, links: { self: `/api/v1/streams/${id}` } },
-    { headers: { "X-Cache": "MISS" } }
+    { headers: buildCacheHeaders(etag, cacheStatus) }
   );
 }
 
@@ -115,14 +166,15 @@ export async function POST(
 
   db.streams.set(id, updatedStream);
 
-  // Invalidate cache BEFORE returning response
-  streamCache.invalidate(tenant, id);
+  // Invalidate the network-scoped cache entry BEFORE returning so the next
+  // GET rebuilds from the persistence store with a fresh ETag. This also
+  // implicitly stales any ETag the client was holding for this resource.
+  streamCache.invalidate(tenant, id, currentNetwork());
 
   return NextResponse.json({ data: updatedStream });
 }
 
 export async function DELETE(request: Request, { params }: Context) {
-  const { streamRepository } = getStore();
   const { id } = await params;
   const rateLimited = await enforceRateLimit(request, "DELETE", `/api/streams/${id}`);
   if (rateLimited) {
@@ -149,8 +201,9 @@ export async function DELETE(request: Request, { params }: Context) {
 
   db.streams.delete(id);
 
-  // Invalidate cache BEFORE returning response
-  streamCache.invalidate(tenant, id);
+  // Invalidate the network-scoped cache entry BEFORE returning so the ETag
+  // for this id cannot be matched after the resource is gone.
+  streamCache.invalidate(tenant, id, currentNetwork());
 
   return new NextResponse(null, { status: 204 });
 }

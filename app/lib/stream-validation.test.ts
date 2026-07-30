@@ -7,7 +7,9 @@
 
 import {
   validateCreateStreamBody,
+  validateListStreamsQuery,
   validatePatchStreamBody,
+  STREAM_STATUSES,
   SUPPORTED_SCHEDULES,
 } from "./stream-validation";
 
@@ -455,7 +457,7 @@ describe("validatePatchStreamBody", () => {
     });
     expect(errors).toHaveLength(1);
     expect(errors[0].code).toBe("UNRECOGNIZED_KEYS");
-    expect(errors[0].message).toContain("Unrecognized key(s) in object: 'unknown_field'");
+    expect(errors[0].message).toMatch(/Unknown fields are not allowed|Unrecognized key/i);
   });
 
   it("returns an error for an invalid webhook_url", () => {
@@ -520,4 +522,68 @@ describe("validatePatchStreamBody", () => {
     expect(errors[0].field).toBe('body');
     expect(errors[0].message).toBe('Expected object, received string');
   });
+});
+
+// ── GET /api/streams query ─────────────────────────────────────────────────
+
+describe("validateListStreamsQuery", () => {
+  it("returns no errors and parsed values for a valid query", () => {
+    const { errors, values } = validateListStreamsQuery({
+      limit: "25",
+      status: "active",
+      cursor: "abc",
+    });
+    expect(errors).toEqual([]);
+    expect(values).toEqual({ limit: 25, status: "active", cursor: "abc" });
+  });
+
+  it("returns no errors for an empty query", () => {
+    const { errors, values } = validateListStreamsQuery({});
+    expect(errors).toEqual([]);
+    expect(values).toEqual({});
+  });
+
+  it("rejects a non-numeric limit", () => {
+    const { errors } = validateListStreamsQuery({ limit: "abc" });
+    expect(errors.length).toBe(1);
+    expect(errors[0].field).toBe("limit");
+    expect(errors[0].code).toBe("INVALID_LIMIT");
+  });
+
+  it("rejects limits outside 1-100", () => {
+    expect(validateListStreamsQuery({ limit: "0" }).errors.length).toBe(1);
+    expect(validateListStreamsQuery({ limit: "101" }).errors.length).toBe(1);
+    expect(validateListStreamsQuery({ limit: "100" }).errors).toEqual([]);
+  });
+
+  it("accepts every known stream status and rejects others", () => {
+    for (const status of STREAM_STATUSES) {
+      expect(validateListStreamsQuery({ status }).errors).toEqual([]);
+    }
+    const { errors } = validateListStreamsQuery({ status: "bogus" });
+    expect(errors.length).toBe(1);
+    expect(errors[0].field).toBe("status");
+    expect(errors[0].code).toBe("INVALID_STATUS");
+  });
+
+  it("rejects an empty cursor", () => {
+    const { errors } = validateListStreamsQuery({ cursor: "" });
+    expect(errors.length).toBe(1);
+    expect(errors[0].field).toBe("cursor");
+    expect(errors[0].code).toBe("INVALID_CURSOR");
+  });
+});
+
+// ── Non-object bodies ──────────────────────────────────────────────────────
+
+describe("validateCreateStreamBody non-object bodies", () => {
+  it.each([null, [], "i-am-a-string", 42])(
+    "returns a single body INVALID_TYPE error for %p",
+    (body) => {
+      const errors = validateCreateStreamBody(body as Record<string, unknown>);
+      expect(errors).toHaveLength(1);
+      expect(errors[0].field).toBe("body");
+      expect(errors[0].code).toBe("INVALID_TYPE");
+    },
+  );
 });

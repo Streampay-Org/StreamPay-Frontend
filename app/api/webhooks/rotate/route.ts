@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
 import { tryAuthenticateRequest } from '@/app/lib/auth';
 import { webhookSecretStore, MIN_SECRET_LENGTH } from '@/app/lib/webhook-secrets';
+import { withTimeout, WEBHOOK_TIMEOUT_MS } from '@/src/middleware/timeout';
 
 function err(code: string, message: string, status: number) {
   return NextResponse.json({ error: { code, message } }, { status });
 }
 
 export async function POST(request: Request) {
+  return withTimeout(WEBHOOK_TIMEOUT_MS, request, async () => {
   const auth = tryAuthenticateRequest(request);
   if (!auth || auth.role !== 'admin') {
     return err('UNAUTHORIZED', 'Admin authentication required', 403);
@@ -49,4 +51,5 @@ export async function POST(request: Request) {
     }
     throw error;
   }
+  });
 }

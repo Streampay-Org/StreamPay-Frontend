@@ -28,9 +28,9 @@ pub fn vested_amount(stream: &Stream, now: u64) -> Result<i128, Error> {
     // Clamp now to [start_time, end_time]
     let mut effective_now = max(stream.start_time, min(now, stream.end_time));
 
-    // If currently paused, accrual stopped at pause_time
+    // If currently paused, accrual stopped at paused_at
     if stream.status == StreamStatus::Paused {
-        effective_now = min(effective_now, stream.pause_time);
+        effective_now = min(effective_now, stream.paused_at);
     }
 
     // Compute elapsed time since start, excluding paused time
@@ -38,9 +38,8 @@ pub fn vested_amount(stream: &Stream, now: u64) -> Result<i128, Error> {
         .saturating_sub(stream.start_time)
         .saturating_sub(stream.total_paused_duration);
 
-    // Handle edge case: zero duration (should never happen with valid streams,
-    // but we handle it defensively).
-    if stream.duration == 0 {
+    // If stream duration has fully elapsed, total amount is fully vested
+    if stream.duration == 0 || elapsed >= stream.duration {
         return Ok(stream.total_amount);
     }
 
@@ -48,9 +47,9 @@ pub fn vested_amount(stream: &Stream, now: u64) -> Result<i128, Error> {
     // All casts from u64 to i128 are safe because u64::MAX < i128::MAX.
     stream
         .total_amount
-        .checked_mul(elapsed as i128) // total_amount ∈ [0, i128::MAX], elapsed cast is lossless
+        .checked_mul(i128::from(elapsed)) // total_amount ∈ [0, i128::MAX], elapsed cast is lossless
         .ok_or(Error::Overflow)? // propagate overflow
-        .checked_div(stream.duration as i128) // duration > 0 at this point, cast is lossless
+        .checked_div(i128::from(stream.duration)) // duration > 0 at this point, cast is lossless
         .ok_or(Error::Overflow) // propagate overflow (shouldn't happen for division by non-zero)
 }
 
@@ -97,8 +96,9 @@ mod tests {
             duration: end_time - start_time,
             last_update: start_time,
             status: StreamStatus::Active,
-            pause_time: 0,
+            paused_at: 0,
             total_paused_duration: 0,
+            fee_bps: 0,
         }
     }
 
@@ -234,7 +234,7 @@ mod tests {
             (1, 0, 1, 1, 1),                // minimal duration, at end
         ];
 
-        for case in cases.iter() {
+        for case in &cases {
             let stream = test_stream(case.0, 0, case.1, case.2);
             let result = vested_amount(&stream, case.3);
             assert_eq!(
@@ -263,7 +263,7 @@ mod tests {
             (1000, 0, 1000, 2000, 3000, 1000),  // past end, nothing released
         ];
 
-        for case in cases.iter() {
+        for case in &cases {
             let stream = test_stream(case.0, case.1, case.2, case.3);
             let result = withdrawable(&stream, case.4);
             assert_eq!(

@@ -11,6 +11,8 @@ import type {
   AuditMetadataValue,
   AuditPurgeResult,
 } from "@/app/types/audit";
+import type { DeepArchiveEntry, DeepArchiveResult } from "@/app/types/audit";
+export type { DeepArchiveEntry, DeepArchiveResult };
 
 export const AUDIT_LOG_RETENTION_DAYS = 30;
 
@@ -88,6 +90,7 @@ function redactTargetAccount(account: string | undefined): string | null {
 export class AppendOnlyAuditLogStore {
   private readonly entries: AuditEntry[] = [];
   private readonly archivedEntries: AuditEntry[] = [];
+  private readonly deepArchivedEntries: DeepArchiveEntry[] = [];
 
   append(input: AuditEntryInput): AuditEntry {
     const lastEntry = this.entries[this.entries.length - 1];
@@ -154,6 +157,15 @@ export class AppendOnlyAuditLogStore {
           return false;
         }
         if (filters.requestId && entry.requestId !== filters.requestId) {
+          return false;
+        }
+        if (filters.orgId && entry.metadata?.orgId !== filters.orgId) {
+          return false;
+        }
+        if (filters.startDate && entry.timestamp < filters.startDate) {
+          return false;
+        }
+        if (filters.endDate && entry.timestamp > filters.endDate) {
           return false;
         }
         if (filters.q) {
@@ -301,9 +313,89 @@ export class AppendOnlyAuditLogStore {
     };
   }
 
+  deepArchive(cutoffTimestamp: string): DeepArchiveResult {
+    const cutoffMs = Date.parse(cutoffTimestamp);
+    if (!Number.isFinite(cutoffMs)) {
+      throw new Error("INVALID_ARCHIVE_CUTOFF");
+    }
+
+    const chainIntactBefore = this.assertIntegrity();
+    const archivedAt = new Date().toISOString();
+
+    const toArchive: AuditEntry[] = [];
+
+    const remainingArchived: AuditEntry[] = [];
+    for (const entry of this.archivedEntries) {
+      if (Date.parse(entry.timestamp) < cutoffMs) {
+        toArchive.push(entry);
+      } else {
+        remainingArchived.push(entry);
+      }
+    }
+
+    const remainingEntries: AuditEntry[] = [];
+    for (const entry of this.entries) {
+      if (Date.parse(entry.timestamp) < cutoffMs) {
+        toArchive.push(entry);
+      } else {
+        remainingEntries.push(entry);
+      }
+    }
+
+    if (toArchive.length === 0) {
+      return {
+        archivedCount: 0,
+        archivedEntryIds: [],
+        chainIntactBefore,
+        chainIntactAfter: chainIntactBefore,
+        cutoffTimestamp: new Date(cutoffMs).toISOString(),
+        archivedAt,
+      };
+    }
+
+    const rebased = this.rebaseChain([...remainingArchived, ...remainingEntries]);
+
+    this.archivedEntries.splice(
+      0,
+      this.archivedEntries.length,
+      ...rebased.slice(0, remainingArchived.length),
+    );
+    this.entries.splice(
+      0,
+      this.entries.length,
+      ...rebased.slice(remainingArchived.length),
+    );
+
+    this.deepArchivedEntries.push(
+      ...toArchive.map((entry) => ({
+        entry: cloneValue(entry),
+        archivedAt,
+      })),
+    );
+
+    const chainIntactAfter = this.assertIntegrity();
+
+    return {
+      archivedCount: toArchive.length,
+      archivedEntryIds: toArchive.map((e) => e.id),
+      chainIntactBefore,
+      chainIntactAfter,
+      cutoffTimestamp: new Date(cutoffMs).toISOString(),
+      archivedAt,
+    };
+  }
+
+  getDeepArchivedEntries(): DeepArchiveEntry[] {
+    return this.deepArchivedEntries.map((de) => ({
+      entry: cloneValue(de.entry),
+      archivedAt: de.archivedAt,
+    }));
+  }
+
   reset(seedEntries: AuditEntryInput[] = defaultSeedAuditEntries) {
     this.entries.splice(0, this.entries.length);
     this.archivedEntries.splice(0, this.archivedEntries.length);
+    this.deepArchivedEntries.splice(0, this.deepArchivedEntries.length);
     for (const entry of seedEntries) {
       this.append(entry);
     }

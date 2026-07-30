@@ -1,123 +1,74 @@
-/** @jest-environment node */
+/**
+ * @jest-environment node
+ */
+import { generateFingerprint } from './fingerprint';
 
-import {
-  REQUEST_FINGERPRINT_HEADER,
-  computeRequestFingerprint,
-  extractClientIp,
-  extractFingerprintSignals,
-  getRequestFingerprintFromHeaders,
-  normalizeFingerprintSignals,
-} from './fingerprint';
-
-describe('request fingerprinting', () => {
-  it('hashes stable signals deterministically', async () => {
-    const signals = {
-      acceptEncoding: 'gzip, br',
-      acceptLanguage: 'en-US,en;q=0.9',
-      clientIp: '203.0.113.10',
+describe('generateFingerprint', () => {
+  it('generates the same fingerprint for identical requests', () => {
+    const req = new Request('https://api.example.com/api/v2/streams', {
       method: 'POST',
-      pathname: '/api/v2/streams',
-      userAgent: 'StreamPay-Test/1.0',
-    };
-
-    const first = await computeRequestFingerprint(signals);
-    const second = await computeRequestFingerprint(signals);
-
-    expect(first).toMatch(/^[a-f0-9]{64}$/);
-    expect(first).toBe(second);
-  });
-
-  it('normalizes header ordering and casing before hashing', async () => {
-    const baseline = await computeRequestFingerprint({
-      acceptEncoding: 'gzip, br',
-      acceptLanguage: 'en-us',
-      clientIp: '203.0.113.10',
-      method: 'post',
-      pathname: '/api/v2/streams/',
-      userAgent: '  StreamPay-Test/1.0  ',
-    });
-
-    const normalized = await computeRequestFingerprint(
-      normalizeFingerprintSignals({
-        acceptEncoding: 'br,gzip',
-        acceptLanguage: 'EN-US,fr;q=0.8',
-        clientIp: '203.0.113.10',
-        method: 'POST',
-        pathname: '/api/v2/streams',
-        userAgent: 'streampay-test/1.0',
-      }),
-    );
-
-    expect(baseline).toBe(normalized);
-  });
-
-  it('changes the hash when fraud-relevant signals change', async () => {
-    const base = {
-      acceptEncoding: 'gzip',
-      acceptLanguage: 'en-us',
-      clientIp: '203.0.113.10',
-      method: 'POST',
-      pathname: '/api/v2/streams',
-      userAgent: 'streampay-test/1.0',
-    };
-
-    const original = await computeRequestFingerprint(base);
-    const differentIp = await computeRequestFingerprint({
-      ...base,
-      clientIp: '198.51.100.4',
-    });
-    const differentPath = await computeRequestFingerprint({
-      ...base,
-      pathname: '/api/auth/wallet',
-    });
-
-    expect(differentIp).not.toBe(original);
-    expect(differentPath).not.toBe(original);
-  });
-
-  it('extracts the first forwarded IP hop only', () => {
-    const headers = new Headers({
-      'x-forwarded-for': '203.0.113.10, 10.0.0.5',
-      'x-real-ip': '10.0.0.5',
-    });
-
-    expect(extractClientIp(headers)).toBe('203.0.113.10');
-  });
-
-  it('falls back to unknown when no client IP headers are present', () => {
-    expect(extractClientIp(new Headers())).toBe('unknown');
-  });
-
-  it('extracts normalized signals from a Request object', () => {
-    const request = new Request('https://api.example.com/api/v2/streams/', {
-      method: 'post',
       headers: {
-        'accept-encoding': 'br, gzip',
+        'x-forwarded-for': '1.1.1.1',
+        'user-agent': 'Mozilla/5.0',
         'accept-language': 'en-US,en;q=0.9',
-        'user-agent': 'StreamPay-Test/1.0',
-        'x-forwarded-for': '203.0.113.10',
+        'accept-encoding': 'gzip, deflate, br',
       },
     });
-
-    expect(extractFingerprintSignals(request)).toEqual({
-      acceptEncoding: 'br,gzip',
-      acceptLanguage: 'en-us',
-      clientIp: '203.0.113.10',
-      method: 'POST',
-      pathname: '/api/v2/streams',
-      userAgent: 'streampay-test/1.0',
-    });
+    const fp1 = generateFingerprint(req);
+    const fp2 = generateFingerprint(req);
+    expect(fp1).toBe(fp2);
+    expect(fp1).toHaveLength(64); // SHA-256 hex length
   });
 
-  it('validates fingerprint headers before reuse', () => {
-    const valid = new Headers({
-      [REQUEST_FINGERPRINT_HEADER]: 'a'.repeat(64),
-    });
-    const invalid = new Headers({
-      [REQUEST_FINGERPRINT_HEADER]: 'not-a-hash',
-    });
+  it('normalizes method to uppercase', () => {
+    const req1 = new Request('https://api.example.com/api/v2/streams', { method: 'get' });
+    const req2 = new Request('https://api.example.com/api/v2/streams', { method: 'GET' });
+    expect(generateFingerprint(req1)).toBe(generateFingerprint(req2));
+  });
 
-    expect(getRequestFingerprintFromHeaders(valid)).toBe('a'.repeat(64));
-    expect(getRequestFingerprintFromHeaders(invalid)).toBeNull();
+  it('normalizes path by removing trailing slashes', () => {
+    const req1 = new Request('https://api.example.com/api/v2/streams/', { method: 'GET' });
+    const req2 = new Request('https://api.example.com/api/v2/streams', { method: 'GET' });
+    expect(generateFingerprint(req1)).toBe(generateFingerprint(req2));
+  });
+
+  it('normalizes IP from forwarded headers', () => {
+    const req1 = new Request('https://api.example.com/api/v2/streams', {
+      headers: { 'x-forwarded-for': '1.1.1.1, 2.2.2.2' },
+    });
+    const req2 = new Request('https://api.example.com/api/v2/streams', {
+      headers: { 'x-forwarded-for': '1.1.1.1' },
+    });
+    expect(generateFingerprint(req1)).toBe(generateFingerprint(req2));
+  });
+
+  it('normalizes Accept-Language', () => {
+    const req1 = new Request('https://api.example.com/api/v2/streams', {
+      headers: { 'accept-language': 'en-US,en;q=0.9' },
+    });
+    const req2 = new Request('https://api.example.com/api/v2/streams', {
+      headers: { 'accept-language': 'en-us' },
+    });
+    // This expects just the primary tag "en-us"
+    // Wait, the implementation does .split(',')[0].trim().toLowerCase()
+    // en-US,en;q=0.9 -> split(',')[0] -> en-US -> lowercased -> en-us
+    expect(generateFingerprint(req1)).toBe(generateFingerprint(req2));
+  });
+
+  it('normalizes Accept-Encoding (sorted)', () => {
+    const req1 = new Request('https://api.example.com/api/v2/streams', {
+      headers: { 'accept-encoding': 'gzip, deflate, br' },
+    });
+    const req2 = new Request('https://api.example.com/api/v2/streams', {
+      headers: { 'accept-encoding': 'br, gzip, deflate' },
+    });
+    expect(generateFingerprint(req1)).toBe(generateFingerprint(req2));
+  });
+
+  it('returns a fallback fingerprint on error', () => {
+    // Mock a request with an invalid URL that triggers the catch block
+    const req = { url: ':', method: 'GET', headers: new Headers() } as unknown as Request;
+    const fp = generateFingerprint(req);
+    expect(fp).toBe('fingerprint-error');
   });
 });

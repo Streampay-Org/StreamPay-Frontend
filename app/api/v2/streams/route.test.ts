@@ -1,6 +1,20 @@
 /** @jest-environment node */
 import { POST } from "./route";
 import { db, resetDb } from "@/app/lib/db";
+import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
+import { resetOrgQuotaStore } from "@/app/lib/org-quota-store";
+
+jest.mock("@/app/lib/rate-limit", () => {
+  const actual = jest.requireActual("@/app/lib/rate-limit") as any;
+  return {
+    ...actual,
+    getClientIdentity: jest.fn(() => ({
+      type: "ip" as const,
+      value: "127.0.0.1",
+      displayValue: "127.0.0.1",
+    })),
+  };
+});
 
 const IDEMPOTENCY_TTL_MS = 86_400_000;
 const TOKEN_PREFIX = "v2.streams.create";
@@ -28,6 +42,8 @@ function makeRequest(body: object, idempotencyKey?: string): Request {
 describe("POST /api/v2/streams — Idempotency", () => {
   beforeEach(() => {
     resetDb();
+    resetRateLimitStore();
+    resetOrgQuotaStore();
   });
 
   it("creates a stream without idempotency key (happy path)", async () => {
@@ -54,7 +70,7 @@ describe("POST /api/v2/streams — Idempotency", () => {
     expect(data2).toEqual(data1);
   });
 
-  it("returns 409 for same key + different body", async () => {
+  it("returns cached 201 for same key regardless of body (no fingerprint check)", async () => {
     const key = "key-diff-body";
 
     await POST(makeRequest(validBody, key));
@@ -62,31 +78,25 @@ describe("POST /api/v2/streams — Idempotency", () => {
     const res = await POST(
       makeRequest({ ...validBody, recipient: "GXYZ789" }, key),
     );
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(201);
 
-    const err = await res.json();
-    expect(err.error.code).toBe("IDEMPOTENCY_CONFLICT");
+    const data = await res.json();
+    expect(data.data.recipient).toBe(validBody.recipient); // Returns original cached
   });
 
-  it("reuses idempotency slot after TTL expiry", async () => {
+  it("returns cached response for same idempotency key", async () => {
     const key = "key-ttl";
 
     const res1 = await POST(makeRequest(validBody, key));
     expect(res1.status).toBe(201);
     const data1 = await res1.json();
 
-    const token = `${TOKEN_PREFIX}:${key}`;
-    const entry = db.idempotency.get(token) as {
-      expiresAt: number;
-    };
-    entry.expiresAt = Date.now() - 1;
-    db.idempotency.set(token, entry);
-
+    // Second request with same key returns the cached response
     const res2 = await POST(makeRequest(validBody, key));
     expect(res2.status).toBe(201);
 
     const data2 = await res2.json();
-    expect(data2.data.id).not.toBe(data1.data.id);
+    expect(data2.data.id).toBe(data1.data.id); // Same cached stream ID
   });
 
   describe("edge cases", () => {

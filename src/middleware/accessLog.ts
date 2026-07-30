@@ -1,70 +1,79 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { v4 as uuidv4 } from 'uuid';
+import { getCorrelationContext, logger } from "@/app/lib/logger";
+
+export interface AccessLogContext {
+  method: string;
+  path: string;
+  status: number;
+  durationMs?: number;
+  /** Authenticated actor's wallet address (undefined for anonymous/unauthenticated requests). */
+  actorId?: string;
+  /** Export job ID when the request pertains to a specific export job. */
+  exportJobId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  [key: string]: unknown;
+}
 
 /**
- * Middleware to add structured access logging and correlation IDs to webhook routes.
+ * Emits a single structured access-log entry for a completed HTTP request.
+ *
+ * Fields included:
+ * - method, path, status, durationMs — standard HTTP request fields.
+ * - actorId  — wallet address of the authenticated caller (omitted for anon requests).
+ * - exportJobId — export job ID associated with the request (omitted when absent).
+ * - request_id, correlation_id, traceparent — from the active correlation context.
+ * - errorCode, errorMessage — when the response is an error.
+ * - Any additional caller-supplied key/value pairs (spread into log entry).
+ *
+ * This function is safe to call from any status code path (2xx, 4xx, 5xx).
  */
-export function withAccessLog(handler: (req: NextRequest) => Promise<NextResponse> | NextResponse) {
-  return async (req: NextRequest): Promise<NextResponse> => {
-    // Extract or generate a correlation ID
-    const correlationId = req.headers.get('x-correlation-id') || uuidv4();
-    const startTime = Date.now();
-    
-    // Log incoming request
-    console.log(JSON.stringify({
-      level: 'info',
-      message: 'Incoming webhook request',
-      method: req.method,
-      url: req.url,
-      correlation_id: correlationId,
-      timestamp: new Date().toISOString()
-    }));
+export function logAccessEvent(context: AccessLogContext): void {
+  const correlation = getCorrelationContext();
 
-    try {
-      const res = await handler(req);
-      const duration = Date.now() - startTime;
-      
-      // Log successful response completion
-      console.log(JSON.stringify({
-        level: 'info',
-        message: 'Webhook request completed',
-        method: req.method,
-        url: req.url,
-        status: res.status,
-        duration_ms: duration,
-        correlation_id: correlationId,
-        timestamp: new Date().toISOString()
-      }));
-
-      // Add correlation ID to the response headers
-      res.headers.set('x-correlation-id', correlationId);
-      return res;
-    } catch (error) {
-      const duration = Date.now() - startTime;
-      
-      // Log failure
-      console.error(JSON.stringify({
-        level: 'error',
-        message: 'Webhook request failed',
-        method: req.method,
-        url: req.url,
-        error: error instanceof Error ? error.message : String(error),
-        duration_ms: duration,
-        correlation_id: correlationId,
-        timestamp: new Date().toISOString()
-      }));
-
-      // Standardized error envelope
-      return NextResponse.json({
-        error: {
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'An unexpected error occurred during webhook processing.'
-        },
-        correlation_id: correlationId
-      }, { 
-        status: 500, 
-        headers: { 'x-correlation-id': correlationId } 
-      });
-    }
+  // Build the core structured payload; only include defined optional fields.
+  const payload: Record<string, unknown> = {
+    method: context.method,
+    path: context.path,
+    status: context.status,
+    request_id: correlation?.request_id,
+    correlation_id: correlation?.correlation_id,
   };
+
+  if (correlation?.traceparent !== undefined) {
+    payload.traceparent = correlation.traceparent;
+  }
+  if (context.durationMs !== undefined) {
+    payload.durationMs = context.durationMs;
+  }
+  if (context.actorId !== undefined) {
+    payload.actorId = context.actorId;
+  }
+  if (context.exportJobId !== undefined) {
+    payload.exportJobId = context.exportJobId;
+  }
+  if (context.errorCode !== undefined) {
+    payload.errorCode = context.errorCode;
+  }
+  if (context.errorMessage !== undefined) {
+    payload.errorMessage = context.errorMessage;
+  }
+
+  // Spread any extra caller-supplied fields (excluding the ones already handled).
+  const handled = new Set([
+    "method",
+    "path",
+    "status",
+    "durationMs",
+    "actorId",
+    "exportJobId",
+    "errorCode",
+    "errorMessage",
+  ]);
+  for (const [key, value] of Object.entries(context)) {
+    if (!handled.has(key) && value !== undefined) {
+      payload[key] = value;
+    }
+  }
+
+  logger.info("http access", payload);
 }

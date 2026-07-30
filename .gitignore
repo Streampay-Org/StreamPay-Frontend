@@ -30,3 +30,4 @@ Desktop.ini
 .cache/
 *.tsbuildinfo
 
+litellm_config.yaml

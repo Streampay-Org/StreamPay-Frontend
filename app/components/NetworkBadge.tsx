@@ -8,17 +8,53 @@
  */
 
 import { getConfig } from '../lib/config';
+import type { StellarNetwork } from '../lib/config/stellar';
 
 interface NetworkBadgeProps {
   className?: string;
   showLabel?: boolean;
+  /** Optional: Override the network (for testing/preview only) */
+  network?: StellarNetwork;
 }
 
-export function NetworkBadge({ className = '', showLabel = true }: NetworkBadgeProps) {
+const networkStyles = {
+  testnet: {
+    backgroundColor: 'var(--system-warning-bg)',
+    color: 'var(--system-warning-text)',
+    borderColor: 'var(--system-warning-border)',
+  },
+  mainnet: {
+    backgroundColor: 'var(--system-success-bg)',
+    color: 'var(--system-success-text)',
+    borderColor: 'var(--system-success-border)',
+  },
+} as const;
+
+const networkLabels = {
+  testnet: {
+    icon: '⚠️',
+    label: 'TESTNET ONLY',
+    ariaLabel: 'Testnet network - not real funds',
+  },
+  mainnet: {
+    icon: '🔒',
+    label: 'Mainnet',
+    ariaLabel: 'Mainnet network - real funds',
+  },
+} as const;
+
+export function NetworkBadge({ 
+  className = '', 
+  showLabel = true,
+  network: networkOverride 
+}: NetworkBadgeProps) {
   try {
-    const config = getConfig();
-    const isTestnet = config.network.name === 'testnet';
-    const isProduction = config.network.isProduction;
+    const config = networkOverride 
+      ? { network: { name: networkOverride, isProduction: networkOverride === 'mainnet' } } 
+      : getConfig();
+    const network = config.network.name as keyof typeof networkStyles;
+    const styles = networkStyles[network];
+    const labels = networkLabels[network];
 
     if (!showLabel) {
       return null;
@@ -37,23 +73,17 @@ export function NetworkBadge({ className = '', showLabel = true }: NetworkBadgeP
           fontWeight: 600,
           textTransform: 'uppercase',
           letterSpacing: '0.05em',
-          backgroundColor: isTestnet ? '#fef3c7' : '#dcfce7',
-          color: isTestnet ? '#92400e' : '#166534',
-          border: `1px solid ${isTestnet ? '#fcd34d' : '#86efac'}`,
+          backgroundColor: styles.backgroundColor,
+          color: styles.color,
+          border: `1px solid ${styles.borderColor}`,
         }}
+        role="status"
+        aria-label={labels.ariaLabel}
       >
-        {isTestnet && (
-          <>
-            <span style={{ fontSize: '1rem' }}>⚠️</span>
-            <span>TESTNET ONLY</span>
-          </>
-        )}
-        {!isTestnet && isProduction && (
-          <>
-            <span style={{ fontSize: '1rem' }}>🔒</span>
-            <span>Mainnet</span>
-          </>
-        )}
+        <span style={{ fontSize: '1rem' }} aria-hidden="true">
+          {labels.icon}
+        </span>
+        <span>{labels.label}</span>
       </div>
     );
   } catch (error) {
@@ -72,12 +102,19 @@ export function NetworkBadge({ className = '', showLabel = true }: NetworkBadgeP
 interface AssetLabelProps {
   assetCode: string;
   className?: string;
+  /** Optional: Override the network (for testing/preview only) */
+  network?: StellarNetwork;
 }
 
-export function AssetLabel({ assetCode, className = '' }: AssetLabelProps) {
+export function AssetLabel({ 
+  assetCode, 
+  className = '',
+  network: networkOverride 
+}: AssetLabelProps) {
   try {
-    const config = getConfig();
-    const isTestnet = config.network.name === 'testnet';
+    const config = networkOverride 
+      ? { network: { name: networkOverride, assetLabel: networkOverride === 'testnet' ? 'TESTNET' : null } } 
+      : getConfig();
     const label = config.network.assetLabel;
 
     if (!label) {
@@ -85,18 +122,27 @@ export function AssetLabel({ assetCode, className = '' }: AssetLabelProps) {
     }
 
     return (
-      <span className={className} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+      <span 
+        className={className} 
+        style={{ 
+          display: 'inline-flex', 
+          alignItems: 'center', 
+          gap: '0.25rem' 
+        }}
+      >
         {assetCode}
         <span
           style={{
             fontSize: '0.7em',
             fontWeight: 600,
-            color: '#92400e',
-            backgroundColor: '#fef3c7',
+            color: 'var(--system-warning-text)',
+            backgroundColor: 'var(--system-warning-bg)',
             padding: '0.1rem 0.4rem',
             borderRadius: '4px',
             textTransform: 'uppercase',
+            border: '1px solid var(--system-warning-border)',
           }}
+          aria-label={`${assetCode} on ${label}`}
         >
           {label}
         </span>

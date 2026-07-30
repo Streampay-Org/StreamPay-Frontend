@@ -74,9 +74,9 @@ export function ErrorRecovery({
 }: ErrorRecoveryProps) {
   return (
     <div className={`error-page error-page--${variant}`}>
-      <a className="error-page__skip" href="#error-recovery">
+      <Link className="error-page__skip" href="#error-recovery">
         Skip to StreamPay home
-      </a>
+      </Link>
       <header className="error-page__brand">
         <Link className="error-page__brand-link" href="/">
           StreamPay

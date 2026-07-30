@@ -1,0 +1,466 @@
+openapi: 3.1.0
+info:
+  title: StreamPay API
+  version: 2.0.0
+paths:
+  /api/webhooks:
+    get:
+      summary: Scrape Prometheus metrics
+      description: |
+        Returns the shared Prometheus text exposition including webhook and
+        other registered series.
+      responses:
+        '200':
+          description: Prometheus metrics payload
+          content:
+            text/plain:
+              examples:
+                metricsSample:
+                  summary: Sample Prometheus text output
+                  value: |
+                    # HELP webhook_requests_total Total number of webhook requests received
+                    # TYPE webhook_requests_total counter
+                    webhook_requests_total{status="200",event_type="payment.received"} 3
+        '500':
+          description: Metrics generation failed
+          content:
+            application/json:
+              examples:
+                serverError:
+                  summary: Internal error generating metrics
+                  value:
+                    error: Internal Server Error
+    post:
+      summary: Receive a webhook event
+      description: |
+        Accepts inbound webhook events. Records Prometheus counter/histogram
+        metrics labeled by status and event_type.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            examples:
+              paymentReceived:
+                summary: Payment received event
+                value:
+                  eventType: payment.received
+                  id: evt_001
+                  payload:
+                    amount: "10.00"
+                    asset: USDC
+      responses:
+        '200':
+          description: Event accepted
+          headers:
+            X-Correlation-ID:
+              schema:
+                type: string
+              description: Correlation ID for structured logging
+          content:
+            application/json:
+              examples:
+                accepted:
+                  summary: Webhook processed successfully
+                  value:
+                    success: true
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              examples:
+                missingEventType:
+                  summary: eventType is required
+                  value:
+                    error:
+                      code: INVALID_INPUT
+                      message: eventType is required
+                      request_id: req_01HZ9ABCDEF
+        '500':
+          description: Processing failure
+          content:
+            application/json:
+              examples:
+                internalError:
+                  summary: Unexpected processing error
+                  value:
+                    error:
+                      code: INTERNAL_ERROR
+                      message: Internal Server Error
+                      request_id: req_01HZ9ABCDEF
+  /api/webhooks/dlq:
+    post:
+      summary: Receive a dead-letter-queue webhook event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            examples:
+              deadLetter:
+                summary: Failed payment event for reprocessing
+                value:
+                  event: payment.failed
+                  id: evt_dlq_001
+      responses:
+        '200':
+          description: Event accepted
+          content:
+            application/json:
+              examples:
+                received:
+                  summary: DLQ event acknowledged
+                  value:
+                    received: true
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              examples:
+                badRequest:
+                  summary: Invalid DLQ payload
+                  value:
+                    error:
+                      code: BAD_REQUEST
+                      message: Bad input.
+                      request_id: req_01HZ9ABCDEF
+  /api/webhooks/deliveries:
+    get:
+      summary: List webhook delivery attempts
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Delivery list
+          content:
+            application/json:
+              examples:
+                deliveriesList:
+                  summary: Empty delivery page
+                  value:
+                    deliveries: []
+                    cursor: null
+                    limit: 20
+        '400':
+          description: Invalid query
+          content:
+            application/json:
+              examples:
+                invalidLimit:
+                  summary: Limit out of range
+                  value:
+                    error:
+                      code: BAD_REQUEST
+                      message: limit must be between 1 and 100.
+                      request_id: req_01HZ9ABCDEF
+  /api/webhooks/health:
+    get:
+      summary: Webhook delivery system health
+      description: |
+        Returns the health status of the webhook delivery system along with
+        subscription and delivery statistics. Supports request correlation
+        tracking via x-correlation-id header.
+      responses:
+        '200':
+          description: Health status retrieved
+          content:
+            application/json:
+              examples:
+                healthy:
+                  summary: All systems healthy
+                  value:
+                    status: ok
+                    checked_at: '2026-07-26T12:00:00.000Z'
+                    subscriptions:
+                      total: 42
+                      active: 42
+                      degraded: 0
+                      disabled: 0
+                    delivery_stats:
+                      total: 1500
+                      delivered: 1498
+                      failed: 2
+                      pending: 0
+                      dlq: 0
+                      success_rate_pct: 99.87
+                degraded:
+                  summary: Some subscriptions degraded or DLQ depth > 0
+                  value:
+                    status: degraded
+                    checked_at: '2026-07-26T12:00:00.000Z'
+                    subscriptions:
+                      total: 42
+                      active: 40
+                      degraded: 2
+                      disabled: 0
+                    delivery_stats:
+                      total: 1500
+                      delivered: 1490
+                      failed: 8
+                      pending: 2
+                      dlq: 3
+                      success_rate_pct: 99.33
+                unhealthy:
+                  summary: More than 50% of subscriptions degraded or disabled
+                  value:
+                    status: unhealthy
+                    checked_at: '2026-07-26T12:00:00.000Z'
+                    subscriptions:
+                      total: 10
+                      active: 3
+                      degraded: 4
+                      disabled: 3
+                    delivery_stats:
+                      total: 200
+                      delivered: 120
+                      failed: 50
+                      pending: 30
+                      dlq: 15
+                      success_rate_pct: 60
+        '500':
+          description: Failed to retrieve health stats
+          content:
+            application/json:
+              examples:
+                internalError:
+                  summary: Unexpected error retrieving health
+                  value:
+                    error:
+                      code: INTERNAL_SERVER_ERROR
+                      message: Failed to retrieve webhook health stats.
+                      request_id: req_01HZ9ABCDEF
+  /api/reconciliation:
+    get:
+      summary: Retrieve public reconciliation overview
+      description: |
+        Returns a paginated list of public reconciliation records showing
+        totals that have been reconciled per currency and their current status.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of records to return (1–1000).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        '200':
+          description: Reconciliation overview retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconciliationOverview'
+              examples:
+                reconciliationOverview:
+                  summary: Sample reconciliation overview
+                  value:
+                    status: success
+                    data:
+                      - id: rec-pub-1
+                        totalReconciled: 1500
+                        currency: XLM
+                        status: completed
+                      - id: rec-pub-2
+                        totalReconciled: 300
+                        currency: USDC
+                        status: pending
+                    meta:
+                      total: 2
+                      limit: 100
+        '400':
+          description: Invalid limit parameter
+          content:
+            application/json:
+              examples:
+                invalidLimit:
+                  summary: Limit validation error
+                  value:
+                    error:
+                      code: INVALID_INPUT
+                      message: Limit must be an integer between 1 and 1000
+                      request_id: req_abc123
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              examples:
+                rateLimited:
+                  summary: Too many requests
+                  value:
+                    error:
+                      code: rate_limit_exceeded
+                      message: Rate limit exceeded. Retry after 30 seconds.
+                      request_id: req_abc123
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              examples:
+                serverError:
+                  summary: Unexpected error
+                  value:
+                    error:
+                      code: INTERNAL_SERVER_ERROR
+                      message: An unexpected error occurred
+                      request_id: req_abc123
+  /api/exports:
+    post:
+      summary: Request a new export job
+      responses:
+        '201':
+          description: Export job created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportJobResponse'
+              examples:
+                exportRequested:
+                  summary: Basic export request
+                  value:
+                    data:
+                      id: "123e4567-e89b-12d3-a456-426614174000"
+                      ownerId: "GB2ABCD..."
+                      requestedAt: "2026-07-24T12:00:00Z"
+                      status: "pending"
+                      expiresAt: "2026-07-31T12:00:00Z"
+                      fileName: "streampay-export-2026-07-24.csv"
+                      rows: 0
+                    links:
+                      self: "/api/exports/123e4567-e89b-12d3-a456-426614174000"
+  /api/exports/{id}:
+    get:
+      summary: Get the status of an export job or download it
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: download
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: expires
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: sig
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Export job status or download
+          content:
+            application/json:
+              examples:
+                exportReady:
+                  summary: Export job is ready
+                  value:
+                    data:
+                      id: "123e4567-e89b-12d3-a456-426614174000"
+                      ownerId: "GB2ABCD..."
+                      requestedAt: "2026-07-24T12:00:00Z"
+                      status: "ready"
+                      expiresAt: "2026-07-31T12:00:00Z"
+                      fileName: "streampay-export-2026-07-24.csv"
+                      rows: 15
+                      signedUrl: "/api/exports/123e4567...?download=true&expires=...&sig=..."
+                      signedUrlExpiresAt: "2026-07-24T13:00:00Z"
+        '404':
+          description: Not found
+          content:
+            application/json:
+              examples:
+                notFound:
+                  summary: Export job not found
+                  value:
+                    error:
+                      code: "NOT_FOUND"
+                      message: "Export job not found."
+                      request_id: "req_xyz"
+        '410':
+          description: Gone
+          content:
+            application/json:
+              examples:
+                expired:
+                  summary: Export job expired
+                  value:
+                    error:
+                      code: "EXPORT_EXPIRED"
+                      message: "The export job has expired."
+                      request_id: "req_xyz"
+components:
+  schemas:
+    ReconciliationOverview:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success, error]
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              totalReconciled:
+                type: number
+              currency:
+                type: string
+              status:
+                type: string
+                enum: [completed, pending, failed]
+        meta:
+          type: object
+          properties:
+            total:
+              type: integer
+            limit:
+              type: integer
+    ExportJobResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+            ownerId:
+              type: string
+            requestedAt:
+              type: string
+            status:
+              type: string
+            expiresAt:
+              type: string
+            fileName:
+              type: string
+            rows:
+              type: integer
+            signedUrl:
+              type: string
+            signedUrlExpiresAt:
+              type: string
+        links:
+          type: object
+          properties:
+            self:
+              type: string

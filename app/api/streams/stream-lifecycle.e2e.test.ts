@@ -152,9 +152,14 @@ async function startServer(): Promise<StartedServer> {
 describe("stream lifecycle E2E (HTTP black-box)", () => {
   let server: StartedServer;
   let settleSpy: jest.MockedFunction<StellarSettlementClient["settleStream"]>;
-  // Capture the real fetch before any test can replace global.fetch with a Horizon mock.
-  const serverFetch = fetch;
   const realFetch = fetch;
+  const serverFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const headers = new Headers(init?.headers);
+    if (!headers.has("Idempotency-Key")) {
+      headers.set("Idempotency-Key", `idempotency-${Math.random().toString(36).slice(2)}`);
+    }
+    return realFetch(input, { ...init, headers });
+  };
 
   beforeAll(async () => {
     server = await startServer();

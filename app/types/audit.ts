@@ -35,6 +35,11 @@ export interface AuditListFilters {
   requestId?: string | null;
   q?: string | null;
   limit?: number;
+  orgId?: string | null;
+  cursor?: string | null;
+  format?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
 }
 
 export interface AuditExportRow {
@@ -65,4 +70,18 @@ export interface AuditPurgeResult {
   purgedEntries: number;
   purgedIds: string[];
   retainedEntries: number;
+}
+
+export interface DeepArchiveEntry {
+  entry: AuditEntry;
+  archivedAt: string;
+}
+
+export interface DeepArchiveResult {
+  archivedCount: number;
+  archivedEntryIds: string[];
+  chainIntactBefore: boolean;
+  chainIntactAfter: boolean;
+  cutoffTimestamp: string;
+  archivedAt: string;
 }

@@ -1,6 +1,6 @@
 //! # Contract error codes
 //!
-//! Every error returned by the StreamPay contract is one of the
+//! Every error returned by the `StreamPay` contract is one of the
 //! discriminants in [`Error`]. The backend maps these codes one-to-one
 //! into the public Problem+JSON error envelope, so:
 //!
@@ -14,7 +14,7 @@
 
 use soroban_sdk::contracterror;
 
-/// Stable StreamPay contract error codes for backend Problem+JSON mapping.
+/// Stable `StreamPay` contract error codes for backend Problem+JSON mapping.
 ///
 /// Discriminants are part of the public contract API and must not be reused.
 #[contracterror]
@@ -43,4 +43,27 @@ pub enum Error {
     Overflow = 10,
     /// 11: Sender has exceeded the maximum number of active streams.
     StreamLimitExceeded = 11,
+    /// 12: Stream sender and recipient are the same address.
+    SelfStream = 12,
+    /// 13: Contract has already been initialised.
+    AlreadyInitialized = 13,
+    /// 14: Provided admin nonce is lower than the stored counter (stale / replayed).
+    NonceTooLow = 14,
+    /// 15: Provided admin nonce is higher than the stored counter (out-of-order gap).
+    NonceOutOfOrder = 15,
+    /// 16: Recipient does not have a trustline for the token.
+    RecipientTrustlineMissing = 16,
+    /// 17: Protocol fee exceeds the caller's `max_fee_bps` slippage guard.
+    FeeTooHigh = 17,
+    /// 18: Fee basis points value exceeds the maximum allowed (10 000).
+    InvalidFeeBps = 18,
+    /// 19: No accumulated fees are available to sweep (all per-stream balances are zero).
+    SweepNoFees = 19,
+    /// 20: Accumulated fee balance for a stream underflows or would produce an
+    ///     invalid token transfer amount.  Guards against integer manipulation.
+    SweepAmountMismatch = 20,
+    /// 21: Admin action is currently in cooldown.
+    AdminCooldown = 21,
+    /// 22: Sender is in cooloff period and cannot create a new stream yet.
+    CooloffActive = 22,
 }

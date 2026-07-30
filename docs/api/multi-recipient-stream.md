@@ -5,6 +5,9 @@ This document details the expected payload for the POST request to create a mult
 ## Endpoint
 `POST /api/v1/streams/multi`
 
+## UI
+The GrantFox multi-recipient experience is also available in the product UI at `/streams/new/multi`, with an entry point from the main stream creation screen for easier discovery.
+
 ## Request Payload
 
 ```json

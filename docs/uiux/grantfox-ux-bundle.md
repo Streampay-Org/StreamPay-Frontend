@@ -1,11 +1,12 @@
 # GrantFox UX Bundle
 
-This document covers the four GrantFox UI updates bundled on a single branch:
+This document covers the GrantFox UI updates bundled on a single branch:
 
 - `#531` push-notification opt-in UX with email fallback
 - `#543` accessible cancel or withdraw confirmation modal
 - `#551` timestamp tooltips with relative and ISO timestamps
 - `#558` onboarding explainer for new users
+- `#861` mobile bottom nav with unread badges
 
 ## API Notes
 
@@ -15,8 +16,9 @@ No backend API contract changes were required for this bundle.
 - `ConfirmCancel` sends the existing stream action plus a client-side `amount` display label for confirmation UX only.
 - `Timestamp` is presentation-only and does not alter payload shapes.
 - `Explainer` is static onboarding content.
+- `BottomNav` / `AppBottomNav` are client-only navigation components; badge counts are passed via props.
 
-If server persistence is later added for push subscriptions or fallback preferences, that should be documented in `openapi.json` and the relevant API route README before release.
+If server persistence is later added for push subscriptions or fallback preferences, or if unread counts are fetched from an API, that should be documented in `openapi.json` and the relevant API route README before release.
 
 ## Components Added
 
@@ -31,7 +33,10 @@ If server persistence is later added for push subscriptions or fallback preferen
 - `app/settings/page.tsx`
 - `app/streams/[id]/page.tsx`
 - `app/streams/[id]/StreamDetailClient.tsx`
+- `app/streams/StreamsPageContent.tsx`
 - `app/onboarding/page.tsx`
+
+The streams empty state now uses a more guided first-time layout with clearer next steps and a stronger call to action for new users.
 
 ## Verification
 

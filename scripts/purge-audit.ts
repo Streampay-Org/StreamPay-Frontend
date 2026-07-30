@@ -18,16 +18,22 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 function usage(): string {
   return [
-    "Usage: ts-node scripts/purge-audit.ts --older-than-days <days> [--execute] [--now <iso>]",
+    "Usage: ts-node scripts/purge-audit.ts --older-than-days <days> [--execute] [--now <iso>] [--request-id <id>]",
     "",
     "Dry-run is the default. Pass --execute to remove matching rows.",
+    "Use --help or -h to print this message.",
     `Recommended production threshold: ${AUDIT_LOG_RETENTION_DAYS} days or greater.`,
   ].join("\n");
 }
 
 function parsePositiveInteger(value: string | undefined, flag: string): number {
-  const parsed = Number.parseInt(value ?? "", 10);
-  if (!Number.isInteger(parsed) || parsed <= 0 || String(parsed) !== value) {
+  const trimmed = value?.trim();
+  if (trimmed === undefined || trimmed.length === 0) {
+    throw new Error(`${flag} must be a positive integer`);
+  }
+
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0 || String(parsed) !== trimmed) {
     throw new Error(`${flag} must be a positive integer`);
   }
   return parsed;
@@ -58,10 +64,15 @@ export function parsePurgeArgs(argv: string[]): PurgeCliOptions {
       if (!value?.trim()) {
         throw new Error("--request-id must be non-empty");
       }
-      requestId = value;
+      requestId = value.trim();
       index += 1;
     } else if (arg === "--help" || arg === "-h") {
-      throw new Error(usage());
+      return {
+        execute: false,
+        now: new Date(),
+        olderThanDays: 0,
+        requestId: `audit-purge-${Date.now().toString(36)}`,
+      };
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -93,6 +104,11 @@ export function runPurgeCli(argv: string[], deps: PurgeCliDeps = console): numbe
       }),
     );
     return 1;
+  }
+
+  if (options.olderThanDays === 0) {
+    deps.log(usage());
+    return 0;
   }
 
   try {

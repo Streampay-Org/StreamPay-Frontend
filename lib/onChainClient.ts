@@ -114,17 +114,11 @@ export const onChainClient = {
 
     const stream = MOCK_ON_CHAIN_DATA[streamId];
     if (!stream) {
-      throw new SorobanError(
-        SorobanErrorCode.StreamNotFound,
-        `Stream ${streamId} does not exist on-chain`,
-        { statusCode: 404, meta: { streamId } }
-      );
+      return null;
     }
 
     return stream;
-  },
-
-  async cancelStream(streamId: string): Promise<OnChainCancellationResult> {
+  },  async cancelStream(streamId: string): Promise<OnChainCancellationResult | null> {
     if (_clientConfig.simulateUnknownError) {
       throw new SorobanError(
         SorobanErrorCode.Unknown,
@@ -134,6 +128,9 @@ export const onChainClient = {
     }
 
     const stream = await this.fetchStream(streamId);
+    if (!stream) {
+      return null;
+    }
 
     if (_clientConfig.simulateSubmitTimeout) {
       throw new SorobanError(

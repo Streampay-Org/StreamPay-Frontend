@@ -23,6 +23,7 @@ Server-Sent Events endpoint for live stream deltas.
 **Protocol:**
 - Server sends `: keep-alive` comments every 30s to keep connection alive
 - Client must handle reconnection on disconnect
+- The server removes stream listeners promptly when a client disconnects to avoid resource leaks
 - Users can only subscribe to streams they own (recipient) or if they have admin role
 
 **Error Responses:**

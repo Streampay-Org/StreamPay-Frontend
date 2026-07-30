@@ -11,6 +11,7 @@
 
 import { isValidStellarPublicKey } from "@/app/lib/wallet-link";
 import { z } from "zod";
+import type { StreamStatus } from "@/app/types/openapi";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -79,6 +80,104 @@ export const patchStreamSchema = z
 
 // ── Validator ──────────────────────────────────────────────────────────────
 
+function zodIssuesToErrors(error: z.ZodError): ValidationError[] {
+  return error.issues.map((issue) => {
+    const params = (issue as { params?: { code?: unknown } }).params;
+    return {
+      field: issue.path.join(".") || "body",
+      code:
+        typeof params?.code === "string" ? params.code : issue.code.toUpperCase(),
+      message: issue.message,
+    };
+  });
+}
+
+/**
+ * Zod schema for the POST /api/streams body.
+ *
+ * The field rules and error codes are the long-standing contract of
+ * `validateCreateStreamBody`; each violation is emitted as a custom issue
+ * carrying its code in `params`, so callers see identical errors.
+ */
+export const createStreamSchema = z
+  .record(z.unknown())
+  .superRefine((body, ctx) => {
+    const fail = (path: string, code: string, message: string) =>
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [path],
+        message,
+        params: { code },
+      });
+
+    const recipient = body.recipient;
+    if (typeof recipient !== "string" || recipient.trim().length === 0) {
+      fail(
+        "recipient",
+        "MISSING_FIELD",
+        "recipient is required and must be a non-empty string.",
+      );
+    } else if (!isValidStellarPublicKey(recipient.trim())) {
+      fail(
+        "recipient",
+        "INVALID_STELLAR_KEY",
+        "recipient must be a valid Stellar public key (56-char string starting with G).",
+      );
+    }
+
+    const rate = body.rate;
+    if (typeof rate !== "string" || rate.trim().length === 0) {
+      fail("rate", "MISSING_FIELD", "rate is required and must be a non-empty string.");
+    } else {
+      const trimmed = rate.trim();
+
+      if (!DECIMAL_PATTERN.test(trimmed)) {
+        fail(
+          "rate",
+          "INVALID_RATE_FORMAT",
+          "rate must be a positive decimal number (e.g. 100 or 50.5).",
+        );
+      } else {
+        if (Number(trimmed) <= 0) {
+          fail("rate", "NEGATIVE_RATE", "rate must be greater than zero.");
+        }
+
+        const fractionPart = trimmed.split(".")[1] ?? "";
+        if (fractionPart.length > MAX_DECIMAL_PRECISION) {
+          fail(
+            "rate",
+            "DECIMAL_PRECISION_EXCEEDED",
+            `rate supports at most ${MAX_DECIMAL_PRECISION} decimal places.`,
+          );
+        }
+      }
+    }
+
+    const schedule = body.schedule;
+    if (typeof schedule !== "string" || schedule.trim().length === 0) {
+      fail(
+        "schedule",
+        "MISSING_FIELD",
+        "schedule is required and must be a non-empty string.",
+      );
+    } else if (
+      !SUPPORTED_SCHEDULES.includes(
+        schedule.trim().toLowerCase() as SupportedSchedule,
+      )
+    ) {
+      fail(
+        "schedule",
+        "INVALID_SCHEDULE",
+        `schedule must be one of: ${SUPPORTED_SCHEDULES.join(", ")}.`,
+      );
+    }
+
+    const token = body.token;
+    if (token !== undefined && token !== null && typeof token !== "string") {
+      fail("token", "INVALID_TOKEN_FORMAT", "token must be a string if provided.");
+    }
+  });
+
 /**
  * Validates the request body for POST /api/streams.
  *
@@ -88,94 +187,92 @@ export const patchStreamSchema = z
 export function validateCreateStreamBody(
   body: Record<string, unknown>,
 ): ValidationError[] {
-  const errors: ValidationError[] = [];
+  const result = createStreamSchema.safeParse(body);
+  return result.success ? [] : zodIssuesToErrors(result.error);
+}
 
-  // ── recipient ────────────────────────────────────────────────────────────
-  const recipient = body.recipient;
-  if (typeof recipient !== "string" || recipient.trim().length === 0) {
-    errors.push({
-      field: "recipient",
-      code: "MISSING_FIELD",
-      message: "recipient is required and must be a non-empty string.",
-    });
-  } else if (!isValidStellarPublicKey(recipient.trim())) {
-    errors.push({
-      field: "recipient",
-      code: "INVALID_STELLAR_KEY",
-      message:
-        "recipient must be a valid Stellar public key (56-char string starting with G).",
-    });
-  }
+// ── GET /api/streams query ─────────────────────────────────────────────────
 
-  // ── rate ─────────────────────────────────────────────────────────────────
-  const rate = body.rate;
-  if (typeof rate !== "string" || rate.trim().length === 0) {
-    errors.push({
-      field: "rate",
-      code: "MISSING_FIELD",
-      message: "rate is required and must be a non-empty string.",
-    });
-  } else {
-    const trimmed = rate.trim();
+export const STREAM_STATUSES = [
+  "draft",
+  "active",
+  "paused",
+  "ended",
+  "withdrawn",
+  "cancelled",
+] as const satisfies readonly StreamStatus[];
 
-    if (!DECIMAL_PATTERN.test(trimmed)) {
-      errors.push({
-        field: "rate",
-        code: "INVALID_RATE_FORMAT",
-        message: "rate must be a positive decimal number (e.g. 100 or 50.5).",
-      });
-    } else {
-      const numericValue = Number(trimmed);
+/**
+ * Zod schema for the GET /api/streams query params. Values arrive as URL
+ * strings; `limit` is returned as a number. Unknown params are ignored by
+ * the caller, and cursor decoding stays a separate semantic check
+ * (INVALID_CURSOR) in the route.
+ */
+export const listStreamsQuerySchema = z.object({
+  limit: z
+    .string()
+    .superRefine((value, ctx) => {
+      const fail = (message: string) =>
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message,
+          params: { code: "INVALID_LIMIT" },
+        });
 
-      if (numericValue <= 0) {
-        errors.push({
-          field: "rate",
-          code: "NEGATIVE_RATE",
-          message: "rate must be greater than zero.",
+      if (!/^\d+$/.test(value)) {
+        fail("limit must be a positive integer.");
+        return;
+      }
+      const parsed = Number(value);
+      if (parsed < 1 || parsed > 100) {
+        fail("limit must be between 1 and 100.");
+      }
+    })
+    .transform(Number)
+    .optional(),
+  status: z
+    .string()
+    .superRefine((value, ctx) => {
+      if (!(STREAM_STATUSES as readonly string[]).includes(value)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `status must be one of: ${STREAM_STATUSES.join(", ")}.`,
+          params: { code: "INVALID_STATUS" },
         });
       }
-
-      const fractionPart = trimmed.split(".")[1] ?? "";
-      if (fractionPart.length > MAX_DECIMAL_PRECISION) {
-        errors.push({
-          field: "rate",
-          code: "DECIMAL_PRECISION_EXCEEDED",
-          message: `rate supports at most ${MAX_DECIMAL_PRECISION} decimal places.`,
+    })
+    .transform((value) => value as StreamStatus)
+    .optional(),
+  cursor: z
+    .string()
+    .superRefine((value, ctx) => {
+      if (value.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "cursor must not be empty.",
+          params: { code: "INVALID_CURSOR" },
         });
       }
-    }
-  }
+    })
+    .optional(),
+});
 
-  // ── schedule ─────────────────────────────────────────────────────────────
-  const schedule = body.schedule;
-  if (typeof schedule !== "string" || schedule.trim().length === 0) {
-    errors.push({
-      field: "schedule",
-      code: "MISSING_FIELD",
-      message: "schedule is required and must be a non-empty string.",
-    });
-  } else {
-    const normalized = schedule.trim().toLowerCase();
-    if (!SUPPORTED_SCHEDULES.includes(normalized as SupportedSchedule)) {
-      errors.push({
-        field: "schedule",
-        code: "INVALID_SCHEDULE",
-        message: `schedule must be one of: ${SUPPORTED_SCHEDULES.join(", ")}.`,
-      });
-    }
-  }
+export type ListStreamsQuery = z.infer<typeof listStreamsQuerySchema>;
 
-  // ── token (optional) ─────────────────────────────────────────────────────
-  const token = body.token;
-  if (token !== undefined && token !== null && typeof token !== "string") {
-    errors.push({
-      field: "token",
-      code: "INVALID_TOKEN_FORMAT",
-      message: "token must be a string if provided.",
-    });
+/**
+ * Validates the query params for GET /api/streams.
+ *
+ * Returns field-level errors plus the parsed values on success.
+ */
+export function validateListStreamsQuery(query: Record<string, unknown>): {
+  errors: ValidationError[];
+  values: ListStreamsQuery;
+} {
+  const result = listStreamsQuerySchema.safeParse(query);
+  if (result.success) {
+    return { errors: [], values: result.data };
   }
-
-  return errors;
+  return { errors: zodIssuesToErrors(result.error), values: {} };
 }
 
 /**

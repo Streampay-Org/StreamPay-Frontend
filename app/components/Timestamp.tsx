@@ -70,7 +70,6 @@ export function Timestamp({ iso, className }: TimestampProps) {
 
   const relativeLabel = formatRelativeTimestamp(iso, now);
   const absoluteLabel = formatAbsoluteTimestamp(iso);
-  const tooltipText = `${relativeLabel} • ${absoluteLabel} • ${iso}`;
 
   const startLongPress = () => {
     if (longPressTimerRef.current !== null) {
@@ -106,7 +105,6 @@ export function Timestamp({ iso, className }: TimestampProps) {
           setIsTooltipVisible(false);
         }}
         onPointerUp={clearLongPress}
-        title={tooltipText}
         type="button"
       >
         <time dateTime={iso}>{relativeLabel}</time>

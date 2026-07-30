@@ -1,8 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { EmptyState } from "../components/EmptyState";
-import { ActivityTimeline, ActivityTimelineSkeleton, type ActivityGroup } from "../components/ActivityTimeline";
+import { useState, useEffect, useCallback } from "react";
+import { StateTriad } from "../components/StateTriad";
+import {
+  ActivityTimeline,
+  ActivityTimelineSkeleton,
+  type ActivityGroup,
+} from "../components/ActivityTimeline";
+import type { StateTriadState } from "../components/StateTriad";
+
+type ActivityPageState = "loading" | "populated" | "empty" | "error";
 
 const MOCK_ACTIVITY: ActivityGroup[] = [
   {
@@ -49,48 +56,92 @@ const MOCK_ACTIVITY: ActivityGroup[] = [
 ];
 
 export default function ActivityPage() {
-  const [loading, setLoading] = useState(true);
+  const [pageState, setPageState] = useState<ActivityPageState>("loading");
   const [activities, setActivities] = useState<ActivityGroup[]>([]);
+  const [loadKey, setLoadKey] = useState(0);
+
+  const handleRetry = useCallback(() => {
+    setLoadKey((k) => k + 1);
+  }, []);
 
   useEffect(() => {
-    // Simulate initial load
+    setPageState("loading");
+
     const timer = setTimeout(() => {
       setActivities(MOCK_ACTIVITY);
-      setLoading(false);
+      setPageState(MOCK_ACTIVITY.length > 0 ? "populated" : "empty");
     }, 1500);
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [loadKey]);
+
+  // Map to StateTriad state
+  const getTriadState = (): StateTriadState => {
+    if (pageState === "loading") return "loading";
+    if (pageState === "error") return "error";
+    if (pageState === "empty" || activities.length === 0) return "empty";
+    return "success";
+  };
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        padding: "4rem 2rem",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-      }}
-    >
-      <div style={{ maxWidth: "48rem", width: "100%", marginBottom: "3rem" }}>
-        <h1 style={{ fontSize: "2.5rem", fontWeight: 800, marginBottom: "0.5rem" }}>Activity</h1>
-        <p style={{ color: "var(--muted-light)", fontSize: "1.1rem" }}>
-          Track every transaction, status update, and wallet event in real-time.
-        </p>
-      </div>
+    <main className="page-shell">
+      <section className="page-hero">
+        <div>
+          <p className="page-hero__eyebrow">Activity</p>
+          <h1 className="page-hero__title">Track every event.</h1>
+          <p className="page-hero__description">
+            Every transaction, status update, and wallet event — visible the
+            moment it happens.
+          </p>
+        </div>
+      </section>
 
-      {loading ? (
-        <ActivityTimelineSkeleton />
-      ) : activities.length > 0 ? (
-        <ActivityTimeline groups={activities} />
-      ) : (
-        <EmptyState
-          eyebrow="Activity"
-          title="Activity will appear here"
-          description="Any payment stream updates, payments, or wallet events will show up once activity begins. Stay connected to monitor your flow."
-          actionLabel="View streams"
-        />
-      )}
+      <section
+        aria-busy={pageState === "loading"}
+        aria-labelledby="activity-overview-title"
+        aria-live="polite"
+        className="stream-layout"
+      >
+        <div className="section-heading">
+          <div>
+            <h2
+              className="section-heading__title"
+              id="activity-overview-title"
+            >
+              Activity feed
+            </h2>
+            <p className="section-heading__description">
+              Payments, stream lifecycle changes, and wallet events appear here
+              as they happen.
+            </p>
+          </div>
+        </div>
+
+        <StateTriad
+          state={getTriadState()}
+          loading={{
+            renderSkeleton: () => <ActivityTimelineSkeleton />,
+          }}
+          empty={{
+            eyebrow: "Activity",
+            title: "Activity will appear here",
+            description:
+              "Any payment stream updates, payments, or wallet events will show up once activity begins. Stay connected to monitor your flow.",
+            actionLabel: "View Streams",
+            onAction: () => {
+              window.location.href = "/streams";
+            },
+          }}
+          error={{
+            heading: "Couldn't load your activity",
+            message:
+              "There was a problem fetching your activity feed. Check your connection and try again.",
+            onRetry: handleRetry,
+          }}
+        >
+          <ActivityTimeline groups={activities} />
+        </StateTriad>
+      </section>
     </main>
   );
 }

@@ -2,6 +2,7 @@
 
 import { POST } from "./route";
 import { resetConfigCache } from "@/app/lib/config";
+import { ReconciliationService } from "@/scripts/reconciliation/reconcile";
 import { createInternalServiceRequestHeaders } from "@/app/lib/internal-service-auth";
 
 const authConfig = {
@@ -240,4 +241,67 @@ describe("POST /api/internal/reconciliation", () => {
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("[DB] Updated last run status to SUCCESS"));
     consoleSpy.mockRestore();
   });
+});
+
+// ── Per-request timeout ────────────────────────────────────────────────────
+
+describe("POST /api/internal/reconciliation timeout", () => {
+  beforeEach(() => {
+    resetConfigCache();
+    process.env.STELLAR_NETWORK = "testnet";
+    process.env.JWT_SECRET = "test-secret-at-least-32-characters-long";
+    process.env.ALLOWED_ORIGINS = "http://localhost:3000";
+    process.env.INTERNAL_SERVICE_HMAC_KEYS = JSON.stringify(authConfig.keys);
+    process.env.INTERNAL_SERVICE_CURRENT_KEY_ID = authConfig.currentKeyId;
+    process.env.INTERNAL_SERVICE_CLOCK_SKEW_SECONDS = String(authConfig.allowedClockSkewSeconds);
+  });
+
+  afterEach(() => {
+    delete process.env.RECONCILIATION_TIMEOUT_MS;
+    jest.restoreAllMocks();
+  });
+
+  function signedRequest(bodyObj: unknown) {
+    const body = JSON.stringify(bodyObj);
+    return new Request("http://localhost/api/internal/reconciliation", {
+      body,
+      headers: createInternalServiceRequestHeaders({
+        body,
+        keyId: "current",
+        method: "POST",
+        secret: authConfig.keys.current,
+        serviceName: "reconciliation-worker",
+        timestampMs: Date.now(),
+        url: "http://localhost/api/internal/reconciliation",
+      }),
+      method: "POST",
+    });
+  }
+
+  it("returns 504 RECONCILIATION_TIMEOUT when reconciliation exceeds the deadline", async () => {
+    process.env.RECONCILIATION_TIMEOUT_MS = "25";
+    jest
+      .spyOn(ReconciliationService.prototype, "runReconciliation")
+      .mockImplementation(
+        (options?: { signal?: AbortSignal }) =>
+          new Promise((resolve) => {
+            options?.signal?.addEventListener("abort", () =>
+              resolve({
+                timestamp: "",
+                totalStreamsChecked: 0,
+                mismatches: [],
+                errors: [],
+                status: "FAILED",
+              }),
+            );
+          }),
+      );
+
+    const response = await POST(signedRequest({ dryRun: true }));
+    const payload = await response.json();
+    expect(response.status).toBe(504);
+    expect(payload.error.code).toBe("RECONCILIATION_TIMEOUT");
+    expect(typeof payload.error.request_id).toBe("string");
+  });
+
 });

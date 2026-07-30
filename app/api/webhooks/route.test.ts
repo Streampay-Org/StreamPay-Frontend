@@ -1,86 +1,73 @@
-import { NextRequest } from 'next/server';
-import { POST } from './route';
+import { POST } from "./route";
 
-jest.mock('@/src/middleware/accessLog', () => ({
-  // Mocking the middleware to just call the handler directly to test the route logic itself
-  // However, we want to test the integrated behavior or just the route.
-  // We'll mock it to pass through while keeping correlation ID logic simple, 
-  // or we can test without mocking it to ensure full coverage. Let's unmock it.
+jest.mock("@/app/lib/logger", () => ({
+  logger: {
+    error: jest.fn(),
+    info: jest.fn(),
+  },
 }));
 
-// We'll use the actual middleware to ensure integration works
-jest.unmock('@/src/middleware/accessLog');
-
-describe('POST /api/webhooks', () => {
-  let consoleLogSpy: jest.SpyInstance;
-  
-  beforeEach(() => {
-    consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
-    jest.spyOn(console, 'error').mockImplementation();
-  });
-
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  it('returns 400 for invalid JSON', async () => {
-    const req = new NextRequest('https://example.com/api/webhooks', {
-      method: 'POST',
-      body: 'invalid-json',
-      headers: { 'x-correlation-id': 'test-123' }
-    });
-
-    const res = await POST(req);
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body).toEqual({
-      error: {
-        code: 'INVALID_JSON',
-        message: 'Request body must be valid JSON.'
+function makeRequest(body: unknown, shouldThrow = false) {
+  return {
+    json: async () => {
+      if (shouldThrow) {
+        throw new Error("invalid json");
       }
-    });
-    expect(res.headers.get('x-correlation-id')).toBe('test-123');
+      return body;
+    },
+  } as unknown as import("next/server").NextRequest;
+}
+
+describe("POST /api/webhooks", () => {
+  it("returns 200 for a valid webhook payload", async () => {
+    const response = await POST(
+      makeRequest({
+        eventType: "payment.received",
+        eventId: "evt_123",
+        timestamp: "2026-07-26T12:34:56.000Z",
+        source: "grantfox",
+        data: { amount: "100", currency: "XLM" },
+        metadata: { campaignId: "fwc26" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ success: true });
   });
 
-  it('returns 400 for non-object payload (array)', async () => {
-    const req = new NextRequest('https://example.com/api/webhooks', {
-      method: 'POST',
-      body: JSON.stringify([{ id: 1 }]),
-      headers: { 'x-correlation-id': 'test-123' }
-    });
+  it("returns 400 when request JSON is invalid", async () => {
+    const response = await POST(makeRequest(null, true));
 
-    const res = await POST(req);
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error.code).toBe('INVALID_PAYLOAD');
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error.code).toBe("INVALID_INPUT");
+    expect(data.error.message).toBe("Request body must be valid JSON.");
   });
 
-  it('returns 400 for null payload', async () => {
-    const req = new NextRequest('https://example.com/api/webhooks', {
-      method: 'POST',
-      body: JSON.stringify(null),
-      headers: { 'x-correlation-id': 'test-123' }
-    });
+  it("returns 400 when eventType is missing", async () => {
+    const response = await POST(makeRequest({ data: { ok: true } }));
 
-    const res = await POST(req);
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error.code).toBe('INVALID_PAYLOAD');
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error.code).toBe("INVALID_INPUT");
+    expect(data.error.message).toBe("eventType is required");
   });
 
-  it('returns 200 for valid JSON object', async () => {
-    const req = new NextRequest('https://example.com/api/webhooks', {
-      method: 'POST',
-      body: JSON.stringify({ event: 'stream.created', data: {} }),
-      headers: { 'x-correlation-id': 'test-123' }
-    });
+  it("returns 400 when eventType is blank", async () => {
+    const response = await POST(makeRequest({ eventType: "   " }));
 
-    const res = await POST(req);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.status).toBe('ok');
-    
-    // Check if the middleware logged the interaction
-    expect(consoleLogSpy).toHaveBeenCalled();
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error.code).toBe("INVALID_INPUT");
+    expect(data.error.message).toBe("eventType is required");
+  });
+
+  it("returns 400 when unknown fields are present", async () => {
+    const response = await POST(makeRequest({ eventType: "payment.received", unexpected: true }));
+
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error.code).toBe("INVALID_INPUT");
+    expect(data.error.message).toBe("Unknown fields are not allowed.");
   });
 });

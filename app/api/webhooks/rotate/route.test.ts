@@ -11,12 +11,10 @@ import {
 } from '@/app/lib/webhook-secrets';
 import { auditLogStore, resetAuditLogStore } from '@/app/lib/audit-log';
 
+import { signToken } from '@/app/lib/auth';
+
 function signAccessToken(role: string, actorId: string): string {
-  return jwt.sign(
-    { sub: `${actorId}-wallet`, role, actorId, iss: 'streampay', aud: 'streampay-api' },
-    JWT_SECRET,
-    { expiresIn: '15m' },
-  );
+  return signToken(`${actorId}-wallet`, { role, actorId });
 }
 
 function validSecret(): string {

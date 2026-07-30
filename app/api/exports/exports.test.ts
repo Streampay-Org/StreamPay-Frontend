@@ -1,5 +1,11 @@
 import jwt from "jsonwebtoken";
 import { db, resetDb } from "@/app/lib/db";
+import { checkRateLimit } from "@/app/lib/rate-limit";
+import {
+  getRateLimitStore,
+  InMemoryRateLimitStore,
+  resetRateLimitStore,
+} from "@/app/lib/rate-limit-store";
 import { POST as createExport } from "./route";
 import { GET as getExport } from "./[id]/route";
 
@@ -19,9 +25,17 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+afterEach(() => {
+  const store = getRateLimitStore();
+  if (store instanceof InMemoryRateLimitStore) {
+    store.destroy();
+  }
+});
+
 describe("Exports API — authentication and scoping", () => {
   beforeEach(() => {
     resetDb();
+    resetRateLimitStore();
   });
 
   // ── POST /api/exports ──────────────────────────────────────────────────────
@@ -54,6 +68,100 @@ describe("Exports API — authentication and scoping", () => {
       const { data } = await res.json();
       const job = db.exportJobs.get(data.id);
       expect(job?.ownerId).toBe("GOWNER1");
+    });
+
+    it("returns 422 if format is invalid", async () => {
+      const token = makeToken("GOWNER1");
+      const res = await createExport(new Request("http://localhost/api/exports", {
+        method: "POST",
+        headers: { "authorization": `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ format: "xml" })
+      }));
+      expect(res.status).toBe(422);
+      const json = await res.json();
+      expect(json.error.code).toBe("VALIDATION_ERROR");
+      expect(json.error.details[0].field).toBe("format");
+    });
+
+    it("returns 422 if unknown fields are present", async () => {
+      const token = makeToken("GOWNER1");
+      const res = await createExport(new Request("http://localhost/api/exports", {
+        method: "POST",
+        headers: { "authorization": `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ unknownField: "foo" })
+      }));
+      expect(res.status).toBe(422);
+      const json = await res.json();
+      expect(json.error.code).toBe("VALIDATION_ERROR");
+    });
+    
+    it("accepts valid JSON body and uses provided format", async () => {
+      const token = makeToken("GOWNER1");
+      const res = await createExport(new Request("http://localhost/api/exports", {
+        method: "POST",
+        headers: { "authorization": `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ format: "json" })
+      }));
+      expect(res.status).toBe(201);
+      const json = await res.json();
+      expect(json.data.fileName).toMatch(/\.json$/);
+    });
+  });
+
+  // ── GET /api/exports (List) ────────────────────────────────────────────────
+
+  describe("GET /api/exports", () => {
+    it("returns 401 for anonymous requests", async () => {
+      const { GET: listExports } = await import("./route");
+      const res = await listExports(authRequest("http://localhost/api/exports"));
+      expect(res.status).toBe(401);
+    });
+
+    it("returns a paginated list of exports for the authenticated user", async () => {
+      const { GET: listExports } = await import("./route");
+      const token = makeToken("GOWNER1");
+      
+      // Create a few exports
+      db.exportJobs.set("job1", { id: "job1", ownerId: "GOWNER1", requestedAt: "2026-07-24T10:00:00Z", status: "pending", expiresAt: "2026-07-31T10:00:00Z", fileName: "export1.csv", rows: 0 });
+      db.exportJobs.set("job2", { id: "job2", ownerId: "GOWNER1", requestedAt: "2026-07-24T11:00:00Z", status: "pending", expiresAt: "2026-07-31T11:00:00Z", fileName: "export2.csv", rows: 0 });
+      db.exportJobs.set("job-other", { id: "job-other", ownerId: "GOTHER2", requestedAt: "2026-07-24T12:00:00Z", status: "pending", expiresAt: "2026-07-31T12:00:00Z", fileName: "export-other.csv", rows: 0 });
+
+      const res = await listExports(authRequest("http://localhost/api/exports", token));
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data.length).toBe(2);
+      // Descending order by requestedAt
+      expect(json.data[0].id).toBe("job2");
+      expect(json.data[1].id).toBe("job1");
+      expect(json.meta.total).toBe(2);
+      expect(json.meta.hasNext).toBe(false);
+    });
+
+    it("supports cursor pagination", async () => {
+      const { GET: listExports } = await import("./route");
+      const { encodeCompositeCursor } = await import("@/app/lib/db");
+      const token = makeToken("GOWNER1");
+      
+      // Create jobs
+      db.exportJobs.set("job1", { id: "job1", ownerId: "GOWNER1", requestedAt: "2026-07-24T10:00:00Z", status: "pending", expiresAt: "2026-07-31T10:00:00Z", fileName: "export1.csv", rows: 0 });
+      db.exportJobs.set("job2", { id: "job2", ownerId: "GOWNER1", requestedAt: "2026-07-24T11:00:00Z", status: "pending", expiresAt: "2026-07-31T11:00:00Z", fileName: "export2.csv", rows: 0 });
+      db.exportJobs.set("job3", { id: "job3", ownerId: "GOWNER1", requestedAt: "2026-07-24T12:00:00Z", status: "pending", expiresAt: "2026-07-31T12:00:00Z", fileName: "export3.csv", rows: 0 });
+
+      // First page
+      const res1 = await listExports(authRequest("http://localhost/api/exports?limit=2", token));
+      const json1 = await res1.json();
+      expect(json1.data.length).toBe(2);
+      expect(json1.data[0].id).toBe("job3");
+      expect(json1.data[1].id).toBe("job2");
+      expect(json1.meta.hasNext).toBe(true);
+
+      // Second page
+      const cursor = encodeCompositeCursor("2026-07-24T11:00:00Z", "job2");
+      const res2 = await listExports(authRequest(`http://localhost/api/exports?limit=2&cursor=${cursor}`, token));
+      const json2 = await res2.json();
+      expect(json2.data.length).toBe(1);
+      expect(json2.data[0].id).toBe("job1");
+      expect(json2.meta.hasNext).toBe(false);
     });
   });
 
@@ -282,5 +390,83 @@ describe("Exports API — authentication and scoping", () => {
       // Only 1 stream row (not 2)
       expect(statusJson.data.rows).toBe(1);
     });
+  });
+});
+
+// ── POST /api/exports rate limiting ────────────────────────────────────────
+
+describe("POST /api/exports rate limiting", () => {
+  beforeEach(() => {
+    resetDb();
+    resetRateLimitStore();
+  });
+
+  it("returns 429 with Retry-After after 5 exports in a minute for one user", async () => {
+    const token = makeToken("GOWNER1");
+
+    for (let i = 0; i < 5; i++) {
+      const res = await createExport(authRequest("http://localhost/api/exports", token));
+      expect(res.status).toBe(201);
+    }
+
+    const limited = await createExport(authRequest("http://localhost/api/exports", token));
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("Retry-After")).toBeTruthy();
+    const json = await limited.json();
+    expect(json.error.code).toBe("rate_limit_exceeded");
+    expect(typeof json.error.request_id).toBe("string");
+  });
+
+  it("tracks the limit per user, not globally", async () => {
+    const tokenA = makeToken("GOWNER1");
+    const tokenB = makeToken("GOWNER2");
+
+    for (let i = 0; i < 5; i++) {
+      const res = await createExport(authRequest("http://localhost/api/exports", tokenA));
+      expect(res.status).toBe(201);
+    }
+
+    const limitedA = await createExport(authRequest("http://localhost/api/exports", tokenA));
+    expect(limitedA.status).toBe(429);
+
+    const freshB = await createExport(authRequest("http://localhost/api/exports", tokenB));
+    expect(freshB.status).toBe(201);
+  });
+
+  it("does not let a forged token consume a victim's budget", async () => {
+    const forged = [
+      Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url"),
+      Buffer.from(JSON.stringify({ sub: "GOWNER1" })).toString("base64url"),
+      "forged",
+    ].join(".");
+
+    for (let i = 0; i < 6; i++) {
+      const res = await createExport(authRequest("http://localhost/api/exports", forged));
+      expect(res.status).toBe(401);
+    }
+
+    const token = makeToken("GOWNER1");
+    for (let i = 0; i < 5; i++) {
+      const res = await createExport(authRequest("http://localhost/api/exports", token));
+      expect(res.status).toBe(201);
+    }
+  });
+
+  it("does not drain the export bucket from other limit tiers", async () => {
+    const token = makeToken("GOWNER1");
+
+    for (let i = 0; i < 5; i++) {
+      const res = await createExport(authRequest("http://localhost/api/exports", token));
+      expect(res.status).toBe(201);
+    }
+    const limited = await createExport(authRequest("http://localhost/api/exports", token));
+    expect(limited.status).toBe(429);
+
+    const readCheck = await checkRateLimit(
+      { type: "wallet", value: "GOWNER1", displayValue: "GOWNER1" },
+      "read",
+    );
+    expect(readCheck.allowed).toBe(true);
+    expect(readCheck.remaining).toBe(59);
   });
 });

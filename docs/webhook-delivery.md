@@ -630,3 +630,116 @@ Use the DLQ replay endpoint for older deliveries without snapshots.
 - [Observability and Tracing](./observability-tracing-guide.md)
 - [Stream Settlement Guide](./payout-math.md)
 - [API Documentation](../openapi.json)
+
+---
+
+## Transactional Outbox (issue #912)
+
+### Problem
+
+Without an outbox, webhook delivery is a fire-and-forget network call made _after_ the business state mutation is committed. If the process crashes between "write state" and "send webhook", the event is silently lost — there is no record that a delivery was ever attempted.
+
+### Solution
+
+`lib/outbox.ts` implements the **transactional outbox pattern**:
+
+1. **Write phase** — `appendToOutbox(entry)` records the webhook event atomically alongside the business mutation. The entry is immediately durable with status `pending`.
+
+2. **Drain phase** — `OutboxDrainWorker.drain()` reads all `pending` entries and hands each one to `WebhookDeliveryWorker.processDelivery()`. On success the entry is marked `dispatched`; on unexpected error it is marked `failed` and retried on the next drain.
+
+```
+Business mutation + appendToOutbox()   ← same logical transaction
+        ↓
+outboxDrainWorker.drain()              ← best-effort, on-demand or scheduled
+        ↓
+WebhookDeliveryWorker.processDelivery() ← full retry / DLQ lifecycle
+```
+
+### Delivery guarantees
+
+| Property | Detail |
+|----------|--------|
+| At-least-once | An entry may be dispatched more than once if the drain crashes after dispatch but before the status update. `X-StreamPay-Delivery-Id` makes duplicate dispatches safe. |
+| No silent loss | `pending` entries survive process restarts. |
+| Causality | Entries are processed oldest-first within each drain batch. |
+| Batch cap | Default batch size is 100 entries per drain; configurable via `OutboxDrainWorkerOptions.batchSize`. |
+
+### Entry lifecycle
+
+```
+pending  →  dispatched   (drain succeeded)
+pending  →  failed       (drain threw an unexpected error)
+failed   →  dispatched   (next drain attempt succeeded)
+```
+
+### Key exports (`lib/outbox.ts`)
+
+| Export | Description |
+|--------|-------------|
+| `appendToOutbox({ endpoint, event, store? })` | Record a new outbox entry. |
+| `OutboxDrainWorker` | Drain worker — call `drain()` to process pending entries. |
+| `outboxDrainWorker` | Module-level singleton drain worker. |
+| `InMemoryOutboxStore` | Default in-process backing store. |
+| `getOutboxStore() / setOutboxStore()` | Swap the active store (e.g., for tests or a durable adapter). |
+| `OutboxEntry` | TypeScript type for a single outbox row. |
+| `OutboxStore` | Interface for a custom backing store. |
+
+### API changes
+
+#### `POST /api/webhooks/dlq`
+
+The endpoint now accepts two body shapes:
+
+**Structured (outbox-integrated)** — when `endpoint` and `event` fields are present, the event is recorded in the transactional outbox before a best-effort drain:
+
+```json
+{
+  "endpoint": {
+    "id": "ep-1",
+    "url": "https://example.com/webhook",
+    "maxRetries": 10
+  },
+  "event": {
+    "id": "evt-1",
+    "eventType": "stream.settled",
+    "streamId": "stream-abc",
+    "data": {},
+    "timestamp": "2026-07-23T18:00:00Z"
+  }
+}
+```
+
+Response: `{ "received": true, "outboxId": "<uuid>" }`
+
+**Legacy (backward-compatible)** — any other valid JSON object returns `{ "received": true }` without outbox integration.
+
+#### `GET /api/webhooks/deliveries`
+
+The response now includes an `outbox` field alongside `deliveries`:
+
+```json
+{
+  "deliveries": [...],
+  "cursor": null,
+  "limit": 20,
+  "outbox": {
+    "total": 5,
+    "pending": 2,
+    "dispatched": 2,
+    "failed": 1,
+    "entries": [...]
+  }
+}
+```
+
+### Replacing the in-memory store with a durable adapter
+
+For true durability, swap `InMemoryOutboxStore` with a PostgreSQL-backed implementation that writes the outbox row inside the same database transaction as your business mutation:
+
+```ts
+import { setOutboxStore } from "@/lib/outbox";
+
+setOutboxStore(new PostgresOutboxStore(dbClient));
+```
+
+See `docs/persistent-store-interface.md` for the broader repository pluggability pattern.

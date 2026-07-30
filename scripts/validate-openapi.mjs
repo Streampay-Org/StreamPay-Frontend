@@ -62,16 +62,20 @@ async function main() {
 
   const paths = spec.paths || {};
   const expectedPaths = [
-    "/streams",
-    "/streams/{id}",
-    "/streams/{id}/start",
-    "/streams/{id}/pause",
-    "/streams/{id}/stop",
-    "/streams/{id}/settle",
-    "/streams/{id}/withdraw",
-    "/activity",
-    "/identity/me",
-    "/auth/wallet",
+    "/api/streams",
+    "/api/streams/{id}",
+    "/api/streams/{id}/start",
+    "/api/streams/{id}/pause",
+    "/api/streams/{id}/stop",
+    "/api/streams/{id}/settle",
+    "/api/v2/streams",
+    "/api/v2/streams/{id}",
+    "/api/v2/streams/{id}/start",
+    "/api/v2/streams/{id}/pause",
+    "/api/v2/streams/{id}/stop",
+    "/api/v2/streams/{id}/settle",
+    "/api/activity",
+    "/api/auth/wallet",
   ];
 
   for (const ep of expectedPaths) {
@@ -98,7 +102,7 @@ async function main() {
   }
 
   const schemas = spec.components?.schemas || {};
-  const requiredSchemas = ["ApiError", "Stream", "StreamStatus", "StreamAction"];
+  const requiredSchemas = ["ErrorEnvelope", "StreamV1", "StreamV2"];
   for (const s of requiredSchemas) {
     if (!schemas[s]) {
       log("ERROR", `Missing schema: ${s}`);

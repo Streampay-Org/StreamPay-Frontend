@@ -6,10 +6,15 @@
     "description": "REST API for the StreamPay payment-streaming platform on Stellar.\n\nAll error responses use the canonical envelope:\n```json\n{ \"error\": { \"code\": \"ERROR_CODE\", \"message\": \"Human-readable detail.\", \"request_id\": \"req_...\" } }\n```\n\nv1 stream paths (`/api/streams`) are deprecated and will be removed. Use `/api/v2/streams`."
   },
   "servers": [
-    { "url": "http://localhost:3000", "description": "Local development" }
+    {
+      "url": "http://localhost:3000",
+      "description": "Local development"
+    }
   ],
   "security": [
-    { "bearerAuth": [] }
+    {
+      "bearerAuth": []
+    }
   ],
   "components": {
     "securitySchemes": {
@@ -23,11 +28,17 @@
     "schemas": {
       "ErrorEnvelope": {
         "type": "object",
-        "required": ["error"],
+        "required": [
+          "error"
+        ],
         "properties": {
           "error": {
             "type": "object",
-            "required": ["code", "message", "request_id"],
+            "required": [
+              "code",
+              "message",
+              "request_id"
+            ],
             "properties": {
               "code": {
                 "type": "string",
@@ -50,8 +61,18 @@
       },
       "StreamV1": {
         "type": "object",
-        "description": "v1 payment stream shape. **Deprecated** — use `StreamV2` via `/api/v2/streams`.",
-        "required": ["id", "recipient", "rate", "schedule", "status", "nextAction", "token", "createdAt", "updatedAt"],
+        "description": "v1 payment stream shape. **Deprecated** \u2014 use `StreamV2` via `/api/v2/streams`.",
+        "required": [
+          "id",
+          "recipient",
+          "rate",
+          "schedule",
+          "status",
+          "nextAction",
+          "token",
+          "createdAt",
+          "updatedAt"
+        ],
         "properties": {
           "id": {
             "type": "string",
@@ -70,17 +91,33 @@
           },
           "schedule": {
             "type": "string",
-            "enum": ["second", "minute", "hour", "day", "week", "month", "year"],
+            "enum": [
+              "second",
+              "minute",
+              "hour",
+              "day",
+              "week",
+              "month",
+              "year"
+            ],
             "description": "Payment interval.",
             "example": "month"
           },
           "status": {
             "type": "string",
-            "enum": ["draft", "active", "paused", "ended"],
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended"
+            ],
             "description": "Current lifecycle state of the stream."
           },
           "nextAction": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The next permitted action for the authenticated user.",
             "example": "start"
           },
@@ -105,7 +142,15 @@
       },
       "StreamV2": {
         "type": "object",
-        "required": ["id", "recipient", "rate", "status", "allowed_actions", "created_at", "settlement"],
+        "required": [
+          "id",
+          "recipient",
+          "rate",
+          "status",
+          "allowed_actions",
+          "created_at",
+          "settlement"
+        ],
         "properties": {
           "id": {
             "type": "string",
@@ -124,14 +169,24 @@
           },
           "status": {
             "type": "string",
-            "enum": ["draft", "active", "paused", "ended"],
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended"
+            ],
             "description": "Current lifecycle state of the stream."
           },
           "allowed_actions": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Actions the authenticated user may perform on this stream. Replaces v1 `actions`.",
-            "example": ["pause", "stop"]
+            "example": [
+              "pause",
+              "stop"
+            ]
           },
           "created_at": {
             "type": "string",
@@ -143,7 +198,11 @@
             "oneOf": [
               {
                 "type": "object",
-                "required": ["settled_at", "amount", "currency"],
+                "required": [
+                  "settled_at",
+                  "amount",
+                  "currency"
+                ],
                 "properties": {
                   "settled_at": {
                     "type": "string",
@@ -160,7 +219,9 @@
                   }
                 }
               },
-              { "type": "null" }
+              {
+                "type": "null"
+              }
             ],
             "description": "Settlement details once the stream has been settled, otherwise `null`. Clients must handle `null` explicitly."
           }
@@ -168,7 +229,10 @@
       },
       "WalletChallenge": {
         "type": "object",
-        "required": ["challenge", "expires_at"],
+        "required": [
+          "challenge",
+          "expires_at"
+        ],
         "properties": {
           "challenge": {
             "type": "string",
@@ -185,7 +249,10 @@
       },
       "WalletToken": {
         "type": "object",
-        "required": ["token", "expires_at"],
+        "required": [
+          "token",
+          "expires_at"
+        ],
         "properties": {
           "token": {
             "type": "string",
@@ -202,51 +269,129 @@
       },
       "AuditActor": {
         "type": "object",
-        "required": ["id", "role"],
+        "required": [
+          "id",
+          "role"
+        ],
         "properties": {
-          "id": { "type": "string" },
+          "id": {
+            "type": "string"
+          },
           "role": {
             "type": "string",
-            "enum": ["user", "support", "admin", "finance", "security", "compliance", "system"]
+            "enum": [
+              "user",
+              "support",
+              "admin",
+              "finance",
+              "security",
+              "compliance",
+              "system"
+            ]
           }
         }
       },
       "AuditTarget": {
         "type": "object",
-        "required": ["type", "id"],
+        "required": [
+          "type",
+          "id"
+        ],
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["stream", "account"]
+            "enum": [
+              "stream",
+              "account"
+            ]
           },
-          "id": { "type": "string" },
-          "account": { "type": "string" }
+          "id": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string"
+          }
         }
       },
       "AuditEntry": {
         "type": "object",
-        "required": ["id", "actor", "target", "action", "requestId", "timestamp", "entryHash", "retentionUntil"],
+        "required": [
+          "id",
+          "actor",
+          "target",
+          "action",
+          "requestId",
+          "timestamp",
+          "entryHash",
+          "retentionUntil"
+        ],
         "properties": {
-          "id": { "type": "string" },
-          "actor": { "$ref": "#/components/schemas/AuditActor" },
-          "target": { "$ref": "#/components/schemas/AuditTarget" },
-          "action": { "type": "string" },
-          "beforeHash": { "type": ["string", "null"] },
-          "afterHash": { "type": ["string", "null"] },
-          "diffHash": { "type": ["string", "null"] },
-          "requestId": { "type": "string" },
-          "timestamp": { "type": "string", "format": "date-time" },
-          "prevHash": { "type": ["string", "null"] },
-          "entryHash": { "type": "string" },
-          "retentionUntil": { "type": "string", "format": "date-time" },
+          "id": {
+            "type": "string"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/AuditActor"
+          },
+          "target": {
+            "$ref": "#/components/schemas/AuditTarget"
+          },
+          "action": {
+            "type": "string"
+          },
+          "beforeHash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "afterHash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "diffHash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "prevHash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entryHash": {
+            "type": "string"
+          },
+          "retentionUntil": {
+            "type": "string",
+            "format": "date-time"
+          },
           "metadata": {
             "type": "object",
             "additionalProperties": {
               "oneOf": [
-                { "type": "string" },
-                { "type": "number" },
-                { "type": "boolean" },
-                { "type": "null" }
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
               ]
             }
           }
@@ -254,44 +399,83 @@
       },
       "AuditResponse": {
         "type": "object",
-        "required": ["access", "data", "links", "meta"],
+        "required": [
+          "access",
+          "data",
+          "links",
+          "meta"
+        ],
         "properties": {
           "access": {
             "type": "object",
-            "required": ["actorId", "role"],
+            "required": [
+              "actorId",
+              "role"
+            ],
             "properties": {
-              "actorId": { "type": "string" },
+              "actorId": {
+                "type": "string"
+              },
               "role": {
                 "type": "string",
-                "enum": ["user", "support", "admin", "finance", "security", "compliance", "system"]
+                "enum": [
+                  "user",
+                  "support",
+                  "admin",
+                  "finance",
+                  "security",
+                  "compliance",
+                  "system"
+                ]
               }
             }
           },
           "data": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/AuditEntry" }
+            "items": {
+              "$ref": "#/components/schemas/AuditEntry"
+            }
           },
           "links": {
             "type": "object",
-            "required": ["self"],
+            "required": [
+              "self"
+            ],
             "properties": {
-              "self": { "type": "string" }
+              "self": {
+                "type": "string"
+              }
             }
           },
           "meta": {
             "type": "object",
-            "required": ["chainIntact", "retentionDays", "total"],
+            "required": [
+              "chainIntact",
+              "retentionDays",
+              "total"
+            ],
             "properties": {
-              "chainIntact": { "type": "boolean" },
-              "retentionDays": { "type": "number" },
-              "total": { "type": "number" }
+              "chainIntact": {
+                "type": "boolean"
+              },
+              "retentionDays": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              }
             }
           }
         }
       },
       "ActivityEvent": {
         "type": "object",
-        "required": ["id", "type", "timestamp", "description"],
+        "required": [
+          "id",
+          "type",
+          "timestamp",
+          "description"
+        ],
         "properties": {
           "id": {
             "type": "string",
@@ -323,7 +507,11 @@
       },
       "PaginatedMeta": {
         "type": "object",
-        "required": ["hasNext", "nextCursor", "total"],
+        "required": [
+          "hasNext",
+          "nextCursor",
+          "total"
+        ],
         "properties": {
           "hasNext": {
             "type": "boolean",
@@ -344,16 +532,26 @@
       },
       "ActivityResponse": {
         "type": "object",
-        "required": ["data", "meta", "links"],
+        "required": [
+          "data",
+          "meta",
+          "links"
+        ],
         "properties": {
           "data": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/ActivityEvent" }
+            "items": {
+              "$ref": "#/components/schemas/ActivityEvent"
+            }
           },
-          "meta": { "$ref": "#/components/schemas/PaginatedMeta" },
+          "meta": {
+            "$ref": "#/components/schemas/PaginatedMeta"
+          },
           "links": {
             "type": "object",
-            "required": ["self"],
+            "required": [
+              "self"
+            ],
             "properties": {
               "self": {
                 "type": "string",
@@ -367,10 +565,12 @@
     },
     "responses": {
       "400": {
-        "description": "Bad request — invalid input.",
+        "description": "Bad request \u2014 invalid input.",
         "content": {
           "application/json": {
-            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
             "example": {
               "error": {
                 "code": "BAD_REQUEST",
@@ -382,10 +582,12 @@
         }
       },
       "401": {
-        "description": "Unauthorized — missing or invalid bearer token.",
+        "description": "Unauthorized \u2014 missing or invalid bearer token.",
         "content": {
           "application/json": {
-            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
             "example": {
               "error": {
                 "code": "UNAUTHORIZED",
@@ -400,7 +602,9 @@
         "description": "Forbidden.",
         "content": {
           "application/json": {
-            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
             "example": {
               "error": {
                 "code": "FORBIDDEN",
@@ -412,10 +616,12 @@
         }
       },
       "404": {
-        "description": "Not found — the requested resource does not exist.",
+        "description": "Not found \u2014 the requested resource does not exist.",
         "content": {
           "application/json": {
-            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
             "example": {
               "error": {
                 "code": "STREAM_NOT_FOUND",
@@ -427,10 +633,12 @@
         }
       },
       "409": {
-        "description": "Conflict — the operation is not valid for the current stream state.",
+        "description": "Conflict \u2014 the operation is not valid for the current stream state.",
         "content": {
           "application/json": {
-            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
             "example": {
               "error": {
                 "code": "STREAM_INACTIVE_STATE",
@@ -442,10 +650,12 @@
         }
       },
       "422": {
-        "description": "Unprocessable entity — request body failed schema validation.",
+        "description": "Unprocessable entity \u2014 request body failed schema validation.",
         "content": {
           "application/json": {
-            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
             "example": {
               "error": {
                 "code": "VALIDATION_ERROR",
@@ -460,7 +670,9 @@
         "description": "Internal server error.",
         "content": {
           "application/json": {
-            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
             "example": {
               "error": {
                 "code": "INTERNAL_SERVER_ERROR",
@@ -479,31 +691,44 @@
         "operationId": "listActivity",
         "summary": "List activity events",
         "description": "Returns a paginated, cursor-based list of activity events. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId and event type.",
-        "tags": ["Activity"],
+        "tags": [
+          "Activity"
+        ],
         "parameters": [
           {
             "name": "limit",
             "in": "query",
             "description": "Maximum number of events to return (1-100, default 20).",
-            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
           },
           {
             "name": "cursor",
             "in": "query",
             "description": "Opaque base64-encoded composite cursor (timestamp|id) for cursor-based pagination. Obtained from meta.nextCursor of the previous response.",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "name": "streamId",
             "in": "query",
             "description": "Filter events by associated stream identifier.",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "name": "type",
             "in": "query",
             "description": "Filter events by type (e.g. stream.created, wallet.connected).",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -511,23 +736,29 @@
             "description": "Paginated list of activity events.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ActivityResponse" }
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityResponse"
+                }
               }
             }
           },
           "422": {
-            "description": "Unprocessable entity — malformed cursor.",
+            "description": "Unprocessable entity \u2014 malformed cursor.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" }
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
               }
             }
           },
           "429": {
-            "description": "Too many requests — rate limit exceeded.",
+            "description": "Too many requests \u2014 rate limit exceeded.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" }
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
               }
             }
           }
@@ -539,50 +770,73 @@
         "operationId": "listAuditLogs",
         "summary": "List audit logs",
         "description": "Returns a paginated list of audit events. Requires audit log access.",
-        "tags": ["Audit"],
-        "security": [{ "bearerAuth": [] }],
+        "tags": [
+          "Audit"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
           {
             "name": "limit",
             "in": "query",
             "description": "Number of records to return (1-250, default 50).",
-            "schema": { "type": "integer", "minimum": 1, "maximum": 250, "default": 50 }
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 250,
+              "default": 50
+            }
           },
           {
             "name": "action",
             "in": "query",
             "description": "Filter by action.",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "name": "actorId",
             "in": "query",
             "description": "Filter by actor ID.",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "name": "q",
             "in": "query",
             "description": "Search query.",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "name": "requestId",
             "in": "query",
             "description": "Filter by request ID.",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "name": "role",
             "in": "query",
             "description": "Filter by actor role.",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "name": "targetId",
             "in": "query",
             "description": "Filter by target ID.",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -590,12 +844,18 @@
             "description": "Audit log list.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/AuditResponse" }
+                "schema": {
+                  "$ref": "#/components/schemas/AuditResponse"
+                }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/401" },
-          "500": { "$ref": "#/components/responses/500" }
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
         }
       }
     },
@@ -605,13 +865,15 @@
         "summary": "Issue a wallet authentication challenge",
         "description": "Returns a one-time nonce the client must sign with their Stellar private key, then submit to `POST /api/auth/wallet`.",
         "security": [],
-        "tags": ["Auth"],
+        "tags": [
+          "Auth"
+        ],
         "parameters": [
           {
             "name": "address",
             "in": "query",
             "required": true,
-            "description": "Stellar public key (G…, 56 characters).",
+            "description": "Stellar public key (G\u2026, 56 characters).",
             "schema": {
               "type": "string",
               "pattern": "^G[A-Z2-7]{55}$",
@@ -624,26 +886,70 @@
             "description": "Challenge issued.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/WalletChallenge" }
+                "schema": {
+                  "$ref": "#/components/schemas/WalletChallenge"
+                }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/400" },
-          "500": { "$ref": "#/components/responses/500" }
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "429": {
+            "description": "IP rate limit exceeded for challenge issuance (20 req/min per IP).",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the client may retry.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "description": "Correlation ID for this response.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "rate_limit_exceeded",
+                    "message": "Too many requests. Please try again later.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
         }
       },
       "post": {
         "operationId": "verifyWalletSignature",
         "summary": "Verify a signed challenge and issue a bearer token",
+        "description": "Wallet login endpoint. Rate-limited to 5 requests per minute per client IP to mitigate brute-force attempts.",
         "security": [],
-        "tags": ["Auth"],
+        "tags": [
+          "Auth"
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["address", "challenge", "signature"],
+                "required": [
+                  "address",
+                  "challenge",
+                  "signature"
+                ],
                 "properties": {
                   "address": {
                     "type": "string",
@@ -670,13 +976,52 @@
             "description": "Token issued.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/WalletToken" }
+                "schema": {
+                  "$ref": "#/components/schemas/WalletToken"
+                }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/400" },
-          "401": { "$ref": "#/components/responses/401" },
-          "500": { "$ref": "#/components/responses/500" }
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "429": {
+            "description": "IP rate limit exceeded for wallet login (5 req/min per IP).",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the client may retry.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "description": "Correlation ID for this response.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "rate_limit_exceeded",
+                    "message": "Too many requests. Please try again later.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
         }
       }
     },
@@ -684,27 +1029,46 @@
       "get": {
         "operationId": "listStreams",
         "summary": "List payment streams (v1, deprecated)",
-        "description": "Returns a cursor-paginated list of streams owned by the authenticated identity. **Deprecated** — use `GET /api/v2/streams` instead.",
+        "description": "Returns a cursor-paginated list of streams owned by the authenticated identity. **Deprecated** \u2014 use `GET /api/v2/streams` instead.",
         "deprecated": true,
-        "tags": ["Streams v1"],
+        "tags": [
+          "Streams v1"
+        ],
         "parameters": [
           {
             "name": "limit",
             "in": "query",
-            "description": "Maximum number of streams to return (1–100, default 20).",
-            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20, "example": 20 }
+            "description": "Maximum number of streams to return (1\u2013100, default 20).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "example": 20
+            }
           },
           {
             "name": "cursor",
             "in": "query",
             "description": "Opaque pagination cursor from a previous response `meta.nextCursor` field.",
-            "schema": { "type": "string", "example": "c3RyZWFtLWFiYzEyMzQ1" }
+            "schema": {
+              "type": "string",
+              "example": "c3RyZWFtLWFiYzEyMzQ1"
+            }
           },
           {
             "name": "status",
             "in": "query",
             "description": "Filter results to streams with this status.",
-            "schema": { "type": "string", "enum": ["draft", "active", "paused", "ended"] }
+            "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "active",
+                "paused",
+                "ended"
+              ]
+            }
           }
         ],
         "responses": {
@@ -714,26 +1078,53 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data", "links", "meta"],
+                  "required": [
+                    "data",
+                    "links",
+                    "meta"
+                  ],
                   "properties": {
                     "data": {
                       "type": "array",
-                      "items": { "$ref": "#/components/schemas/StreamV1" }
+                      "items": {
+                        "$ref": "#/components/schemas/StreamV1"
+                      }
                     },
                     "links": {
                       "type": "object",
-                      "required": ["self"],
+                      "required": [
+                        "self"
+                      ],
                       "properties": {
-                        "self": { "type": "string", "example": "/api/v1/streams?limit=20" }
+                        "self": {
+                          "type": "string",
+                          "example": "/api/v1/streams?limit=20"
+                        }
                       }
                     },
                     "meta": {
                       "type": "object",
-                      "required": ["hasNext", "nextCursor", "total"],
+                      "required": [
+                        "hasNext",
+                        "nextCursor",
+                        "total"
+                      ],
                       "properties": {
-                        "hasNext": { "type": "boolean", "example": false },
-                        "nextCursor": { "type": ["string", "null"], "example": null },
-                        "total": { "type": "integer", "example": 1 }
+                        "hasNext": {
+                          "type": "boolean",
+                          "example": false
+                        },
+                        "nextCursor": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "example": null
+                        },
+                        "total": {
+                          "type": "integer",
+                          "example": 1
+                        }
                       }
                     }
                   }
@@ -755,16 +1146,28 @@
                           "updatedAt": "2024-01-16T08:30:00.000Z"
                         }
                       ],
-                      "links": { "self": "/api/v1/streams?limit=20" },
-                      "meta": { "hasNext": false, "nextCursor": null, "total": 1 }
+                      "links": {
+                        "self": "/api/v1/streams?limit=20"
+                      },
+                      "meta": {
+                        "hasNext": false,
+                        "nextCursor": null,
+                        "total": 1
+                      }
                     }
                   },
                   "empty-list": {
                     "summary": "No streams exist yet",
                     "value": {
                       "data": [],
-                      "links": { "self": "/api/v1/streams?limit=20" },
-                      "meta": { "hasNext": false, "nextCursor": null, "total": 0 }
+                      "links": {
+                        "self": "/api/v1/streams?limit=20"
+                      },
+                      "meta": {
+                        "hasNext": false,
+                        "nextCursor": null,
+                        "total": 0
+                      }
                     }
                   },
                   "paginated-first-page": {
@@ -783,8 +1186,14 @@
                           "updatedAt": "2024-01-15T10:00:00.000Z"
                         }
                       ],
-                      "links": { "self": "/api/v1/streams?limit=1" },
-                      "meta": { "hasNext": true, "nextCursor": "c3RyZWFtLWFiYzEyMzQ1", "total": 3 }
+                      "links": {
+                        "self": "/api/v1/streams?limit=1"
+                      },
+                      "meta": {
+                        "hasNext": true,
+                        "nextCursor": "c3RyZWFtLWFiYzEyMzQ1",
+                        "total": 3
+                      }
                     }
                   }
                 }
@@ -795,7 +1204,9 @@
             "description": "Malformed cursor.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
                 "example": {
                   "error": {
                     "code": "INVALID_CURSOR",
@@ -810,7 +1221,9 @@
             "description": "Rate limit exceeded.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
                 "example": {
                   "error": {
                     "code": "RATE_LIMIT_EXCEEDED",
@@ -821,22 +1234,29 @@
               }
             }
           },
-          "500": { "$ref": "#/components/responses/500" }
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
         }
       },
       "post": {
         "operationId": "createStream",
         "summary": "Create a payment stream (v1, deprecated)",
-        "description": "Creates a new payment stream in `draft` status. **Deprecated** — use `POST /api/v2/streams` instead.\n\nSupplying an `Idempotency-Key` header makes this request idempotent; replaying the same key and body returns the cached response.",
+        "description": "Creates a new payment stream in `draft` status. **Deprecated** \u2014 use `POST /api/v2/streams` instead.\n\nSupplying an `Idempotency-Key` header makes this request idempotent; replaying the same key and body returns the cached response.",
         "deprecated": true,
-        "tags": ["Streams v1"],
+        "tags": [
+          "Streams v1"
+        ],
         "parameters": [
           {
             "name": "Idempotency-Key",
             "in": "header",
             "required": false,
             "description": "Client-generated key (UUID recommended) to make the request idempotent.",
-            "schema": { "type": "string", "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479" }
+            "schema": {
+              "type": "string",
+              "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            }
           }
         ],
         "requestBody": {
@@ -845,11 +1265,15 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["recipient", "rate", "schedule"],
+                "required": [
+                  "recipient",
+                  "rate",
+                  "schedule"
+                ],
                 "properties": {
                   "recipient": {
                     "type": "string",
-                    "description": "Stellar public key of the payment recipient (56-character G… address).",
+                    "description": "Stellar public key of the payment recipient (56-character G\u2026 address).",
                     "example": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG"
                   },
                   "rate": {
@@ -859,7 +1283,15 @@
                   },
                   "schedule": {
                     "type": "string",
-                    "enum": ["second", "minute", "hour", "day", "week", "month", "year"],
+                    "enum": [
+                      "second",
+                      "minute",
+                      "hour",
+                      "day",
+                      "week",
+                      "month",
+                      "year"
+                    ],
                     "description": "Payment interval.",
                     "example": "month"
                   },
@@ -870,11 +1302,25 @@
                   }
                 }
               },
-              "example": {
-                "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
-                "rate": "120",
-                "schedule": "month",
-                "token": "XLM"
+              "examples": {
+                "minimal-xlm": {
+                  "summary": "Minimal request — XLM (default token)",
+                  "value": {
+                    "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                    "rate": "120",
+                    "schedule": "month",
+                    "token": "XLM"
+                  }
+                },
+                "with-usdc-token": {
+                  "summary": "Full request with USDC token",
+                  "value": {
+                    "recipient": "GDEF1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFGH",
+                    "rate": "500",
+                    "schedule": "week",
+                    "token": "USDC"
+                  }
+                }
               }
             }
           }
@@ -886,41 +1332,63 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data", "links"],
+                  "required": [
+                    "data",
+                    "links"
+                  ],
                   "properties": {
-                    "data": { "$ref": "#/components/schemas/StreamV1" },
+                    "data": {
+                      "$ref": "#/components/schemas/StreamV1"
+                    },
                     "links": {
                       "type": "object",
-                      "required": ["self"],
+                      "required": [
+                        "self"
+                      ],
                       "properties": {
-                        "self": { "type": "string", "example": "/api/v1/streams/stream-abc12345" }
+                        "self": {
+                          "type": "string",
+                          "example": "/api/v1/streams/stream-abc12345"
+                        }
                       }
                     }
                   }
                 },
-                "example": {
-                  "data": {
-                    "id": "stream-abc12345",
-                    "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
-                    "rate": "120",
-                    "schedule": "month",
-                    "status": "draft",
-                    "nextAction": "start",
-                    "token": "XLM",
-                    "createdAt": "2024-01-15T10:00:00.000Z",
-                    "updatedAt": "2024-01-15T10:00:00.000Z"
+                "examples": {
+                  "draft-xlm": {
+                    "summary": "Newly created XLM stream in draft status",
+                    "value": {
+                      "data": {
+                        "id": "stream-abc12345",
+                        "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                        "rate": "120",
+                        "schedule": "month",
+                        "status": "draft",
+                        "nextAction": "start",
+                        "token": "XLM",
+                        "createdAt": "2024-01-15T10:00:00.000Z",
+                        "updatedAt": "2024-01-15T10:00:00.000Z"
+                      },
+                      "links": { "self": "/api/v1/streams/stream-abc12345" }
+                    }
                   },
-                  "links": { "self": "/api/v1/streams/stream-abc12345" }
+                  "links": {
+                    "self": "/api/v1/streams/stream-abc12345"
+                  }
                 }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/400" },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
           "409": {
             "description": "Idempotency key reused with a different request body.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
                 "example": {
                   "error": {
                     "code": "IDEMPOTENCY_CONFLICT",
@@ -931,12 +1399,16 @@
               }
             }
           },
-          "422": { "$ref": "#/components/responses/422" },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
           "429": {
             "description": "Rate limit exceeded.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
                 "example": {
                   "error": {
                     "code": "RATE_LIMIT_EXCEEDED",
@@ -947,7 +1419,213 @@
               }
             }
           },
-          "500": { "$ref": "#/components/responses/500" }
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/streams/search": {
+      "get": {
+        "operationId": "searchStreams",
+        "summary": "Search payment streams with FTS and filters",
+        "description": "Performs full-text search across stream fields (id, recipient, memo, label, email, senderAddress, partnerId, token) and filters by status, asset, sender, recipient, and creation date bounds.",
+        "tags": [
+          "Streams v1"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Full-text search query term.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Filter by stream status (draft, active, paused, ended, withdrawn, cancelled).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "active",
+                "paused",
+                "ended",
+                "withdrawn",
+                "cancelled"
+              ]
+            }
+          },
+          {
+            "name": "asset",
+            "in": "query",
+            "description": "Filter by asset or token symbol.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sender",
+            "in": "query",
+            "description": "Filter by sender address.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "recipient",
+            "in": "query",
+            "description": "Filter by recipient.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "ISO-8601 creation date lower bound.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "ISO-8601 creation date upper bound.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of results to return (1-200, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Pagination offset (default 0).",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Search results returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta",
+                    "links"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StreamV1"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": [
+                        "total",
+                        "limit",
+                        "offset",
+                        "count",
+                        "query"
+                      ],
+                      "properties": {
+                        "total": {
+                          "type": "integer"
+                        },
+                        "limit": {
+                          "type": "integer"
+                        },
+                        "offset": {
+                          "type": "integer"
+                        },
+                        "count": {
+                          "type": "integer"
+                        },
+                        "query": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    "links": {
+                      "type": "object",
+                      "required": [
+                        "self"
+                      ],
+                      "properties": {
+                        "self": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "examples": {
+                  "results-found": {
+                    "summary": "Search returned matching streams",
+                    "value": {
+                      "data": [
+                        {
+                          "id": "stream-abc12345",
+                          "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                          "rate": "120",
+                          "schedule": "month",
+                          "status": "active",
+                          "nextAction": "pause",
+                          "token": "XLM",
+                          "createdAt": "2024-01-15T10:00:00.000Z",
+                          "updatedAt": "2024-01-16T08:30:00.000Z"
+                        }
+                      ],
+                      "meta": { "total": 1, "limit": 50, "offset": 0, "count": 1, "query": "abc12345" },
+                      "links": { "self": "/api/streams/search?q=abc12345&limit=50" }
+                    }
+                  },
+                  "no-results": {
+                    "summary": "No streams matched the search query",
+                    "value": {
+                      "data": [],
+                      "meta": { "total": 0, "limit": 50, "offset": 0, "count": 0, "query": "nonexistent" },
+                      "links": { "self": "/api/streams/search?q=nonexistent&limit=50" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
         }
       }
     },
@@ -958,43 +1636,67 @@
           "in": "path",
           "required": true,
           "description": "Stream identifier.",
-          "schema": { "type": "string", "example": "stream-abc12345" }
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
         },
         {
           "name": "x-tenant-id",
           "in": "header",
           "required": true,
           "description": "Tenant context for multi-tenant isolation. Must be a non-empty string.",
-          "schema": { "type": "string", "example": "tenant-org-xyz" }
+          "schema": {
+            "type": "string",
+            "example": "tenant-org-xyz"
+          }
         }
       ],
       "get": {
         "operationId": "getStream",
         "summary": "Get a payment stream (v1, deprecated)",
-        "description": "Returns a single stream by ID in the v1 shape. **Deprecated** — use `GET /api/v2/streams/{id}` instead.\n\nResponses are cached; a cache hit returns `X-Cache: HIT`.",
+        "description": "Returns a single stream by ID in the v1 shape. **Deprecated** \u2014 use `GET /api/v2/streams/{id}` instead.\n\nResponses are cached; a cache hit returns `X-Cache: HIT`.",
         "deprecated": true,
-        "tags": ["Streams v1"],
+        "tags": [
+          "Streams v1"
+        ],
         "responses": {
           "200": {
             "description": "Stream found.",
             "headers": {
               "X-Cache": {
                 "description": "Whether the response was served from cache (`HIT`) or fetched from the data store (`MISS`).",
-                "schema": { "type": "string", "enum": ["HIT", "MISS"] }
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "HIT",
+                    "MISS"
+                  ]
+                }
               }
             },
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data", "links"],
+                  "required": [
+                    "data",
+                    "links"
+                  ],
                   "properties": {
-                    "data": { "$ref": "#/components/schemas/StreamV1" },
+                    "data": {
+                      "$ref": "#/components/schemas/StreamV1"
+                    },
                     "links": {
                       "type": "object",
-                      "required": ["self"],
+                      "required": [
+                        "self"
+                      ],
                       "properties": {
-                        "self": { "type": "string", "example": "/api/v1/streams/stream-abc12345" }
+                        "self": {
+                          "type": "string",
+                          "example": "/api/v1/streams/stream-abc12345"
+                        }
                       }
                     }
                   }
@@ -1014,7 +1716,9 @@
                         "createdAt": "2024-01-15T10:00:00.000Z",
                         "updatedAt": "2024-01-15T10:00:00.000Z"
                       },
-                      "links": { "self": "/api/v1/streams/stream-abc12345" }
+                      "links": {
+                        "self": "/api/v1/streams/stream-abc12345"
+                      }
                     }
                   },
                   "active-stream": {
@@ -1031,7 +1735,9 @@
                         "createdAt": "2024-01-10T08:00:00.000Z",
                         "updatedAt": "2024-01-16T09:15:00.000Z"
                       },
-                      "links": { "self": "/api/v1/streams/stream-def67890" }
+                      "links": {
+                        "self": "/api/v1/streams/stream-def67890"
+                      }
                     }
                   }
                 }
@@ -1042,7 +1748,9 @@
             "description": "Missing or empty `x-tenant-id` header.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
                 "example": {
                   "error": {
                     "code": "MISSING_TENANT",
@@ -1053,12 +1761,16 @@
               }
             }
           },
-          "404": { "$ref": "#/components/responses/404" },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
           "429": {
             "description": "Rate limit exceeded.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
                 "example": {
                   "error": {
                     "code": "RATE_LIMIT_EXCEEDED",
@@ -1069,15 +1781,19 @@
               }
             }
           },
-          "500": { "$ref": "#/components/responses/500" }
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
         }
       },
       "post": {
         "operationId": "updateStream",
         "summary": "Update a payment stream (v1, deprecated)",
-        "description": "Partially updates a stream by merging the request body fields. **Deprecated** — there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.\n\nThe `updatedAt` field is always refreshed. Cache is invalidated on success.",
+        "description": "Partially updates a stream by merging the request body fields. **Deprecated** \u2014 there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.\n\nThe `updatedAt` field is always refreshed. Cache is invalidated on success.",
         "deprecated": true,
-        "tags": ["Streams v1"],
+        "tags": [
+          "Streams v1"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -1093,7 +1809,15 @@
                   },
                   "schedule": {
                     "type": "string",
-                    "enum": ["second", "minute", "hour", "day", "week", "month", "year"],
+                    "enum": [
+                      "second",
+                      "minute",
+                      "hour",
+                      "day",
+                      "week",
+                      "month",
+                      "year"
+                    ],
                     "example": "month"
                   },
                   "token": {
@@ -1103,7 +1827,9 @@
                   }
                 }
               },
-              "example": { "rate": "150" }
+              "example": {
+                "rate": "150"
+              }
             }
           }
         },
@@ -1114,22 +1840,47 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
-                    "data": { "$ref": "#/components/schemas/StreamV1" }
+                    "data": {
+                      "$ref": "#/components/schemas/StreamV1"
+                    }
                   }
                 },
-                "example": {
-                  "data": {
-                    "id": "stream-abc12345",
-                    "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
-                    "rate": "150",
-                    "schedule": "month",
-                    "status": "draft",
-                    "nextAction": "start",
-                    "token": "XLM",
-                    "createdAt": "2024-01-15T10:00:00.000Z",
-                    "updatedAt": "2024-01-15T11:30:00.000Z"
+                "examples": {
+                  "rate-updated": {
+                    "summary": "Rate updated successfully",
+                    "value": {
+                      "data": {
+                        "id": "stream-abc12345",
+                        "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                        "rate": "150",
+                        "schedule": "month",
+                        "status": "draft",
+                        "nextAction": "start",
+                        "token": "XLM",
+                        "createdAt": "2024-01-15T10:00:00.000Z",
+                        "updatedAt": "2024-01-15T11:30:00.000Z"
+                      }
+                    }
+                  },
+                  "rate-and-token-updated": {
+                    "summary": "Rate and token updated",
+                    "value": {
+                      "data": {
+                        "id": "stream-abc12345",
+                        "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                        "rate": "200",
+                        "schedule": "month",
+                        "status": "draft",
+                        "nextAction": "start",
+                        "token": "USDC",
+                        "createdAt": "2024-01-15T10:00:00.000Z",
+                        "updatedAt": "2024-01-15T11:35:00.000Z"
+                      }
+                    }
                   }
                 }
               }
@@ -1139,7 +1890,9 @@
             "description": "Missing `x-tenant-id` header or invalid JSON body.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
                 "examples": {
                   "missing-tenant": {
                     "summary": "x-tenant-id header absent",
@@ -1165,12 +1918,16 @@
               }
             }
           },
-          "404": { "$ref": "#/components/responses/404" },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
           "429": {
             "description": "Rate limit exceeded.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
                 "example": {
                   "error": {
                     "code": "RATE_LIMIT_EXCEEDED",
@@ -1181,15 +1938,19 @@
               }
             }
           },
-          "500": { "$ref": "#/components/responses/500" }
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
         }
       },
       "delete": {
         "operationId": "deleteStream",
         "summary": "Delete a payment stream (v1, deprecated)",
-        "description": "Permanently deletes a stream. **Deprecated** — use `DELETE /api/v2/streams/{id}` instead.\n\nA stream must be in `draft` or `ended` status before it can be deleted. Attempting to delete an `active` or `paused` stream returns 409. Cache is invalidated on success.",
+        "description": "Permanently deletes a stream. **Deprecated** \u2014 use `DELETE /api/v2/streams/{id}` instead.\n\nA stream must be in `draft` or `ended` status before it can be deleted. Attempting to delete an `active` or `paused` stream returns 409. Cache is invalidated on success.",
         "deprecated": true,
-        "tags": ["Streams v1"],
+        "tags": [
+          "Streams v1"
+        ],
         "responses": {
           "204": {
             "description": "Stream deleted. No response body."
@@ -1198,7 +1959,9 @@
             "description": "Missing or empty `x-tenant-id` header.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
                 "example": {
                   "error": {
                     "code": "MISSING_TENANT",
@@ -1209,13 +1972,19 @@
               }
             }
           },
-          "404": { "$ref": "#/components/responses/404" },
-          "409": { "$ref": "#/components/responses/409" },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
           "429": {
             "description": "Rate limit exceeded.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
                 "example": {
                   "error": {
                     "code": "RATE_LIMIT_EXCEEDED",
@@ -1226,7 +1995,626 @@
               }
             }
           },
-          "500": { "$ref": "#/components/responses/500" }
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/streams/{id}/start": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "x-tenant-id",
+          "in": "header",
+          "required": true,
+          "description": "Tenant context for multi-tenant isolation. Must be a non-empty string.",
+          "schema": {
+            "type": "string",
+            "example": "tenant-org-xyz"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": false,
+          "description": "Client-generated key (UUID recommended) to make the request idempotent.",
+          "schema": {
+            "type": "string",
+            "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "startStream",
+        "summary": "Start a payment stream (v1, deprecated)",
+        "description": "Transitions a stream from `draft` (or `paused`) to `active`, initiating payment disbursements. **Deprecated** \u2014 use `POST /api/v2/streams/{id}/start` instead.",
+        "deprecated": true,
+        "tags": [
+          "Streams v1"
+        ],
+        "responses": {
+          "200": {
+            "description": "Stream started or resumed successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/StreamV1"
+                    }
+                  }
+                },
+                "examples": {
+                  "draft-to-active": {
+                    "summary": "Draft stream started, now active",
+                    "value": {
+                      "data": {
+                        "id": "stream-abc12345",
+                        "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                        "rate": "120",
+                        "schedule": "month",
+                        "status": "active",
+                        "nextAction": "pause",
+                        "token": "XLM",
+                        "createdAt": "2024-01-15T10:00:00.000Z",
+                        "updatedAt": "2024-01-15T10:05:00.000Z"
+                      }
+                    }
+                  },
+                  "paused-to-active": {
+                    "summary": "Paused stream resumed, now active again",
+                    "value": {
+                      "data": {
+                        "id": "stream-def67890",
+                        "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                        "rate": "50",
+                        "schedule": "week",
+                        "status": "active",
+                        "nextAction": "pause",
+                        "token": "XLM",
+                        "createdAt": "2024-01-10T08:00:00.000Z",
+                        "updatedAt": "2024-01-16T09:20:00.000Z"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or empty `x-tenant-id` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "MISSING_TENANT",
+                    "message": "Tenant ID header is required",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict \u2014 stream is not in `draft` or `paused` status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_STREAM_STATE",
+                    "message": "Cannot start a stream that is not in draft or paused status.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many requests. Retry after 30 seconds.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/streams/{id}/stop": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "x-tenant-id",
+          "in": "header",
+          "required": true,
+          "description": "Tenant context for multi-tenant isolation. Must be a non-empty string.",
+          "schema": {
+            "type": "string",
+            "example": "tenant-org-xyz"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": false,
+          "description": "Client-generated key (UUID recommended) to make the request idempotent.",
+          "schema": {
+            "type": "string",
+            "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "stopStream",
+        "summary": "Stop a payment stream (v1, deprecated)",
+        "description": "Permanently stops a stream, transitioning it to `ended` status. Valid from `active` or `draft` states. This action is irreversible. **Deprecated** \u2014 use `POST /api/v2/streams/{id}/stop` instead.",
+        "deprecated": true,
+        "tags": [
+          "Streams v1"
+        ],
+        "responses": {
+          "200": {
+            "description": "Stream stopped successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/StreamV1"
+                    }
+                  }
+                },
+                "examples": {
+                  "active-to-ended": {
+                    "summary": "Active stream stopped, now ended",
+                    "value": {
+                      "data": {
+                        "id": "stream-abc12345",
+                        "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                        "rate": "120",
+                        "schedule": "month",
+                        "status": "ended",
+                        "nextAction": "withdraw",
+                        "token": "XLM",
+                        "createdAt": "2024-01-15T10:00:00.000Z",
+                        "updatedAt": "2024-01-16T12:00:00.000Z"
+                      }
+                    }
+                  },
+                  "draft-to-ended": {
+                    "summary": "Draft stream cancelled, now ended",
+                    "value": {
+                      "data": {
+                        "id": "stream-ghi11223",
+                        "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                        "rate": "200",
+                        "schedule": "month",
+                        "status": "ended",
+                        "nextAction": "withdraw",
+                        "token": "USDC",
+                        "createdAt": "2024-01-18T14:00:00.000Z",
+                        "updatedAt": "2024-01-18T14:05:00.000Z"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or empty `x-tenant-id` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "MISSING_TENANT",
+                    "message": "Tenant ID header is required",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict \u2014 stream is not in `active` or `draft` status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_STREAM_STATE",
+                    "message": "Only active or draft streams can be stopped.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many requests. Retry after 30 seconds.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/streams/{id}/pause": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "x-tenant-id",
+          "in": "header",
+          "required": true,
+          "description": "Tenant context for multi-tenant isolation. Must be a non-empty string.",
+          "schema": {
+            "type": "string",
+            "example": "tenant-org-xyz"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": false,
+          "description": "Client-generated key (UUID recommended) to make the request idempotent.",
+          "schema": {
+            "type": "string",
+            "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "pauseStream",
+        "summary": "Pause a payment stream (v1, deprecated)",
+        "description": "Temporarily suspends an active stream, transitioning it to `paused` status. Payments are halted and `pausedAt` is recorded until the stream is resumed. Only valid when the stream is `active`. **Deprecated** \u2014 use `POST /api/v2/streams/{id}/pause` instead.",
+        "deprecated": true,
+        "tags": [
+          "Streams v1"
+        ],
+        "responses": {
+          "200": {
+            "description": "Stream paused successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/StreamV1"
+                    }
+                  }
+                },
+                "examples": {
+                  "active-to-paused": {
+                    "summary": "Active stream paused, payments halted",
+                    "value": {
+                      "data": {
+                        "id": "stream-abc12345",
+                        "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                        "rate": "120",
+                        "schedule": "month",
+                        "status": "paused",
+                        "nextAction": "stop",
+                        "token": "XLM",
+                        "createdAt": "2024-01-15T10:00:00.000Z",
+                        "updatedAt": "2024-01-16T11:00:00.000Z"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or empty `x-tenant-id` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "MISSING_TENANT",
+                    "message": "Tenant ID header is required",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict \u2014 stream is not in `active` status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_STREAM_STATE",
+                    "message": "Cannot pause a stream that is not active.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many requests. Retry after 30 seconds.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/streams/{id}/settle": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "x-tenant-id",
+          "in": "header",
+          "required": true,
+          "description": "Tenant context for multi-tenant isolation. Must be a non-empty string.",
+          "schema": {
+            "type": "string",
+            "example": "tenant-org-xyz"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": false,
+          "description": "Client-generated key (UUID recommended) to make the request idempotent.",
+          "schema": {
+            "type": "string",
+            "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "settleStream",
+        "summary": "Settle a payment stream (v1, deprecated)",
+        "description": "Finalises the stream on Stellar/Soroban, transitioning it to `ended` and recording the settlement transaction. Only valid when the stream is `active` or `paused`. **Deprecated** \u2014 use `POST /api/v2/streams/{id}/settle` instead.",
+        "deprecated": true,
+        "tags": [
+          "Streams v1"
+        ],
+        "responses": {
+          "200": {
+            "description": "Stream settled successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/StreamV1"
+                    }
+                  }
+                },
+                "examples": {
+                  "settle-active": {
+                    "summary": "Active stream settled, now ended with settlement info",
+                    "value": {
+                      "data": {
+                        "id": "stream-abc12345",
+                        "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                        "rate": "120",
+                        "schedule": "month",
+                        "status": "ended",
+                        "nextAction": "withdraw",
+                        "token": "XLM",
+                        "createdAt": "2024-01-15T10:00:00.000Z",
+                        "updatedAt": "2024-02-01T12:00:00.000Z"
+                      }
+                    }
+                  },
+                  "settle-paused": {
+                    "summary": "Paused stream settled, now ended with settlement info",
+                    "value": {
+                      "data": {
+                        "id": "stream-def67890",
+                        "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                        "rate": "50",
+                        "schedule": "week",
+                        "status": "ended",
+                        "nextAction": "withdraw",
+                        "token": "XLM",
+                        "createdAt": "2024-01-10T08:00:00.000Z",
+                        "updatedAt": "2024-01-20T14:30:00.000Z"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or empty `x-tenant-id` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "MISSING_TENANT",
+                    "message": "Tenant ID header is required",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict \u2014 stream is not in `active` or `paused` status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_STREAM_STATE",
+                    "message": "Only active or paused streams can be settled.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many requests. Retry after 30 seconds.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          },
+          "502": {
+            "description": "Settlement failed \u2014 Stellar/Soroban transaction could not be completed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "SETTLEMENT_FAILED",
+                    "message": "Failed to settle stream on Stellar/Soroban",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -1235,26 +2623,36 @@
         "operationId": "listStreamsV2",
         "summary": "List payment streams (v2)",
         "description": "Returns all streams owned by the authenticated user in the v2 shape (`allowed_actions`, `created_at`, `settlement`).",
-        "tags": ["Streams"],
-        "security": [{ "bearerAuth": [] }],
+        "tags": [
+          "Streams"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Stream list.",
+            "description": "Paginated stream list.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["streams"],
+                  "required": [
+                    "streams"
+                  ],
                   "properties": {
                     "streams": {
                       "type": "array",
-                      "items": { "$ref": "#/components/schemas/StreamV2" }
+                      "items": {
+                        "$ref": "#/components/schemas/StreamV2"
+                      }
                     }
                   }
                 },
                 "examples": {
                   "one-active-stream": {
-                    "summary": "Single active stream",
+                    "summary": "Single active stream, no further pages",
                     "value": {
                       "streams": [
                         {
@@ -1262,11 +2660,16 @@
                           "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
                           "rate": "120 XLM/month",
                           "status": "active",
-                          "allowed_actions": ["pause", "stop"],
+                          "allowed_actions": [
+                            "pause",
+                            "stop"
+                          ],
                           "created_at": "2024-01-15T10:00:00.000Z",
                           "settlement": null
                         }
-                      ]
+                      ],
+                      "meta": { "hasNext": false, "nextCursor": null, "total": 1 },
+                      "links": { "self": "/api/v2/streams?limit=20" }
                     }
                   },
                   "settled-stream": {
@@ -1286,37 +2689,55 @@
                             "currency": "XLM"
                           }
                         }
-                      ]
+                      ],
+                      "meta": { "hasNext": false, "nextCursor": null, "total": 1 },
+                      "links": { "self": "/api/v2/streams?limit=20" }
                     }
                   },
                   "empty-list": {
                     "summary": "No streams for this user",
-                    "value": { "streams": [] }
+                    "value": {
+                      "streams": []
+                    }
                   }
                 }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/401" },
-          "500": { "$ref": "#/components/responses/500" }
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
         }
       },
       "post": {
         "operationId": "createStreamV2",
         "summary": "Create a payment stream (v2)",
-        "tags": ["Streams"],
-        "security": [{ "bearerAuth": [] }],
+        "tags": [
+          "Streams"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["recipient", "rate", "schedule"],
+                "required": [
+                  "recipient",
+                  "rate",
+                  "schedule"
+                ],
                 "properties": {
                   "recipient": {
                     "type": "string",
-                    "description": "Stellar public key of the recipient (56-character G… address).",
+                    "description": "Stellar public key of the recipient (56-character G\u2026 address).",
                     "example": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG"
                   },
                   "rate": {
@@ -1326,7 +2747,15 @@
                   },
                   "schedule": {
                     "type": "string",
-                    "enum": ["second", "minute", "hour", "day", "week", "month", "year"],
+                    "enum": [
+                      "second",
+                      "minute",
+                      "hour",
+                      "day",
+                      "week",
+                      "month",
+                      "year"
+                    ],
                     "description": "Payment interval.",
                     "example": "month"
                   },
@@ -1337,10 +2766,24 @@
                   }
                 }
               },
-              "example": {
-                "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
-                "rate": "120",
-                "schedule": "month"
+              "examples": {
+                "minimal-xlm": {
+                  "summary": "Minimal request — XLM (default token)",
+                  "value": {
+                    "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                    "rate": "120",
+                    "schedule": "month"
+                  }
+                },
+                "with-usdc-token": {
+                  "summary": "Full request with USDC token",
+                  "value": {
+                    "recipient": "GDEF1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFGH",
+                    "rate": "500",
+                    "schedule": "week",
+                    "token": "USDC"
+                  }
+                }
               }
             }
           }
@@ -1350,23 +2793,35 @@
             "description": "Stream created. Initial status is `draft`.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/StreamV2" },
+                "schema": {
+                  "$ref": "#/components/schemas/StreamV2"
+                },
                 "example": {
                   "id": "stream_lf3k9z",
                   "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
                   "rate": "120 XLM/month",
                   "status": "draft",
-                  "allowed_actions": ["start"],
+                  "allowed_actions": [
+                    "start"
+                  ],
                   "created_at": "2024-01-15T10:00:00.000Z",
                   "settlement": null
                 }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/400" },
-          "401": { "$ref": "#/components/responses/401" },
-          "422": { "$ref": "#/components/responses/422" },
-          "500": { "$ref": "#/components/responses/500" }
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
         }
       }
     },
@@ -1377,15 +2832,24 @@
           "in": "path",
           "required": true,
           "description": "Stream identifier.",
-          "schema": { "type": "string", "example": "stream_lf3k9z" }
+          "schema": {
+            "type": "string",
+            "example": "stream_lf3k9z"
+          }
         }
       ],
       "get": {
         "operationId": "getStreamV2",
         "summary": "Get a payment stream (v2)",
         "description": "Returns a single stream by ID in the v2 shape.",
-        "tags": ["Streams"],
-        "security": [{ "bearerAuth": [] }],
+        "tags": [
+          "Streams"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Stream found.",
@@ -1393,14 +2857,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data", "links"],
+                  "required": [
+                    "data",
+                    "links"
+                  ],
                   "properties": {
-                    "data": { "$ref": "#/components/schemas/StreamV2" },
+                    "data": {
+                      "$ref": "#/components/schemas/StreamV2"
+                    },
                     "links": {
                       "type": "object",
-                      "required": ["self"],
+                      "required": [
+                        "self"
+                      ],
                       "properties": {
-                        "self": { "type": "string", "example": "/api/v2/streams/stream_lf3k9z" }
+                        "self": {
+                          "type": "string",
+                          "example": "/api/v2/streams/stream_lf3k9z"
+                        }
                       }
                     }
                   }
@@ -1414,11 +2888,15 @@
                         "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
                         "rate": "120 XLM/month",
                         "status": "draft",
-                        "allowed_actions": ["start"],
+                        "allowed_actions": [
+                          "start"
+                        ],
                         "created_at": "2024-01-15T10:00:00.000Z",
                         "settlement": null
                       },
-                      "links": { "self": "/api/v2/streams/stream_lf3k9z" }
+                      "links": {
+                        "self": "/api/v2/streams/stream_lf3k9z"
+                      }
                     }
                   },
                   "active-stream": {
@@ -1429,11 +2907,16 @@
                         "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
                         "rate": "120 XLM/month",
                         "status": "active",
-                        "allowed_actions": ["pause", "stop"],
+                        "allowed_actions": [
+                          "pause",
+                          "stop"
+                        ],
                         "created_at": "2024-01-15T10:00:00.000Z",
                         "settlement": null
                       },
-                      "links": { "self": "/api/v2/streams/stream_lf3k9z" }
+                      "links": {
+                        "self": "/api/v2/streams/stream_lf3k9z"
+                      }
                     }
                   },
                   "ended-settled-stream": {
@@ -1452,32 +2935,447 @@
                           "currency": "XLM"
                         }
                       },
-                      "links": { "self": "/api/v2/streams/stream_lf3k9z" }
+                      "links": {
+                        "self": "/api/v2/streams/stream_lf3k9z"
+                      }
                     }
                   }
                 }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/401" },
-          "404": { "$ref": "#/components/responses/404" },
-          "500": { "$ref": "#/components/responses/500" }
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
         }
       },
       "delete": {
         "operationId": "deleteStreamV2",
         "summary": "Delete a payment stream (v2)",
         "description": "Permanently deletes a stream. The stream must be in `draft` or `ended` status; attempting to delete an `active` or `paused` stream returns 409.",
-        "tags": ["Streams"],
-        "security": [{ "bearerAuth": [] }],
+        "tags": [
+          "Streams"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "responses": {
           "204": {
             "description": "Stream deleted. No response body."
           },
-          "401": { "$ref": "#/components/responses/401" },
-          "404": { "$ref": "#/components/responses/404" },
-          "409": { "$ref": "#/components/responses/409" },
-          "500": { "$ref": "#/components/responses/500" }
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v2/streams/{id}/start": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream_lf3k9z"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "startStreamV2",
+        "summary": "Start a payment stream",
+        "description": "Transitions a stream from `draft` to `active`, initiating payment disbursements. Only valid when the stream is in `draft` status.",
+        "tags": [
+          "Streams"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stream started successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamV2"
+                },
+                "examples": {
+                  "draft-to-active": {
+                    "summary": "Stream transitioned from draft to active",
+                    "value": {
+                      "id": "stream_lf3k9z",
+                      "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                      "rate": "120 XLM/month",
+                      "status": "active",
+                      "allowed_actions": [
+                        "pause",
+                        "stop"
+                      ],
+                      "created_at": "2024-01-15T10:00:00.000Z",
+                      "settlement": null
+                    }
+                  },
+                  "paused-to-active": {
+                    "summary": "Paused stream resumed to active",
+                    "value": {
+                      "id": "stream_lf3k9z",
+                      "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                      "rate": "120 XLM/month",
+                      "status": "active",
+                      "allowed_actions": ["pause", "stop"],
+                      "created_at": "2024-01-15T10:00:00.000Z",
+                      "settlement": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict \u2014 stream is not in `draft` status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_STATE_TRANSITION",
+                    "message": "Cannot start a stream that is not in draft or paused status.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v2/streams/{id}/stop": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream_lf3k9z"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "stopStreamV2",
+        "summary": "Stop a payment stream",
+        "description": "Permanently stops a stream, transitioning it to `ended` status. Valid from `active` or `paused` states. This action is irreversible.",
+        "tags": [
+          "Streams"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stream stopped successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamV2"
+                },
+                "examples": {
+                  "stopped-from-active": {
+                    "summary": "Active stream stopped, now ended",
+                    "value": {
+                      "id": "stream_lf3k9z",
+                      "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                      "rate": "120 XLM/month",
+                      "status": "ended",
+                      "allowed_actions": [],
+                      "created_at": "2024-01-15T10:00:00.000Z",
+                      "settlement": null
+                    }
+                  },
+                  "stopped-from-paused": {
+                    "summary": "Paused stream stopped, now ended",
+                    "value": {
+                      "id": "stream_m7n2p1",
+                      "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                      "rate": "50 XLM/week",
+                      "status": "ended",
+                      "allowed_actions": [],
+                      "created_at": "2024-01-10T08:00:00.000Z",
+                      "settlement": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict \u2014 stream is not in `active` or `paused` status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_STATE_TRANSITION",
+                    "message": "Cannot stop a stream that is not active or paused.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v2/streams/{id}/pause": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream_lf3k9z"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "pauseStreamV2",
+        "summary": "Pause a payment stream",
+        "description": "Temporarily suspends an active stream, transitioning it to `paused` status. Payments are halted until the stream is resumed. Only valid when the stream is `active`.",
+        "tags": [
+          "Streams"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stream paused successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamV2"
+                },
+                "examples": {
+                  "active-to-paused": {
+                    "summary": "Active stream paused, payments halted",
+                    "value": {
+                      "id": "stream_lf3k9z",
+                      "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                      "rate": "120 XLM/month",
+                      "status": "paused",
+                      "allowed_actions": [
+                        "start",
+                        "stop"
+                      ],
+                      "created_at": "2024-01-15T10:00:00.000Z",
+                      "settlement": null
+                    }
+                  },
+                  "high-value-paused": {
+                    "summary": "High-value USDC stream paused",
+                    "value": {
+                      "id": "stream_q8r4s5",
+                      "recipient": "GDEF1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFGH",
+                      "rate": "5000 USDC/month",
+                      "status": "paused",
+                      "allowed_actions": ["start", "stop"],
+                      "created_at": "2024-02-01T09:00:00.000Z",
+                      "settlement": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict \u2014 stream is not in `active` status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_STATE_TRANSITION",
+                    "message": "Cannot pause a stream that is not active.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v2/streams/{id}/settle": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream_lf3k9z"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "settleStreamV2",
+        "summary": "Settle a payment stream",
+        "description": "Finalises the stream's payment balance and records settlement details. Can only be called on a stream in `ended` status. Populates the `settlement` field with amount, currency, and timestamp.",
+        "tags": [
+          "Streams"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stream settled successfully. The `settlement` field is now populated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamV2"
+                },
+                "examples": {
+                  "success": {
+                    "summary": "Ended stream settled with XLM balance",
+                    "value": {
+                      "id": "stream_lf3k9z",
+                      "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                      "rate": "120 XLM/month",
+                      "status": "ended",
+                      "allowed_actions": [],
+                      "created_at": "2024-01-15T10:00:00.000Z",
+                      "settlement": {
+                        "settled_at": "2024-02-01T12:00:00.000Z",
+                        "amount": "360 XLM",
+                        "currency": "XLM"
+                      }
+                    }
+                  },
+                  "zero-balance": {
+                    "summary": "Stream settled with zero outstanding balance",
+                    "value": {
+                      "id": "stream_q8r4s5",
+                      "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                      "rate": "10 XLM/day",
+                      "status": "ended",
+                      "allowed_actions": [],
+                      "created_at": "2024-01-20T09:00:00.000Z",
+                      "settlement": {
+                        "settled_at": "2024-01-20T09:05:00.000Z",
+                        "amount": "0 XLM",
+                        "currency": "XLM"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict \u2014 stream is not in `ended` status or has already been settled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "not-ended": {
+                    "summary": "Stream must be ended before settlement",
+                    "value": {
+                      "error": {
+                        "code": "INVALID_STATE_TRANSITION",
+                        "message": "Cannot settle a stream that is not in ended status.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "already-settled": {
+                    "summary": "Stream has already been settled",
+                    "value": {
+                      "error": {
+                        "code": "ALREADY_SETTLED",
+                        "message": "This stream has already been settled.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
         }
       }
     },
@@ -1487,7 +3385,9 @@
         "summary": "Receive a dead-letter-queue webhook event",
         "description": "Accepts failed webhook events for reprocessing. No authentication required (secured at the network/gateway level).",
         "security": [],
-        "tags": ["Webhooks"],
+        "tags": [
+          "Webhooks"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -1495,7 +3395,10 @@
               "schema": {
                 "type": "object",
                 "description": "Arbitrary webhook event payload.",
-                "example": { "event": "payment.failed", "id": "evt_001" }
+                "example": {
+                  "event": "payment.failed",
+                  "id": "evt_001"
+                }
               }
             }
           }
@@ -1507,16 +3410,25 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["received"],
+                  "required": [
+                    "received"
+                  ],
                   "properties": {
-                    "received": { "type": "boolean", "example": true }
+                    "received": {
+                      "type": "boolean",
+                      "example": true
+                    }
                   }
                 }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/400" },
-          "500": { "$ref": "#/components/responses/500" }
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
         }
       }
     },
@@ -1525,19 +3437,28 @@
         "operationId": "listWebhookDeliveries",
         "summary": "List webhook delivery attempts",
         "security": [],
-        "tags": ["Webhooks"],
+        "tags": [
+          "Webhooks"
+        ],
         "parameters": [
           {
             "name": "limit",
             "in": "query",
-            "description": "Number of records to return (1–100, default 20).",
-            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+            "description": "Number of records to return (1\u2013100, default 20).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
           },
           {
             "name": "cursor",
             "in": "query",
             "description": "Opaque pagination cursor from a previous response.",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1547,18 +3468,137 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["deliveries", "cursor", "limit"],
+                  "required": [
+                    "deliveries",
+                    "cursor",
+                    "limit"
+                  ],
                   "properties": {
-                    "deliveries": { "type": "array", "items": { "type": "object" } },
-                    "cursor": { "type": ["string", "null"] },
-                    "limit": { "type": "integer" }
+                    "deliveries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "limit": {
+                      "type": "integer"
+                    }
                   }
                 }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/400" },
-          "500": { "$ref": "#/components/responses/500" }
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/webhooks/health": {
+      "get": {
+        "summary": "Webhook delivery system health",
+        "description": "Returns the health status of the webhook delivery system along with subscription and delivery statistics.",
+        "responses": {
+          "200": {
+            "description": "Health status retrieved",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "healthy": {
+                    "summary": "All systems healthy",
+                    "value": {
+                      "status": "ok",
+                      "checked_at": "2026-07-26T12:00:00.000Z",
+                      "subscriptions": {
+                        "total": 42,
+                        "active": 42,
+                        "degraded": 0,
+                        "disabled": 0
+                      },
+                      "delivery_stats": {
+                        "total": 1500,
+                        "delivered": 1498,
+                        "failed": 2,
+                        "pending": 0,
+                        "dlq": 0,
+                        "success_rate_pct": 99.87
+                      }
+                    }
+                  },
+                  "degraded": {
+                    "summary": "Some subscriptions degraded",
+                    "value": {
+                      "status": "degraded",
+                      "checked_at": "2026-07-26T12:00:00.000Z",
+                      "subscriptions": {
+                        "total": 42,
+                        "active": 40,
+                        "degraded": 2,
+                        "disabled": 0
+                      },
+                      "delivery_stats": {
+                        "total": 1500,
+                        "delivered": 1490,
+                        "failed": 8,
+                        "pending": 2,
+                        "dlq": 3,
+                        "success_rate_pct": 99.33
+                      }
+                    }
+                  },
+                  "unhealthy": {
+                    "summary": "More than 50% of subscriptions degraded or disabled",
+                    "value": {
+                      "status": "unhealthy",
+                      "checked_at": "2026-07-26T12:00:00.000Z",
+                      "subscriptions": {
+                        "total": 10,
+                        "active": 3,
+                        "degraded": 4,
+                        "disabled": 3
+                      },
+                      "delivery_stats": {
+                        "total": 200,
+                        "delivered": 120,
+                        "failed": 50,
+                        "pending": 30,
+                        "dlq": 15,
+                        "success_rate_pct": 60
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve health stats",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "internalError": {
+                    "summary": "Unexpected error retrieving health",
+                    "value": {
+                      "error": {
+                        "code": "INTERNAL_SERVER_ERROR",
+                        "message": "Failed to retrieve webhook health stats.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -1567,14 +3607,19 @@
         "operationId": "adminRedeliverWebhook",
         "summary": "Force-redeliver a webhook event",
         "description": "Creates a new delivery for an existing delivery ID, reusing the original endpoint and event payload.\n\n**Auth:** Internal-service HMAC or admin JWT required.\n\n**Data availability:** The original delivery must have full event/endpoint snapshots (deliveries created after snapshot support shipped).\n\n**Idempotency:** Not enforced at the endpoint level; each call creates a new delivery.",
-        "tags": ["Webhooks", "Admin"],
+        "tags": [
+          "Webhooks",
+          "Admin"
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["deliveryId"],
+                "required": [
+                  "deliveryId"
+                ],
                 "properties": {
                   "deliveryId": {
                     "type": "string",
@@ -1593,11 +3638,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": ["deliveryId", "originalDeliveryId"],
+                      "required": [
+                        "deliveryId",
+                        "originalDeliveryId"
+                      ],
                       "properties": {
                         "deliveryId": {
                           "type": "string",
@@ -1623,10 +3673,102 @@
               }
             }
           },
-          "400": { "$ref": "#/components/responses/400" },
-          "401": { "$ref": "#/components/responses/401" },
-          "404": { "$ref": "#/components/responses/404" },
-          "500": { "$ref": "#/components/responses/500" }
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/admin/pause-by-sender": {
+      "post": {
+        "operationId": "adminPauseBySender",
+        "summary": "Emergency-pause all streams by sender",
+        "description": "Pauses all active payment streams belonging to the given sender address. Gated by admin auth \u2014 only the configured admin address may call this.\n\nNon-active streams (draft, paused, ended) are silently skipped.\n\n**Auth:** Admin wallet address via `Actor-Wallet-Address` header or JWT.\n\n**Idempotency:** Not enforced; repeat calls are safe (already-paused streams are skipped).",
+        "tags": [
+          "Admin"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "senderAddress"
+                ],
+                "properties": {
+                  "senderAddress": {
+                    "type": "string",
+                    "description": "Stellar wallet address of the sender whose streams should be paused.",
+                    "example": "GCVVMU4QAB7O6TZCZMF4FPL2KOHVPR2SJNX5O3H6X5Y5QK6HZ"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Streams paused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "paused",
+                        "count",
+                        "senderAddress"
+                      ],
+                      "properties": {
+                        "paused": {
+                          "type": "array",
+                          "description": "Array of streams that were paused by this request.",
+                          "items": {
+                            "$ref": "#/components/schemas/Stream"
+                          }
+                        },
+                        "count": {
+                          "type": "integer",
+                          "description": "Number of streams paused."
+                        },
+                        "senderAddress": {
+                          "type": "string",
+                          "description": "The sender address that was targeted."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
         }
       }
     },
@@ -1636,14 +3778,18 @@
         "summary": "Sign a payload via KMS (debug only)",
         "description": "**Non-production only.** Returns a base64-encoded signature for the given payload. Returns 403 in production.",
         "security": [],
-        "tags": ["Debug"],
+        "tags": [
+          "Debug"
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["payload"],
+                "required": [
+                  "payload"
+                ],
                 "properties": {
                   "payload": {
                     "type": "string",
@@ -1662,7 +3808,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["signature"],
+                  "required": [
+                    "signature"
+                  ],
                   "properties": {
                     "signature": {
                       "type": "string",
@@ -1674,19 +3822,47 @@
               }
             }
           },
-          "400": { "$ref": "#/components/responses/400" },
-          "403": { "$ref": "#/components/responses/403" },
-          "500": { "$ref": "#/components/responses/500" }
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
         }
       }
     }
   },
   "tags": [
-    { "name": "Activity", "description": "Activity event log" },
-    { "name": "Auth", "description": "Wallet-based authentication flow" },
-    { "name": "Streams", "description": "Payment stream management (v2)" },
-    { "name": "Streams v1", "description": "Payment stream management (v1, deprecated — use Streams)" },
-    { "name": "Webhooks", "description": "Webhook ingestion and delivery history" },
-    { "name": "Debug", "description": "Non-production debugging utilities" }
+    {
+      "name": "Activity",
+      "description": "Activity event log"
+    },
+    {
+      "name": "Auth",
+      "description": "Wallet-based authentication flow"
+    },
+    {
+      "name": "Streams",
+      "description": "Payment stream management (v2)"
+    },
+    {
+      "name": "Streams v1",
+      "description": "Payment stream management (v1, deprecated \u2014 use Streams)"
+    },
+    {
+      "name": "Webhooks",
+      "description": "Webhook ingestion and delivery history"
+    },
+    {
+      "name": "Admin",
+      "description": "Admin-only emergency and maintenance operations"
+    },
+    {
+      "name": "Debug",
+      "description": "Non-production debugging utilities"
+    }
   ]
 }

@@ -232,3 +232,99 @@ describe('ReconciliationService', () => {
     });
   });
 });
+
+describe('ReconciliationService abort signal', () => {
+  let service: ReconciliationService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = new ReconciliationService();
+  });
+
+  const dbStream = (id: string) => ({
+    id, recipient_address: 'r', total_amount: '100', released_amount: '50',
+    status: 'ACTIVE', last_sync_ledger: 0,
+  });
+
+  it('stops before checking provided streams when already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const report = await service.runReconciliation({
+      dbStreams: [dbStream('s1')],
+      dryRun: true,
+      signal: controller.signal,
+    });
+
+    expect(report.totalStreamsChecked).toBe(0);
+    expect(report.status).toBe('FAILED');
+    expect(report.errors[0].error).toContain('aborted');
+    expect(onChainClient.fetchStream).not.toHaveBeenCalled();
+  });
+
+  it('stops mid-loop over provided streams when the signal fires', async () => {
+    const controller = new AbortController();
+    (onChainClient.fetchStream as jest.Mock).mockImplementation(async () => {
+      controller.abort();
+      return { id: 's1', total_amount: 100n, released_amount: 50n, status: ContractStreamStatus.ACTIVE };
+    });
+
+    const report = await service.runReconciliation({
+      dbStreams: [dbStream('s1'), dbStream('s2')],
+      dryRun: true,
+      signal: controller.signal,
+    });
+
+    expect(report.totalStreamsChecked).toBe(1);
+    expect(report.status).toBe('FAILED');
+    expect(onChainClient.fetchStream).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops before paginating when already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const report = await service.runReconciliation({ dryRun: true, signal: controller.signal });
+
+    expect(report.totalStreamsChecked).toBe(0);
+    expect(report.status).toBe('FAILED');
+    expect(dbClient.getStreams).not.toHaveBeenCalled();
+  });
+
+  it('stops mid-page in the paginated path when the signal fires', async () => {
+    const controller = new AbortController();
+    (dbClient.getStreams as jest.Mock).mockResolvedValue([dbStream('s1'), dbStream('s2')]);
+    (onChainClient.fetchStream as jest.Mock).mockImplementation(async () => {
+      controller.abort();
+      return { id: 's1', total_amount: 100n, released_amount: 50n, status: ContractStreamStatus.ACTIVE };
+    });
+
+    const report = await service.runReconciliation({ dryRun: true, signal: controller.signal });
+
+    expect(report.totalStreamsChecked).toBe(1);
+    expect(report.status).toBe('FAILED');
+    expect(onChainClient.fetchStream).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips the last-run-status write when aborted, and writes it otherwise', async () => {
+    const controller = new AbortController();
+    (onChainClient.fetchStream as jest.Mock).mockImplementation(async () => {
+      controller.abort();
+      return { id: 's1', total_amount: 100n, released_amount: 50n, status: ContractStreamStatus.ACTIVE };
+    });
+
+    await service.runReconciliation({
+      dbStreams: [dbStream('s1'), dbStream('s2')],
+      dryRun: false,
+      signal: controller.signal,
+    });
+    expect(dbClient.updateLastRunStatus).not.toHaveBeenCalled();
+
+    jest.clearAllMocks();
+    (onChainClient.fetchStream as jest.Mock).mockResolvedValue({
+      id: 's1', total_amount: 100n, released_amount: 50n, status: ContractStreamStatus.ACTIVE,
+    });
+    await service.runReconciliation({ dbStreams: [dbStream('s1')], dryRun: false });
+    expect(dbClient.updateLastRunStatus).toHaveBeenCalledTimes(1);
+  });
+});

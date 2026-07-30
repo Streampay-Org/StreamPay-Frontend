@@ -41,6 +41,7 @@ The application will fail to boot without these required variables:
 - `STELLAR_NETWORK` - Network selection: `testnet` or `mainnet`
 - `JWT_SECRET` - JWT signing secret (minimum 32 characters)
 - `ALLOWED_ORIGINS` - Comma-separated list of allowed browser origins for API requests
+- `CANARY_PERCENTAGE` - Optional integer from 0 to 100 that samples requests into the canary path; sampled traffic receives the `X-Canary: true` header
 
 ### Setup
 
@@ -67,6 +68,7 @@ The application will fail to boot without these required variables:
 - **Fail-fast validation**: Application refuses to start with invalid configuration
 - **No silent defaults**: Never falls back to mainnet automatically
 - **Explicit CORS allowlist**: Public API origin access is controlled by `ALLOWED_ORIGINS`
+- **Deterministic canary routing**: `CANARY_PERCENTAGE` can sample requests by tenant/user hash so a known percentage of traffic is tagged for canary review without changing the normal request path
 - **CI guardrails**: CI is enforced to use testnet only
 - **Secret redaction**: All secrets are automatically redacted from logs
 - **UI safety labels**: Testnet assets are clearly labeled to prevent confusion
@@ -98,6 +100,13 @@ transition table and invariants.
 - Mid-month starts and last-day pauses are prorated using inclusive UTC days.
 - Short months use actual day counts (no 30/32-day months).
 - Local time display may shift with DST; calculations remain UTC.
+
+## Webhook input validation
+
+`POST /api/webhooks` now validates request bodies with a strict Zod schema.
+Requests must include a non-empty `eventType` string. Optional fields are
+`eventId`, `timestamp` (ISO 8601), `source`, `data`, `metadata`, and `headers`.
+Unknown top-level fields now return HTTP 400 with `INVALID_INPUT`.
 
 ## Horizon/Soroban resilience notes
 
@@ -160,9 +169,11 @@ App will be at `http://localhost:3000`.
 | `npm run build`| Production build      |
 | `npm start`    | Run production build  |
 | `npm test`     | Run Jest tests        |
+| `npm test -- --runInBand tests/contract.test.ts` | Run OpenAPI contract shape verification |
 | `npm run test:e2e` | Run HTTP lifecycle E2E tests |
 | `npm run lint` | Next.js ESLint        |
 | `npm run reconcile` | Run nightly reconciliation job |
+| `npm run recon:cli` | Run on-demand reconciliation CLI for a single stream |
 
 ## CI/CD
 
@@ -253,7 +264,10 @@ streampay-frontend/
 │   ├── layout.tsx
 │   ├── page.tsx
 │   ├── page.test.tsx
-│   └── globals.css
+│   ├── globals.css
+│   └── help/
+│       ├── page.tsx        ← Help & FAQ page (RSC)
+│       └── page.test.tsx
 ├── next.config.ts
 ├── tsconfig.json
 ├── jest.config.js
@@ -281,11 +295,20 @@ Wallet-based auth uses a challenge/verify flow:
 |--------|------|------|-------------|
 | `GET` | `/api/auth/wallet` | — | Issue wallet challenge |
 | `POST` | `/api/auth/wallet` | — | Verify signature, get token |
+| `GET` | `/api/auth/wallet/health` | — | Wallet-auth subsystem health probe |
 | `GET` | `/api/v2/streams` | Bearer | List streams (v2 shape) |
 | `POST` | `/api/v2/streams` | Bearer | Create a stream |
 | `POST` | `/api/webhooks/dlq` | — | Receive DLQ webhook events |
 | `GET` | `/api/webhooks/deliveries` | — | List delivery attempts |
 | `POST` | `/api/debug/kms-sign` | — | Sign payload via KMS (non-prod only) |
+| `POST` | `/api/internal/reconciliation` | HMAC | Trigger full or scoped reconciliation |
+| `POST` | `/api/internal/reconciliation/nightly` | HMAC | Run the nightly reconciliation job |
+| `GET` | `/api/internal/reconciliation/diff/:id` | HMAC | Per-stream DB vs on-chain diff |
+
+> **Internal routes** (`/api/internal/*`) require HMAC-signed service-to-service headers.
+> Callers must be in the `allowedServices` list (`ops-automation`, `reconciliation-worker`).
+> Any auth failure returns `404` to conceal the route from unauthenticated scanners.
+> See [docs/internal-service-auth.md](docs/internal-service-auth.md) for the signing scheme.
 
 ### Error envelope
 
@@ -337,15 +360,20 @@ Quick links to the long-form docs under [docs/](docs/):
 - [Architecture overview](docs/architecture.md)
 - [API client usage](docs/api-client-usage.md)
 - [Stream state glossary](docs/stream-state-glossary.md)
+- [Contract events panel](docs/contract-events-panel.md)
 - [Error codes reference](docs/error-codes.md)
 - [Testing guide](docs/testing-guide.md)
 - [Glossary](docs/glossary.md)
+- [HTTP caching (ETag / 304)](docs/caching.md)
 - [State machine](docs/STATE_MACHINE.md)
 - [Network security](docs/network-security.md)
 - [Privacy](docs/PRIVACY.md)
 - [Reconciliation runbook](docs/reconciliation-runbook.md)
-
-See also [CONTRIBUTING.md](CONTRIBUTING.md) and
+- [Initial render performance](docs/performance-initial-render.md)
+- [StreamTypeChip color-blind patterns](docs/streamtypechip-cb-patterns.md) — `status` prop & texture overlay API
+- [StreamTypeChip focus accessibility](docs/streamtypechip-focus-accessibility.md)
+- [Help & FAQ page](/help) — in-app support page at `app/help/page.tsx`
+- [Exports access logs](docs/api/exports-access-logs.md) — structured per-request access logs for `/api/exports`
 [SECURITY.md](SECURITY.md) in the repository root.
 
 ## Troubleshooting
@@ -371,6 +399,38 @@ and the runbooks under [docs/runbooks/](docs/runbooks).
 ## License
 
 MIT
+
+## Onboarding tour
+
+New users see a 5-step `WelcomeTour` modal the first time they land on the home page. The tour covers:
+
+1. What StreamPay is and how streaming payments work.
+2. Connecting a Stellar wallet via the challenge/signature flow.
+3. Creating a payment stream (recipient, amount, dates).
+4. Tracking streams — statuses, vested balance, next action.
+5. Withdrawing vested funds and understanding cancellation.
+
+**Implementation**
+
+| File | Role |
+|------|------|
+| `app/components/WelcomeTour.tsx` | Multi-step modal component. Exports `WelcomeTour`, `TOUR_STEPS`, and `WELCOME_TOUR_KEY`. |
+| `app/components/OnboardingManager.tsx` | Client component mounted in `app/page.tsx`. Shows the tour on first visit, then a plain banner on subsequent visits until both are dismissed. |
+| `app/globals.css` | `.welcome-tour-overlay`, `.welcome-tour`, `.welcome-tour__*` classes. |
+
+**Behaviour**
+
+- **First visit** — the tour modal appears. Clicking "Get started" (last step) or "Skip tour" dismisses it and writes `streampay:welcome-tour-dismissed` to `localStorage`. The plain banner is also suppressed after the tour is seen.
+- **Subsequent visits (tour seen, banner not dismissed)** — the plain banner is shown.
+- **All dismissed** — nothing is rendered.
+- Pressing **Escape** closes the tour. **ArrowRight / ArrowDown** advance, **ArrowLeft / ArrowUp** go back. Clicking a dot jumps to that step. Clicking the backdrop dismisses.
+- Pressing **?** anywhere in the app opens the Keyboard Shortcuts overlay, listing all available shortcuts. Press **?** again or **Escape** to close it.
+
+**Testing**
+
+```bash
+npx jest app/components/WelcomeTour.test.tsx app/components/OnboardingManager.test.tsx
+```
 
 ## Smoke tests
 

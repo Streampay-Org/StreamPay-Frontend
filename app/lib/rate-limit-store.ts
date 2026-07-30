@@ -19,7 +19,7 @@ export class InMemoryRateLimitStore implements RateLimitStore {
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly maxTokensPerBucket = 1000) {
-    if (typeof setInterval !== "undefined") {
+    if (process.env.NODE_ENV !== "test" && typeof setInterval !== "undefined") {
       this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
     }
   }
@@ -92,6 +92,11 @@ let globalStore: RateLimitStore | null = null;
 export function getRateLimitStore(): RateLimitStore {
   if (!globalStore) {
     globalStore = new InMemoryRateLimitStore();
+    if (process.env.NODE_ENV === "test") {
+      // Disable periodic cleanup during tests to avoid timeouts
+      // @ts-ignore – accessing private member via any
+      disableCleanupForTests();
+    }
   }
   return globalStore;
 }
@@ -103,3 +108,13 @@ export function setRateLimitStore(store: RateLimitStore): void {
 export function resetRateLimitStore(): void {
   globalStore = null;
 }
+
+/** Disable the cleanup interval for test environments */
+export function disableCleanupForTests(): void {
+  if (globalStore && (globalStore as any).cleanupInterval) {
+    clearInterval((globalStore as any).cleanupInterval);
+    (globalStore as any).cleanupInterval = null;
+  }
+}
+
+

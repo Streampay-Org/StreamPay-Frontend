@@ -24,11 +24,40 @@ The solution uses a three-tier strategy:
 
 - `app/utils/theme-noflash.ts` - Core theme utilities
 - `app/utils/theme-noflash.test.ts` - Comprehensive test suite
+- `app/components/SplashScreenWrapper.tsx` - Client-component boundary that
+  owns the `next/dynamic(..., { ssr: false })` call for `SplashScreen` (see
+  below)
+- `app/components/SplashScreenWrapper.test.tsx` - Tests for the wrapper
+- `app/layout.test.tsx` - Regression tests for `RootLayout` composition
 
 #### Modified Files
 
-- `app/layout.tsx` - Added inline script for theme initialization
+- `app/layout.tsx` - Added inline script for theme initialization; fixed to
+  keep `RootLayout` buildable (see "Layout fixes" below)
 - `app/globals.css` - Added light theme CSS variables
+
+### Layout fixes (this change)
+
+While verifying the no-flash script end-to-end, `app/layout.tsx` failed a
+production build (`next build`) for two reasons unrelated to the theme
+script itself:
+
+1. **`ssr: false` is not allowed with `next/dynamic` in a Server
+   Component.** `app/layout.tsx` is a Server Component by default, but it
+   called `dynamic(() => import("./components/SplashScreen"), { ssr: false
+   })` directly at module scope. Next.js (App Router) requires that call
+   site to live inside a Client Component. Fixed by moving the `dynamic()`
+   call into a new `"use client"` wrapper, `SplashScreenWrapper`, following
+   the same pattern already used by `CommandPaletteWrapper`. `RootLayout`
+   now renders `<SplashScreenWrapper />` and no longer imports
+   `next/dynamic` directly.
+2. **`<AppBottomNav />` was referenced in JSX without an import**, which
+   throws `ReferenceError: AppBottomNav is not defined` at render/build
+   time. Added `import { AppBottomNav } from "./components/AppBottomNav";`.
+
+Neither change affects the no-flash script's behavior, API, or the visible
+theme output — they were required to make the existing, already-correct
+no-flash implementation actually reachable via a working build.
 
 ### API Reference
 
