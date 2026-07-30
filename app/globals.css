@@ -1042,6 +1042,142 @@ a:hover {
   text-transform: uppercase;
 }
 
+/* ─── StreamRow Responsive Breakpoints (Issue #1032) ─────────────────────
+ *
+ * Breakpoint table (mirrors FIGMA-BREAKPOINTS-MODAL-SPEC.md):
+ *   mobile     0–479px    single column, default
+ *   phablet    480–767px  single column, expanded touch targets (44px)
+ *   tablet     768–1023px single column, wider side margins
+ *   desktop    1024–1279px 2-col grid: identity+meta / progress+action
+ *   wide       1280–1439px 2-col grid, relaxed horizontal padding
+ *   ultrawide  1440px+    3-col grid, max-width 72rem for stream-list
+ *
+ * All values use design tokens or raw WCAG-compliant minimums.
+ * No changes are required to StreamRow.tsx — layout is CSS-only.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+/* ── Phablet (480px+): expanded touch targets ───────────────────────────── */
+@media (min-width: 30rem) {
+  /* 44px min touch target for the primary action button (WCAG 2.1 SC 2.5.5) */
+  .stream-row__action-wrap .button {
+    min-height: 2.75rem; /* 44px */
+    min-width: 2.75rem;  /* 44px */
+    padding-block: var(--space-3);
+  }
+}
+
+/* ── Desktop (1024px+): 2-column card layout ────────────────────────────── */
+@media (min-width: 64rem) {
+  /*
+   * Switch from a single-column stack to a 2-column grid:
+   *   col 1 (1.6fr): identity + status badge (stream-row__primary)
+   *   col 2 (1fr):   rate/status meta + progress bar (stream-row__meta
+   *                  and .stream-progress)
+   * The action button row spans the full card width below both columns.
+   */
+  .stream-row {
+    grid-template-columns: minmax(0, 1.6fr) minmax(16rem, 1fr);
+    grid-template-rows: auto auto;
+    column-gap: var(--space-8);
+    row-gap: var(--space-4);
+    align-items: center;
+  }
+
+  /* col 1, row 1 */
+  .stream-row__primary {
+    grid-column: 1;
+    grid-row: 1;
+    align-items: center;
+    grid-template-columns: 1fr auto; /* identity | badge */
+  }
+
+  /* col 2, row 1 — meta sits beside the identity block */
+  .stream-row__meta {
+    grid-column: 2;
+    grid-row: 1;
+    /* Expand to 3-col meta on desktop: Rate | Status | Burn-down */
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  /* col 2, row 2 — progress bar sits below meta in col 2 */
+  .stream-row__progress {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  /* action-wrap spans full width, row 2, col 1 */
+  .stream-row__action-wrap {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: end;
+  }
+}
+
+/* ── Wide (1280px+): relax horizontal padding ───────────────────────────── */
+@media (min-width: 80rem) {
+  .stream-row {
+    padding-inline: var(--space-8);
+  }
+}
+
+/* ── Ultrawide (1440px+): constrain stream-list, 3-col meta ─────────────── */
+@media (min-width: 90rem) {
+  /*
+   * Cap the stream list at 72rem and centre it so lines don't span
+   * the full ultra-wide viewport (WCAG 2.1 SC 1.4.8 / 65ch guideline).
+   */
+  .stream-list {
+    max-width: 72rem;
+    margin-inline: auto;
+  }
+
+  /*
+   * On ultrawide, the action button moves inline with the second column
+   * instead of spanning below, keeping the card height compact.
+   */
+  .stream-row {
+    grid-template-columns: minmax(0, 1.6fr) minmax(16rem, 1fr) auto;
+    grid-template-rows: auto;
+    align-items: center;
+  }
+
+  .stream-row__primary {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .stream-row__meta {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  /* Progress sits below the full 3-col row on ultrawide */
+  .stream-row__progress {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  /* Action button: col 3, row 1 — inline with meta */
+  .stream-row__action-wrap {
+    grid-column: 3;
+    grid-row: 1;
+    align-self: center;
+  }
+
+  /* Paragraph/description text capped at 65ch for readability */
+  .stream-row__schedule {
+    max-width: 42ch;
+  }
+}
+
+/* ── Compact density override for desktop+ ───────────────────────────────── */
+@media (min-width: 64rem) {
+  .stream-row--compact {
+    column-gap: var(--space-6);
+  }
+}
+
 /* ─── CreateStreamForm — design tokens v7 ────────────────────────────────
  *
  * All spacing, typography, and radius values use design tokens from :root.

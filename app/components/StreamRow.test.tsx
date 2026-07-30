@@ -667,4 +667,226 @@ describe("StreamRow", () => {
       }
     });
   });
+
+  /**
+   * Responsive breakpoint audit (Issue #1032).
+   *
+   * jsdom does not process stylesheets, so viewport-driven layout changes
+   * cannot be tested by reading computed styles.  Instead these tests assert
+   * the DOM structure and BEM class/attribute hooks that the responsive CSS
+   * rules target.  The strategy mirrors the existing design-tokens suite:
+   *   - Verify the CSS selectors exist (correct class names on elements).
+   *   - Verify semantic structure is preserved across all breakpoints.
+   *   - Verify WCAG touch-target and accessibility contracts hold.
+   *
+   * Layout correctness at specific viewport widths must be validated in
+   * browser-level tests (e.g. Playwright / Chromatic visual regression).
+   */
+  describe("responsive breakpoints audit (Issue #1032)", () => {
+    describe("BEM structure hooks for CSS grid layout", () => {
+      it("renders stream-row__primary for the desktop 2-col grid column 1 selector", () => {
+        const { container } = render(<StreamRow stream={baseStream} />);
+        expect(container.querySelector(".stream-row__primary")).not.toBeNull();
+      });
+
+      it("renders stream-row__meta for the desktop 2-col grid column 2 selector", () => {
+        const { container } = render(<StreamRow stream={baseStream} />);
+        expect(container.querySelector(".stream-row__meta")).not.toBeNull();
+      });
+
+      it("renders stream-row__progress (via StreamProgress) for the desktop grid row 2 selector", () => {
+        // StreamProgress renders with class .stream-progress which receives
+        // .stream-row__progress via the className prop
+        const { container } = render(<StreamRow stream={baseStream} />);
+        expect(container.querySelector(".stream-row__progress")).not.toBeNull();
+      });
+
+      it("does not render stream-row__progress when status is draft (no grid slot needed)", () => {
+        const { container } = render(<StreamRow stream={makeMockStream("draft")} />);
+        // Draft streams intentionally omit the progress bar
+        expect(container.querySelector(".stream-row__progress")).toBeNull();
+      });
+
+      it("renders stream-row__action-wrap for the desktop grid row 2 / ultrawide col 3 selector", () => {
+        const { container } = render(<StreamRow stream={baseStream} />);
+        expect(container.querySelector(".stream-row__action-wrap")).not.toBeNull();
+      });
+
+      it("stream-row__primary contains the identity block and StatusBadge (desktop 2-col layout)", () => {
+        const { container } = render(<StreamRow stream={baseStream} />);
+        const primary = container.querySelector(".stream-row__primary");
+        expect(primary).not.toBeNull();
+        expect(primary?.querySelector(".stream-row__identity")).not.toBeNull();
+        expect(primary?.querySelector(".status-badge")).not.toBeNull();
+      });
+
+      it("stream-row__meta contains dt elements for each metadata dimension", () => {
+        const { container } = render(<StreamRow stream={baseStream} />);
+        const meta = container.querySelector(".stream-row__meta");
+        const dts = meta?.querySelectorAll("dt") ?? [];
+        // At minimum: Rate, Status (Burn-down only when amounts present)
+        expect(dts.length).toBeGreaterThanOrEqual(2);
+      });
+
+      it("stream-row__meta contains 3 dt entries when burn-down amounts are present", () => {
+        // The ultrawide 3-col meta grid needs all 3 entries
+        const { container } = render(<StreamRow stream={baseStream} />);
+        const dts = container.querySelectorAll(".stream-row__meta dt");
+        expect(dts.length).toBe(3);
+      });
+
+      it("stream-row__meta contains 2 dt entries when burn-down amounts are absent", () => {
+        const streamWithoutAmounts: StreamRowData = {
+          ...makeMockStream("active"),
+          accruedAmount: undefined,
+          totalAmount: undefined,
+        };
+        const { container } = render(<StreamRow stream={streamWithoutAmounts} />);
+        const dts = container.querySelectorAll(".stream-row__meta dt");
+        expect(dts.length).toBe(2);
+      });
+
+      it.each(ALL_STATUSES)(
+        "all grid-targeted child elements are present for status=%s",
+        (status) => {
+          const { container } = render(<StreamRow stream={makeMockStream(status)} />);
+          expect(container.querySelector(".stream-row__primary")).not.toBeNull();
+          expect(container.querySelector(".stream-row__meta")).not.toBeNull();
+          expect(container.querySelector(".stream-row__action-wrap")).not.toBeNull();
+        },
+      );
+    });
+
+    describe("WCAG 2.1 touch target compliance (SC 2.5.5)", () => {
+      it("renders the action button as a <button> element (native interactive target)", () => {
+        const { container } = render(<StreamRow stream={baseStream} />);
+        const btn = container.querySelector(".stream-row__action");
+        expect(btn?.tagName).toBe("BUTTON");
+      });
+
+      it("action button is not disabled by default (usable touch target)", () => {
+        const { container } = render(<StreamRow stream={baseStream} />);
+        const btn = container.querySelector(".stream-row__action") as HTMLButtonElement | null;
+        expect(btn?.disabled).toBe(false);
+      });
+
+      it("action button wraps a <span> with the action label for accessible text", () => {
+        const { container } = render(<StreamRow stream={baseStream} />);
+        const label = container.querySelector(".stream-row__action span");
+        expect(label).not.toBeNull();
+        expect(label?.textContent).toBe("Pause");
+      });
+
+      it.each(ALL_STATUSES)(
+        "action button has non-empty text content for status=%s (touch target labelled)",
+        (status) => {
+          const { container } = render(<StreamRow stream={makeMockStream(status)} />);
+          const btn = container.querySelector(".stream-row__action");
+          expect(btn?.textContent?.trim()).not.toBe("");
+        },
+      );
+    });
+
+    describe("semantic structure preserved across all breakpoints", () => {
+      it("root element is <article> — landmark for list-item semantics", () => {
+        const { container } = render(<StreamRow stream={baseStream} />);
+        expect(container.querySelector("article.stream-row")).not.toBeNull();
+      });
+
+      it("recipient name is an <h2> — heading hierarchy preserved at all viewports", () => {
+        const { container } = render(<StreamRow stream={baseStream} />);
+        expect(container.querySelector("h2.stream-row__recipient")).not.toBeNull();
+      });
+
+      it("meta list uses <dt>/<dd> pairs — accessible definition list semantics", () => {
+        const { container } = render(<StreamRow stream={baseStream} />);
+        const dts = container.querySelectorAll(".stream-row__meta dt");
+        const dds = container.querySelectorAll(".stream-row__meta dd");
+        expect(dts.length).toBeGreaterThan(0);
+        // Each dt has a corresponding dd
+        expect(dds.length).toBe(dts.length);
+      });
+
+      it("aria-labelledby points to the recipient h2 id (screen reader row identity)", () => {
+        const { container } = render(<StreamRow stream={baseStream} />);
+        const article = container.querySelector("article.stream-row");
+        const h2 = container.querySelector("h2.stream-row__recipient");
+        expect(article?.getAttribute("aria-labelledby")).toBe(h2?.getAttribute("id"));
+      });
+
+      it("decorative elements are aria-hidden (pattern, color-stripe)", () => {
+        const { container } = render(<StreamRow stream={baseStream} />);
+        const pattern = container.querySelector(".stream-row__pattern");
+        const stripe = container.querySelector(".stream-row__color-stripe");
+        expect(pattern).toHaveAttribute("aria-hidden", "true");
+        expect(stripe).toHaveAttribute("aria-hidden", "true");
+      });
+
+      it.each(ALL_STATUSES)(
+        "stream-row article carries stream-row--%s class for CSS status hooks: status=%s",
+        (status) => {
+          const { container } = render(<StreamRow stream={makeMockStream(status)} />);
+          expect(container.querySelector("article.stream-row")).toHaveClass(
+            `stream-row--${status}`,
+          );
+        },
+      );
+    });
+
+    describe("compact density at desktop+ (breakpoint override hooks)", () => {
+      it("compact + desktop class combination does not break grid structure", () => {
+        const { container } = render(
+          <StreamRow stream={baseStream} density="compact" />,
+        );
+        const article = container.querySelector("article.stream-row");
+        // Both modifiers present so both breakpoint rules apply
+        expect(article).toHaveClass("stream-row--compact");
+        // Core grid children still render
+        expect(container.querySelector(".stream-row__primary")).not.toBeNull();
+        expect(container.querySelector(".stream-row__meta")).not.toBeNull();
+        expect(container.querySelector(".stream-row__action-wrap")).not.toBeNull();
+      });
+
+      it.each(ALL_STATUSES)(
+        "compact density preserves all grid child elements for status=%s",
+        (status) => {
+          const { container } = render(
+            <StreamRow stream={makeMockStream(status)} density="compact" />,
+          );
+          expect(container.querySelector(".stream-row__primary")).not.toBeNull();
+          expect(container.querySelector(".stream-row__meta")).not.toBeNull();
+          expect(container.querySelector(".stream-row__action-wrap")).not.toBeNull();
+        },
+      );
+    });
+
+    describe("ultrawide max-width hook (.stream-list class contract)", () => {
+      it("stream-row renders inside an article which can be placed in a .stream-list container", () => {
+        // Verify the article output is compatible with the .stream-list wrapper
+        // that the ultrawide CSS targets for max-width centering.
+        const { container } = render(<StreamRow stream={baseStream} />);
+        const article = container.querySelector("article.stream-row");
+        expect(article).not.toBeNull();
+        // The article tag type is correct for list item semantics
+        expect(article?.tagName).toBe("ARTICLE");
+      });
+    });
+
+    describe("schedule line-length clamp (ultrawide readability)", () => {
+      it("renders stream-row__schedule with readable text content", () => {
+        const { container } = render(<StreamRow stream={baseStream} />);
+        const schedule = container.querySelector(".stream-row__schedule");
+        expect(schedule).not.toBeNull();
+        expect(schedule?.textContent?.trim()).toBe(baseStream.schedule);
+      });
+
+      it.each(ALL_STATUSES)(
+        "stream-row__schedule is present for status=%s",
+        (status) => {
+          const { container } = render(<StreamRow stream={makeMockStream(status)} />);
+          expect(container.querySelector(".stream-row__schedule")).not.toBeNull();
+        },
+      );
+    });
+  });
 });
