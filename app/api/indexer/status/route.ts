@@ -13,11 +13,19 @@
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+import { isCircuitBreakerOpen } from "@/app/lib/admin-guard";
+
 interface IndexerStatus {
   ledgerCursor: number;
   lagMs: number;
   queueDepth: number;
   syncedAt: string;
+  /**
+   * True when an admin has tripped the indexer circuit breaker via
+   * POST /api/admin/circuit-breaker. Ingestion is halted; cursor and lag
+   * are frozen at their last values and will not advance until reset.
+   */
+  breakerOpen: boolean;
 }
 
 function getIndexerStatus(): IndexerStatus {
@@ -27,6 +35,7 @@ function getIndexerStatus(): IndexerStatus {
     lagMs: Math.floor(Math.random() * 3000),
     queueDepth: Math.floor(Math.random() * 50),
     syncedAt: new Date().toISOString(),
+    breakerOpen: isCircuitBreakerOpen("indexer"),
   };
 }
 

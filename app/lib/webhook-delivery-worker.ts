@@ -11,6 +11,7 @@ import {
 } from "./webhook-delivery";
 import { webhookDeliveryStore } from "./webhook-delivery-store";
 import { webhookOutboxStore, WebhookOutboxEntry } from "./webhook-outbox";
+import { isCircuitBreakerOpen } from "./admin-guard";
 
 export class WebhookDeliveryWorker {
   private client: WebhookDeliveryClient;
@@ -49,7 +50,14 @@ export class WebhookDeliveryWorker {
     event: WebhookEvent,
     deliveryId: string,
     reissuedFrom?: string,
-  ): Promise<{ success: boolean; deliveryId: string; attempts: number; dlqed?: boolean }> {
+  ): Promise<{
+    success: boolean;
+    deliveryId: string;
+    attempts: number;
+    dlqed?: boolean;
+    /** Held by the global admin breaker — retryable once the breaker resets. */
+    deferred?: boolean;
+  }> {
     const ctx = getCorrelationContext();
     withWebhookContext(deliveryId);
     const maxAttempts = this.maxRetries;
@@ -68,6 +76,19 @@ export class WebhookDeliveryWorker {
           endpoint, event, deliveryId, attempt,
           webhookDeliveryStore.getDelivery(deliveryId)?.attempts ?? [],
         );
+
+        // ── Global admin breaker → hold, do NOT DLQ ──────────────────────────
+        // The operator paused dispatch deliberately. Leave the delivery pending
+        // so it can be retried once the breaker is reset; DLQing here would
+        // discard every in-flight event for the duration of an incident.
+        if (result.deferred) {
+          logger.warn("Webhook delivery deferred — admin circuit breaker open", {
+            delivery_id: deliveryId, endpoint_id: endpoint.id,
+            event_id: event.id, breaker: "admin.webhook",
+            correlation_id: ctx?.correlation_id,
+          });
+          return { success: false, deliveryId, attempts: 0, deferred: true };
+        }
 
         if (result.error?.includes("Circuit breaker open")) {
           webhookDeliveryStore.moveToDLQ(deliveryId, result.error);
@@ -168,6 +189,13 @@ export class WebhookDeliveryWorker {
         status: "delivered",
         attempts: result.attempts,
       });
+    } else if (result.deferred) {
+      // Admin breaker is open — return the entry to the pending pool untouched
+      // so the next drain (after the breaker resets) picks it up again.
+      webhookOutboxStore.updateOutboxEntry(entry.id, {
+        status: "pending",
+        attempts: result.attempts,
+      });
     } else if (result.dlqed) {
       webhookOutboxStore.updateOutboxEntry(entry.id, {
         status: "dlq",
@@ -187,6 +215,17 @@ export class WebhookDeliveryWorker {
    * Drain the outbox: process all pending entries
    */
   async drainOutbox(limit: number = 100): Promise<void> {
+    // Skip the whole drain while the admin breaker is open. Without this the
+    // worker would churn every pending entry through processDelivery once per
+    // tick, only to defer each one back to pending.
+    if (isCircuitBreakerOpen("webhook")) {
+      logger.warn("Outbox drain skipped — admin circuit breaker open", {
+        breaker: "admin.webhook",
+        correlation_id: getCorrelationContext()?.correlation_id,
+      });
+      return;
+    }
+
     const entries = webhookOutboxStore.getPendingOutboxEntries(limit);
 
     logger.info("Draining webhook outbox", {

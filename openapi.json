@@ -26,6 +26,46 @@
       }
     },
     "schemas": {
+      "CircuitBreakerState": {
+        "type": "object",
+        "required": [
+          "open",
+          "updatedAt",
+          "updatedBy"
+        ],
+        "properties": {
+          "open": {
+            "type": "boolean",
+            "description": "True when the breaker is tripped and dispatch is halted."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "ISO-8601 timestamp of the last toggle; null if never toggled."
+          },
+          "updatedBy": {
+            "type": "string",
+            "nullable": true,
+            "description": "Admin address that last toggled this breaker; null if never toggled."
+          }
+        }
+      },
+      "CircuitBreakers": {
+        "type": "object",
+        "required": [
+          "indexer",
+          "webhook"
+        ],
+        "properties": {
+          "indexer": {
+            "$ref": "#/components/schemas/CircuitBreakerState"
+          },
+          "webhook": {
+            "$ref": "#/components/schemas/CircuitBreakerState"
+          }
+        }
+      },
       "ErrorEnvelope": {
         "type": "object",
         "required": [
@@ -3751,6 +3791,112 @@
                           "description": "The sender address that was targeted."
                         }
                       }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/admin/circuit-breaker": {
+      "get": {
+        "operationId": "adminGetCircuitBreakers",
+        "summary": "Read circuit breaker state",
+        "description": "Returns the current state of every named circuit breaker.\n\n**Auth:** Admin wallet address via `Actor-Wallet-Address` header or JWT.",
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "Current breaker state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CircuitBreakers"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
+      "post": {
+        "operationId": "adminSetCircuitBreaker",
+        "summary": "Toggle an indexer or webhook circuit breaker",
+        "description": "Trips or resets a named subsystem circuit breaker. Gated by admin auth — only the configured admin address may call this.\n\nWhen `open` is true the named subsystem halts dispatch. For the `webhook` target this means no outbound delivery is attempted and the outbox drain is skipped; pending events are **held, not discarded**, and resume when the breaker is reset. For the `indexer` target the state is surfaced on `GET /api/indexer/status` as `breakerOpen`.\n\nThis global operator-controlled breaker is distinct from the automatic per-endpoint failure breaker, which trips itself after repeated delivery failures to a single endpoint and sends that endpoint's deliveries to the DLQ.\n\n**Auth:** Admin wallet address via `Actor-Wallet-Address` header or JWT.\n\n**Idempotency:** Naturally idempotent — setting the same state twice is a no-op beyond the updated timestamp.",
+        "tags": [
+          "Admin"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "target",
+                  "open"
+                ],
+                "properties": {
+                  "target": {
+                    "type": "string",
+                    "enum": [
+                      "indexer",
+                      "webhook"
+                    ],
+                    "description": "Which subsystem breaker to toggle.",
+                    "example": "webhook"
+                  },
+                  "open": {
+                    "type": "boolean",
+                    "description": "true trips the breaker (halt dispatch); false resets it (resume).",
+                    "example": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Breaker updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CircuitBreakers"
                     }
                   }
                 }
