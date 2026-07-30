@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { LiveRegion } from "../src/components/LiveRegion";
 import { KbdHint } from "../src/components/KbdHint";
 import { EmptyState } from "../src/components/EmptyState";
+import { WalletBadgeSkeleton } from "./components/Skeleton";
 import styles from "./WalletBadge.module.css";
 
 export type WalletState = "disconnected" | "connecting" | "connected" | "error" | "disconnecting";
@@ -37,6 +38,21 @@ export interface WalletBadgeProps {
   className?: string;
   /** Whether to show a detailed empty state when disconnected */
   showEmptyState?: boolean;
+  /**
+   * When `true`, renders a themed skeleton placeholder instead of the real
+   * badge content.  Use on first paint while the wallet connection state is
+   * still being resolved (e.g. before the Freighter SDK responds).
+   *
+   * Pass `showExtendedSkeleton` alongside to also display network + balance
+   * placeholder slots, matching a fully-connected badge appearance.
+   */
+  loading?: boolean;
+  /**
+   * Controls whether the loading skeleton shows the extended network + balance
+   * placeholder slots.  Only relevant when `loading={true}`.
+   * @default false
+   */
+  showExtendedSkeleton?: boolean;
 }
 
 /**
@@ -74,6 +90,7 @@ function usePrefersReducedMotion(): boolean {
 /**
  * WalletBadge displays current wallet status and announces state changes via an ARIA live region.
  * Refactored for Issue #1072 with responsive breakpoint layout rules, design tokens, and WCAG accessibility.
+ * Issue #1073: `loading` prop renders a themed skeleton on first paint before wallet state is known.
  * Issue #1078: static fallback when `prefers-reduced-motion: reduce` is set.
  */
 export function WalletBadge({
@@ -91,6 +108,8 @@ export function WalletBadge({
   announcement,
   className = "",
   showEmptyState = false,
+  loading = false,
+  showExtendedSkeleton = false,
 }: WalletBadgeProps) {
   const [srMessage, setSrMessage] = useState<string>("");
   const prefersReducedMotion = usePrefersReducedMotion();
@@ -186,6 +205,19 @@ export function WalletBadge({
   };
 
   const isInteractive = Boolean(onClick || (state === "disconnected" && onConnect));
+
+  // ─── Loading skeleton ─────────────────────────────────────────────────────
+  // Rendered on first paint while wallet connection state is being resolved.
+  // The skeleton exactly mirrors the real badge's inline-flex layout so the
+  // page does not shift once data arrives.
+  if (loading) {
+    return (
+      <WalletBadgeSkeleton
+        showExtended={showExtendedSkeleton}
+        className={className}
+      />
+    );
+  }
 
   if (showEmptyState && state === "disconnected") {
     return (

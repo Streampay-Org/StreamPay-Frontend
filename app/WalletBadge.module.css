@@ -260,3 +260,69 @@
     transform: none;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────
+ * WalletBadge skeleton (Issue #1073)
+ * Mirrors the real badge's inline-flex shape so no layout
+ * shift occurs when the live badge replaces the placeholder.
+ * ───────────────────────────────────────────────────────────── */
+
+/* The skeleton wrapper reuses the same .badge base so dimensions,
+   padding, radius, and border are identical to the real badge. */
+:global(.wallet-badge-skeleton) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wb-gap, var(--spacing-sm, 0.5rem));
+  padding: var(--wb-pad-y, var(--spacing-xs, 0.4rem)) var(--wb-pad-x, var(--spacing-md, 0.8rem));
+  border-radius: var(--wb-radius, var(--radius-full, 9999px));
+  border: 1px solid var(--border, #374151);
+  background-color: var(--panel, #1f2937);
+  min-height: var(--size-44, 44px);
+  box-sizing: border-box;
+  /* Prevent interaction on the placeholder */
+  pointer-events: none;
+  user-select: none;
+}
+
+:global(.wallet-badge-skeleton__dot),
+:global(.wallet-badge-skeleton__label),
+:global(.wallet-badge-skeleton__network),
+:global(.wallet-badge-skeleton__balance) {
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* Responsive: mirror the real badge breakpoints */
+@media (max-width: 29.9375rem) {
+  :global(.wallet-badge-skeleton) {
+    padding: var(--spacing-xs-mobile, 0.35rem) var(--spacing-md-mobile, 0.65rem);
+    gap: var(--spacing-xs-mobile, 0.35rem);
+  }
+
+  /* Hide network + balance slots on narrow screens, matching the real badge */
+  :global(.wallet-badge-skeleton__network),
+  :global(.wallet-badge-skeleton__balance) {
+    display: none;
+  }
+
+  :global(.wallet-badge-skeleton__label) {
+    width: 72px !important;
+  }
+}
+
+@media (min-width: 64rem) {
+  :global(.wallet-badge-skeleton) {
+    padding: var(--spacing-sm-desktop, 0.45rem) var(--spacing-lg-desktop, 0.9rem);
+    gap: var(--spacing-md-desktop, 0.6rem);
+  }
+}
+
+/* Suppress animation for users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  :global(.wallet-badge-skeleton__dot),
+  :global(.wallet-badge-skeleton__label),
+  :global(.wallet-badge-skeleton__network),
+  :global(.wallet-badge-skeleton__balance) {
+    animation: none !important;
+  }
+}
