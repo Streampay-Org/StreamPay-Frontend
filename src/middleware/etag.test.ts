@@ -1,4 +1,4 @@
-import { withStrongEtag } from './etag';
+import { withStrongEtag, withStrongEtagBody, createStrongEtagFromBody } from './etag';
 
 describe('withStrongEtag', () => {
   it('generates a strong ETag and returns 200 on initial request', () => {
@@ -38,5 +38,57 @@ describe('withStrongEtag', () => {
     const response = withStrongEtag(request, data);
     expect(response.status).toBe(200);
     expect(response.headers.get('etag')).toMatch(/^"[a-f0-9]{64}"$/);
+  });
+});
+
+describe('withStrongEtagBody', () => {
+  const contentType = 'text/plain; version=0.0.4; charset=utf-8';
+  const body = '# HELP demo Demo metric\ndemo 1\n';
+
+  it('returns 200 with strong ETag, cache-control, and Content-Type', () => {
+    const request = new Request('http://localhost/api/webhooks');
+    const response = withStrongEtagBody(request, body, contentType);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('etag')).toBe(createStrongEtagFromBody(body));
+    expect(response.headers.get('etag')).toMatch(/^"[a-f0-9]{64}"$/);
+    expect(response.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate');
+    expect(response.headers.get('Content-Type')).toBe(contentType);
+  });
+
+  it('returns 304 when If-None-Match matches the body ETag', async () => {
+    const first = withStrongEtagBody(new Request('http://localhost/api/webhooks'), body, contentType);
+    const etag = first.headers.get('etag')!;
+
+    const cached = withStrongEtagBody(
+      new Request('http://localhost/api/webhooks', {
+        headers: new Headers({ 'If-None-Match': etag }),
+      }),
+      body,
+      contentType,
+    );
+
+    expect(cached.status).toBe(304);
+    expect(cached.headers.get('etag')).toBe(etag);
+    expect(cached.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate');
+    await expect(cached.text()).resolves.toBe('');
+  });
+
+  it('returns 200 with a new ETag when the body changes', () => {
+    const first = withStrongEtagBody(new Request('http://localhost/api/webhooks'), body, contentType);
+    const firstEtag = first.headers.get('etag')!;
+
+    const updatedBody = body + 'demo 2\n';
+    const second = withStrongEtagBody(
+      new Request('http://localhost/api/webhooks', {
+        headers: new Headers({ 'If-None-Match': firstEtag }),
+      }),
+      updatedBody,
+      contentType,
+    );
+
+    expect(second.status).toBe(200);
+    expect(second.headers.get('etag')).not.toBe(firstEtag);
+    expect(second.headers.get('Content-Type')).toBe(contentType);
   });
 });

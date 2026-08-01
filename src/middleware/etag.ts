@@ -24,6 +24,15 @@ export function createStrongEtag(value: unknown): string {
   return `"${hash}"`;
 }
 
+/**
+ * Strong ETag over the exact response body bytes (no JSON canonicalisation).
+ * Use for non-JSON representations such as Prometheus text exposition.
+ */
+export function createStrongEtagFromBody(body: string): string {
+  const hash = createHash("sha256").update(body).digest("hex");
+  return `"${hash}"`;
+}
+
 function normaliseEtagToken(token: string): string {
   return token.trim().replace(/^W\//i, "");
 }
@@ -75,5 +84,36 @@ export function withStrongEtag(request: Request, data: unknown): NextResponse {
   return NextResponse.json(data, {
     status: 200,
     headers: cacheHeaders,
+  });
+}
+
+/**
+ * Strong ETag / 304 helper for raw (non-JSON) response bodies.
+ *
+ * Hashes the exact body bytes so the validator remains strong for text
+ * representations such as Prometheus metrics from `GET /api/webhooks`.
+ */
+export function withStrongEtagBody(
+  request: Request,
+  body: string,
+  contentType: string,
+): NextResponse {
+  const etag = createStrongEtagFromBody(body);
+  const cacheHeaders = createCacheHeaders(etag);
+  const ifNoneMatch = request.headers?.get("if-none-match") ?? null;
+
+  if (isIfNoneMatchMatch(etag, ifNoneMatch)) {
+    return new NextResponse(null, {
+      status: 304,
+      headers: cacheHeaders,
+    });
+  }
+
+  return new NextResponse(body, {
+    status: 200,
+    headers: {
+      "Content-Type": contentType,
+      ...cacheHeaders,
+    },
   });
 }
