@@ -2,21 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { registry, webhookCounter, webhookDuration } from "@/src/metrics/registry";
 import { logger } from "@/app/lib/logger";
 import { webhookPayloadSchema } from "@/src/validators/webhooks";
+import { applyRateLimit } from "@/src/middleware/rateLimit";
+import { withStrongEtagBody } from "@/src/middleware/etag";
 
 // Prometheus metrics endpoint
 export async function GET(request: Request) {
   // Per-user rate limit — identity: API key > JWT wallet sub > IP.
-  const rateLimited = await applyRateLimit(request, 'webhooks', 'GET');
+  const rateLimited = await applyRateLimit(request, "webhooks", "GET");
   if (rateLimited) return rateLimited;
 
   try {
     const metrics = await registry.metrics();
-    return new NextResponse(metrics, {
-      status: 200,
-      headers: {
-        "Content-Type": registry.contentType,
-      },
-    });
+    // Strong ETag / 304 for conditional scrapes (Issue #1110)
+    return withStrongEtagBody(request, metrics, registry.contentType);
   } catch (error) {
     logger.error("Failed to generate metrics", { error });
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
@@ -27,7 +25,7 @@ export async function GET(request: Request) {
 export async function POST(req: NextRequest) {
   // Per-user rate limit before body parse / processing so exhausted callers
   // cannot spend CPU on validation or metrics work.
-  const rateLimited = await applyRateLimit(req, 'webhooks', 'POST');
+  const rateLimited = await applyRateLimit(req, "webhooks", "POST");
   if (rateLimited) return rateLimited;
 
   const start = process.hrtime();

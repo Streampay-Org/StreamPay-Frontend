@@ -7,6 +7,10 @@ jest.mock("@/app/lib/logger", () => ({
   },
 }));
 
+jest.mock("@/src/middleware/rateLimit", () => ({
+  applyRateLimit: jest.fn(async () => null),
+}));
+
 function makeRequest(body: unknown, shouldThrow = false) {
   return {
     json: async () => {
