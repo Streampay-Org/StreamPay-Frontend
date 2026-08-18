@@ -18,6 +18,7 @@ import { PageError } from "../components/PageError";
 import { EmptyState } from "../components/EmptyState";
 import { DensityToggle, type Density } from "../components/DensityToggle";
 import { TagChips } from "../components/TagChips";
+import { WalletModal } from "../components/WalletModal";
 
 export type StreamsViewState = "loading" | "populated" | "empty" | "error";
 export type DensityMode = "comfortable" | "compact";
@@ -36,6 +37,18 @@ const streamListCopy = {
       "Choose a collaborator or vendor to pay",
       "Set a cadence: daily, weekly, or monthly",
       "Fund your stream wallet and go live",
+    ] as const,
+  },
+  emptyDisconnected: {
+    actionLabel: "Connect Wallet",
+    description:
+      "Connect your Stellar wallet to create and manage payment streams. Choose from Freighter, Albedo, or other compatible providers.",
+    eyebrow: "Wallet required",
+    title: "Connect your wallet to get started",
+    guidanceSteps: [
+      "Select your preferred Stellar wallet provider",
+      "Authorize the connection securely",
+      "Start creating payment streams",
     ] as const,
   },
   filtered: {
@@ -103,6 +116,16 @@ type StreamsPageContentProps = {
   onClearFilters?: () => void;
   /** Seed density on mount (tests use this to skip the localStorage effect). */
   initialDensity?: Density;
+  /**
+   * Wallet connection status. When false, empty state shows wallet connection
+   * CTA instead of stream creation CTA.
+   */
+  isWalletConnected?: boolean;
+  /**
+   * Callback invoked when user selects a wallet provider from the modal.
+   * Receives the provider ID (e.g. "freighter", "albedo").
+   */
+  onWalletSelect?: (providerId: string) => void;
 };
 
 /* ─── Loading skeleton ──────────────────────────────────────────────────── */
@@ -158,9 +181,20 @@ export function StreamsPageContent({
   emptyStateVariant = "default",
   onClearFilters,
   initialDensity,
+  isWalletConnected = true,
+  onWalletSelect,
 }: StreamsPageContentProps) {
   /* ── Density toggle (radiogroup; persists to localStorage) ── */
   const [density, setDensity] = useState<Density>(initialDensity ?? "cozy");
+
+  /* ── Wallet modal control ── */
+  const [walletModalOpen, setWalletModalOpen] = useState(false);
+
+  const handleWalletModalOpen = () => setWalletModalOpen(true);
+  const handleWalletModalClose = () => setWalletModalOpen(false);
+  const handleWalletSelect = (providerId: string) => {
+    onWalletSelect?.(providerId);
+  };
 
   /* Sync from localStorage after hydration (skipped when initialDensity is provided) */
   useEffect(() => {
@@ -289,30 +323,32 @@ export function StreamsPageContent({
             onRetry={onRetry}
           />
         ) : isEmpty || isFilteredEmpty ? (
-          <EmptyState
-            eyebrow={
-              isFilteredEmpty
-                ? streamListCopy.filtered.eyebrow
-                : streamListCopy.empty.eyebrow
+          (() => {
+            if (isFilteredEmpty) {
+              return (
+                <EmptyState
+                  eyebrow={streamListCopy.filtered.eyebrow}
+                  title={streamListCopy.filtered.title}
+                  description={streamListCopy.filtered.description}
+                  actionLabel={streamListCopy.filtered.actionLabel}
+                  onAction={onClearFilters}
+                />
+              );
             }
-            title={
-              isFilteredEmpty
-                ? streamListCopy.filtered.title
-                : streamListCopy.empty.title
-            }
-            description={
-              isFilteredEmpty
-                ? streamListCopy.filtered.description
-                : streamListCopy.empty.description
-            }
-            actionLabel={
-              isFilteredEmpty
-                ? streamListCopy.filtered.actionLabel
-                : streamListCopy.empty.actionLabel
-            }
-            onAction={isFilteredEmpty ? onClearFilters : onRetryAction}
-            guidanceSteps={isFilteredEmpty ? undefined : [...streamListCopy.empty.guidanceSteps]}
-          />
+            const isDisconnected = !isWalletConnected;
+            const copy = isDisconnected ? streamListCopy.emptyDisconnected : streamListCopy.empty;
+            return (
+              <EmptyState
+                eyebrow={copy.eyebrow}
+                title={copy.title}
+                description={copy.description}
+                actionLabel={copy.actionLabel}
+                onAction={isDisconnected ? handleWalletModalOpen : onRetryAction}
+                guidanceSteps={[...copy.guidanceSteps]}
+                ariaLabel={isDisconnected ? "wallet disconnected empty state" : "wallet connected empty state"}
+              />
+            );
+          })()
         ) : (
           /*
            * Cascade animation: each StreamRow receives an inline
@@ -344,6 +380,13 @@ export function StreamsPageContent({
           </section>
         )}
       </section>
+
+      {/* ── Wallet connection modal ────────────────────────────────────── */}
+      <WalletModal
+        isOpen={walletModalOpen}
+        onClose={handleWalletModalClose}
+        onSelect={handleWalletSelect}
+      />
     </main>
   );
 }

@@ -16,6 +16,15 @@ jest.mock("../components/StreamRow", () => ({
   ),
 }));
 
+// Mock wallet providers
+jest.mock("../state/walletPrefs", () => ({
+  getSortedProviders: jest.fn(() => [
+    { id: "freighter", name: "Freighter" },
+    { id: "albedo", name: "Albedo" },
+  ]),
+  setMRUWalletId: jest.fn(),
+}));
+
 describe("StreamsPageContent", () => {
   it("shows loading state with the custom StreamListSkeleton", () => {
     render(<StreamsPageContent state="loading" streams={[]} />);
@@ -23,7 +32,7 @@ describe("StreamsPageContent", () => {
     // Skeleton CSS class nodes (Skeleton component emits .skeleton)
     expect(document.querySelectorAll(".skeleton").length).toBeGreaterThan(0);
     // role="status" polite announcement is present (label text matches)
-    expect(screen.getByText(/Loading your streams/i)).toBeInTheDocument();
+    expect(screen.getByText(/Loading streams/i)).toBeInTheDocument();
     // 3 ghost row articles rendered inside the skeleton
     expect(
       document.querySelectorAll("article.stream-row--skeleton").length,
@@ -50,15 +59,15 @@ describe("StreamsPageContent", () => {
 
   describe("empty state", () => {
     it("shows copy, primary CTA and the v7 EmptyIllustration SVG when explicitly state=empty", () => {
-      render(<StreamsPageContent state="empty" streams={[]} />);
+      render(<StreamsPageContent state="empty" streams={[]} isWalletConnected={true} />);
 
       // Primary copy matches streamListCopy.empty
       expect(screen.getAllByText(/Streams/i)[0]).toBeInTheDocument();
       expect(
-        screen.getByRole("heading", { name: /Your streams list is empty/i }),
+        screen.getByRole("heading", { name: /Start your first stream/i }),
       ).toBeInTheDocument();
       expect(
-        screen.getByRole("button", { name: /Create Your First Stream/i }),
+        screen.getByRole("button", { name: /Create your first stream/i }),
       ).toBeInTheDocument();
 
       // v7 EmptyIllustration is rendered (inside .empty-state__illustration > svg)
@@ -68,9 +77,9 @@ describe("StreamsPageContent", () => {
     });
 
     it("auto-detects empty when state prop is omitted and streams=[]", () => {
-      render(<StreamsPageContent streams={[]} />);
+      render(<StreamsPageContent streams={[]} isWalletConnected={true} />);
       expect(
-        screen.getByRole("heading", { name: /Your streams list is empty/i }),
+        screen.getByRole("heading", { name: /Start your first stream/i }),
       ).toBeInTheDocument();
     });
 
@@ -149,6 +158,67 @@ describe("StreamsPageContent", () => {
     // "Create Stream" hero button is wired to onRetryAction prop
     fireEvent.click(createBtn);
     expect(onCreate).toHaveBeenCalledTimes(1);
+  });
+
+  describe("wallet-aware empty state", () => {
+    it("shows wallet disconnected CTA when isWalletConnected=false and streams=[]", () => {
+      render(<StreamsPageContent streams={[]} isWalletConnected={false} />);
+      expect(
+        screen.getByRole("button", { name: /Connect Wallet/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("wallet disconnected state has distinguishable aria-label", () => {
+      const { container } = render(
+        <StreamsPageContent streams={[]} isWalletConnected={false} />,
+      );
+      const section = container.querySelector("section.empty-state");
+      expect(section).toHaveAttribute("aria-label", "wallet disconnected empty state");
+    });
+
+    it("wallet connected state preserves original CTA and aria-label", () => {
+      const { container } = render(
+        <StreamsPageContent streams={[]} isWalletConnected={true} />,
+      );
+      expect(
+        screen.getByRole("button", { name: /Create your first stream/i }),
+      ).toBeInTheDocument();
+      const section = container.querySelector("section.empty-state");
+      expect(section).toHaveAttribute("aria-label", "wallet connected empty state");
+    });
+
+    it("opens WalletModal when disconnected CTA is clicked", () => {
+      render(<StreamsPageContent streams={[]} isWalletConnected={false} />);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      const ctaBtn = screen.getByRole("button", { name: /Connect Wallet/i });
+      fireEvent.click(ctaBtn);
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+
+    it("provides close button in WalletModal that can be clicked", () => {
+      render(<StreamsPageContent streams={[]} isWalletConnected={false} />);
+      fireEvent.click(screen.getByRole("button", { name: /Connect Wallet/i }));
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      const closeBtn = screen.getByRole("button", { name: /Close modal/i });
+      expect(closeBtn).toBeInTheDocument();
+      fireEvent.click(closeBtn);
+    });
+
+    it("invokes onWalletSelect exactly once when provider is chosen", () => {
+      const onSelect = jest.fn();
+      render(
+        <StreamsPageContent
+          streams={[]}
+          isWalletConnected={false}
+          onWalletSelect={onSelect}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: /Connect Wallet/i }));
+      const providerBtn = screen.getByRole("button", { name: /Freighter/i });
+      fireEvent.click(providerBtn);
+      expect(onSelect).toHaveBeenCalledTimes(1);
+      expect(onSelect).toHaveBeenCalledWith("freighter");
+    });
   });
 
   describe("density toggle", () => {
