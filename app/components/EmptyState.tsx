@@ -28,6 +28,8 @@ type EmptyStateProps = {
   children?: ReactNode;
   /** Additional CSS classes forwarded to the outer <section>. */
   className?: string;
+  /** Optional accessible label to distinguish empty state types for screen readers. */
+  ariaLabel?: string;
 };
 
 /**
@@ -55,6 +57,7 @@ export function EmptyState({
   variant = "streams",
   children,
   className = "",
+  ariaLabel,
 }: EmptyStateProps) {
   const hasGuidance = Array.isArray(guidanceSteps) && guidanceSteps.length > 0;
   const hasSupporting = Boolean(children) || hasGuidance;
@@ -67,7 +70,11 @@ export function EmptyState({
     .join(" ");
 
   return (
-    <section className={outerClass} aria-labelledby="empty-state-title">
+    <section
+      className={outerClass}
+      aria-labelledby="empty-state-title"
+      {...(ariaLabel ? { "aria-label": ariaLabel } : {})}
+    >
       {variant === "streams" ? (
         <div className="empty-state__illustration" aria-hidden="true">
           <EmptyIllustration

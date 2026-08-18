@@ -87,6 +87,14 @@ describe("EmptyState", () => {
     expect(screen.getByText(/My custom heading/i)).toBeInTheDocument();
   });
 
+  it("accepts an optional ariaLabel to distinguish empty state types for screen readers", () => {
+    const { container } = render(
+      <EmptyState {...DEFAULT_PROPS} ariaLabel="wallet disconnected empty state" />
+    );
+    const section = container.querySelector("section.empty-state")!;
+    expect(section).toHaveAttribute("aria-label", "wallet disconnected empty state");
+  });
+
   describe("variant prop (illustration control)", () => {
     it("streams variant (default) renders the v7 EmptyIllustration inside .empty-state__illustration", () => {
       const { container } = render(<EmptyState {...DEFAULT_PROPS} />);
