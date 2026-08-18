@@ -4,10 +4,25 @@
 
 import { render, fireEvent } from "@testing-library/react";
 const { screen } = require("@testing-library/react") as any;
+import StreamsPage from "./page";
 import { StreamsPageContent } from "./StreamsPageContent";
 
 const STORAGE_KEY = "streampay.density";
 
+describe("StreamsPage route", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("renders disconnected empty state with Connect Wallet CTA on initial load", () => {
+    render(<StreamsPage />);
+
+    expect(screen.getByRole("heading", { name: /connect your wallet to get started/i })).toBeInTheDocument();
+    expect(screen.getByText(/connect your stellar wallet to create and manage payment streams/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /connect wallet/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/wallet disconnected empty state/i)).toBeInTheDocument();
+  });
+});
 
 describe("StreamsPageContent", () => {
   beforeEach(() => {
