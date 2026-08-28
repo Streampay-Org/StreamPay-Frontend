@@ -34,17 +34,33 @@ export async function GET(
   const limit = Math.min(Math.max(Number.isFinite(limitParam) ? limitParam : 50, 1), 250);
   const action = searchParams.get("action") ?? undefined;
   const role = searchParams.get("role") as AuditActorRole | null;
+  const cursor = searchParams.get("cursor") ?? undefined;
 
-  const entries = auditLogStore.list({
+  if (cursor) {
+    try {
+      const decoded = Buffer.from(cursor, "base64").toString("utf-8");
+      if (!decoded.includes("|")) {
+        throw new Error();
+      }
+    } catch {
+      return createErrorResponse("INVALID_CURSOR", "Malformed cursor", 422);
+    }
+  }
+
+  const { data: entries, hasNext, nextCursor } = auditLogStore.getPaginated({
     action: action ?? null,
     role: role ?? null,
     limit,
+    cursor,
+    orgId, // Important! orgId was missing in original implementation despite the comment!
   });
 
   return NextResponse.json({
     orgId,
     entries,
     count: entries.length,
+    hasNext,
+    nextCursor,
     chainIntact: auditLogStore.assertIntegrity(),
   });
 }

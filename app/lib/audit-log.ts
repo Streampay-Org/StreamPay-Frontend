@@ -140,59 +140,105 @@ export class AppendOnlyAuditLogStore {
   }
 
   list(filters: AuditListFilters = {}): AuditEntry[] {
+    return this.getPaginated(filters).data;
+  }
+
+  getPaginated(filters: AuditListFilters = {}): { data: AuditEntry[]; hasNext: boolean; nextCursor: string | null; total: number } {
     const limit = Math.min(Math.max(filters.limit ?? 50, 1), 250);
 
-    const results = this.entries
-      .filter((entry) => {
-        if (filters.actorId && entry.actor.id !== filters.actorId) {
-          return false;
+    let results = this.entries.filter((entry) => {
+      if (filters.actorId && entry.actor.id !== filters.actorId) return false;
+      if (filters.role && entry.actor.role !== filters.role) return false;
+      if (filters.action && entry.action !== filters.action) return false;
+      if (filters.targetId && entry.target.id !== filters.targetId) return false;
+      if (filters.requestId && entry.requestId !== filters.requestId) return false;
+      if (filters.orgId && entry.metadata?.orgId !== filters.orgId) return false;
+      if (filters.startDate && entry.timestamp < filters.startDate) return false;
+      if (filters.endDate && entry.timestamp > filters.endDate) return false;
+      if (filters.q) {
+        const haystack = [
+          entry.actor.id,
+          entry.actor.role,
+          entry.action,
+          entry.target.id,
+          entry.target.account ?? "",
+          entry.requestId,
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(filters.q.toLowerCase())) return false;
+      }
+      return true;
+    });
+
+    const total = results.length;
+
+    results = results.sort((left, right) => {
+      const tsCmp = right.timestamp.localeCompare(left.timestamp);
+      return tsCmp !== 0 ? tsCmp : right.id.localeCompare(left.id);
+    });
+
+    if (filters.cursor) {
+      // Decode composite cursor
+      let cursorTimestamp = "";
+      let cursorId = "";
+      try {
+        const decoded = Buffer.from(filters.cursor, "base64").toString("utf-8");
+        const parts = decoded.split("|");
+        if (parts.length === 2) {
+          cursorTimestamp = parts[0];
+          cursorId = parts[1];
         }
-        if (filters.role && entry.actor.role !== filters.role) {
-          return false;
-        }
-        if (filters.action && entry.action !== filters.action) {
-          return false;
-        }
-        if (filters.targetId && entry.target.id !== filters.targetId) {
-          return false;
-        }
-        if (filters.requestId && entry.requestId !== filters.requestId) {
-          return false;
-        }
-        if (filters.orgId && entry.metadata?.orgId !== filters.orgId) {
-          return false;
-        }
-        if (filters.startDate && entry.timestamp < filters.startDate) {
-          return false;
-        }
-        if (filters.endDate && entry.timestamp > filters.endDate) {
-          return false;
-        }
-        if (filters.q) {
-          const haystack = [
-            entry.actor.id,
-            entry.actor.role,
-            entry.action,
-            entry.target.id,
-            entry.target.account ?? "",
-            entry.requestId,
-          ]
-            .join(" ")
-            .toLowerCase();
-          if (!haystack.includes(filters.q.toLowerCase())) {
-            return false;
+      } catch (e) {
+        // Invalid cursor format handled by returning no results or ignoring?
+        // We'll throw an error and let the caller handle it or just return empty
+      }
+
+      if (cursorTimestamp && cursorId) {
+        const cursorIndex = results.findIndex((entry) => {
+          const tsCmp = entry.timestamp.localeCompare(cursorTimestamp);
+          return tsCmp < 0 || (tsCmp === 0 && entry.id.localeCompare(cursorId) <= 0);
+        });
+        if (cursorIndex >= 0) {
+          // Because we sort descending, we want items after the cursor
+          // Actually, if the cursor is an item, we want to start from the item AFTER it in the sorted array
+          // The cursorIndex points to an item that is <= cursor in sorting.
+          // Since it's exactly the cursor, we skip it.
+          const exactIndex = results.findIndex(e => e.id === cursorId);
+          if (exactIndex >= 0) {
+             results = results.slice(exactIndex + 1);
+          } else {
+             results = results.filter((entry) => {
+               const tsCmp = entry.timestamp.localeCompare(cursorTimestamp);
+               // Because it's descending, we want entries that are OLDER (smaller timestamp)
+               // or SAME timestamp but smaller ID.
+               if (tsCmp !== 0) return tsCmp < 0; // older
+               return entry.id.localeCompare(cursorId) < 0; // smaller id
+             });
           }
         }
-        return true;
-      })
-      .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
-      .slice(0, limit);
+      }
+    }
 
-    return results.map((entry) => cloneValue(entry));
+    const hasNext = results.length > limit;
+    const paginatedResults = results.slice(0, limit);
+
+    let nextCursor: string | null = null;
+    if (hasNext && paginatedResults.length > 0) {
+      const lastEntry = paginatedResults[paginatedResults.length - 1];
+      nextCursor = Buffer.from(`${lastEntry.timestamp}|${lastEntry.id}`).toString("base64");
+    }
+
+    return {
+      data: paginatedResults.map((entry) => cloneValue(entry)),
+      hasNext,
+      nextCursor,
+      total,
+    };
   }
 
   exportRows(filters: AuditListFilters = {}): AuditExportRow[] {
-    return this.list(filters).map((entry) => ({
+    return this.getPaginated({ ...filters, limit: Number.MAX_SAFE_INTEGER }).data.map((entry) => ({
       action: entry.action,
       actorId: entry.actor.id,
       actorRole: entry.actor.role,
