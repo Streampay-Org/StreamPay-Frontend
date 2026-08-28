@@ -124,6 +124,12 @@ function severity(
 }
 
 export function IndexerStatus({ data, className = "" }: IndexerStatusProps) {
+  const [mounted, setMounted] = React.useState(false);
+  
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const headingId = useId();
   const { network, lastProcessedLedger, latestLedger, status, lastUpdatedAt, lag, message } = data;
   const sev = severity(status, lag);
@@ -181,7 +187,7 @@ export function IndexerStatus({ data, className = "" }: IndexerStatusProps) {
           </div>
 
           <span className="indexer-status__timestamp">
-            updated {relativeTime(lastUpdatedAt)}
+            {mounted ? `updated ${relativeTime(lastUpdatedAt)}` : "updated"}
           </span>
         </div>
 
