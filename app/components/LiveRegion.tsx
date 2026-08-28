@@ -1,7 +1,7 @@
 /**
  * LiveRegion
  *
- * Reusable wrapper for ARIA live regions.  Renders a visually-hidden `<div>`
+ * Reusable wrapper for ARIA live regions. Renders a visually-hidden `<div>`
  * that announces its `message` content to assistive technologies whenever the
  * value changes.
  *
@@ -12,39 +12,70 @@
  *   never affects layout.
  * - `aria-atomic="true"` (default) announces the full message on each update,
  *   not just the diff.
- *
- * ## Usage
- * ```tsx
- * <LiveRegion message="Stream completed" />
- * <LiveRegion message="Error occurred" politeness="assertive" />
- * ```
+ * - Deduplicates consecutive identical announcements by default to prevent
+ *   repetitive noise for screen reader users.
  */
 
 "use client";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+import React, { useEffect, useRef, useState } from "react";
+
+// ── Types ──────────────────────────────────────────────────────────────────
 
 export type AriaLive = "polite" | "assertive" | "off";
 
 export interface LiveRegionProps {
-  /** Text announced to screen readers.  Pass empty string to silence. */
+  /** Text announced to screen readers. Pass empty string to silence. */
   message: string;
-  /** ARIA live-region politeness level.  Default `"polite"`. */
+  /** ARIA live-region politeness level. Default `"polite"`. */
   politeness?: AriaLive;
-  /** When true the entire region content is announced, not just the diff.  Default `true`. */
+  /** When true the entire region content is announced, not just the diff. Default `true`. */
   atomic?: boolean;
+  /**
+   * When true (default), prevents consecutive identical messages from triggering
+   * redundant announcements.
+   * @default true
+   */
+  deduplicate?: boolean;
+  /**
+   * When true, bypasses deduplication to re-announce the same message.
+   * @default false
+   */
+  allowDuplicates?: boolean;
   /** Optional data-testid for test selectors. */
   "data-testid"?: string;
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// ── Component ──────────────────────────────────────────────────────────────
 
 export function LiveRegion({
   message,
   politeness = "polite",
   atomic = true,
+  deduplicate = true,
+  allowDuplicates = false,
   "data-testid": testId,
 }: LiveRegionProps) {
+  const [announcedMessage, setAnnouncedMessage] = useState(message);
+  const lastAnnouncedRef = useRef(message);
+
+  useEffect(() => {
+    const shouldDeduplicate = deduplicate && !allowDuplicates;
+    const trimmedCurrent = message.trim();
+    const trimmedLast = lastAnnouncedRef.current.trim();
+
+    if (
+      shouldDeduplicate &&
+      trimmedCurrent === trimmedLast &&
+      message === announcedMessage
+    ) {
+      return;
+    }
+
+    lastAnnouncedRef.current = message;
+    setAnnouncedMessage(message);
+  }, [message, deduplicate, allowDuplicates, announcedMessage]);
+
   return (
     <div
       className="sr-only"
@@ -53,7 +84,7 @@ export function LiveRegion({
       aria-atomic={atomic}
       data-testid={testId}
     >
-      {message}
+      {announcedMessage}
     </div>
   );
 }
