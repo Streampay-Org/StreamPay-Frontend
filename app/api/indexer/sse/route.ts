@@ -49,9 +49,12 @@ import {
   withCorrelationContext,
 } from "@/app/lib/logger";
 
+import crypto from "crypto";
+
 // ---------------------------------------------------------------------------
 // Configuration helpers
 // ---------------------------------------------------------------------------
+
 
 /**
  * Milliseconds between status ticks.
@@ -127,8 +130,13 @@ export function getIndexerStatus(): IndexerStatus {
  *   data: <json>\n
  *   \n
  */
-function encodeEvent(encoder: TextEncoder, event: string, data: unknown): Uint8Array {
-  return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+function encodeEvent(encoder: TextEncoder, event: string, data: unknown, id?: string): Uint8Array {
+  let output = `event: ${event}\n`;
+  if (id) {
+    output += `id: ${id}\n`;
+  }
+  output += `data: ${JSON.stringify(data)}\n\n`;
+  return encoder.encode(output);
 }
 
 // ---------------------------------------------------------------------------
@@ -171,14 +179,23 @@ export async function GET(request: Request): Promise<Response> {
 
     const stream = new ReadableStream({
       async start(controller) {
+        let lastSentId = request.headers.get("last-event-id") ?? request.headers.get("Last-Event-ID") ?? null;
+
         /**
          * Pushes one SSE frame into the stream. Returns `false` when the
          * controller has been closed (client disconnected), so callers can
          * break out of their polling loop early.
          */
         const send = (event: string, data: unknown): boolean => {
+          const id = crypto.createHash("sha256").update(JSON.stringify(data)).digest("hex");
+          
+          if (id === lastSentId) {
+            return true; // Skip duplicate status
+          }
+          
+          lastSentId = id;
           try {
-            controller.enqueue(encodeEvent(encoder, event, data));
+            controller.enqueue(encodeEvent(encoder, event, data, id));
             return true;
           } catch {
             // Controller already closed — client has disconnected.
