@@ -76,6 +76,7 @@ export const Skeleton: React.FC<SkeletonProps> = ({
             ? `${resolvedHeight}px`
             : resolvedHeight,
         borderRadius: circle ? "50%" : undefined,
+        maxWidth: "100%",
         ...style,
       }}
       {...rest}
