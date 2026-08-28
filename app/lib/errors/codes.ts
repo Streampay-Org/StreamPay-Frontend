@@ -685,6 +685,18 @@ export const ERROR_REGISTRY: Record<ErrorCode, ErrorCodeMetadata> = {
     typeUri: `${BASE_TYPE_URI}/invalid-field-value`,
   },
 
+  CSRF_TOKEN_INVALID: {
+    code: "CSRF_TOKEN_INVALID",
+    httpStatus: 403,
+    category: "auth",
+    title: "Invalid Security Token",
+    userMessage:
+      "Your session has expired or the security token is invalid. Please refresh the page.",
+    technicalDescription: "CSRF token validation failed for a state-changing request",
+    retry: { retryable: false },
+    typeUri: `${BASE_TYPE_URI}/csrf-token-invalid`,
+  },
+
   // Catch-all
   UNKNOWN_ERROR: {
     code: "UNKNOWN_ERROR",

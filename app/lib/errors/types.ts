@@ -71,6 +71,7 @@ export type ErrorCode =
   | 'INVALID_REQUEST'
   | 'MISSING_REQUIRED_FIELD'
   | 'INVALID_FIELD_VALUE'
+  | 'CSRF_TOKEN_INVALID'
   
   // Catch-all
   | 'UNKNOWN_ERROR';
