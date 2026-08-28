@@ -27,6 +27,19 @@ class FakeEventSource implements EventSourceLike {
     const listener = this.listeners.get(type);
     listener?.({ data: JSON.stringify(data) } as MessageEvent<string>);
   }
+
+  emitRawMessage(data: string): void {
+    const event = { data } as MessageEvent<string>;
+    this.onmessage?.(event);
+  }
+
+  emitOpen(): void {
+    this.onopen?.(new Event("open"));
+  }
+
+  emitError(): void {
+    this.onerror?.(new Event("error"));
+  }
 }
 
 describe("StreamPayClient", () => {
@@ -141,5 +154,87 @@ describe("StreamPayClient", () => {
 
     subscription.close();
     expect(source.closed).toBe(true);
+  });
+
+  it("prevents duplicate SDK event subscriptions by sharing underlying EventSource", () => {
+    const source = new FakeEventSource();
+    const factory = jest.fn(() => source);
+    const client = new StreamPayClient({
+      baseUrl: "https://api.streampay.test",
+      eventSourceFactory: factory,
+    });
+
+    const sub1OnUpdate = jest.fn();
+    const sub2OnUpdate = jest.fn();
+
+    // Call subscribe twice for the same streamId
+    const sub1 = client.subscribeToStream("stream-dedup", { onUpdate: sub1OnUpdate });
+    const sub2 = client.subscribeToStream("stream-dedup", { onUpdate: sub2OnUpdate });
+
+    // Factory should have been invoked exactly ONCE
+    expect(factory).toHaveBeenCalledTimes(1);
+
+    // Both subscribers should receive events
+    source.emit("stream:updated", { id: "stream-dedup", status: "active" });
+    expect(sub1OnUpdate).toHaveBeenCalledWith({ id: "stream-dedup", status: "active" });
+    expect(sub2OnUpdate).toHaveBeenCalledWith({ id: "stream-dedup", status: "active" });
+
+    // Closing first subscription should NOT close the underlying EventSource
+    sub1.close();
+    expect(source.closed).toBe(false);
+
+    // Event still flows to remaining subscriber
+    source.emit("stream:updated", { id: "stream-dedup", status: "paused" });
+    expect(sub2OnUpdate).toHaveBeenCalledWith({ id: "stream-dedup", status: "paused" });
+    expect(sub1OnUpdate).toHaveBeenCalledTimes(1); // sub1 did not receive the second event
+
+    // Closing the last subscription cleans up and closes the EventSource
+    sub2.close();
+    expect(source.closed).toBe(true);
+  });
+
+  it("handles idempotent close calls safely without errors", () => {
+    const source = new FakeEventSource();
+    const factory = jest.fn(() => source);
+    const client = new StreamPayClient({
+      baseUrl: "https://api.streampay.test",
+      eventSourceFactory: factory,
+    });
+
+    const sub = client.subscribeToStream("stream-idem");
+    expect(() => {
+      sub.close();
+      sub.close();
+      sub.close();
+    }).not.toThrow();
+    expect(source.closed).toBe(true);
+  });
+
+  it("isolates handler errors so faulty listener does not block others", () => {
+    const source = new FakeEventSource();
+    const factory = jest.fn(() => source);
+    const client = new StreamPayClient({
+      baseUrl: "https://api.streampay.test",
+      eventSourceFactory: factory,
+    });
+
+    const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    const buggyHandler = jest.fn(() => {
+      throw new Error("handler crash");
+    });
+    const healthyHandler = jest.fn();
+
+    const sub1 = client.subscribeToStream("stream-err", { onUpdate: buggyHandler });
+    const sub2 = client.subscribeToStream("stream-err", { onUpdate: healthyHandler });
+
+    source.emit("stream:updated", { id: "stream-err", status: "active" });
+
+    expect(buggyHandler).toHaveBeenCalled();
+    expect(healthyHandler).toHaveBeenCalledWith({ id: "stream-err", status: "active" });
+
+    sub1.close();
+    sub2.close();
+    consoleSpy.mockRestore();
   });
 });
