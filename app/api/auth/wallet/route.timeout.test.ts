@@ -217,10 +217,17 @@ describe("POST /api/auth/wallet — timeout", () => {
   });
 
   it("returns 200 normally when within the deadline", async () => {
+    // Mint a real single-use challenge so the verify is accepted.
+    const challengeRes = await GET(
+      makeGetRequest(`?address=${VALID_ADDRESS}`),
+    );
+    expect(challengeRes.status).toBe(200);
+    const { challenge } = await challengeRes.json();
+
     const res = await POST(
       makePostRequest({
         address: VALID_ADDRESS,
-        challenge: VALID_CHALLENGE,
+        challenge,
         signature: "valid-sig",
       }),
     );

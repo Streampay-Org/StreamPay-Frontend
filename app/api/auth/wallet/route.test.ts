@@ -105,12 +105,22 @@ function makePostRequest(
   } as unknown as import("next/server").NextRequest;
 }
 
-function validPostBody() {
+function validPostBody(challenge: string = VALID_CHALLENGE) {
   return {
     address: VALID_ADDRESS,
-    challenge: VALID_CHALLENGE,
+    challenge,
     signature: "validbase64sig==",
   };
+}
+
+/**
+ * Issue a real single-use challenge via GET so a POST verify can succeed.
+ * The challenge store is reset in beforeEach, so rates stay within limits.
+ */
+async function issueChallenge(): Promise<string> {
+  const res = await GET(makeGetRequest({ address: VALID_ADDRESS }));
+  expect(res.status).toBe(200);
+  return (res as any).body.challenge as string;
 }
 
 function detailFields(res: unknown): string[] {
@@ -266,9 +276,10 @@ describe("POST /api/auth/wallet validation", () => {
   });
 
   it("ignores unknown extra fields when the known fields are valid", async () => {
+    const challenge = await issueChallenge();
     const res = await POST(
       makePostRequest(
-        { ...validPostBody(), extra: "ignored" },
+        { ...validPostBody(challenge), extra: "ignored" },
         "securecsrf123",
         "securecsrf123",
       ),
@@ -420,8 +431,9 @@ describe("POST /api/auth/wallet", () => {
   });
 
   it("returns 200 with token for valid matching double-submit CSRF tokens", async () => {
+    const challenge = await issueChallenge();
     const res = await POST(
-      makePostRequest(validPostBody(), "securecsrf123", "securecsrf123"),
+      makePostRequest(validPostBody(challenge), "securecsrf123", "securecsrf123"),
     );
     expect(res.status).toBe(200);
     const body = (res as any).body;
@@ -432,21 +444,122 @@ describe("POST /api/auth/wallet", () => {
   });
 
   it("returns 429 when rate limit is exceeded on POST (login)", async () => {
-    const req = () =>
-      makePostRequest(validPostBody(), "securecsrf123", "securecsrf123");
+    // Exhaust the login limit (5/min) — each POST redeems a fresh single-use
+    // challenge so the successes are genuine, and the 6th is rate-limited.
+    const challenges = await Promise.all(
+      Array.from({ length: 5 }, () => issueChallenge()),
+    );
 
-    // Exhaust the login limit (5/min)
-    for (let i = 0; i < 5; i++) {
-      const res = await POST(req());
+    for (const challenge of challenges) {
+      const res = await POST(
+        makePostRequest(validPostBody(challenge), "securecsrf123", "securecsrf123"),
+      );
       expect(res.status).toBe(200);
     }
 
     // 6th request should be rate-limited
-    const limited = await POST(req());
+    const limited = await POST(
+      makePostRequest(validPostBody(VALID_CHALLENGE), "securecsrf123", "securecsrf123"),
+    );
     expect(limited.status).toBe(429);
     expect((limited as any).body.error.code).toBe("rate_limit_exceeded");
     expect((limited as any).body.error.message).toBeTruthy();
     expect(typeof (limited as any).body.error.request_id).toBe("string");
+  });
+});
+
+describe("POST /api/auth/wallet — single-use challenge & duplicate submissions", () => {
+  it("returns 401 CHALLENGE_NOT_FOUND for a challenge never issued on this server", async () => {
+    const res = await POST(
+      makePostRequest(validPostBody("streampay_auth_1_abc"), "csrf", "csrf"),
+    );
+    expect(res.status).toBe(401);
+    expect((res as any).body.error.code).toBe("CHALLENGE_NOT_FOUND");
+  });
+
+  it("returns 401 CHALLENGE_NOT_FOUND when the challenge belongs to a different address", async () => {
+    const challenge = await issueChallenge();
+    // Same challenge string but a different (still checksum-valid) address.
+    const other = "GCJX2XMTUXUEDVMKIBHPAAOC4NGIVVV7JNVNJCSD24DVDYU6AZJ5SXC5";
+    const res = await POST(
+      makePostRequest(
+        { address: other, challenge, signature: "validbase64sig==" },
+        "csrf",
+        "csrf",
+      ),
+    );
+    expect(res.status).toBe(401);
+    expect((res as any).body.error.code).toBe("CHALLENGE_NOT_FOUND");
+  });
+
+  it("returns 401 CHALLENGE_EXPIRED once the challenge has expired", async () => {
+    const now = Date.now();
+    jest.spyOn(Date, "now").mockReturnValue(now);
+    try {
+      const challenge = await issueChallenge(); // expires_at = now + 5 min
+      // Advance the clock past the 5-minute validity window.
+      (Date.now as jest.Mock).mockReturnValue(now + 5 * 60 * 1000 + 1);
+      const res = await POST(
+        makePostRequest(validPostBody(challenge), "csrf", "csrf"),
+      );
+      expect(res.status).toBe(401);
+      expect((res as any).body.error.code).toBe("CHALLENGE_EXPIRED");
+    } finally {
+      jest.restoreAllMocks();
+    }
+  });
+
+  it("returns 409 CHALLENGE_ALREADY_USED on replay (duplicate submission after timeout)", async () => {
+    const challenge = await issueChallenge();
+    const first = await POST(
+      makePostRequest(validPostBody(challenge), "csrf", "csrf"),
+    );
+    expect(first.status).toBe(200);
+
+    // Retry with the exact same signed body — e.g. an automatic retry after a
+    // network timeout where the first attempt actually succeeded.
+    const second = await POST(
+      makePostRequest(validPostBody(challenge), "csrf", "csrf"),
+    );
+    expect(second.status).toBe(409);
+    expect((second as any).body.error.code).toBe("CHALLENGE_ALREADY_USED");
+  });
+
+  it("allows exactly one of two concurrent identical submissions (no duplicate token)", async () => {
+    const challenge = await issueChallenge();
+    const [a, b] = await Promise.all([
+      POST(makePostRequest(validPostBody(challenge), "csrf", "csrf")),
+      POST(makePostRequest(validPostBody(challenge), "csrf", "csrf")),
+    ]);
+    const statuses = [a.status, b.status].sort();
+    expect(statuses).toEqual([200, 409]);
+  });
+
+  it("mints the same deterministic token for one address across fresh challenges", async () => {
+    const c1 = await issueChallenge();
+    const c2 = await issueChallenge();
+    const r1 = await POST(makePostRequest(validPostBody(c1), "csrf", "csrf"));
+    const r2 = await POST(makePostRequest(validPostBody(c2), "csrf", "csrf"));
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    expect((r1 as any).body.token).toBe((r2 as any).body.token);
+  });
+
+  it("a failed signature does not burn the challenge (still redeemable after retry)", async () => {
+    const challenge = await issueChallenge();
+    const bad = await POST(
+      makePostRequest(
+        { ...validPostBody(challenge), signature: "" },
+        "csrf",
+        "csrf",
+      ),
+    );
+    expect(bad.status).toBe(422);
+
+    const good = await POST(
+      makePostRequest(validPostBody(challenge), "csrf", "csrf"),
+    );
+    expect(good.status).toBe(200);
   });
 });
 

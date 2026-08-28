@@ -29,6 +29,15 @@ interface WalletChallengeRecord {
   challenge: string;
   created_at: string;
   expires_at: string;
+  /**
+   * Invariant: a challenge is single-use. Once a POST /api/auth/wallet
+   * verify succeeds it is flipped to `true` and must never be accepted again.
+   * This is what makes wallet submissions idempotent and prevents duplicate
+   * token issuance after a client timeout/retry. The flag is checked and set
+   * synchronously (no intervening `await`) so concurrent duplicate requests
+   * observe mutually consistent state on the single-threaded JS event loop.
+   */
+  used: boolean;
 }
 
 const walletChallengeStore: WalletChallengeRecord[] = [];
@@ -44,7 +53,58 @@ function createWalletChallengeRecord(
     challenge,
     created_at: new Date().toISOString(),
     expires_at: expiresAt,
+    used: false,
   };
+}
+
+/**
+ * Result of claiming a single-use wallet challenge during POST verify.
+ * Report the outcome to the caller so it can return a deterministic status.
+ */
+type ChallengeClaim =
+  | { kind: "NOT_FOUND" }
+  | { kind: "EXPIRED" }
+  | { kind: "USED" }
+  | { kind: "OK" };
+
+/**
+ * Deterministically consume a single-use challenge issued by GET /api/auth/wallet.
+ *
+ * The whole check-and-set runs synchronously with no `await`, so within a
+ * single process it is atomic: exactly one concurrent POST can win the claim
+ * for a given challenge, and every other attempt observes {@link ChallengeClaim}.
+ *
+ * Ordering is deliberately the same as the anti-replay verification in
+ * `app/lib/wallet-link.ts`: the caller verifies the signature first, then calls
+ * this to atomically flip `used`. That way a failed signature never burns a
+ * challenge the user can still retry.
+ */
+function claimWalletChallenge(
+  address: string,
+  challenge: string,
+): ChallengeClaim {
+  const now = Date.now();
+  for (const record of walletChallengeStore) {
+    if (record.challenge !== challenge) continue;
+
+    if (record.address !== address) {
+      // A challenge belongs to exactly the address it was issued for.
+      return { kind: "NOT_FOUND" };
+    }
+    if (record.used) {
+      // Already redeemed → duplicate submission (e.g. client retried after the
+      // first attempt timed out on the wire). Reject so no second token is minted.
+      return { kind: "USED" };
+    }
+    if (Date.parse(record.expires_at) <= now) {
+      return { kind: "EXPIRED" };
+    }
+
+    // Atomically mark as used before returning so subsequent calls see USED.
+    record.used = true;
+    return { kind: "OK" };
+  }
+  return { kind: "NOT_FOUND" };
 }
 
 function compareWalletChallengeRecords(
@@ -100,8 +160,11 @@ function getWalletChallengePage(
       ? createCursor(paginated[paginated.length - 1])
       : null;
 
+  // Do not leak the internal single-use `used` flag through the public listing.
+  const data = paginated.map(({ used: _used, ...rest }) => rest);
+
   return {
-    data: paginated,
+    data,
     meta: { hasNext, nextCursor, total: filtered.length },
   };
 }
@@ -369,9 +432,21 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/auth/wallet
- * Verifies double-submit CSRF token and wallet signature, then issues a bearer
- * token.
- * Rate-limited by IP (5 req/min) to prevent brute-force login attempts.
+ * Verifies double-submit CSRF token, that the challenge was actually issued by
+ * GET /api/auth/wallet (single-use), and the wallet signature, then issues a
+ * bearer token. Rate-limited by IP (5 req/min) to prevent brute-force logins.
+ *
+ * # Single-use challenge + duplicate-submission protection
+ * Each challenge is redeemable exactly once. After a successful verify the
+ * challenge is atomically marked used, so:
+ *   • replaying the same signed body is rejected with `CHALLENGE_ALREADY_USED`
+ *     (HTTP 409) instead of minting a second token;
+ *   • a client retry after a `504 Gateway Timeout` (where the first attempt may
+ *     have actually minted a token) never produces a duplicate submission;
+ *   • a challenge issued for a different address / never issued / expired is
+ *     rejected with `CHALLENGE_NOT_FOUND` / `CHALLENGE_EXPIRED` (HTTP 401).
+ * Clients should treat `CHALLENGE_ALREADY_USED` as "already authenticated, do
+ * not resubmit" and obtain a fresh challenge for a new attempt.
  *
  * The handler runs under a per-request deadline (`WALLET_VERIFY_TIMEOUT_MS`,
  * default 5 s, override via `AUTH_WALLET_VERIFY_TIMEOUT_MS` env var).  If the
@@ -430,7 +505,7 @@ export async function POST(req: NextRequest) {
             );
           }
 
-          const { address, signature } = body as {
+          const { address, challenge, signature } = body as {
             address: string;
             challenge: string;
             signature: string;
@@ -467,6 +542,70 @@ export async function POST(req: NextRequest) {
               ErrorCode.UNAUTHORIZED,
               "Signature verification failed.",
               401,
+            );
+          }
+
+          // ── Single-use challenge enforcement ──────────────────────────────
+          // The challenge issued by GET /api/auth/wallet is the natural
+          // idempotency key for the whole submission. Validating it here —
+          // against the in-process store — before minting a token guarantees:
+          //   • a challenge never seen on this server cannot mint a token;
+          //   • a challenge for a *different* address is rejected;
+          //   • an expired challenge is rejected;
+          //   • a retry after a wire timeout (where the first attempt actually
+          //     succeeded) is detected as a duplicate instead of minting a
+          //     second token.
+          const claimed = claimWalletChallenge(address, challenge);
+
+          if (claimed.kind === "NOT_FOUND") {
+            logAccessEvent({
+              method: "POST",
+              path: req.nextUrl.pathname,
+              status: 401,
+              durationMs: Date.now() - startedAt,
+              errorCode: ErrorCode.CHALLENGE_NOT_FOUND,
+              errorMessage: "Challenge was not issued on this server.",
+            });
+            return errorResponse(
+              ErrorCode.CHALLENGE_NOT_FOUND,
+              "Challenge was not recognized. Request a fresh challenge and retry.",
+              401,
+            );
+          }
+
+          if (claimed.kind === "EXPIRED") {
+            logAccessEvent({
+              method: "POST",
+              path: req.nextUrl.pathname,
+              status: 401,
+              durationMs: Date.now() - startedAt,
+              errorCode: ErrorCode.CHALLENGE_EXPIRED,
+              errorMessage: "Challenge has expired.",
+            });
+            return errorResponse(
+              ErrorCode.CHALLENGE_EXPIRED,
+              "Challenge has expired. Request a new challenge and retry.",
+              401,
+            );
+          }
+
+          if (claimed.kind === "USED") {
+            // Dup detect: the same challenge was already redeemed (e.g. the
+            // client retried after a 504/network timeout where the first POST
+            // actually completed). We must not mint a second token, so we
+            // surface a stable, observable conflict the client can act on.
+            logAccessEvent({
+              method: "POST",
+              path: req.nextUrl.pathname,
+              status: 409,
+              durationMs: Date.now() - startedAt,
+              errorCode: ErrorCode.CHALLENGE_ALREADY_USED,
+              errorMessage: "Challenge already used by a prior submission.",
+            });
+            return errorResponse(
+              ErrorCode.CHALLENGE_ALREADY_USED,
+              "Challenge was already used. Refresh the challenge and submit again.",
+              409,
             );
           }
 

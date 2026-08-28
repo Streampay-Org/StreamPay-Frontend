@@ -95,12 +95,22 @@ function makePostRequest(
   } as unknown as import('next/server').NextRequest;
 }
 
-function validPostBody() {
+function validPostBody(challenge = VALID_CHALLENGE) {
   return {
     address: VALID_ADDRESS,
-    challenge: VALID_CHALLENGE,
+    challenge,
     signature: 'validbase64sig==',
   };
+}
+
+/** Mint a single-use challenge via GET so a POST verify succeeds under the
+ * single-use contract. Rates stay within limits because the store/limiter are
+ * reset in beforeEach. */
+async function issueChallenge(): Promise<string> {
+  const res = await GET(makeGetRequest({ address: VALID_ADDRESS }));
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { challenge: string };
+  return body.challenge;
 }
 
 beforeEach(() => {
@@ -231,7 +241,8 @@ describe('Per-endpoint metrics on /api/auth/wallet', () => {
 
   describe('POST /api/auth/wallet (operation="verify")', () => {
     it('increments the counter for 200 on a valid verify', async () => {
-      await POST(makePostRequest(validPostBody(), 'csrf', 'csrf'));
+      const challenge = await issueChallenge();
+      await POST(makePostRequest(validPostBody(challenge), 'csrf', 'csrf'));
 
       const metrics = await registry.metrics();
       expect(
@@ -292,11 +303,13 @@ describe('Per-endpoint metrics on /api/auth/wallet', () => {
     });
 
     it('increments the counter for 429 when the login limiter trips', async () => {
+      // Each successful POST redeems a distinct single-use challenge.
       for (let i = 0; i < 5; i++) {
-        await POST(makePostRequest(validPostBody(), 'csrf', 'csrf'));
+        const challenge = await issueChallenge();
+        await POST(makePostRequest(validPostBody(challenge), 'csrf', 'csrf'));
       }
       const limited = await POST(
-        makePostRequest(validPostBody(), 'csrf', 'csrf'),
+        makePostRequest(validPostBody('streampay_auth_9999_limiter'), 'csrf', 'csrf'),
       );
       expect(limited.status).toBe(429);
 
@@ -318,12 +331,13 @@ describe('Per-endpoint metrics on /api/auth/wallet', () => {
     });
 
     it('separates GET and POST time series by method+operation labels', async () => {
-      await GET(makeGetRequest({ address: VALID_ADDRESS }));
-      await POST(makePostRequest(validPostBody(), 'csrf', 'csrf'));
+      // A single GET mints the challenge (GET series) that the POST then
+      // redeems (POST series); each labelled series reports exactly 1.
+      const challenge = await issueChallenge();
+      const post = await POST(makePostRequest(validPostBody(challenge), 'csrf', 'csrf'));
+      expect(post.status).toBe(200);
 
       const metrics = await registry.metrics();
-      // Each combination of labels represents a distinct Prometheus time
-      // series; verify they are present and have value 1.
       expect(
         findSample(metrics, 'wallet_auth_requests_total', {
           method: 'GET',
@@ -375,7 +389,9 @@ describe('Per-endpoint metrics on /api/auth/wallet', () => {
     });
 
     it('exposes the duration metric via registry.metrics()', async () => {
-      await POST(makePostRequest(validPostBody(), 'csrf', 'csrf'));
+      const challenge = await issueChallenge();
+      const res = await POST(makePostRequest(validPostBody(challenge), 'csrf', 'csrf'));
+      expect(res.status).toBe(200);
 
       const metrics = await registry.metrics();
       expect(metrics).toContain('wallet_auth_request_duration_seconds');
