@@ -3,6 +3,13 @@ import { db } from "@/app/lib/db";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { eventBus } from "@/app/lib/event-bus";
 import { logger } from "@/app/lib/logger";
+import {
+  createSseConnection,
+  getSseHeartbeatIntervalMs,
+  getSseMaxHeartbeats,
+  getSseMaxIdleMs,
+  type SseConnection,
+} from "@/app/lib/sse";
 
 /**
  * SSE Endpoint for live stream and settlement status updates.
@@ -56,60 +63,56 @@ export async function GET(request: NextRequest) {
   }
 
   // 4. Establish SSE Connection
-  const encoder = new TextEncoder();
+  let sse: SseConnection | undefined;
 
   const stream_response = new ReadableStream({
     start(controller) {
       logger.info("Client connected to stream events", { actorId: actor.actorId, streamId });
 
-      // Keep-alive ping interval (every 30 seconds)
-      const pingInterval = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(": keep-alive\n\n"));
-        } catch (e) {
-          clearInterval(pingInterval);
-        }
-      }, 30000);
-
       // Event handlers
-      const onStreamUpdated = (data: any) => {
-        try {
-          controller.enqueue(encoder.encode(`event: stream:updated\ndata: ${JSON.stringify(data)}\n\n`));
-        } catch (e) {
-          cleanup();
-        }
+      const onStreamUpdated = (data: unknown) => {
+        sse?.send("stream:updated", data);
       };
 
-      const onSettleFinished = (data: any) => {
-        try {
-          controller.enqueue(encoder.encode(`event: settle:finished\ndata: ${JSON.stringify(data)}\n\n`));
-        } catch (e) {
-          cleanup();
-        }
+      const onSettleFinished = (data: unknown) => {
+        sse?.send("settle:finished", data);
       };
 
       // Subscribe to event bus
       eventBus.on(`stream:updated:${streamId}`, onStreamUpdated);
       eventBus.on(`settle:finished:${streamId}`, onSettleFinished);
 
-      const cleanup = () => {
-        clearInterval(pingInterval);
-        eventBus.off(`stream:updated:${streamId}`, onStreamUpdated);
-        eventBus.off(`settle:finished:${streamId}`, onSettleFinished);
-        try {
-          controller.close();
-        } catch (e) {
-          // Stream might already be closed
-        }
-        logger.info("Client disconnected from stream events", { actorId: actor.actorId, streamId });
-      };
-
-      // Handle stream termination
-      request.signal.addEventListener("abort", cleanup);
+      // Bounded heartbeats + dead-client detection (abort, rejected writes,
+      // idle deadline) are handled by the shared SSE connection helper.
+      sse = createSseConnection(controller, {
+        signal: request.signal,
+        heartbeatIntervalMs: getSseHeartbeatIntervalMs(),
+        maxHeartbeats: getSseMaxHeartbeats(),
+        maxIdleMs: getSseMaxIdleMs(),
+        onHeartbeat: (heartbeatsSent) => {
+          logger.debug("SSE keep-alive heartbeat sent", {
+            actorId: actor.actorId,
+            streamId,
+            heartbeats_sent: heartbeatsSent,
+          });
+        },
+        onClose: (reason, stats) => {
+          eventBus.off(`stream:updated:${streamId}`, onStreamUpdated);
+          eventBus.off(`settle:finished:${streamId}`, onSettleFinished);
+          logger.info("Client disconnected from stream events", {
+            actorId: actor.actorId,
+            streamId,
+            close_reason: reason,
+            events_sent: stats.eventsSent,
+            heartbeats_sent: stats.heartbeatsSent,
+          });
+        },
+      });
     },
     cancel() {
-      // Handled via abort signal
-    }
+      // Consumer cancelled the stream; the helper closes exactly once.
+      sse?.close("manual");
+    },
   });
 
   return new Response(stream_response, {

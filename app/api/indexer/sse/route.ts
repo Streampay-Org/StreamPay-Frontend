@@ -48,6 +48,7 @@ import {
   logger,
   withCorrelationContext,
 } from "@/app/lib/logger";
+import { createSseConnection, getSseMaxIdleMs } from "@/app/lib/sse";
 
 // ---------------------------------------------------------------------------
 // Configuration helpers
@@ -116,22 +117,6 @@ export function getIndexerStatus(): IndexerStatus {
 }
 
 // ---------------------------------------------------------------------------
-// SSE frame helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Encodes a named SSE event frame.
- *
- * Format per the HTML living standard:
- *   event: <name>\n
- *   data: <json>\n
- *   \n
- */
-function encodeEvent(encoder: TextEncoder, event: string, data: unknown): Uint8Array {
-  return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-}
-
-// ---------------------------------------------------------------------------
 // Route handler
 // ---------------------------------------------------------------------------
 
@@ -167,28 +152,37 @@ export async function GET(request: Request): Promise<Response> {
       identity: identity.displayValue,
     });
 
-    const encoder = new TextEncoder();
-
     const stream = new ReadableStream({
       async start(controller) {
-        /**
-         * Pushes one SSE frame into the stream. Returns `false` when the
-         * controller has been closed (client disconnected), so callers can
-         * break out of their polling loop early.
-         */
-        const send = (event: string, data: unknown): boolean => {
-          try {
-            controller.enqueue(encodeEvent(encoder, event, data));
-            return true;
-          } catch {
-            // Controller already closed — client has disconnected.
-            return false;
-          }
-        };
+        const sse = createSseConnection(controller, {
+          signal: request.signal,
+          // Status ticks already keep the connection alive, so no separate
+          // heartbeat comments are needed here; the connection is still
+          // bounded (max events), idle-deadline protected, and aborts are
+          // detected by the shared helper.
+          heartbeatIntervalMs: 0,
+          maxHeartbeats: 0,
+          maxEvents: getMaxEvents(),
+          maxIdleMs: getSseMaxIdleMs(),
+          onClose: (reason, stats) => {
+            if (reason === "aborted" || reason === "client-gone") {
+              logger.info("SSE indexer stream: client disconnected", {
+                events_emitted: stats.eventsSent,
+                request_id: correlationCtx.request_id,
+              });
+              return;
+            }
+            logger.info("SSE indexer stream closed", {
+              events_emitted: stats.eventsSent,
+              close_reason: reason,
+              request_id: correlationCtx.request_id,
+            });
+          },
+        });
 
         // Emit initial snapshot immediately so the client has data right away.
         const initial = getIndexerStatus();
-        if (!send("indexer_status", initial)) {
+        if (!sse.send("indexer_status", initial)) {
           return;
         }
 
@@ -198,7 +192,7 @@ export async function GET(request: Request): Promise<Response> {
           logger.warn("SSE indexer stream: circuit breaker open on connect, closing early", {
             request_id: correlationCtx.request_id,
           });
-          controller.close();
+          sse.close("manual");
           return;
         }
 
@@ -208,12 +202,9 @@ export async function GET(request: Request): Promise<Response> {
           await new Promise<void>((resolve) => setTimeout(resolve, getSseIntervalMs()));
 
           const status = getIndexerStatus();
-          if (!send("indexer_status", status)) {
-            // Client disconnected mid-stream.
-            logger.info("SSE indexer stream: client disconnected", {
-              events_emitted: emitted,
-              request_id: correlationCtx.request_id,
-            });
+          if (!sse.send("indexer_status", status)) {
+            // Client disconnected or the stream was closed mid-poll; the
+            // helper has already logged the close reason.
             return;
           }
 
@@ -230,12 +221,7 @@ export async function GET(request: Request): Promise<Response> {
           }
         }
 
-        logger.info("SSE indexer stream closed", {
-          events_emitted: emitted,
-          request_id: correlationCtx.request_id,
-        });
-
-        controller.close();
+        sse.close("manual");
       },
     });
 
