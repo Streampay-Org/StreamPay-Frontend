@@ -8,6 +8,18 @@
  * ~1 hour at 5 s cadence). An initial snapshot is emitted immediately so the
  * client never has to wait for the first tick.
  *
+ * ## Backpressure & queue overflow
+ * Events are staged through a bounded `SseQueue` before being forwarded to the
+ * `ReadableStream` controller.  When the queue fills faster than the client
+ * drains it:
+ * - The excess event is dropped and its count is recorded in queue metrics.
+ * - A warning is logged at the `backpressured` threshold (75 % of capacity).
+ * - The total drop count is returned in `X-SSE-Queue-Dropped` on stream close.
+ *
+ * The queue capacity and overflow policy can be tuned via env vars:
+ * - `SSE_QUEUE_CAPACITY` — max buffered frames (default 64).
+ * - `SSE_QUEUE_POLICY`   — `"drop"` | `"newest"` | `"error"` (default `"drop"`).
+ *
  * ## Usage
  * ```ts
  * const es = new EventSource('/api/indexer/sse');
@@ -27,13 +39,14 @@
  *   rather than continuing to poll frozen state indefinitely.
  *
  * ## Response headers
- * | Header              | Value                       |
- * |---------------------|-----------------------------|
- * | Content-Type        | text/event-stream            |
- * | Cache-Control       | no-cache, no-transform       |
- * | Connection          | keep-alive                   |
- * | X-Accel-Buffering   | no                           |
- * | X-Request-Id        | <correlation request_id>     |
+ * | Header                | Value                           |
+ * |-----------------------|---------------------------------|
+ * | Content-Type          | text/event-stream               |
+ * | Cache-Control         | no-cache, no-transform          |
+ * | Connection            | keep-alive                      |
+ * | X-Accel-Buffering     | no                              |
+ * | X-Request-Id          | <correlation request_id>        |
+ * | X-SSE-Queue-Capacity  | <queue capacity>                |
  */
 
 export const dynamic = "force-dynamic";
@@ -48,6 +61,13 @@ import {
   logger,
   withCorrelationContext,
 } from "@/app/lib/logger";
+import {
+  SseQueue,
+  encodeSSEFrame,
+  flushQueue,
+  sseMetricsLog,
+} from "@/lib/sseBackpressure";
+import type { SseOverflowPolicy } from "@/lib/sseBackpressure";
 
 // ---------------------------------------------------------------------------
 // Configuration helpers
@@ -69,6 +89,27 @@ function getSseIntervalMs(): number {
  */
 function getMaxEvents(): number {
   return Number(process.env.SSE_MAX_EVENTS ?? 720);
+}
+
+/**
+ * Maximum number of frames the backpressure queue can hold before the
+ * overflow policy is applied.  Read per-request so tests can override via
+ * `process.env.SSE_QUEUE_CAPACITY`.
+ */
+function getQueueCapacity(): number {
+  return Number(process.env.SSE_QUEUE_CAPACITY ?? 64);
+}
+
+/**
+ * Backpressure queue overflow policy.
+ * Read per-request so tests can set `process.env.SSE_QUEUE_POLICY` freely.
+ */
+function getQueuePolicy(): SseOverflowPolicy {
+  const raw = process.env.SSE_QUEUE_POLICY ?? "drop";
+  if (raw === "drop" || raw === "newest" || raw === "error") {
+    return raw;
+  }
+  return "drop";
 }
 
 // ---------------------------------------------------------------------------
@@ -116,20 +157,10 @@ export function getIndexerStatus(): IndexerStatus {
 }
 
 // ---------------------------------------------------------------------------
-// SSE frame helpers
+// SSE frame helpers (delegated to lib/sseBackpressure)
 // ---------------------------------------------------------------------------
 
-/**
- * Encodes a named SSE event frame.
- *
- * Format per the HTML living standard:
- *   event: <name>\n
- *   data: <json>\n
- *   \n
- */
-function encodeEvent(encoder: TextEncoder, event: string, data: unknown): Uint8Array {
-  return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-}
+// encodeSSEFrame is imported from lib/sseBackpressure and used directly below.
 
 // ---------------------------------------------------------------------------
 // Route handler
@@ -169,21 +200,64 @@ export async function GET(request: Request): Promise<Response> {
 
     const encoder = new TextEncoder();
 
+    // ── Backpressure queue ─────────────────────────────────────────────────
+    // All SSE frames pass through this bounded queue before reaching the
+    // ReadableStream controller.  If the client is slow, the queue absorbs
+    // the burst up to `capacity` and then applies the configured overflow
+    // policy (default: drop + log).  This prevents unbounded memory growth
+    // on long-lived connections with slow consumers.
+    const sseQueue = new SseQueue({
+      capacity: getQueueCapacity(),
+      policy: getQueuePolicy(),
+    });
+
     const stream = new ReadableStream({
       async start(controller) {
         /**
-         * Pushes one SSE frame into the stream. Returns `false` when the
-         * controller has been closed (client disconnected), so callers can
-         * break out of their polling loop early.
+         * Stage one encoded SSE frame through the backpressure queue, then
+         * immediately flush the queue into `controller`.
+         *
+         * @returns `false` when the controller is already closed (client gone)
+         *          so callers can break out of their loop early.
          */
         const send = (event: string, data: unknown): boolean => {
-          try {
-            controller.enqueue(encodeEvent(encoder, event, data));
-            return true;
-          } catch {
+          const chunk = encodeSSEFrame(encoder, event, data);
+          const result = sseQueue.enqueue(chunk);
+
+          if (result === "dropped") {
+            logger.warn("SSE indexer: event dropped due to queue overflow", sseMetricsLog(
+              sseQueue.metrics(),
+              { request_id: correlationCtx.request_id },
+            ));
+            // The queue still has items — try to flush what we have.
+          } else if (result === "backpressured") {
+            logger.warn("SSE indexer: queue backpressure detected", sseMetricsLog(
+              sseQueue.metrics(),
+              { request_id: correlationCtx.request_id },
+            ));
+          } else if (result === "error") {
+            // Terminal overflow — close the stream cleanly.
+            logger.error("SSE indexer: queue overflow (error policy) — closing stream", sseMetricsLog(
+              sseQueue.metrics(),
+              { request_id: correlationCtx.request_id },
+            ));
+            flushQueue(sseQueue, controller);
+            try { controller.close(); } catch { /* already closed */ }
+            return false;
+          } else if (result === "evicted") {
+            logger.warn("SSE indexer: oldest event evicted from queue (newest policy)", sseMetricsLog(
+              sseQueue.metrics(),
+              { request_id: correlationCtx.request_id },
+            ));
+          }
+
+          // Flush the queue to the wire.
+          const flushed = flushQueue(sseQueue, controller);
+          if (flushed === "closed") {
             // Controller already closed — client has disconnected.
             return false;
           }
+          return true;
         };
 
         // Emit initial snapshot immediately so the client has data right away.
@@ -209,11 +283,11 @@ export async function GET(request: Request): Promise<Response> {
 
           const status = getIndexerStatus();
           if (!send("indexer_status", status)) {
-            // Client disconnected mid-stream.
-            logger.info("SSE indexer stream: client disconnected", {
-              events_emitted: emitted,
-              request_id: correlationCtx.request_id,
-            });
+            // Client disconnected or terminal overflow mid-stream.
+            logger.info("SSE indexer stream: client disconnected", sseMetricsLog(
+              sseQueue.metrics(),
+              { events_emitted: emitted, request_id: correlationCtx.request_id },
+            ));
             return;
           }
 
@@ -222,18 +296,19 @@ export async function GET(request: Request): Promise<Response> {
           // Trip detected mid-stream: emit the breaker-open state and exit
           // cleanly so the client can reconnect when the breaker is reset.
           if (status.breakerOpen) {
-            logger.warn("SSE indexer stream: circuit breaker tripped, closing stream", {
-              events_emitted: emitted,
-              request_id: correlationCtx.request_id,
-            });
+            logger.warn("SSE indexer stream: circuit breaker tripped, closing stream", sseMetricsLog(
+              sseQueue.metrics(),
+              { events_emitted: emitted, request_id: correlationCtx.request_id },
+            ));
             break;
           }
         }
 
-        logger.info("SSE indexer stream closed", {
-          events_emitted: emitted,
-          request_id: correlationCtx.request_id,
-        });
+        const finalMetrics = sseQueue.metrics();
+        logger.info("SSE indexer stream closed", sseMetricsLog(
+          finalMetrics,
+          { events_emitted: emitted, request_id: correlationCtx.request_id },
+        ));
 
         controller.close();
       },
@@ -246,6 +321,7 @@ export async function GET(request: Request): Promise<Response> {
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
         "X-Request-Id": correlationCtx.request_id,
+        "X-SSE-Queue-Capacity": String(getQueueCapacity()),
       },
     });
   });
