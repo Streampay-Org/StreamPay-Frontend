@@ -3,6 +3,7 @@
 import Link from "next/link";
 import React from "react";
 import { Timestamp } from "./Timestamp";
+import { VirtualListItem } from "./VirtualListItem";
 
 export type ActivityEvent = {
   id: string;
@@ -30,7 +31,7 @@ export const ActivityTimeline = ({ groups }: ActivityTimelineProps) => {
           <h3 className="activity-group-title">{group.date}</h3>
           <ul className="activity-timeline">
             {group.events.map((event) => (
-              <li key={event.id} className="activity-item">
+              <VirtualListItem key={event.id} className="activity-item" defaultHeight={100}>
                 <div className="activity-marker">
                   <div className={`activity-dot activity-dot--${event.status}`} />
                   <div className="activity-line" />
@@ -48,7 +49,7 @@ export const ActivityTimeline = ({ groups }: ActivityTimelineProps) => {
                     )}
                   </div>
                 </div>
-              </li>
+              </VirtualListItem>
             ))}
           </ul>
         </section>

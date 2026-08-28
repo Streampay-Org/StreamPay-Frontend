@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { CopyAddress } from "./CopyAddress";
 import { Timestamp } from "./Timestamp";
+import { VirtualListItem } from "./VirtualListItem";
 
 /**
  * Contract event types emitted by the StreamPay Soroban contract over a
@@ -168,10 +169,11 @@ export function EventTimeline({ events }: EventTimelineProps) {
           {visibleEvents.map((event) => {
             const meta = EVENT_META[event.type];
             return (
-              <li
+              <VirtualListItem
                 key={event.id}
                 className="activity-item"
                 aria-label={`${meta.label} event`}
+                defaultHeight={120}
               >
                 <div className="activity-marker">
                   <div className={`activity-dot activity-dot--${meta.status}`} />
@@ -207,7 +209,7 @@ export function EventTimeline({ events }: EventTimelineProps) {
                     </div>
                   </div>
                 </div>
-              </li>
+              </VirtualListItem>
             );
           })}
         </ul>
