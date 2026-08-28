@@ -1,10 +1,15 @@
 import type { StreamRowData } from "../components/StreamRow";
 
 function escapeCsv(value: string): string {
-  if (/[",\n\r]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
+  let safeValue = value;
+  if (/^[=+\-@]/.test(safeValue)) {
+    safeValue = "'" + safeValue;
   }
-  return value;
+  
+  if (/[",\n\r]/.test(safeValue)) {
+    return `"${safeValue.replace(/"/g, '""')}"`;
+  }
+  return safeValue;
 }
 
 const CSV_HEADERS = ["ID", "Recipient", "Rate", "Schedule", "Status", "Next Action"];
