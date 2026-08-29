@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { registry, webhookCounter, webhookDuration } from "@/src/metrics/registry";
 import { logger } from "@/app/lib/logger";
 import { webhookPayloadSchema } from "@/src/validators/webhooks";
+import { withRouteTimeout } from "@/src/middleware/timeout";
 
 // Prometheus metrics endpoint
-export async function GET(request: Request) {
+async function handleWebhooksGet(request: Request) {
   // Per-user rate limit — identity: API key > JWT wallet sub > IP.
   const rateLimited = await applyRateLimit(request, 'webhooks', 'GET');
   if (rateLimited) return rateLimited;
@@ -23,8 +24,12 @@ export async function GET(request: Request) {
   }
 }
 
+export async function GET(request: Request) {
+  return withRouteTimeout(request, () => handleWebhooksGet(request));
+}
+
 // Webhook receiver endpoint
-export async function POST(req: NextRequest) {
+async function handleWebhooksPost(req: NextRequest) {
   // Per-user rate limit before body parse / processing so exhausted callers
   // cannot spend CPU on validation or metrics work.
   const rateLimited = await applyRateLimit(req, 'webhooks', 'POST');
@@ -93,4 +98,8 @@ export async function POST(req: NextRequest) {
       durationSeconds,
     );
   }
+}
+
+export async function POST(req: NextRequest) {
+  return withRouteTimeout(req, () => handleWebhooksPost(req));
 }

@@ -3,6 +3,7 @@ import { requireAuditLogAccess } from "@/app/lib/auth";
 import { AUDIT_LOG_RETENTION_DAYS, auditLogStore } from "@/app/lib/audit-log";
 import type { AuditActorRole, AuditListFilters } from "@/app/types/audit";
 import { AuditResponseSchema, type AuditResponseDTO } from "@/app/lib/dtos/audit.dto";
+import { withRouteTimeout } from "@/src/middleware/timeout";
 
 function createErrorResponse(code: string, message: string, status: number) {
   return NextResponse.json({ error: { code, message, request_id: "mock-request-id" } }, { status });
@@ -29,7 +30,7 @@ function buildFilters(request: Request): AuditListFilters {
   };
 }
 
-export async function GET(request: Request) {
+async function handleAuditGet(request: Request) {
   const { searchParams } = new URL(request.url);
   const exportFormat = searchParams.get("export");
   const actor = requireAuditLogAccess(request, exportFormat === "ndjson" ? "export" : "read");
@@ -74,6 +75,10 @@ export async function GET(request: Request) {
   });
 
   return NextResponse.json<AuditResponseDTO>(payload);
+}
+
+export async function GET(request: Request) {
+  return withRouteTimeout(request, () => handleAuditGet(request));
 }
 
 export async function POST() {

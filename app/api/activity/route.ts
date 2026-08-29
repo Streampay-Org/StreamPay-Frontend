@@ -4,13 +4,14 @@ import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { getCorrelationContext, logger, withCorrelationContext } from "@/app/lib/logger";
+import { withRouteTimeout } from "@/src/middleware/timeout";
 
 function createErrorResponse(code: string, message: string, status: number) {
   const context = getCorrelationContext();
   return NextResponse.json({ error: { code, message, request_id: context?.request_id } }, { status });
 }
 
-export async function GET(request: Request) {
+async function handleActivityGet(request: Request) {
   const { activityTimeline } = getStore();
   const url = new URL(request.url);
   const limitType = getLimitForRoute("GET", url.pathname);
@@ -57,4 +58,8 @@ export async function GET(request: Request) {
       links: { self: `/api/activity?limit=${limit}` },
     });
   });
+}
+
+export async function GET(request: Request) {
+  return withRouteTimeout(request, () => handleActivityGet(request));
 }

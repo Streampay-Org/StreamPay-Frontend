@@ -19,6 +19,7 @@ import {
 import type { Stream } from "@/app/types/openapi";
 import { createCacheHeaders, createStrongEtag, isIfNoneMatchMatch } from "@/src/middleware/etag";
 import { observeStreamsRequest } from "@/src/metrics/registry";
+import { withRouteTimeout } from "@/src/middleware/timeout";
 
 function errorResponse(code: string, message: string, status: number) {
   return createErrorResponse(code, message, status);
@@ -41,7 +42,7 @@ function getHeader(request: Request, name: string): string | null {
   return request.headers?.get?.(name) ?? null;
 }
 
-export async function GET(request: Request) {
+async function handleStreamsGet(request: Request) {
   const start = process.hrtime();
   let status = 200;
 
@@ -149,7 +150,11 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+export async function GET(request: Request) {
+  return withRouteTimeout(request, () => handleStreamsGet(request));
+}
+
+async function handleStreamsPost(request: Request) {
   const start = process.hrtime();
   let status = 201;
 
@@ -266,4 +271,8 @@ export async function POST(request: Request) {
   } finally {
     observeStreamsRequest("POST", status, start);
   }
+}
+
+export async function POST(request: Request) {
+  return withRouteTimeout(request, () => handleStreamsPost(request));
 }

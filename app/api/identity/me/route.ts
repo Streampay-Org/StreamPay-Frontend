@@ -5,13 +5,14 @@ import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { getCorrelationContext } from "@/app/lib/logger";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { getLastSeen } from "@/lib/lastSeen";
+import { withRouteTimeout } from "@/src/middleware/timeout";
 
 function createErrorResponse(code: string, message: string, status: number) {
   const context = getCorrelationContext();
   return NextResponse.json({ error: { code, message, request_id: context?.request_id } }, { status });
 }
 
-export async function GET(request: Request) {
+async function handleIdentityMeGet(request: Request) {
   const url = new URL(request.url);
   const limitType = getLimitForRoute("GET", url.pathname);
   const identity = getClientIdentity(request);
@@ -39,4 +40,8 @@ export async function GET(request: Request) {
     },
     links: { self: "/api/identity/me" },
   });
+}
+
+export async function GET(request: Request) {
+  return withRouteTimeout(request, () => handleIdentityMeGet(request));
 }
