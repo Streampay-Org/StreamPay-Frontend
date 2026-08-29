@@ -45,6 +45,38 @@ const SERVICE_NAME = process.env.SERVICE_NAME ?? 'streampay-frontend';
 /** OTLP HTTP endpoint; omit to disable export. */
 const OTLP_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? null;
 
+/**
+ * Telemetry consent gate.
+ *
+ * Per least-privilege, telemetry MUST NOT leave the process unless consent
+ * has been explicitly granted. Consent defaults to `false` (deny) and may be
+ * opt-in either at deploy time (STREAMPAY_TELEMETRY_CONSENT=true) or at
+ * runtime via `setTelemetryConsent(true)` once a user/deployment has opted in.
+ *
+ * The consent flag is the single chokepoint enforced inside `otlpHttpExport`,
+ * so callers cannot accidentally bypass it.
+ */
+const TELEMETRY_CONSENT_ENV = process.env.STREAMPAY_TELEMETRY_CONSENT;
+const DEFAULT_TELEMETRY_CONSENT =
+  TELEMETRY_CONSENT_ENV === 'true' || TELEMETRY_CONSENT_ENV === '1';
+
+let _telemetryConsent = DEFAULT_TELEMETRY_CONSENT;
+
+/** Returns whether telemetry export is currently permitted. */
+export function isTelemetryConsented(): boolean {
+  return _telemetryConsent === true;
+}
+
+/** Sets the telemetry consent state. Only `true` enables export. */
+export function setTelemetryConsent(value: boolean): void {
+  _telemetryConsent = value === true;
+}
+
+/** Restores the deploy-time default consent state. */
+export function resetTelemetryConsent(): void {
+  _telemetryConsent = DEFAULT_TELEMETRY_CONSENT;
+}
+
 /** Maximum number of attributes per span (prevents unbounded growth). */
 const MAX_ATTRIBUTES = 64;
 
@@ -287,6 +319,103 @@ class SpanImpl implements Span {
   }
 }
 
+// ── Redaction ──────────────────────────────────────────────────────────────────
+
+/**
+ * Redaction of telemetry payloads.
+ *
+ * Before any span is exported it is passed through `redactSpanRecord`, which
+ * produces a NEW, immutable copy with sensitive attributes removed. The
+ * original record is never mutated, so concurrent exports, retries, and
+ * re-exports of the same span cannot corrupt shared state or leak PII via a
+ * stale reference.
+ *
+ * Invariants:
+ *  • `redactSpanRecord` is pure and total — it never throws and never reads
+ *    or writes caller-owned data.
+ *  • Only known-sensitive attribute *keys* are fully masked; PII-shaped
+ *    *values* (emails, Stellar account/seed keys) are masked wherever they
+ *    appear, regardless of key name.
+ *  • Non-sensitive data is preserved verbatim.
+ */
+
+/** Keys whose values are always treated as sensitive and masked. */
+const SENSITIVE_KEY_RE =
+  /^(email|e?mail|memo|label|partner_?id|recipient|wallet|session_?id)$/i;
+
+/** Substring match for credential/secret style keys. */
+const SENSITIVE_KEY_SUBSTR_RE =
+  /secret|password|passwd|token|api_?key|private_?key|signature|authorization|auth_?token|cookie|ssn|card_?number|cvv|secret_?key/i;
+
+/** Well-formed email address. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Stellar account ID (public key) — `G` followed by 55 base32 chars. */
+const STELLAR_ACCOUNT_RE = /^G[0-9A-Z]{55}$/;
+
+/** Stellar secret seed — `S` followed by 55 base32 chars. */
+const STELLAR_SECRET_RE = /^S[0-9A-Z]{55}$/;
+
+/** Mask used for redacted values. */
+const REDACTED = '[REDACTED]';
+
+function isSensitiveKey(key: string): boolean {
+  return SENSITIVE_KEY_RE.test(key) || SENSITIVE_KEY_SUBSTR_RE.test(key);
+}
+
+function looksLikePII(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  return (
+    EMAIL_RE.test(value) ||
+    STELLAR_ACCOUNT_RE.test(value) ||
+    STELLAR_SECRET_RE.test(value)
+  );
+}
+
+/**
+ * Redacts a single scalar attribute value. PII-shaped strings are masked;
+ * all other values are returned unchanged.
+ */
+function redactScalar(value: AttributeValue): AttributeValue {
+  if (typeof value === 'string' && looksLikePII(value)) return REDACTED;
+  return value;
+}
+
+/**
+ * Returns a NEW attributes object with sensitive data masked. The input is
+ * never mutated. Invalid/non-object input yields an empty object (defensive
+ * against malformed span records).
+ */
+export function redactAttributes(
+  attrs: Record<string, AttributeValue> | null | undefined,
+): Record<string, AttributeValue> {
+  if (!attrs || typeof attrs !== 'object') return {};
+  const out: Record<string, AttributeValue> = {};
+  for (const [key, value] of Object.entries(attrs)) {
+    if (isSensitiveKey(key)) {
+      out[key] = REDACTED;
+    } else if (Array.isArray(value)) {
+      out[key] = value.map(el => redactScalar(el as AttributeValue)) as AttributeValue;
+    } else {
+      out[key] = redactScalar(value);
+    }
+  }
+  return out;
+}
+
+/**
+ * Returns a NEW span record with all sensitive attributes and event
+ * attributes redacted. The input record and its nested objects are never
+ * mutated, guaranteeing safe concurrent/retry export.
+ */
+export function redactSpanRecord(span: SpanRecord): SpanRecord {
+  return {
+    ...span,
+    attributes: redactAttributes(span.attributes),
+    events: span.events.map(e => ({ ...e, attributes: redactAttributes(e.attributes) })),
+  };
+}
+
 // ── OTLP HTTP exporter ────────────────────────────────────────────────────────
 
 /**
@@ -300,6 +429,18 @@ class SpanImpl implements Span {
  */
 export async function otlpHttpExport(span: SpanRecord): Promise<void> {
   if (!OTLP_ENDPOINT) return;
+
+  // Consent gate (least privilege): never export telemetry without consent.
+  if (!isTelemetryConsented()) return;
+
+  // Redact sensitive attributes before egress. A failure to redact must NOT
+  // result in an unredacted payload being sent — drop the span instead.
+  let safe: SpanRecord;
+  try {
+    safe = redactSpanRecord(span);
+  } catch {
+    return;
+  }
 
   const payload = {
     resourceSpans: [
@@ -321,11 +462,11 @@ export async function otlpHttpExport(span: SpanRecord): Promise<void> {
                 kind:         spanKindToOtlp(span.kind),
                 startTimeUnixNano: String(span.startTime * 1_000_000),
                 endTimeUnixNano:   String(span.endTime   * 1_000_000),
-                attributes: Object.entries(span.attributes).map(([k, v]) => ({
+                attributes: Object.entries(safe.attributes).map(([k, v]) => ({
                   key:   k,
                   value: attributeValueToOtlp(v),
                 })),
-                events: span.events.map(e => ({
+                events: safe.events.map(e => ({
                   name:              e.name,
                   timeUnixNano:      String(e.timestamp * 1_000_000),
                   attributes: Object.entries(e.attributes).map(([k, v]) => ({
