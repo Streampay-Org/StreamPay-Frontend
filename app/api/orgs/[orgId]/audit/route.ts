@@ -4,6 +4,11 @@
  * Returns audit log entries scoped to a specific org.
  * Filters by orgId using the shared auditLogStore.
  *
+ * Access: audit-log read roles only (support, admin, finance, security,
+ * compliance) — the same authorization as `GET /api/audit`. The audit log
+ * records privileged and financial actions, so org-scoped reads must never be
+ * reachable without an authenticated actor holding an audit-read role.
+ *
  * Query params:
  *   limit  - max entries (default 50, max 250)
  *   cursor - pagination cursor
@@ -11,6 +16,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { requireAuditLogAccess } from "@/app/lib/auth";
 import { orgDb } from "@/app/lib/org-db";
 import { auditLogStore } from "@/app/lib/audit-log";
 import type { AuditActorRole } from "@/app/types/audit";
@@ -23,6 +29,11 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ orgId: string }> },
 ) {
+  const actor = requireAuditLogAccess(request, "read");
+  if (actor instanceof NextResponse) {
+    return actor;
+  }
+
   const { orgId } = await params;
 
   if (!orgDb.orgs.has(orgId)) {
@@ -34,17 +45,33 @@ export async function GET(
   const limit = Math.min(Math.max(Number.isFinite(limitParam) ? limitParam : 50, 1), 250);
   const action = searchParams.get("action") ?? undefined;
   const role = searchParams.get("role") as AuditActorRole | null;
+  const cursor = searchParams.get("cursor") ?? undefined;
 
-  const entries = auditLogStore.list({
+  if (cursor) {
+    try {
+      const decoded = Buffer.from(cursor, "base64").toString("utf-8");
+      if (!decoded.includes("|")) {
+        throw new Error();
+      }
+    } catch {
+      return createErrorResponse("INVALID_CURSOR", "Malformed cursor", 422);
+    }
+  }
+
+  const { data: entries, hasNext, nextCursor } = auditLogStore.getPaginated({
     action: action ?? null,
     role: role ?? null,
     limit,
+    cursor,
+    orgId, // Important! orgId was missing in original implementation despite the comment!
   });
 
   return NextResponse.json({
     orgId,
     entries,
     count: entries.length,
+    hasNext,
+    nextCursor,
     chainIntact: auditLogStore.assertIntegrity(),
   });
 }
