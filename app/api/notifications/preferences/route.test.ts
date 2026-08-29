@@ -298,4 +298,40 @@ describe("PUT /api/notifications/preferences", () => {
       allowCriticalAlerts: true,
     });
   });
+
+  it("returns ETag on GET and rejects update with 409 STATE_CONFLICT when If-Match header fails to match", async () => {
+    const token = signToken({ sub: WALLET_ADDRESS, actorId: "actor-conflict" });
+
+    // Fetch initial preferences to get ETag
+    const getRes = await GET(requestWithAuthorization({ authorization: `Bearer ${token}` }));
+    expect(getRes.status).toBe(200);
+    const etag = getRes.headers.get("etag");
+    expect(etag).toBeTruthy();
+
+    // Valid update with matching If-Match succeeds
+    const validReq = new Request("http://localhost/api/notifications/preferences", {
+      method: "PUT",
+      headers: new Headers({
+        authorization: `Bearer ${token}`,
+        "if-match": etag!,
+      }),
+      body: JSON.stringify({ email: false }),
+    });
+    const putRes = await PUT(validReq);
+    expect(putRes.status).toBe(200);
+
+    // Stale update using previous ETag fails with 409 STATE_CONFLICT
+    const staleReq = new Request("http://localhost/api/notifications/preferences", {
+      method: "PUT",
+      headers: new Headers({
+        authorization: `Bearer ${token}`,
+        "if-match": etag!,
+      }),
+      body: JSON.stringify({ webhook: true }),
+    });
+    const conflictRes = await PUT(staleReq);
+    expect(conflictRes.status).toBe(409);
+    const conflictBody = await conflictRes.json();
+    expect(conflictBody.error.code).toBe("STATE_CONFLICT");
+  });
 });

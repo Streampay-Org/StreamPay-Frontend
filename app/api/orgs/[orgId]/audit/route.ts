@@ -4,6 +4,11 @@
  * Returns audit log entries scoped to a specific org.
  * Filters by orgId using the shared auditLogStore.
  *
+ * Access: audit-log read roles only (support, admin, finance, security,
+ * compliance) — the same authorization as `GET /api/audit`. The audit log
+ * records privileged and financial actions, so org-scoped reads must never be
+ * reachable without an authenticated actor holding an audit-read role.
+ *
  * Query params:
  *   limit  - max entries (default 50, max 250)
  *   cursor - pagination cursor
@@ -11,6 +16,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { requireAuditLogAccess } from "@/app/lib/auth";
 import { orgDb } from "@/app/lib/org-db";
 import { auditLogStore } from "@/app/lib/audit-log";
 import type { AuditActorRole } from "@/app/types/audit";
@@ -23,6 +29,11 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ orgId: string }> },
 ) {
+  const actor = requireAuditLogAccess(request, "read");
+  if (actor instanceof NextResponse) {
+    return actor;
+  }
+
   const { orgId } = await params;
 
   if (!orgDb.orgs.has(orgId)) {

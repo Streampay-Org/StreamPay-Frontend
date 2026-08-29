@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 type WalletBalanceProps = {
   /** Resolver for the current balance, e.g. an on-chain query. */
-  fetchBalance: () => Promise<string>;
+  fetchBalance: (signal?: AbortSignal) => Promise<string>;
   /** Asset code shown next to the amount. */
   assetCode?: string;
   /** Poll interval in milliseconds (defaults to 15s). */
@@ -15,8 +15,8 @@ type Status = "loading" | "idle" | "error";
 
 /**
  * Displays a wallet balance that refreshes on an interval, with a live
- * "refreshing" indicator and a manual refresh control. The polling timer is
- * cleared on unmount so it never leaks or updates an unmounted component.
+ * "refreshing" indicator and a manual refresh control. Stale refreshes are
+ * aborted and ignored so late network responses cannot overwrite newer data.
  */
 export function WalletBalance({
   fetchBalance,
@@ -26,17 +26,41 @@ export function WalletBalance({
   const [balance, setBalance] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>("loading");
   const mounted = useRef(true);
+  const activeRefreshId = useRef(0);
+  const activeController = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
+    activeController.current?.abort();
+    const controller = new AbortController();
+    activeController.current = controller;
+    const refreshId = activeRefreshId.current + 1;
+    activeRefreshId.current = refreshId;
+
     setStatus("loading");
     try {
-      const next = await fetchBalance();
-      if (!mounted.current) return;
+      const next = await fetchBalance(controller.signal);
+      if (
+        !mounted.current ||
+        controller.signal.aborted ||
+        refreshId !== activeRefreshId.current
+      ) {
+        return;
+      }
       setBalance(next);
       setStatus("idle");
     } catch {
-      if (!mounted.current) return;
+      if (
+        !mounted.current ||
+        controller.signal.aborted ||
+        refreshId !== activeRefreshId.current
+      ) {
+        return;
+      }
       setStatus("error");
+    } finally {
+      if (activeController.current === controller) {
+        activeController.current = null;
+      }
     }
   }, [fetchBalance]);
 
@@ -46,6 +70,9 @@ export function WalletBalance({
     const id = setInterval(() => void refresh(), pollIntervalMs);
     return () => {
       mounted.current = false;
+      activeRefreshId.current += 1;
+      activeController.current?.abort();
+      activeController.current = null;
       clearInterval(id);
     };
   }, [refresh, pollIntervalMs]);

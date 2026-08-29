@@ -264,7 +264,7 @@ describe('ReconciliationService abort signal', () => {
 
   it('stops mid-loop over provided streams when the signal fires', async () => {
     const controller = new AbortController();
-    (onChainClient.fetchStream as jest.Mock).mockImplementation(async () => {
+    (onChainClient.fetchStream as jest.Mock).mockImplementation(async (network, id) => {
       controller.abort();
       return { id: 's1', total_amount: 100n, released_amount: 50n, status: ContractStreamStatus.ACTIVE };
     });
@@ -294,7 +294,7 @@ describe('ReconciliationService abort signal', () => {
   it('stops mid-page in the paginated path when the signal fires', async () => {
     const controller = new AbortController();
     (dbClient.getStreams as jest.Mock).mockResolvedValue([dbStream('s1'), dbStream('s2')]);
-    (onChainClient.fetchStream as jest.Mock).mockImplementation(async () => {
+    (onChainClient.fetchStream as jest.Mock).mockImplementation(async (network, id) => {
       controller.abort();
       return { id: 's1', total_amount: 100n, released_amount: 50n, status: ContractStreamStatus.ACTIVE };
     });
@@ -308,7 +308,7 @@ describe('ReconciliationService abort signal', () => {
 
   it('skips the last-run-status write when aborted, and writes it otherwise', async () => {
     const controller = new AbortController();
-    (onChainClient.fetchStream as jest.Mock).mockImplementation(async () => {
+    (onChainClient.fetchStream as jest.Mock).mockImplementation(async (network, id) => {
       controller.abort();
       return { id: 's1', total_amount: 100n, released_amount: 50n, status: ContractStreamStatus.ACTIVE };
     });

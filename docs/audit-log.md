@@ -46,14 +46,28 @@ operator inputs are handled consistently.
 
 ## Access matrix
 
-| Role | Read `/api/audit` | Export `?export=ndjson` |
-| --- | --- | --- |
-| `support` | Yes | No |
-| `finance` | Yes | No |
-| `admin` | Yes | Yes |
-| `security` | Yes | Yes |
-| `compliance` | Yes | Yes |
-| `user` | No | No |
+| Role | Read `/api/audit` / `/api/orgs/:orgId/audit` | Export `?export=ndjson` / `/api/audit/export` | Archive `/api/audit/archive` |
+| --- | --- | --- | --- |
+| `support` | Yes | No | No |
+| `finance` | Yes | No | No |
+| `admin` | Yes | Yes | Yes |
+| `security` | Yes | Yes | Yes |
+| `compliance` | Yes | Yes | Yes |
+| `user` | No | No | No |
+
+## Archive downloads
+
+Archived audit entries (soft-archived by retention plus deep-archived cold-storage
+entries) can be downloaded as NDJSON from `GET /api/audit/archive`. This is
+**authorization-checked like an export**: only `admin`, `security`, and
+`compliance` roles may download the archive, and the same redacted projection
+(`mask-target-account`) is applied so archived downloads never leak unredacted
+target accounts.
+
+- `limit` query parameter bounds the response (1–250, default 250), newest-first.
+- Response includes `x-audit-chain-intact`, `x-audit-retention-days`,
+  `x-request-id`, `x-content-type-options: nosniff`, and `cache-control: no-store`.
+- The audit log — including its archive — is read-only via API; mutations return 405.
 
 ## Export redaction
 

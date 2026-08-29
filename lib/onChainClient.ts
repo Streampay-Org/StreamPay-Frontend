@@ -79,7 +79,7 @@ export function resetOnChainClientConfig(): void {
 }
 
 export const onChainClient = {
-  async fetchStream(streamId: string): Promise<OnChainStream> {
+  async fetchStream(network: string, streamId: string): Promise<OnChainStream> {
     if (_clientConfig.simulateUnknownError) {
       throw new SorobanError(
         SorobanErrorCode.Unknown,
@@ -118,7 +118,7 @@ export const onChainClient = {
     }
 
     return stream;
-  },  async cancelStream(streamId: string): Promise<OnChainCancellationResult | null> {
+  },  async cancelStream(network: string, streamId: string): Promise<OnChainCancellationResult | null> {
     if (_clientConfig.simulateUnknownError) {
       throw new SorobanError(
         SorobanErrorCode.Unknown,
@@ -127,7 +127,7 @@ export const onChainClient = {
       );
     }
 
-    const stream = await this.fetchStream(streamId);
+    const stream = await this.fetchStream(network, streamId);
     if (!stream) {
       return null;
     }
@@ -179,7 +179,7 @@ export const onChainClient = {
     };
   },
 
-  async createStream(streamId: string, _payload: unknown): Promise<{ stream_id: string; tx_hash: string }> {
+  async createStream(network: string, streamId: string, _payload: unknown): Promise<{ stream_id: string; tx_hash: string }> {
     if (_clientConfig.simulateUnknownError) {
       throw new SorobanError(
         SorobanErrorCode.Unknown,

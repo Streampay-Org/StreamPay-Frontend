@@ -4,36 +4,54 @@ import React, {
   KeyboardEvent,
   MouseEvent,
   PropsWithChildren,
+  RefObject,
   useEffect,
   useId,
   useRef,
   useState,
 } from "react";
 
-interface ModalProps {
+export type FocusTarget =
+  | HTMLElement
+  | RefObject<HTMLElement | null>
+  | (() => HTMLElement | null | undefined)
+  | null
+  | undefined;
+
+export interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
+  /**
+   * Optional custom element, ref, or callback to restore focus to on modal close.
+   * Defaults to the element that was active when the modal opened.
+   */
+  restoreFocusTarget?: FocusTarget;
+  /**
+   * Whether to automatically restore focus upon modal close.
+   * @default true
+   */
+  autoRestoreFocus?: boolean;
 }
 
 export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
   isOpen,
   onClose,
   title,
+  restoreFocusTarget,
+  autoRestoreFocus = true,
   children,
 }) => {
   const [shouldRender, setShouldRender] = useState(isOpen);
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
-  // Tracks whether the current pointer interaction *started* on the overlay.
-  // Without this, a text-selection drag that begins inside the dialog and ends
-  // on the backdrop would incorrectly close the modal. We only treat it as an
-  // outside-click when both press and release happen on the overlay itself.
   const pointerDownOnOverlayRef = useRef(false);
   const titleId = useId();
 
   useEffect(() => {
-    if (isOpen) setShouldRender(true);
+    if (isOpen) {
+      setShouldRender(true);
+    }
   }, [isOpen]);
 
   useEffect(() => {
@@ -47,28 +65,53 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
     };
   }, [isOpen]);
 
-  useEffect(() => {
-    if (isOpen) {
-      previouslyFocusedElementRef.current = document.activeElement as HTMLElement | null;
-      dialogRef.current?.focus();
-      return;
+  const resolveTargetElement = (): HTMLElement | null => {
+    if (restoreFocusTarget !== undefined) {
+      if (typeof restoreFocusTarget === "function") {
+        return restoreFocusTarget() ?? null;
+      }
+      if (restoreFocusTarget && "current" in restoreFocusTarget) {
+        return restoreFocusTarget.current;
+      }
+      return restoreFocusTarget ?? null;
     }
+    return previouslyFocusedElementRef.current;
+  };
 
-    previouslyFocusedElementRef.current?.focus();
-    previouslyFocusedElementRef.current = null;
-  }, [isOpen]);
+  useEffect(() => {
+    if (isOpen && shouldRender) {
+      if (!previouslyFocusedElementRef.current) {
+        previouslyFocusedElementRef.current =
+          document.activeElement as HTMLElement | null;
+      }
+      dialogRef.current?.focus();
+    } else if (!isOpen && previouslyFocusedElementRef.current) {
+      if (autoRestoreFocus) {
+        const target = resolveTargetElement();
+        if (
+          target &&
+          typeof target.focus === "function" &&
+          target.isConnected
+        ) {
+          target.focus();
+        }
+      } else {
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+      }
+      previouslyFocusedElementRef.current = null;
+    }
+  }, [isOpen, shouldRender, autoRestoreFocus, restoreFocusTarget]);
 
   const handleAnimationEnd = () => {
     if (!isOpen) setShouldRender(false);
   };
 
-  // Record where the pointer press began so we can distinguish a genuine
-  // backdrop click from a drag that merely ended on the backdrop.
   const handleOverlayPointerDown = (event: MouseEvent<HTMLDivElement>) => {
     pointerDownOnOverlayRef.current = event.target === event.currentTarget;
   };
 
-  // Close only when the click both started and ended on the overlay.
   const handleOverlayClick = (event: MouseEvent<HTMLDivElement>) => {
     const startedOnOverlay = pointerDownOnOverlayRef.current;
     pointerDownOnOverlayRef.current = false;
@@ -77,7 +120,6 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
     }
   };
 
-  // Keep keyboard focus inside the active dialog per WAI-ARIA dialog guidance.
   const getFocusableElements = () => {
     if (!dialogRef.current) return [];
 
@@ -90,12 +132,12 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
           "input:not([disabled])",
           "select:not([disabled])",
           "[tabindex]:not([tabindex='-1'])",
-        ].join(",")
-      )
+        ].join(","),
+      ),
     ).filter(
       (element) =>
         !element.hasAttribute("hidden") &&
-        element.getAttribute("aria-hidden") !== "true"
+        element.getAttribute("aria-hidden") !== "true",
     );
   };
 
@@ -117,7 +159,8 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
     }
 
     const firstFocusableElement = focusableElements[0];
-    const lastFocusableElement = focusableElements[focusableElements.length - 1];
+    const lastFocusableElement =
+      focusableElements[focusableElements.length - 1];
     const activeElement = document.activeElement;
 
     if (event.shiftKey) {
@@ -188,7 +231,9 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
             marginBottom: "1.5rem",
           }}
         >
-          <h2 id={titleId} style={{ fontSize: "1.25rem" }}>{title}</h2>
+          <h2 id={titleId} style={{ fontSize: "1.25rem" }}>
+            {title}
+          </h2>
           <button
             onClick={onClose}
             aria-label="Close modal"
@@ -208,20 +253,40 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
 
       <style jsx global>{`
         @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
         }
         @keyframes fadeOut {
-          from { opacity: 1; }
-          to { opacity: 0; }
+          from {
+            opacity: 1;
+          }
+          to {
+            opacity: 0;
+          }
         }
         @keyframes scaleIn {
-          from { transform: scale(0.95); opacity: 0; }
-          to { transform: scale(1); opacity: 1; }
+          from {
+            transform: scale(0.95);
+            opacity: 0;
+          }
+          to {
+            transform: scale(1);
+            opacity: 1;
+          }
         }
         @keyframes scaleOut {
-          from { transform: scale(1); opacity: 1; }
-          to { transform: scale(0.95); opacity: 0; }
+          from {
+            transform: scale(1);
+            opacity: 1;
+          }
+          to {
+            transform: scale(0.95);
+            opacity: 0;
+          }
         }
       `}</style>
     </div>

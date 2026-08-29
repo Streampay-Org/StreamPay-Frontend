@@ -63,7 +63,7 @@ describe('onChainClient — chaos / fault injection', () => {
 
   describe('fetchStream — happy path', () => {
     it('returns stream_1 (XLM) with all fields intact', async () => {
-      const result = await onChainClient.fetchStream('stream_1');
+      const result = await onChainClient.fetchStream('testnet', 'stream_1');
 
       expect(result).not.toBeNull();
       expect(result!.id).toBe('stream_1');
@@ -74,7 +74,7 @@ describe('onChainClient — chaos / fault injection', () => {
     });
 
     it('returns stream_2 (USDC) with fully-qualified token identifier', async () => {
-      const result = await onChainClient.fetchStream('stream_2');
+      const result = await onChainClient.fetchStream('testnet', 'stream_2');
 
       expect(result).not.toBeNull();
       expect(result!.token).toMatch(/^USDC:/);
@@ -82,13 +82,13 @@ describe('onChainClient — chaos / fault injection', () => {
     });
 
     it('returns null for an unknown stream id', async () => {
-      const result = await onChainClient.fetchStream('does_not_exist');
+      const result = await onChainClient.fetchStream('testnet', 'does_not_exist');
       expect(result).toBeNull();
     });
 
     it('is deterministic — two identical calls return equal values', async () => {
-      const a = await onChainClient.fetchStream('stream_1');
-      const b = await onChainClient.fetchStream('stream_1');
+      const a = await onChainClient.fetchStream('testnet', 'stream_1');
+      const b = await onChainClient.fetchStream('testnet', 'stream_1');
 
       // BigInt fields must be compared explicitly (toEqual handles them)
       expect(a).toEqual(b);
@@ -105,7 +105,7 @@ describe('onChainClient — chaos / fault injection', () => {
         throw Object.assign(new Error('Request timed out'), { code: 'ETIMEDOUT' });
       });
 
-      await expect(onChainClient.fetchStream('stream_1')).rejects.toThrow(
+      await expect(onChainClient.fetchStream('testnet', 'stream_1')).rejects.toThrow(
         /timed out/i,
       );
     });
@@ -115,7 +115,7 @@ describe('onChainClient — chaos / fault injection', () => {
         throw Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' });
       });
 
-      await expect(onChainClient.fetchStream('stream_1')).rejects.toMatchObject({
+      await expect(onChainClient.fetchStream('testnet', 'stream_1')).rejects.toMatchObject({
         code: 'ETIMEDOUT',
       });
     });
@@ -153,7 +153,7 @@ describe('onChainClient — chaos / fault injection', () => {
 
         // Current behaviour: no validation layer, returns as-is.
         // Update this assertion once input validation is introduced.
-        const result = await onChainClient.fetchStream('stream_1');
+        const result = await onChainClient.fetchStream('testnet', 'stream_1');
         expect(result).toBeDefined();
       },
     );
@@ -165,7 +165,7 @@ describe('onChainClient — chaos / fault injection', () => {
         throw Object.assign(new Error('Internal Server Error'), { status: 500 });
       });
 
-      await expect(onChainClient.fetchStream('stream_1')).rejects.toMatchObject({
+      await expect(onChainClient.fetchStream('testnet', 'stream_1')).rejects.toMatchObject({
         status: 500,
       });
     });
@@ -175,7 +175,7 @@ describe('onChainClient — chaos / fault injection', () => {
         throw Object.assign(new Error('Service Unavailable'), { status: 503 });
       });
 
-      await expect(onChainClient.fetchStream('stream_1')).rejects.toMatchObject({
+      await expect(onChainClient.fetchStream('testnet', 'stream_1')).rejects.toMatchObject({
         status: 503,
       });
     });
@@ -193,10 +193,10 @@ describe('onChainClient — chaos / fault injection', () => {
       // Simulate a caller that retries once on 5xx
       async function fetchWithRetry(id: string) {
         try {
-          return await onChainClient.fetchStream(id);
+          return await onChainClient.fetchStream('testnet', id);
         } catch (err: unknown) {
           if ((err as { status?: number }).status === 500) {
-            return await onChainClient.fetchStream(id);
+            return await onChainClient.fetchStream('testnet', id);
           }
           throw err;
         }
@@ -216,7 +216,7 @@ describe('onChainClient — chaos / fault injection', () => {
         });
       });
 
-      await expect(onChainClient.fetchStream('stream_1')).rejects.toMatchObject({
+      await expect(onChainClient.fetchStream('testnet', 'stream_1')).rejects.toMatchObject({
         code: 'ECONNREFUSED',
       });
     });
@@ -228,7 +228,7 @@ describe('onChainClient — chaos / fault injection', () => {
         });
       });
 
-      await expect(onChainClient.fetchStream('stream_1')).rejects.toMatchObject({
+      await expect(onChainClient.fetchStream('testnet', 'stream_1')).rejects.toMatchObject({
         code: 'ENOTFOUND',
       });
     });
@@ -240,7 +240,7 @@ describe('onChainClient — chaos / fault injection', () => {
 
   describe('cancelStream — happy path', () => {
     it('returns a result for stream_1 (XLM)', async () => {
-      const result = await onChainClient.cancelStream('stream_1');
+      const result = await onChainClient.cancelStream('testnet', 'stream_1');
 
       expect(result).not.toBeNull();
       expect(result!.stream_id).toBe('stream_1');
@@ -248,14 +248,14 @@ describe('onChainClient — chaos / fault injection', () => {
     });
 
     it('returns a result for stream_2 (USDC) preserving the token identifier', async () => {
-      const result = await onChainClient.cancelStream('stream_2');
+      const result = await onChainClient.cancelStream('testnet', 'stream_2');
 
       expect(result).not.toBeNull();
       expect(result!.token).toMatch(/^USDC:/);
     });
 
     it('returns null when the stream does not exist', async () => {
-      const result = await onChainClient.cancelStream('ghost_stream');
+      const result = await onChainClient.cancelStream('testnet', 'ghost_stream');
       expect(result).toBeNull();
     });
   });
@@ -270,7 +270,7 @@ describe('onChainClient — chaos / fault injection', () => {
      */
     it('satisfies the invariant for stream_1 (XLM)', async () => {
       const stream = STREAM_XLM;
-      const result = await onChainClient.cancelStream(stream.id);
+      const result = await onChainClient.cancelStream('testnet', stream.id);
 
       const expectedEscrow = stream.total_amount - stream.released_amount;
       expect(result!.recipient_payout + result!.sender_refund).toBe(expectedEscrow);
@@ -278,7 +278,7 @@ describe('onChainClient — chaos / fault injection', () => {
 
     it('satisfies the invariant for stream_2 (USDC) despite intentional released_amount mismatch', async () => {
       const stream = STREAM_USDC;
-      const result = await onChainClient.cancelStream(stream.id);
+      const result = await onChainClient.cancelStream('testnet', stream.id);
 
       const expectedEscrow = stream.total_amount - stream.released_amount;
       expect(result!.recipient_payout + result!.sender_refund).toBe(expectedEscrow);
@@ -289,15 +289,15 @@ describe('onChainClient — chaos / fault injection', () => {
       // vested = 750_000_000n
       // recipient_payout = vested - released = 250_000_000n
       // sender_refund    = total - vested    = 250_000_000n
-      const result = await onChainClient.cancelStream('stream_1');
+      const result = await onChainClient.cancelStream('testnet', 'stream_1');
 
       expect(result!.recipient_payout).toBe(250_000_000n);
       expect(result!.sender_refund).toBe(250_000_000n);
     });
 
     it('never mixes tokens — payout and refund use the stream token only', async () => {
-      const xlm  = await onChainClient.cancelStream('stream_1');
-      const usdc = await onChainClient.cancelStream('stream_2');
+      const xlm  = await onChainClient.cancelStream('testnet', 'stream_1');
+      const usdc = await onChainClient.cancelStream('testnet', 'stream_2');
 
       expect(xlm!.token).toBe('XLM');
       expect(usdc!.token).toMatch(/^USDC:/);
@@ -309,13 +309,13 @@ describe('onChainClient — chaos / fault injection', () => {
 
   describe('cancelStream — tx hash fields', () => {
     it('always sets recipient_tx_hash', async () => {
-      const result = await onChainClient.cancelStream('stream_1');
+      const result = await onChainClient.cancelStream('testnet', 'stream_1');
       expect(result!.recipient_tx_hash).toBe('mock-cancel-payout-stream_1');
     });
 
     it('sets sender_tx_hash when sender_refund > 0', async () => {
       // stream_1: refund = 250_000_000n > 0
-      const result = await onChainClient.cancelStream('stream_1');
+      const result = await onChainClient.cancelStream('testnet', 'stream_1');
       expect(result!.sender_tx_hash).toBe('mock-cancel-refund-stream_1');
     });
 
@@ -332,7 +332,7 @@ describe('onChainClient — chaos / fault injection', () => {
         released_amount: 750_000_000n,
       }));
 
-      const result = await onChainClient.cancelStream('stream_full_vest');
+      const result = await onChainClient.cancelStream('testnet', 'stream_full_vest');
       // recipient_payout = 750_000_000n - 750_000_000n = 0n
       // sender_refund    = 1_000_000_000n - 750_000_000n = 250_000_000n
       // sender_refund is still > 0 here; test confirms hash is present
@@ -353,7 +353,7 @@ describe('onChainClient — chaos / fault injection', () => {
         released_amount: 0n,
       }));
 
-      const result = await onChainClient.cancelStream('stream_zero');
+      const result = await onChainClient.cancelStream('testnet', 'stream_zero');
       // vested = 0n, payout = 0n, refund = 0n → no sender hash
       expect(result!.sender_tx_hash).toBeUndefined();
     });
@@ -369,7 +369,7 @@ describe('onChainClient — chaos / fault injection', () => {
         throw Object.assign(new Error('Request timed out'), { code: 'ETIMEDOUT' });
       });
 
-      await expect(onChainClient.cancelStream('stream_1')).rejects.toThrow(
+      await expect(onChainClient.cancelStream('testnet', 'stream_1')).rejects.toThrow(
         /timed out/i,
       );
     });
@@ -381,7 +381,7 @@ describe('onChainClient — chaos / fault injection', () => {
         throw Object.assign(new Error('Internal Server Error'), { status: 500 });
       });
 
-      await expect(onChainClient.cancelStream('stream_1')).rejects.toMatchObject({
+      await expect(onChainClient.cancelStream('testnet', 'stream_1')).rejects.toMatchObject({
         status: 500,
       });
     });
@@ -391,7 +391,7 @@ describe('onChainClient — chaos / fault injection', () => {
         throw Object.assign(new Error('Service Unavailable'), { status: 503 });
       });
 
-      await expect(onChainClient.cancelStream('stream_1')).rejects.toMatchObject({
+      await expect(onChainClient.cancelStream('testnet', 'stream_1')).rejects.toMatchObject({
         status: 503,
       });
     });
@@ -401,7 +401,7 @@ describe('onChainClient — chaos / fault injection', () => {
     it('handles a stream with total_amount = 0n (zero-division-safe)', async () => {
       mockFetch(async () => ({ ...STREAM_XLM, total_amount: 0n, released_amount: 0n }));
 
-      const result = await onChainClient.cancelStream('stream_1');
+      const result = await onChainClient.cancelStream('testnet', 'stream_1');
       // Should not throw; all amounts resolve to 0n
       expect(result!.recipient_payout).toBe(0n);
       expect(result!.sender_refund).toBe(0n);
@@ -415,7 +415,7 @@ describe('onChainClient — chaos / fault injection', () => {
       }));
 
       // Document current behaviour (no guard); update assertion if a guard is added.
-      const result = await onChainClient.cancelStream('stream_1');
+      const result = await onChainClient.cancelStream('testnet', 'stream_1');
       expect(result).not.toBeNull();
     });
   });
@@ -427,8 +427,8 @@ describe('onChainClient — chaos / fault injection', () => {
   describe('isolation', () => {
     it('concurrent fetchStream calls return independent results', async () => {
       const [s1, s2] = await Promise.all([
-        onChainClient.fetchStream('stream_1'),
-        onChainClient.fetchStream('stream_2'),
+        onChainClient.fetchStream('testnet', 'stream_1'),
+        onChainClient.fetchStream('testnet', 'stream_2'),
       ]);
 
       expect(s1!.id).toBe('stream_1');
@@ -438,8 +438,8 @@ describe('onChainClient — chaos / fault injection', () => {
 
     it('concurrent cancelStream calls do not interfere', async () => {
       const [r1, r2] = await Promise.all([
-        onChainClient.cancelStream('stream_1'),
-        onChainClient.cancelStream('stream_2'),
+        onChainClient.cancelStream('testnet', 'stream_1'),
+        onChainClient.cancelStream('testnet', 'stream_2'),
       ]);
 
       expect(r1!.stream_id).toBe('stream_1');

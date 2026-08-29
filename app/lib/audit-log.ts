@@ -238,25 +238,31 @@ export class AppendOnlyAuditLogStore {
   }
 
   exportRows(filters: AuditListFilters = {}): AuditExportRow[] {
-    return this.getPaginated({ ...filters, limit: Number.MAX_SAFE_INTEGER }).data.map((entry) => ({
-      action: entry.action,
-      actorId: entry.actor.id,
-      actorRole: entry.actor.role,
-      afterHash: entry.afterHash,
-      beforeHash: entry.beforeHash,
-      diffHash: entry.diffHash,
-      entryHash: entry.entryHash,
-      id: entry.id,
-      metadata: entry.metadata,
-      prevHash: entry.prevHash,
-      redactedTargetAccount: redactTargetAccount(entry.target.account),
-      redactionPolicy: "mask-target-account",
-      requestId: entry.requestId,
-      retentionUntil: entry.retentionUntil,
-      targetId: entry.target.id,
-      targetType: entry.target.type,
-      timestamp: entry.timestamp,
-    }));
+    return this.getPaginated({ ...filters, limit: Number.MAX_SAFE_INTEGER }).data
+      .map((entry) => this.toExportRow(entry));
+  }
+  }
+
+  /**
+   * Export rows for archived entries (soft-archived by retention plus
+   * deep-archived cold-storage entries). Uses the same redacted projection as
+   * `exportRows` so archived downloads never leak unredacted target accounts.
+   *
+   * Rows are ordered newest-first and capped by `limit` (1–250, default 250)
+   * for deterministic, bounded output.
+   */
+  exportArchivedRows(limit = 250): AuditExportRow[] {
+    const rows: AuditExportRow[] = [];
+    for (const entry of this.archivedEntries) {
+      rows.push(this.toExportRow(entry));
+    }
+    for (const deepEntry of this.deepArchivedEntries) {
+      rows.push(this.toExportRow(deepEntry.entry));
+    }
+    const capped = Math.min(Math.max(limit, 1), 250);
+    return rows
+      .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
+      .slice(0, capped);
   }
 
   archiveExpiredEntries(referenceTimestamp: string | Date = new Date().toISOString()): AuditEntry[] {
@@ -445,6 +451,28 @@ export class AppendOnlyAuditLogStore {
     for (const entry of seedEntries) {
       this.append(entry);
     }
+  }
+
+  private toExportRow(entry: AuditEntry): AuditExportRow {
+    return {
+      action: entry.action,
+      actorId: entry.actor.id,
+      actorRole: entry.actor.role,
+      afterHash: entry.afterHash,
+      beforeHash: entry.beforeHash,
+      diffHash: entry.diffHash,
+      entryHash: entry.entryHash,
+      id: entry.id,
+      metadata: entry.metadata,
+      prevHash: entry.prevHash,
+      redactedTargetAccount: redactTargetAccount(entry.target.account),
+      redactionPolicy: "mask-target-account",
+      requestId: entry.requestId,
+      retentionUntil: entry.retentionUntil,
+      targetId: entry.target.id,
+      targetType: entry.target.type,
+      timestamp: entry.timestamp,
+    };
   }
 
   private rebaseChain(entries: AuditEntry[]): AuditEntry[] {
