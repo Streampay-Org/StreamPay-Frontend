@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Changed
+- **SSE heartbeats are now bounded and dead clients are detected** (#1372):
+  all three SSE endpoints (`/api/indexer/sse`, `/api/streams/events`,
+  `/api/streams/:id/events`) share a new `createSseConnection` helper
+  (`app/lib/sse.ts`) that emits at most `SSE_HEARTBEAT_MAX` keep-alive
+  heartbeats, closes on client abort, rejected writes, or an idle deadline
+  (`SSE_MAX_IDLE_MS`), and cleans up timers/listeners exactly once per
+  connection. Documented in `docs/SSE-HEARTBEATS.md`.
 - `POST /api/webhooks` now applies strict Zod body validation. Requests must include a non-empty `eventType`; unknown top-level fields now return `400 INVALID_INPUT`.
 
 All notable API changes to StreamPay are documented here.  

@@ -418,7 +418,7 @@ class InMemoryStorage implements StorageAdapter {
  * const entry = sorobanRetryQueue.dequeue();
  * if (entry.ok && entry.data) {
  *   try {
- *     await onChainClient.fetchStream(entry.data.payload.streamId);
+ *     await onChainClient.fetchStream('testnet', entry.data.payload.streamId);
  *     sorobanRetryQueue.markComplete(entry.data.id);
  *   } catch (err) {
  *     sorobanRetryQueue.markFailed(entry.data.id, err);

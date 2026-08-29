@@ -130,6 +130,92 @@ describe("StreamPayClient", () => {
     });
   });
 
+  it("redacts sensitive fields from error-envelope details (request-body echo)", async () => {
+    const fetchFn = jest.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Invalid payload",
+            request_id: "req-api",
+            details: {
+              request: {
+                recipient: "GABC",
+                rate: "10",
+                token: "partner-token",
+                secret: "s3cr3t",
+              },
+              fieldErrors: { email: "invalid" },
+            },
+          },
+        },
+        422,
+      ),
+    );
+    const client = new StreamPayClient({ baseUrl: "https://api.streampay.test", fetchFn });
+
+    try {
+      await client.createStream({ recipient: "GABC", rate: "10", schedule: "week" });
+      throw new Error("expected createStream to reject");
+    } catch (err) {
+      const sdkError = err as StreamPaySdkError;
+      expect(sdkError.code).toBe("VALIDATION_ERROR");
+      expect(sdkError.requestId).toBe("req-api");
+      const details = sdkError.details as {
+        request: Record<string, unknown>;
+        fieldErrors: Record<string, unknown>;
+      };
+      expect(details.request.token).toBe("[REDACTED]");
+      expect(details.request.secret).toBe("[REDACTED]");
+      expect(details.request.recipient).toBe("GABC");
+      expect(details.fieldErrors.email).toBe("invalid");
+    }
+  });
+
+  it("redacts sensitive fields from non-envelope error bodies", async () => {
+    const fetchFn = jest.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          message: "backend rejected",
+          privateKey: `S${"A".repeat(55)}`,
+          nested: { authorization: "Bearer leaked" },
+        },
+        500,
+      ),
+    );
+    const client = new StreamPayClient({ baseUrl: "https://api.streampay.test", fetchFn });
+
+    try {
+      await client.listStreams();
+      throw new Error("expected listStreams to reject");
+    } catch (err) {
+      const sdkError = err as StreamPaySdkError;
+      expect(sdkError.code).toBe("HTTP_ERROR");
+      const details = sdkError.details as Record<string, unknown>;
+      expect(details.privateKey).toBe("[REDACTED]");
+      expect(details.nested).toEqual({ authorization: "[REDACTED]" });
+      expect(details.message).toBe("backend rejected");
+    }
+  });
+
+  it("redacts Stellar secret seeds inside error diagnostics regardless of key", async () => {
+    const seed = `S${"A".repeat(55)}`;
+    const fetchFn = jest.fn().mockResolvedValue(
+      jsonResponse({ value: seed, keep: "ok" }, 500),
+    );
+    const client = new StreamPayClient({ baseUrl: "https://api.streampay.test", fetchFn });
+
+    try {
+      await client.listStreams();
+      throw new Error("expected listStreams to reject");
+    } catch (err) {
+      const sdkError = err as StreamPaySdkError;
+      const details = sdkError.details as Record<string, unknown>;
+      expect(details.value).toBe("[REDACTED]");
+      expect(details.keep).toBe("ok");
+    }
+  });
+
   it("wraps SSE stream update and settlement events", () => {
     const source = new FakeEventSource();
     const factory = jest.fn(() => source);
