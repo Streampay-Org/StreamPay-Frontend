@@ -230,7 +230,6 @@ export function IndexerStatus({ data, className = "" }: IndexerStatusProps) {
         assertive: isAssertiveState(status),
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, lag, message]);
 
   return (

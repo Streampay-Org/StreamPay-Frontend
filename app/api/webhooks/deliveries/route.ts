@@ -3,6 +3,7 @@ import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
 import { webhookDeliveryStore } from "@/app/lib/webhook-delivery-store";
 import { getOutboxStore } from "@/lib/outbox";
 import { decodeCompositeCursor } from "@/app/lib/db";
+import { withTimeout, WEBHOOK_TIMEOUT_MS } from "@/src/middleware/timeout";
 
 /**
  * GET /api/webhooks/deliveries

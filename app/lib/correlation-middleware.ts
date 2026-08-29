@@ -39,7 +39,7 @@ function serializeError(error: unknown): Record<string, unknown> {
 export async function withCorrelationMiddleware(
   request: NextRequest,
   handler: () => Promise<NextResponse>
-|): Promise<NextResponse> {
+): Promise<NextResponse> {
   const headers = request.headers;
   
   // Extract correlation context from headers

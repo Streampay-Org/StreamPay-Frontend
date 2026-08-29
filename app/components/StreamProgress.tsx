@@ -153,7 +153,7 @@ function derivePercent(props: StreamProgressProps): number {
   if (status === "ended" || status === "withdrawn" || status === "cancelled") {
     return 100;
   }
-  if (status === "draft") {
+  if (status === "draft" || status === "failed") {
     return 0;
   }
 
@@ -189,6 +189,7 @@ function deriveLabel(status: StreamStatus | "empty", percent: number): string {
   if (status === "ended")      return "Completed";
   if (status === "withdrawn")  return "Withdrawn";
   if (status === "cancelled")  return "Cancelled";
+  if (status === "failed")     return "Failed";
   if (status === "empty")      return "No stream";
   return `${Math.round(percent)}% accrued`;
 }
@@ -276,6 +277,8 @@ export function StreamProgress({
         setSrAnnouncement("Stream withdrawn");
       } else if (status === "cancelled") {
         setSrAnnouncement("Stream cancelled");
+      } else if (status === "failed") {
+        setSrAnnouncement("Stream failed");
       } else if (status === "paused") {
         setSrAnnouncement("Stream paused");
       } else if (status === "active") {
@@ -304,6 +307,7 @@ export function StreamProgress({
     status === "paused"    ? "paused"    :
     status === "ended" || status === "withdrawn" ? "ended" :
     status === "cancelled" ? "cancelled" :
+    status === "failed"    ? "failed"    :
     "draft";
 
   // When the user prefers reduced motion we render a static bar: the fill is

@@ -1,4 +1,4 @@
-export type StreamStatus = "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+export type StreamStatus = "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled" | "failed";
 export type StreamAction = "start" | "pause" | "stop" | "settle" | "withdraw" | "cancel";
 export type WithdrawalState = "pending" | "succeeded" | "failed";
 
