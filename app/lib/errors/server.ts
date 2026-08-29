@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { safeJson } from "../safe-json";
+import { safeJson } from "@/lib/safe-json";
 
 /**
  * Canonical error envelope used by every API route.

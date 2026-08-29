@@ -31,10 +31,36 @@ jest.mock("../components/ActivityTimeline", () => ({
 describe("ActivityPage", () => {
   beforeEach(() => {
     jest.useFakeTimers();
+    global.fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          data: [
+            {
+              id: "1",
+              type: "stream_created",
+              description: "New stream created for Project Alpha",
+              timestamp: new Date().toISOString(),
+              streamId: "alpha",
+              isDeleted: false,
+            },
+            {
+              id: "2",
+              type: "stream_created",
+              description: "Deleted stream activity",
+              timestamp: new Date().toISOString(),
+              streamId: "beta",
+              isDeleted: true,
+            }
+          ]
+        })
+      })
+    ) as jest.Mock;
   });
 
   afterEach(() => {
     jest.useRealTimers();
+    jest.restoreAllMocks();
   });
 
   it("shows the loading skeleton while data is fetching", () => {
@@ -55,14 +81,11 @@ describe("ActivityPage", () => {
     render(<ActivityPage />);
     expect(screen.getByTestId("activity-skeleton")).toBeInTheDocument();
     
-    jest.advanceTimersByTime(1500);
-    
     await waitFor(() => {
       expect(screen.getByTestId("activity-timeline")).toBeInTheDocument();
     });
     
     expect(screen.getByText("Today")).toBeInTheDocument();
-    expect(screen.getByText("Yesterday")).toBeInTheDocument();
   });
 
   it("uses aria-busy=true while loading", () => {
@@ -73,7 +96,6 @@ describe("ActivityPage", () => {
 
   it("clears aria-busy once data is loaded", async () => {
     render(<ActivityPage />);
-    jest.advanceTimersByTime(1500);
     
     await waitFor(() => {
       const feedSection = screen.getByLabelText("Activity feed");

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { decodeCompositeCursor, getStore } from "@/app/lib/db";
+import { decodeCompositeCursor, getStore, db } from "@/app/lib/db";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
@@ -46,14 +46,30 @@ async function handleActivityGet(request: Request) {
 
     const result = activityTimeline.query({ cursor: cursor ?? undefined, limit, streamId: streamId ?? undefined, type: type ?? undefined });
 
+    const tenant = request.headers.get("x-tenant-id");
+
+    const enrichedData = result.data.map(entry => {
+      let isDeleted = false;
+      if (entry.streamId && tenant) {
+        const stream = db.streams.findOne ? db.streams.findOne(tenant, entry.streamId) : null;
+        if (!stream) {
+          isDeleted = true;
+        }
+      }
+      return {
+        ...entry,
+        isDeleted
+      };
+    });
+
     logger.info("Activity list completed", {
-      count: result.data.length,
+      count: enrichedData.length,
       total: result.meta.total,
       lagMs: activityTimeline.getLagMs(),
     });
 
     return NextResponse.json({
-      data: result.data,
+      data: enrichedData,
       meta: result.meta,
       links: { self: `/api/activity?limit=${limit}` },
     });
