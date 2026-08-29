@@ -24,6 +24,23 @@ Every REST request sends:
 API error envelopes are raised as `StreamPaySdkError` with `code`, `status`,
 `requestId`, and optional `details`.
 
+### Diagnostics privacy
+
+`details` is intended for diagnostics, so it is **redacted before it leaves the
+SDK**. Error responses commonly echo the submitted request body, which can
+contain credentials (tokens, secrets, signing keys, signatures, seeds,
+mnemonics, …). The SDK applies a deterministic, least-privilege redaction
+(`lib/sdk/redact.ts`) to any body captured into `StreamPaySdkError.details`:
+
+- Sensitive field names (`token`, `secret`, `password`, `privateKey`,
+  `api_key`, `signature`, `seed`, …) are replaced with `[REDACTED]`.
+- Stellar secret seeds (`S…`) and PEM private-key blocks are redacted even
+  under non-sensitive field names.
+- Non-sensitive fields (recipient addresses, rates, error messages, field
+  errors) are preserved so failures remain diagnosable.
+- Redaction is pure and total: it never throws, never mutates the error
+  payload, and is deterministic for identical input.
+
 ## REST Helpers
 
 ```ts

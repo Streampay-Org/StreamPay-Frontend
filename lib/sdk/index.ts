@@ -1,3 +1,5 @@
+import { redactDiagnosticBody } from "./redact";
+
 export type StreamStatus = "draft" | "active" | "paused" | "ended";
 
 export interface StreamPayStream {
@@ -304,7 +306,9 @@ export class StreamPayClient {
     if (isErrorEnvelope(body) && body.error) {
       return new StreamPaySdkError(body.error.message ?? response.statusText, {
         code: body.error.code ?? "UNKNOWN_ERROR",
-        details: body.error.details,
+        // Redact before exposing to diagnostics: error responses commonly echo
+        // the submitted request body, which can contain credentials.
+        details: redactDiagnosticBody(body.error.details),
         requestId: body.error.request_id ?? response.headers.get("x-request-id") ?? fallbackRequestId,
         status: response.status,
       });
@@ -312,7 +316,7 @@ export class StreamPayClient {
 
     return new StreamPaySdkError(response.statusText || "StreamPay request failed", {
       code: "HTTP_ERROR",
-      details: body,
+      details: redactDiagnosticBody(body),
       requestId: response.headers.get("x-request-id") ?? fallbackRequestId,
       status: response.status,
     });

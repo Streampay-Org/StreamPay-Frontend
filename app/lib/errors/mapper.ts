@@ -375,6 +375,75 @@ export function normalizeGenericError(
 }
 
 /**
+ * Safely serialize an unknown value to JSON for diagnostics.
+ *
+ * Unlike `JSON.stringify`, this helper does not throw on circular
+ * references, BigInt, or other non-JSON values. Error objects are expanded
+ * to preserve their `name`, `message`, `stack`, `cause`, and enumerable
+ * properties so error context survives normalization.
+ */
+function safeStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+
+  const serialize = (val: unknown): unknown => {
+    if (val === null) return null;
+
+    const type = typeof val;
+    if (type === 'bigint') return `${val.toString()}n`;
+    if (type === 'undefined' || type === 'function' || type === 'symbol') {
+      return undefined;
+    }
+    if (type === 'number' && !Number.isFinite(val)) return String(val);
+    if (type !== 'object') return val;
+
+    if (seen.has(val)) return '[Circular]';
+
+    if (val instanceof Error) {
+      seen.add(val);
+      const error = val as Error & Record<string, unknown>;
+      const result: Record<string, unknown> = {
+        name: error.name,
+        message: error.message,
+      };
+      if (error.stack !== undefined) result.stack = error.stack;
+      if (error.cause !== undefined) result.cause = serialize(error.cause);
+      for (const key of Object.keys(error)) {
+        if (key === 'name' || key === 'message' || key === 'stack' || key === 'cause') continue;
+        result[key] = serialize(error[key]);
+      }
+      seen.delete(val);
+      return result;
+    }
+
+    seen.add(val);
+    let result: unknown;
+    if (Array.isArray(val)) {
+      result = val.map((item) => serialize(item));
+    } else {
+      const obj = val as Record<string, unknown>;
+      result = {};
+      for (const key of Object.keys(obj)) {
+        result[key] = serialize(obj[key]);
+      }
+    }
+    seen.delete(val);
+    return result;
+  };
+
+  try {
+    const serialized = serialize(value);
+    if (serialized === undefined) return String(value);
+    return JSON.stringify(serialized) ?? String(value);
+  } catch {
+    try {
+      return String(value);
+    } catch {
+      return '[Unserializable Error]';
+    }
+  }
+}
+
+/**
  * Main error normalization function
  * Handles any error type and converts to StreamPayError
  */
@@ -457,7 +526,7 @@ export function normalizeError(
     category: 'unknown',
     retry: metadata.retry,
     meta: {
-      originalError: typeof error === 'string' ? error : JSON.stringify(error),
+      originalError: typeof error === 'string' ? error : safeStringify(error),
     },
   };
 }
