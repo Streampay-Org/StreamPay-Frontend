@@ -2,6 +2,7 @@
 
 import React, { useId, useEffect, useRef, useState } from "react";
 import { LiveRegion } from "@/app/components/LiveRegion";
+import { usePrefersReducedMotion } from "@/app/hooks/usePrefersReducedMotion";
 
 /**
  * IndexerStatus
@@ -166,6 +167,7 @@ export function isAssertiveState(state: IndexerState): boolean {
 
 export function IndexerStatus({ data, className = "" }: IndexerStatusProps) {
   const headingId = useId();
+  const prefersReducedMotion = usePrefersReducedMotion();
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     setMounted(true);
@@ -301,10 +303,14 @@ export function IndexerStatus({ data, className = "" }: IndexerStatusProps) {
           <div
             className="indexer-status__status-indicator"
             aria-label={`Status: ${label}`}
+            data-reduced-motion={prefersReducedMotion ? "true" : "false"}
           >
             <span
               className="indexer-status__dot"
               aria-hidden="true"
+              style={{
+                transition: prefersReducedMotion ? "none" : "background-color 0.2s ease, transform 0.2s ease",
+              }}
             />
             <span className="indexer-status__status-label" aria-hidden="true">{label}</span>
           </div>

@@ -533,3 +533,60 @@ describe("IndexerStatus — section role and labelling", () => {
     ).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Accessibility — reduced motion
+// ---------------------------------------------------------------------------
+
+describe("IndexerStatus — reduced motion", () => {
+  let originalMatchMedia: typeof window.matchMedia;
+
+  beforeAll(() => {
+    originalMatchMedia = window.matchMedia;
+  });
+
+  afterAll(() => {
+    window.matchMedia = originalMatchMedia;
+  });
+
+  it("applies data-reduced-motion=true and transition: none when prefers-reduced-motion is true", () => {
+    window.matchMedia = jest.fn().mockImplementation((query) => ({
+      matches: query === "(prefers-reduced-motion: reduce)",
+      media: query,
+      onchange: null,
+      addListener: jest.fn(),
+      removeListener: jest.fn(),
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      dispatchEvent: jest.fn(),
+    }));
+
+    const { container } = render(<IndexerStatus data={baseData} />);
+    const indicator = container.querySelector(".indexer-status__status-indicator");
+    expect(indicator).toHaveAttribute("data-reduced-motion", "true");
+
+    const dot = container.querySelector(".indexer-status__dot");
+    expect(dot).toHaveStyle({ transition: "none" });
+  });
+
+  it("applies data-reduced-motion=false and transition when prefers-reduced-motion is false", () => {
+    window.matchMedia = jest.fn().mockImplementation(() => ({
+      matches: false,
+      media: "",
+      onchange: null,
+      addListener: jest.fn(),
+      removeListener: jest.fn(),
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      dispatchEvent: jest.fn(),
+    }));
+
+    const { container } = render(<IndexerStatus data={baseData} />);
+    const indicator = container.querySelector(".indexer-status__status-indicator");
+    expect(indicator).toHaveAttribute("data-reduced-motion", "false");
+
+    const dot = container.querySelector(".indexer-status__dot");
+    expect(dot).toHaveStyle({ transition: "background-color 0.2s ease, transform 0.2s ease" });
+  });
+});
+
