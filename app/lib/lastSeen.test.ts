@@ -29,6 +29,49 @@ describe("lastSeen", () => {
     expect(updatedUser!.last_seen! <= afterTime).toBe(true);
   });
 
+  test("does not move last_seen backward when a stale write arrives", () => {
+    const walletAddress = "GFUTURE...9999";
+    const users = getStore().streamRepository.users;
+
+    // Seed the user with a far-future last_seen (simulating a newer request
+    // that was already recorded).
+    const future = new Date(Date.now() + 60_000).toISOString();
+    users.set(walletAddress, {
+      wallet_address: walletAddress,
+      email: null,
+      display_name: "",
+      avatar_url: null,
+      created_at: new Date().toISOString(),
+      last_seen: future,
+    });
+
+    // updateLastSeen computes `now` (well before `future`) and must NOT
+    // overwrite the newer stored value.
+    updateLastSeen(walletAddress);
+
+    expect(users.get(walletAddress)?.last_seen).toBe(future);
+  });
+
+  test("advances last_seen when the new timestamp is strictly later", () => {
+    const walletAddress = "GLATER...7777";
+    const users = getStore().streamRepository.users;
+
+    const past = new Date(Date.now() - 60_000).toISOString();
+    users.set(walletAddress, {
+      wallet_address: walletAddress,
+      email: null,
+      display_name: "",
+      avatar_url: null,
+      created_at: new Date().toISOString(),
+      last_seen: past,
+    });
+
+    updateLastSeen(walletAddress);
+
+    const updated = users.get(walletAddress)?.last_seen!;
+    expect(Date.parse(updated)).toBeGreaterThan(Date.parse(past));
+  });
+
   test("creates minimal user and sets last_seen if user doesn't exist", () => {
     const walletAddress = "GTEST...1234";
     const users = getStore().streamRepository.users;

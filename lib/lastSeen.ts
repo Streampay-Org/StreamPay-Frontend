@@ -20,14 +20,51 @@
 const store = new Map<string, string>();
 
 /**
+ * Compare two ISO-8601 timestamps and decide whether `candidate` may replace
+ * `existing` while preserving the monotonic "last-seen" invariant.
+ *
+ * Invariant: the stored last-seen value must never move *backward*.  A stale
+ * request that was generated earlier but arrives (or is processed) after a
+ * newer one must not overwrite the newer timestamp.
+ *
+ * Returns `true` only when the candidate is strictly later than the stored
+ * value.  We intentionally reject equal timestamps too, so a duplicate/late
+ * event never touches a value it cannot prove is older — this keeps the store
+ * idempotent under retries and out-of-order delivery.
+ *
+ * If either value is not a parseable ISO-8601 timestamp we refuse to overwrite
+ * (return `false`): a known-good stored value must never be clobbered by
+ * malformed input, and an unparseable candidate carries no ordering signal.
+ *
+ * @param candidate  The incoming `at` value.
+ * @param existing   The currently stored timestamp, or `undefined` if absent.
+ */
+function isMonotonicAdvance(
+  candidate: string,
+  existing: string | undefined,
+): boolean {
+  if (existing === undefined) return true;
+  const candidateMs = Date.parse(candidate);
+  const existingMs = Date.parse(existing);
+  if (Number.isNaN(candidateMs) || Number.isNaN(existingMs)) return false;
+  return candidateMs > existingMs;
+}
+
+/**
  * Record that an actor was active.  No-ops on blank actorId.
  * `at` defaults to the current wall-clock time.
+ *
+ * The write is monotonic: a `candidate` timestamp is only persisted when it is
+ * strictly later than the value already stored for the actor, so a stale or
+ * out-of-order request can never move an actor's last-seen value backward.
  */
 export function touchLastSeen(
   actorId: string,
   at: string = new Date().toISOString(),
 ): void {
   if (!actorId) return;
+  const existing = store.get(actorId);
+  if (!isMonotonicAdvance(at, existing)) return;
   store.set(actorId, at);
 }
 
@@ -92,6 +129,9 @@ export function extractActorIdFromAuthHeader(
  * Extract the actor id from the request's Authorization header and call
  * `touchLastSeen`.  Unauthenticated requests (no Bearer token) are silently
  * ignored so the store only contains confirmed developer identities.
+ *
+ * `touchLastSeen` enforces a monotonic last-seen invariant, so a stale or
+ * out-of-order request can never move an actor's recorded timestamp backward.
  */
 export function touchLastSeenFromRequest(request: Request): void {
   const authHeader = request.headers.get('authorization');
