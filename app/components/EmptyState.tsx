@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { EmptyIllustration } from "./EmptyIllustration";
 import { StreamProgressEmptyIllustration } from "./StreamProgressEmptyIllustration";
 
@@ -58,6 +58,14 @@ export function EmptyState({
 }: EmptyStateProps) {
   const hasGuidance = Array.isArray(guidanceSteps) && guidanceSteps.length > 0;
   const hasSupporting = Boolean(children) || hasGuidance;
+  const generatedId = useId();
+  const titleId = `${generatedId}-empty-title`;
+  const descriptionId = `${generatedId}-empty-description`;
+  const supportingTitleId = `${generatedId}-empty-supporting-title`;
+  const supportingId = `${generatedId}-empty-supporting`;
+  const buttonDescriptionId = hasSupporting
+    ? `${descriptionId} ${supportingId}`
+    : descriptionId;
   const outerClass = [
     "empty-state",
     variant === "streams" ? "empty-state--streams" : variant === "stream-progress" ? "empty-state--stream-progress" : "",
@@ -67,7 +75,12 @@ export function EmptyState({
     .join(" ");
 
   return (
-    <section className={outerClass} aria-labelledby="empty-state-title">
+    <section
+      className={outerClass}
+      role="region"
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
+    >
       {variant === "streams" ? (
         <div className="empty-state__illustration" aria-hidden="true">
           <EmptyIllustration
@@ -86,23 +99,26 @@ export function EmptyState({
 
       <div className="empty-state__content">
         <p className="empty-state__eyebrow">{eyebrow}</p>
-        <h2 className="empty-state__title" id="empty-state-title">
+        <h2 className="empty-state__title" id={titleId}>
           {title}
         </h2>
-        <p className="empty-state__description">{description}</p>
+        <p className="empty-state__description" id={descriptionId}>{description}</p>
       </div>
 
       {hasSupporting ? (
-        <div className="empty-state__supporting">
+        <div className="empty-state__supporting" id={supportingId}>
           {children}
           {hasGuidance ? (
             <>
               {!children ? (
-                <p className="empty-state__supporting-title">
+                <p className="empty-state__supporting-title" id={supportingTitleId}>
                   What you&apos;ll set up
                 </p>
               ) : null}
-              <ul className="empty-state__supporting-list">
+              <ul
+                className="empty-state__supporting-list"
+                aria-labelledby={!children ? supportingTitleId : undefined}
+              >
                 {guidanceSteps.map((step, i) => (
                   <li key={`${step.slice(0, 8)}-${i}`}>{step}</li>
                 ))}
@@ -116,6 +132,8 @@ export function EmptyState({
         className="button button--primary"
         type="button"
         onClick={onAction}
+        disabled={!onAction}
+        aria-describedby={buttonDescriptionId}
       >
         {actionLabel}
       </button>

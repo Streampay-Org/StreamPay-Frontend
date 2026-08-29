@@ -3,6 +3,7 @@
   border-radius: 0.25rem;
   animation: pulse 1.5s ease-in-out infinite;
   display: inline-block;
+  max-width: 100%;
 }
 
 @keyframes pulse {

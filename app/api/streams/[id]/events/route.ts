@@ -4,12 +4,12 @@ import { tryAuthenticateRequest, JWT_SECRET } from "@/app/lib/auth";
 import { eventBus } from "@/app/lib/event-bus";
 import { logger, getCorrelationContext, extractCorrelationContext, setCorrelationContext, withStreamContext } from "@/app/lib/logger";
 import {
-  createSseConnection,
-  getSseHeartbeatIntervalMs,
-  getSseMaxHeartbeats,
-  getSseMaxIdleMs,
-  type SseConnection,
-} from "@/app/lib/sse";
+  SseQueue,
+  encodeSSEFrame,
+  encodeSSEComment,
+  flushQueue,
+  sseMetricsLog,
+} from "@/lib/sseBackpressure";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -158,7 +158,18 @@ export async function GET(
     );
   }
 
-  // 6. Establish SSE Connection
+  // 6. Establish SSE Connection with backpressure queue
+  //
+  // Event-bus callbacks are not bound by any flow-control primitive, so a
+  // slow client can cause the in-process queue to grow without bound.  We
+  // route every frame through a bounded SseQueue; overflow events are
+  // dropped (or handled per the configured policy) and logged so operators
+  // can diagnose slow-consumer problems without OOM crashes.
+  const encoder = new TextEncoder();
+
+  // Queue capacity: default 64 frames (~20 min of 30 s ping intervals).
+  const sseQueue = new SseQueue({ capacity: 64, policy: "drop" });
+
   logger.info("SSE connection established", {
     actorId: actor.actorId,
     streamId,
@@ -166,72 +177,165 @@ export async function GET(
     walletAddress: actor.walletAddress,
   });
 
-  let sse: SseConnection | undefined;
+  /**
+   * Enqueue an SSE event frame through the backpressure queue, then flush
+   * to the controller.  Returns `false` if the controller is closed.
+   */
+  const sendEvent = (
+    controller: ReadableStreamDefaultController,
+    eventName: string,
+    data: unknown,
+  ): boolean => {
+    const chunk = encodeSSEFrame(encoder, eventName, data);
+    const result = sseQueue.enqueue(chunk);
+
+    if (result === "dropped") {
+      logger.warn("SSE stream: event dropped due to queue overflow", sseMetricsLog(
+        sseQueue.metrics(),
+        { streamId, actorId: actor.actorId, event: eventName },
+      ));
+    } else if (result === "backpressured") {
+      logger.warn("SSE stream: queue backpressure detected", sseMetricsLog(
+        sseQueue.metrics(),
+        { streamId, actorId: actor.actorId, event: eventName },
+      ));
+    } else if (result === "evicted") {
+      logger.warn("SSE stream: oldest event evicted from queue (newest policy)", sseMetricsLog(
+        sseQueue.metrics(),
+        { streamId, actorId: actor.actorId, event: eventName },
+      ));
+    } else if (result === "error") {
+      logger.error("SSE stream: queue overflow (error policy) — closing stream", sseMetricsLog(
+        sseQueue.metrics(),
+        { streamId, actorId: actor.actorId, event: eventName },
+      ));
+      flushQueue(sseQueue, controller);
+      try { controller.close(); } catch { /* already closed */ }
+      return false;
+    }
+
+    return flushQueue(sseQueue, controller) !== "closed";
+  };
+
+  let cleanupFn: (() => void) | undefined;
 
   const streamResponse = new ReadableStream({
     start(controller) {
-      // Event handlers for stream updates
-      const onStreamUpdated = (data: unknown) => {
-        if (!sse?.send("stream:updated", data)) {
-          // Connection already closed (bounded, client gone, aborted, …).
+      let isClosed = false;
+      let pingInterval: ReturnType<typeof setInterval> | undefined;
+
+      const cleanup = () => {
+        if (isClosed) {
           return;
         }
-        logger.debug("SSE: stream:updated event sent", {
-          streamId,
-          actorId: actor.actorId,
-        });
+
+        isClosed = true;
+
+        if (pingInterval) {
+          clearInterval(pingInterval);
+          pingInterval = undefined;
+        }
+
+        eventBus.off(`stream:updated:${streamId}`, onStreamUpdated);
+        eventBus.off(`settle:finished:${streamId}`, onSettleFinished);
+        request.signal.removeEventListener("abort", onAbort);
+
+        const finalMetrics = sseQueue.metrics();
+        logger.info("SSE connection closed", sseMetricsLog(
+          finalMetrics,
+          { actorId: actor.actorId, streamId, tenant },
+        ));
+
+        try {
+          controller.close();
+        } catch (e) {
+          // Stream might already be closed
+        }
+      };
+      cleanupFn = cleanup;
+
+      const onAbort = () => cleanup();
+
+      // Keep-alive ping interval (every 30 seconds)
+      // Pings are also routed through the queue so slow consumers see them
+      // without ever bypassing the backpressure boundary.
+      pingInterval = setInterval(() => {
+        if (isClosed) {
+          return;
+        }
+        const pingChunk = encodeSSEComment(encoder, "keep-alive");
+        const pingResult = sseQueue.enqueue(pingChunk);
+        if (pingResult === "dropped" || pingResult === "error") {
+          // Ping dropped; if queue is in error state, trigger cleanup.
+          if (pingResult === "error") {
+            logger.warn("SSE stream: keep-alive dropped (error policy triggered)", {
+              streamId,
+              actorId: actor.actorId,
+            });
+            cleanup();
+            return;
+          }
+        }
+        if (flushQueue(sseQueue, controller) === "closed") {
+          cleanup();
+        }
+      }, 30000);
+
+      // Event handlers for stream updates
+      const onStreamUpdated = (data: unknown) => {
+        if (isClosed) {
+          return;
+        }
+
+        const ok = sendEvent(controller, "stream:updated", data);
+        if (!ok) {
+          logger.error("SSE stream: stream:updated could not be delivered — closing", {
+            streamId,
+            actorId: actor.actorId,
+          });
+          cleanup();
+        } else {
+          logger.debug("SSE: stream:updated event sent", {
+            streamId,
+            actorId: actor.actorId,
+          });
+        }
       };
 
       const onSettleFinished = (data: unknown) => {
-        if (!sse?.send("settle:finished", data)) {
-          // Connection already closed (bounded, client gone, aborted, …).
+        if (isClosed) {
           return;
         }
-        logger.debug("SSE: settle:finished event sent", {
-          streamId,
-          actorId: actor.actorId,
-        });
+
+        const ok = sendEvent(controller, "settle:finished", data);
+        if (!ok) {
+          logger.error("SSE stream: settle:finished could not be delivered — closing", {
+            streamId,
+            actorId: actor.actorId,
+          });
+          cleanup();
+        } else {
+          logger.debug("SSE: settle:finished event sent", {
+            streamId,
+            actorId: actor.actorId,
+          });
+        }
       };
 
       // Subscribe to event bus for this specific stream
       eventBus.on(`stream:updated:${streamId}`, onStreamUpdated);
       eventBus.on(`settle:finished:${streamId}`, onSettleFinished);
 
-      // Bounded heartbeats + dead-client detection (abort, rejected writes,
-      // idle deadline) are handled by the shared SSE connection helper.
-      sse = createSseConnection(controller, {
-        signal: request.signal,
-        heartbeatIntervalMs: getSseHeartbeatIntervalMs(),
-        maxHeartbeats: getSseMaxHeartbeats(),
-        maxIdleMs: getSseMaxIdleMs(),
-        onHeartbeat: (heartbeatsSent) => {
-          logger.debug("SSE keep-alive heartbeat sent", {
-            streamId,
-            tenant,
-            heartbeats_sent: heartbeatsSent,
-          });
-        },
-        onClose: (reason, stats) => {
-          eventBus.off(`stream:updated:${streamId}`, onStreamUpdated);
-          eventBus.off(`settle:finished:${streamId}`, onSettleFinished);
-          logger.info("SSE connection closed", {
-            actorId: actor.actorId,
-            streamId,
-            tenant,
-            close_reason: reason,
-            events_sent: stats.eventsSent,
-            heartbeats_sent: stats.heartbeatsSent,
-          });
-        },
-      });
+      // Handle stream termination on client disconnect
+      request.signal.addEventListener("abort", onAbort, { once: true });
     },
     cancel() {
-      sse?.close("manual");
+      cleanupFn?.();
       logger.info("SSE connection cancelled", {
         streamId,
         actorId: actor.actorId,
       });
-    },
+    }
   });
 
   return new Response(streamResponse, {

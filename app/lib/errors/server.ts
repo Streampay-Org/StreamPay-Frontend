@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
+import { safeJson } from "../safe-json";
 
 /**
  * Canonical error envelope used by every API route.
@@ -7,11 +8,7 @@ import { headers } from "next/headers";
  * Shape:
  * ```json
  * {
- *   "error": {
- *     "code":       "STREAM_NOT_FOUND",
- *     "message":    "The requested stream does not exist.",
- *     "request_id": "req_01HZ..."
- *   }
+ *   "equest_id": "req_01HZ..."
  * }
  * ```
  */
@@ -20,45 +17,34 @@ export interface ErrorEnvelope {
     code: string;
     message: string;
     request_id: string;
+    details?: Record<string, unknown>;
   };
 }
 
-/**
- * Well-known error codes used across routes.
- * Extend this list as new routes are added.
- */
 export const ErrorCode = {
-  // Generic
   INTERNAL_SERVER_ERROR: "INTERNAL_SERVER_ERROR",
   NOT_FOUND: "NOT_FOUND",
   BAD_REQUEST: "BAD_REQUEST",
   UNAUTHORIZED: "UNAUTHORIZED",
   FORBIDDEN: "FORBIDDEN",
-  // Webhooks
   WEBHOOK_PROCESSING_FAILED: "WEBHOOK_PROCESSING_FAILED",
   DELIVERY_FETCH_FAILED: "DELIVERY_FETCH_FAILED",
   INVALID_CURSOR: "INVALID_CURSOR",
-  // KMS / signing
   KMS_SIGN_FAILED: "KMS_SIGN_FAILED",
   KMS_SIGN_INVALID_INPUT: "KMS_SIGN_INVALID_INPUT",
-  // Timeout
   GATEWAY_TIMEOUT: "GATEWAY_TIMEOUT",
-  // Auth
   WALLET_CHALLENGE_FAILED: "WALLET_CHALLENGE_FAILED",
   WALLET_VERIFY_FAILED: "WALLET_VERIFY_FAILED",
-  // JWKS / key management
   JWKS_BUILD_FAILED: "JWKS_BUILD_FAILED",
-  // Streams
   STREAM_NOT_FOUND: "STREAM_NOT_FOUND",
   STREAM_CREATE_FAILED: "STREAM_CREATE_FAILED",
-  // Soroban / on-chain
   SOROBAN_SIMULATION_FAILED: "SOROBAN_SIMULATION_FAILED",
   SOROBAN_SIMULATION_TIMEOUT: "SOROBAN_SIMULATION_TIMEOUT",
   SOROBAN_SUBMIT_TIMEOUT: "SOROBAN_SUBMIT_TIMEOUT",
   SOROBAN_SUBMIT_FAILED: "SOROBAN_SUBMIT_FAILED",
   SOROBAN_SUBMIT_BAD_AUTH: "SOROBAN_SUBMIT_BAD_AUTH",
   SOROBAN_SUBMIT_INSUFFICIENT_FUNDS: "SOROBAN_SUBMIT_INSUFFICIENT_FUNDS",
-  SOROBAN_RPC_UNAVAILABLE: "SOROBAN_RPC_UNAVAILABLE",
+  SOROBAN_RPC_UAVAILABLE: "SOROBAN_RPC_UAVAILABLE",
   SOROBAN_RPC_TIMEOUT: "SOROBAN_RPC_TIMEOUT",
   SOROBAN_CONTRACT_NOT_FOUND: "SOROBAN_CONTRACT_NOT_FOUND",
   SOROBAN_STREAM_NOT_FOUND: "SOROBAN_STREAM_NOT_FOUND",
@@ -80,7 +66,6 @@ function resolveRequestId(): string {
   } catch {
     // headers() throws outside a request context (e.g. unit tests)
   }
-  // Fallback: timestamp + random hex — not a UUID but stable enough for logs
   return `req_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 10)}`;
 }
 
@@ -90,15 +75,27 @@ function resolveRequestId(): string {
  * @param code    - Machine-readable error code (use `ErrorCode.*`)
  * @param message - Human-readable description safe to expose to clients
  * @param status  - HTTP status code (default 500)
+ * @param context - Optional structured context to preserve (will be serialized safely)
  */
 export function errorResponse(
   code: string,
   message: string,
   status = 500,
+  context?: Record<string, unknown>,
 ): NextResponse<ErrorEnvelope> {
   const request_id = resolveRequestId();
-  return NextResponse.json<ErrorEnvelope>(
-    { error: { code, message, request_id } },
-    { status },
-  );
+  const error : ErrorEnvelope["error"] = {
+    code,
+    message,
+    request_id,
+    ...(context ? { details: context } : {}),
+  };
+
+  return new NextResponse(
+    safeJson({ error }),
+    {
+      status,
+      headers: { "Content-Type": "application/json" },
+    },
+  ) as unknown as NextResponse<ErrorEnvelope>;
 }
