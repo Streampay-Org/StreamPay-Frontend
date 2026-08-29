@@ -4598,6 +4598,7 @@ a:hover {
 .stream-viz__table-wrap {
   max-height: 18rem;
   overflow-y: auto;
+  overflow-x: auto;
 }
 
 .stream-viz__table {

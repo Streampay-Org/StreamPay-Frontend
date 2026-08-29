@@ -502,7 +502,7 @@ function DataTableView({
   }
 
   return (
-    <div className="stream-viz__table-wrap" role="region" aria-label="Stream data table">
+    <div className="stream-viz__table-wrap" role="region" aria-label="Stream data table" tabIndex={0}>
       <table className="stream-viz__table">
         <caption className="sr-only">Stream funds over time</caption>
         <thead>
