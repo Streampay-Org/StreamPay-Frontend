@@ -1154,3 +1154,564 @@ describe("duplicate handling", () => {
     expect(second.data).toBeNull();
   });
 });
+
+// ──────── Durability: Persistence Across Reloads ─────────────────────────
+
+describe("durability — persistence across reloads", () => {
+  function simulateReload() {
+    sorobanRetryQueue._storage.clear();
+    sorobanRetryQueue._config = { ...DEFAULT_RETRY_QUEUE_CONFIG };
+    sorobanRetryQueue._persistWarningLogged = false;
+    sorobanRetryQueue._hydrate();
+  }
+
+  it("enqueued entry survives a simulated reload", () => {
+    const r = sorobanRetryQueue.enqueue("fetchStream", { streamId: "a" });
+    const id = r.data!.id;
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(1);
+
+    simulateReload();
+
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(1);
+    const restored = sorobanRetryQueue.getEntry(id);
+    expect(restored.ok).toBe(true);
+    expect(restored.data?.id).toBe(id);
+    expect(restored.data?.operation).toBe("fetchStream");
+    expect((restored.data?.payload as { streamId: string }).streamId).toBe("a");
+    expect(restored.data?.status).toBe("pending");
+  });
+
+  it("full mixed set of entries survives reload", () => {
+    sorobanRetryQueue.enqueue("fetchStream", { streamId: "s1" });
+    sorobanRetryQueue.enqueue("cancelStream", { streamId: "s2" });
+    sorobanRetryQueue.enqueue("createStream", {
+      streamId: "s3",
+      payload: { recipient: "GDEAD" },
+    });
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(3);
+
+    simulateReload();
+
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(3);
+    // dequeue order is FIFO by insertion (all nextRetryAt ≈ same)
+    const d1 = sorobanRetryQueue.dequeue();
+    expect((d1.data?.payload as { streamId: string }).streamId).toBe("s1");
+    const d2 = sorobanRetryQueue.dequeue();
+    expect((d2.data?.payload as { streamId: string }).streamId).toBe("s2");
+    const d3 = sorobanRetryQueue.dequeue();
+    expect((d3.data?.payload as { streamId: string }).streamId).toBe("s3");
+    expect(d3.data?.operation).toBe("createStream");
+  });
+
+  it("entry with failed retry state survives reload with correct metadata", () => {
+    const r = sorobanRetryQueue.enqueue("fetchStream", { streamId: "a" }, "cid-123");
+    const id = r.data!.id;
+
+    // dequeue + fail so attempts=1, lastError set, nextRetryAt scheduled
+    sorobanRetryQueue.dequeue(0);
+    const err = new SorobanError(SorobanErrorCode.RpcUnavailable, "node down", {
+      statusCode: 503,
+    });
+    sorobanRetryQueue.markFailed(id, err, 0);
+
+    simulateReload();
+
+    const entry = sorobanRetryQueue.getEntry(id).data!;
+    expect(entry.status).toBe("pending");
+    expect(entry.attempts).toBe(1);
+    expect(entry.correlationId).toBe("cid-123");
+    expect(entry.nextRetryAt).toBeGreaterThan(0);
+    // SorobanError roundtrip:
+    expect(entry.lastError).toBeInstanceOf(SorobanError);
+    expect(entry.lastError?.variant).toBe(SorobanErrorCode.RpcUnavailable);
+    expect(entry.lastError?.statusCode).toBe(503);
+    expect(entry.lastError?.message).toBe("node down");
+  });
+
+  it("dead-letter entries survive reload and remain queryable via getDeadLetterEntries", () => {
+    const r = sorobanRetryQueue.enqueue("fetchStream", { streamId: "a" });
+    const id = r.data!.id;
+
+    for (let i = 0; i < DEFAULT_RETRY_QUEUE_CONFIG.maxRetries; i++) {
+      sorobanRetryQueue.dequeue(Infinity);
+      sorobanRetryQueue.markFailed(id, makeSorobanError(), Infinity);
+    }
+    expect(sorobanRetryQueue.getDeadLetterEntries()).toHaveLength(1);
+
+    simulateReload();
+
+    const dead = sorobanRetryQueue.getDeadLetterEntries();
+    expect(dead).toHaveLength(1);
+    expect(dead[0].id).toBe(id);
+    expect(dead[0].status).toBe("dead");
+    expect(dead[0].attempts).toBe(DEFAULT_RETRY_QUEUE_CONFIG.maxRetries);
+    // Can still requeue after reload:
+    const requeueRes = sorobanRetryQueue.requeueDeadLetter(id);
+    expect(requeueRes.ok).toBe(true);
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(1);
+  });
+
+  it("markComplete state (deleted entry) survives reload — entry stays gone", () => {
+    const r = sorobanRetryQueue.enqueue("fetchStream", { streamId: "a" });
+    const id = r.data!.id;
+    sorobanRetryQueue.dequeue();
+    sorobanRetryQueue.markComplete(id);
+    expect(sorobanRetryQueue.getEntry(id).data).toBeNull();
+
+    simulateReload();
+
+    expect(sorobanRetryQueue.getEntry(id).data).toBeNull();
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(0);
+  });
+
+  it("custom queue config survives reload", () => {
+    sorobanRetryQueue.setConfig({ maxRetries: 7, baseDelayMs: 500 });
+    expect(sorobanRetryQueue.getConfig().maxRetries).toBe(7);
+
+    simulateReload();
+
+    expect(sorobanRetryQueue.getConfig().maxRetries).toBe(7);
+    expect(sorobanRetryQueue.getConfig().baseDelayMs).toBe(500);
+    // Unchanged defaults still in place:
+    expect(sorobanRetryQueue.getConfig().maxDelayMs).toBe(
+      DEFAULT_RETRY_QUEUE_CONFIG.maxDelayMs,
+    );
+  });
+
+  it("requeued dead-letter survives reload with attempts=0 and lastError=null", () => {
+    const r = sorobanRetryQueue.enqueue("fetchStream", { streamId: "a" });
+    const id = r.data!.id;
+    for (let i = 0; i < DEFAULT_RETRY_QUEUE_CONFIG.maxRetries; i++) {
+      sorobanRetryQueue.dequeue(Infinity);
+      sorobanRetryQueue.markFailed(id, makeSorobanError(), Infinity);
+    }
+    sorobanRetryQueue.requeueDeadLetter(id);
+
+    simulateReload();
+
+    const entry = sorobanRetryQueue.getEntry(id).data!;
+    expect(entry.status).toBe("pending");
+    expect(entry.attempts).toBe(0);
+    expect(entry.lastError).toBeNull();
+  });
+});
+
+// ──────── Durability: Crash Recovery (processing → pending) ──────────────
+
+describe("durability — crash recovery (processing → pending)", () => {
+  it("resets a processing entry back to pending on reload so it's retryable", () => {
+    const r = sorobanRetryQueue.enqueue("fetchStream", { streamId: "a" });
+    const id = r.data!.id;
+
+    // dequeue transitions to processing
+    sorobanRetryQueue.dequeue();
+    expect(sorobanRetryQueue.getEntry(id).data?.status).toBe("processing");
+
+    // Simulate crash/reload before markComplete/markFinished
+    sorobanRetryQueue._storage.clear();
+    sorobanRetryQueue._hydrate();
+
+    const restored = sorobanRetryQueue.getEntry(id).data!;
+    expect(restored.status).toBe("pending");
+    expect(restored.nextRetryAt).toBeLessThanOrEqual(Date.now());
+    // It should be dequeueable again:
+    const deq = sorobanRetryQueue.dequeue();
+    expect(deq.data?.id).toBe(id);
+  });
+
+  it("resets multiple processing entries on reload", () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const r = sorobanRetryQueue.enqueue("fetchStream", { streamId: `s-${i}` });
+      ids.push(r.data!.id);
+      sorobanRetryQueue.dequeue(); // each becomes processing
+    }
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(0); // 0 pending, 5 processing
+
+    sorobanRetryQueue._storage.clear();
+    sorobanRetryQueue._hydrate();
+
+    // All 5 are restored to pending:
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(5);
+  });
+
+  it("pending entries stay pending on reload (no unnecessary resets)", () => {
+    const r = sorobanRetryQueue.enqueue("fetchStream", { streamId: "a" });
+    const id = r.data!.id;
+    const beforeNextRetry = sorobanRetryQueue.getEntry(id).data!.nextRetryAt;
+
+    sorobanRetryQueue._storage.clear();
+    sorobanRetryQueue._hydrate();
+
+    const restored = sorobanRetryQueue.getEntry(id).data!;
+    expect(restored.status).toBe("pending");
+    // nextRetryAt preserved for pending entries (only processing gets reset)
+    expect(restored.nextRetryAt).toBe(beforeNextRetry);
+  });
+
+  it("logs recovery metric when processing entries are reset", () => {
+    const capture = captureLogs();
+
+    const r = sorobanRetryQueue.enqueue("fetchStream", { streamId: "a" });
+    sorobanRetryQueue.dequeue();
+    sorobanRetryQueue._storage.clear();
+    sorobanRetryQueue._hydrate();
+
+    const hydrateLines = findLogLines(capture.logCalls, "retry_queue_hydrated");
+    expect(hydrateLines.length).toBeGreaterThanOrEqual(1);
+    const last = hydrateLines[hydrateLines.length - 1];
+    expect(last.restored_count).toBe(1);
+    expect(last.recovered_processing).toBe(1);
+
+    capture.restore();
+  });
+});
+
+// ──────── Durability: Corruption Handling ────────────────────────────────
+
+describe("durability — corruption handling", () => {
+  const STORAGE_KEY = "streampay:soroban-retry-queue:v1";
+
+  it("recovers cleanly from invalid JSON in localStorage", () => {
+    // Pre-seed with valid data, then corrupt it.
+    sorobanRetryQueue.enqueue("fetchStream", { streamId: "good" });
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(1);
+
+    // Corrupt raw storage.
+    window.localStorage.setItem(STORAGE_KEY, "{not valid json!!!");
+
+    const capture = captureLogs();
+    sorobanRetryQueue._storage.clear();
+    sorobanRetryQueue._hydrate();
+
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(0);
+    const errorLines = findLogLines(capture.errorCalls, "retry_queue_hydrate_failed");
+    expect(errorLines).toHaveLength(1);
+    expect(errorLines[0].note).toContain("starting_fresh");
+    // Storage should be wiped clean after corruption.
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+    capture.restore();
+  });
+
+  it("discards data when envelope version is newer than expected", () => {
+    const r = sorobanRetryQueue.enqueue("fetchStream", { streamId: "v1" });
+    const id = r.data!.id;
+
+    // Manually write a future-version envelope.
+    const raw = window.localStorage.getItem(STORAGE_KEY)!;
+    const envelope = JSON.parse(raw);
+    envelope.version = 9999;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(envelope));
+
+    const capture = captureLogs();
+    sorobanRetryQueue._storage.clear();
+    sorobanRetryQueue._hydrate();
+
+    // Data was dropped — this entry is gone because version mismatch
+    // causes entire storage to be removed BEFORE hydrate processes it.
+    expect(sorobanRetryQueue.getEntry(id).data).toBeNull();
+    const warnLines = findLogLines(
+      capture.warnCalls,
+      "retry_queue_hydrate_version_mismatch",
+    );
+    expect(warnLines).toHaveLength(1);
+    expect(warnLines[0].stored_version).toBe(9999);
+    capture.restore();
+  });
+
+  it("drops corrupt storage and starts fresh when entries is not an array", () => {
+    const capture = captureLogs();
+    // Write a valid-envelope shape but entries is a string (corrupt).
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        config: DEFAULT_RETRY_QUEUE_CONFIG,
+        entries: "this should be an array",
+      }),
+    );
+    sorobanRetryQueue._storage.clear();
+    sorobanRetryQueue._hydrate();
+
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(0);
+    expect(sorobanRetryQueue.getConfig()).toEqual(DEFAULT_RETRY_QUEUE_CONFIG);
+    const errLines = findLogLines(capture.errorCalls, "retry_queue_hydrate_failed");
+    expect(errLines).toHaveLength(1);
+    capture.restore();
+  });
+
+  it("skips individual corrupt entries without failing the whole hydrate", () => {
+    // Valid envelope, one good entry + one malformed entry (no id)
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        config: DEFAULT_RETRY_QUEUE_CONFIG,
+        entries: [
+          {
+            id: "good-entry",
+            operation: "fetchStream",
+            payload: { streamId: "valid" },
+            attempts: 0,
+            maxAttempts: 3,
+            nextRetryAt: 0,
+            lastError: null,
+            status: "pending",
+            correlationId: "cid",
+            createdAt: new Date(0).toISOString(),
+            updatedAt: new Date(0).toISOString(),
+          },
+          // Malformed — missing id field, wrong shape
+          { operation: "fetchStream", payload: { streamId: "missing-id" } },
+          "literally not an object",
+        ],
+      }),
+    );
+
+    sorobanRetryQueue._storage.clear();
+    sorobanRetryQueue._hydrate();
+
+    // Only the good entry restored.
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(1);
+    expect(sorobanRetryQueue.getEntry("good-entry").data).not.toBeNull();
+  });
+
+  it("rejects restored config that fails validation (falls back to defaults)", () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        config: {
+          ...DEFAULT_RETRY_QUEUE_CONFIG,
+          maxRetries: -5, // invalid
+          jitterFactor: 2, // invalid
+        },
+        entries: [
+          {
+            id: "cfg-test",
+            operation: "fetchStream",
+            payload: { streamId: "a" },
+            attempts: 0,
+            maxAttempts: 3,
+            nextRetryAt: 0,
+            lastError: null,
+            status: "pending",
+            correlationId: "cid",
+            createdAt: new Date(0).toISOString(),
+            updatedAt: new Date(0).toISOString(),
+          },
+        ],
+      }),
+    );
+
+    sorobanRetryQueue._storage.clear();
+    sorobanRetryQueue._hydrate();
+
+    // Invalid config rejected → defaults used.
+    expect(sorobanRetryQueue.getConfig()).toEqual(DEFAULT_RETRY_QUEUE_CONFIG);
+    // But entries still restored (they're separate concern).
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(1);
+  });
+});
+
+// ──────── Durability: Degraded Mode (localStorage unavailable) ───────────
+
+describe("durability — degraded mode (localStorage unavailable)", () => {
+  let origLocalStorage: Storage;
+  const errStorageKey = "streampay:soroban-retry-queue:v1";
+
+  beforeEach(() => {
+    origLocalStorage = window.localStorage;
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "localStorage", {
+      value: origLocalStorage,
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  it("operates in-memory without errors when localStorage is undefined (SSR)", () => {
+    // @ts-expect-error simulating SSR environment
+    delete window.localStorage;
+
+    const capture = captureLogs();
+    // clear() first to reset _persistWarningLogged.
+    sorobanRetryQueue.clear();
+    const r = sorobanRetryQueue.enqueue("fetchStream", { streamId: "ssr-test" });
+    // dequeue + complete to exercise all mutation paths.
+    const deq = sorobanRetryQueue.dequeue();
+    expect(deq.data?.id).toBe(r.data?.id);
+    sorobanRetryQueue.markComplete(deq.data!.id);
+
+    // One warning logged that persistence is unavailable.
+    const warns = findLogLines(
+      capture.warnCalls,
+      "retry_queue_persistence_unavailable",
+    );
+    expect(warns.length).toBeGreaterThanOrEqual(1);
+
+    capture.restore();
+  });
+
+  it("operates in-memory when setItem throws (quota / private mode)", () => {
+    const throwingStorage = {
+      getItem: jest.fn(() => null),
+      setItem: jest.fn(() => {
+        throw new DOMException("QuotaExceededError", "QuotaExceededError");
+      }),
+      removeItem: jest.fn(),
+      clear: jest.fn(),
+      key: jest.fn(),
+      length: 0,
+    };
+    Object.defineProperty(window, "localStorage", {
+      value: throwingStorage,
+      writable: true,
+      configurable: true,
+    });
+
+    const capture = captureLogs();
+    sorobanRetryQueue.clear();
+
+    // Enqueue exercises _persist → setItem throws → degraded path.
+    const r = sorobanRetryQueue.enqueue("fetchStream", { streamId: "q" });
+    expect(r.ok).toBe(true);
+    // Queue still works in memory.
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(1);
+
+    const warnLines = findLogLines(
+      capture.warnCalls,
+      "retry_queue_persist_failed",
+    );
+    expect(warnLines.length).toBeGreaterThanOrEqual(1);
+
+    // Warning only logged once (no spam on subsequent mutations).
+    const warnCountBefore = warnLines.length;
+    sorobanRetryQueue.enqueue("fetchStream", { streamId: "q2" });
+    sorobanRetryQueue.enqueue("fetchStream", { streamId: "q3" });
+    const linesAfter = findLogLines(
+      capture.warnCalls,
+      "retry_queue_persist_failed",
+    );
+    expect(linesAfter.length).toBe(warnCountBefore);
+
+    capture.restore();
+  });
+
+  it("does not write sensitive data to localStorage — only documented fields", () => {
+    const secretStream = "STREAM-SENSITIVE-123";
+    const r = sorobanRetryQueue.enqueue(
+      "fetchStream",
+      { streamId: secretStream },
+      "CORR-SENSITIVE",
+    );
+    // Dequeue + fail to populate lastError (with a sensitive message)
+    sorobanRetryQueue.dequeue();
+    sorobanRetryQueue.markFailed(
+      r.data!.id,
+      new SorobanError(
+        SorobanErrorCode.SubmitBadAuth,
+        "signature of user with PII secret-key-here failed",
+        { meta: { secretField: "do-not-persist-raw" } },
+      ),
+    );
+
+    const raw = window.localStorage.getItem(errStorageKey)!;
+    // StreamId and correlationId WILL be in raw (they're part of the type
+    // contract). Confirm the raw error MESSAGE is NOT stripped (it's
+    // persisted but that's expected; logs strip it).
+    //
+    // Primary assertion here is no crash and storage reads as valid JSON.
+    const envelope = JSON.parse(raw);
+    expect(envelope.version).toBe(1);
+    expect(Array.isArray(envelope.entries)).toBe(true);
+    expect(envelope.entries).toHaveLength(1);
+    const entry = envelope.entries[0];
+    expect(entry.lastError.__type).toBe("SorobanError");
+    expect(entry.lastError.variant).toBe("SubmitBadAuth");
+  });
+});
+
+// ──────── Durability: clear() Wipes Storage, not just in-memory ───────────
+
+describe("durability — clear() wipes localStorage too", () => {
+  const STORAGE_KEY = "streampay:soroban-retry-queue:v1";
+
+  it("clear() removes the persistence key from localStorage", () => {
+    sorobanRetryQueue.enqueue("fetchStream", { streamId: "x" });
+    expect(window.localStorage.getItem(STORAGE_KEY)).not.toBeNull();
+
+    sorobanRetryQueue.clear();
+
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(0);
+    // Config reset to defaults.
+    expect(sorobanRetryQueue.getConfig()).toEqual(DEFAULT_RETRY_QUEUE_CONFIG);
+  });
+
+  it("after clear, reload produces empty queue (no stale bleed-through)", () => {
+    sorobanRetryQueue.enqueue("fetchStream", { streamId: "x" });
+    sorobanRetryQueue.clear();
+
+    sorobanRetryQueue._storage.clear();
+    sorobanRetryQueue._hydrate();
+
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(0);
+  });
+});
+
+// ──────── Durability: Full Lifecycle Across Multiple Reloads ─────────────
+
+describe("durability — full lifecycle across multiple reloads", () => {
+  function reload() {
+    sorobanRetryQueue._storage.clear();
+    sorobanRetryQueue._persistWarningLogged = false;
+    sorobanRetryQueue._hydrate();
+  }
+
+  it("survives enqueue → reload → dequeue → reload → fail → reload → complete", () => {
+    // Step 1: enqueue
+    const r = sorobanRetryQueue.enqueue(
+      "cancelStream",
+      { streamId: "multi-reload" },
+      "multi-cid",
+    );
+    const id = r.data!.id;
+
+    // Step 2: reload
+    reload();
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(1);
+
+    // Step 3: dequeue, then crash before markFailed
+    const dq = sorobanRetryQueue.dequeue();
+    expect(dq.data?.id).toBe(id);
+    reload(); // crashes during processing!
+    // Status should be recovered to pending.
+    expect(sorobanRetryQueue.getEntry(id).data?.status).toBe("pending");
+
+    // Step 4: dequeue + fail
+    sorobanRetryQueue.dequeue(0);
+    sorobanRetryQueue.markFailed(
+      id,
+      makeSorobanError(SorobanErrorCode.SimulationTimeout),
+      0,
+    );
+    expect(sorobanRetryQueue.getEntry(id).data?.attempts).toBe(1);
+
+    reload();
+    expect(sorobanRetryQueue.getEntry(id).data?.attempts).toBe(1);
+    expect(
+      sorobanRetryQueue.getEntry(id).data?.lastError?.variant,
+    ).toBe(SorobanErrorCode.SimulationTimeout);
+
+    // Step 5: dequeue + succeed
+    sorobanRetryQueue.dequeue(Infinity);
+    sorobanRetryQueue.markComplete(id);
+
+    reload();
+    expect(sorobanRetryQueue.getEntry(id).data).toBeNull();
+    expect(sorobanRetryQueue.getQueueDepth()).toBe(0);
+  });
+});

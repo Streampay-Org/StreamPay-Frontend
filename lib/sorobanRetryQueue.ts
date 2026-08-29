@@ -28,10 +28,23 @@
  * ```
  *
  * ## Persistence Strategy
- * Currently uses an in-memory `Map` (matching the project's existing
- * patterns for `cursorsDb`, `processedEventsDb`, etc.). The storage
- * interface is intentionally narrow so a future migration to PostgreSQL
- * or Redis requires swapping only the storage layer.
+ * Durable write-through persistence using `window.localStorage` with a
+ * versioned JSON envelope (key: `streampay:soroban-retry-queue:v1`). The
+ * hot path remains an in-memory `Map` for zero-latency reads; every
+ * mutation writes through to localStorage atomically.
+ *
+ * **Guarantees:**
+ * - State survives page reloads, tab restores, and soft navigation.
+ * - Entries interrupted in `"processing"` state by a crash/reload are
+ *   automatically reset to `"pending"` on hydrate so they can be retried.
+ * - Corrupt or version-mismatched storage is safely discarded and the
+ *   queue starts fresh (no silent data corruption).
+ * - If localStorage is unavailable (SSR, private browsing, quota exceeded)
+ *   the queue degrades gracefully to in-memory-only with a warning log.
+ *
+ * The storage interface is intentionally narrow so a future migration to
+ * PostgreSQL or Redis requires swapping only the `_persist` / `_hydrate`
+ * layer; no callers change.
  *
  * ## Public API
  *
@@ -68,6 +81,9 @@ import {
   SorobanError,
   SorobanErrorCode,
 } from "../types";
+
+const STORAGE_KEY = "streampay:soroban-retry-queue:v1";
+const STORAGE_VERSION = 1;
 
 // =============================================================================
 // Types
@@ -140,6 +156,29 @@ export interface RetryQueueEntry {
 }
 
 export type RetryEntryStatus = "pending" | "processing" | "dead";
+
+// =============================================================================
+// Serialization Types (for durable persistence)
+// =============================================================================
+
+interface SerializedSorobanError {
+  __type: "SorobanError";
+  variant: SorobanErrorCode;
+  message: string;
+  meta?: Record<string, unknown>;
+  statusCode?: number;
+}
+
+interface SerializedRetryQueueEntry
+  extends Omit<RetryQueueEntry, "lastError"> {
+  lastError: SerializedSorobanError | null;
+}
+
+interface SerializedRetryQueueEnvelope {
+  version: number;
+  config: SorobanRetryQueueConfig;
+  entries: SerializedRetryQueueEntry[];
+}
 
 // =============================================================================
 // Configuration
@@ -363,6 +402,42 @@ export function computeBackoff(
 }
 
 // =============================================================================
+// Serialization / Deserialization Helpers
+// =============================================================================
+
+function serializeError(err: SorobanError | null): SerializedSorobanError | null {
+  if (!err) return null;
+  return {
+    __type: "SorobanError",
+    variant: err.variant,
+    message: err.message,
+    meta: err.meta,
+    statusCode: err.statusCode,
+  };
+}
+
+function deserializeError(ser: SerializedSorobanError | null): SorobanError | null {
+  if (!ser) return null;
+  if (ser.__type !== "SorobanError") return null;
+  try {
+    return new SorobanError(ser.variant, ser.message, {
+      meta: ser.meta,
+      statusCode: ser.statusCode,
+    });
+  } catch {
+    return new SorobanError(SorobanErrorCode.Unknown, "Deserialized error");
+  }
+}
+
+function serializeEntry(entry: RetryQueueEntry): SerializedRetryQueueEntry {
+  return { ...entry, lastError: serializeError(entry.lastError) };
+}
+
+function deserializeEntry(ser: SerializedRetryQueueEntry): RetryQueueEntry {
+  return { ...ser, lastError: deserializeError(ser.lastError) };
+}
+
+// =============================================================================
 // Storage Interface (in-memory, swappable)
 // =============================================================================
 
@@ -431,6 +506,147 @@ export const sorobanRetryQueue = {
 
   _storage: new InMemoryStorage() as StorageAdapter,
   _config: { ...DEFAULT_RETRY_QUEUE_CONFIG },
+  _persistWarningLogged: false,
+
+  // ── Durability: Hydrate / Persist ──────────────────────────────────────
+
+  _isLocalStorageAvailable(): boolean {
+    try {
+      if (typeof window === "undefined" || !window.localStorage) return false;
+      const testKey = `${STORAGE_KEY}__probe__`;
+      window.localStorage.setItem(testKey, "1");
+      window.localStorage.removeItem(testKey);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  _persist(): void {
+    try {
+      if (!this._isLocalStorageAvailable()) {
+        if (!this._persistWarningLogged) {
+          log("warn", "retry_queue_persistence_unavailable", {
+            reason: "localStorage_not_available",
+            note: "queue_uses_in_memory_only — data_will_be_lost_on_reload",
+          });
+          this._persistWarningLogged = true;
+        }
+        return;
+      }
+
+      const entries: SerializedRetryQueueEntry[] = [];
+      for (const [, entry] of this._storage.entries()) {
+        entries.push(serializeEntry(entry));
+      }
+
+      const envelope: SerializedRetryQueueEnvelope = {
+        version: STORAGE_VERSION,
+        config: { ...this._config },
+        entries,
+      };
+
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(envelope));
+    } catch (err) {
+      // Never throw from persistence — degraded mode is acceptable.
+      // Only log the first failure to avoid log spam.
+      if (!this._persistWarningLogged) {
+        log("warn", "retry_queue_persist_failed", {
+          error: err instanceof Error ? err.name : "unknown",
+          note: "queue_continues_in_memory_only",
+        });
+        this._persistWarningLogged = true;
+      }
+    }
+  },
+
+  _hydrate(): void {
+    // Always start from a clean in-memory state before hydrating.
+    this._storage.clear();
+
+    try {
+      if (!this._isLocalStorageAvailable()) return;
+
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw) as SerializedRetryQueueEnvelope;
+      if (!parsed || typeof parsed !== "object") {
+        throw new Error("envelope_not_an_object");
+      }
+
+      if (parsed.version !== STORAGE_VERSION) {
+        log("warn", "retry_queue_hydrate_version_mismatch", {
+          stored_version: parsed.version,
+          expected_version: STORAGE_VERSION,
+          note: "discarding_stale_data",
+        });
+        window.localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
+
+      // Validate and restore config if present
+      if (parsed.config && typeof parsed.config === "object") {
+        const cfgErrors = validateConfig(parsed.config as Partial<SorobanRetryQueueConfig>, "hydrate");
+        if (!cfgErrors) {
+          this._config = { ...DEFAULT_RETRY_QUEUE_CONFIG, ...parsed.config };
+        }
+      }
+
+      if (!Array.isArray(parsed.entries)) {
+        throw new Error("entries_not_an_array");
+      }
+
+      let restored = 0;
+      let recoveredProcessing = 0;
+
+      for (const ser of parsed.entries) {
+        try {
+          if (!ser || typeof ser !== "object" || typeof ser.id !== "string") continue;
+          const entry = deserializeEntry(ser as SerializedRetryQueueEntry);
+
+          // CRITICAL INVARIANT: Any entry found in "processing" state at
+          // hydrate time was interrupted by a reload / crash mid-flight.
+          // Reset it to "pending" so it can be retried rather than stuck
+          // forever in an unrecoverable processing state.
+          if (entry.status === "processing") {
+            entry.status = "pending";
+            entry.nextRetryAt = Date.now();
+            entry.updatedAt = new Date().toISOString();
+            recoveredProcessing++;
+          }
+
+          this._storage.set(entry.id, entry);
+          restored++;
+        } catch {
+          // Skip individual corrupt entries; don't fail the whole hydrate.
+        }
+      }
+
+      if (restored > 0) {
+        log("info", "retry_queue_hydrated", {
+          restored_count: restored,
+          recovered_processing: recoveredProcessing,
+        });
+      }
+    } catch (err) {
+      // On any catastrophic hydration failure, log, wipe corrupt storage,
+      // and start fresh. Prefer empty queue over silent data corruption.
+      log("error", "retry_queue_hydrate_failed", {
+        error: err instanceof Error ? err.message : "unknown",
+        note: "discarding_corrupt_storage_and_starting_fresh",
+      });
+      try {
+        if (this._isLocalStorageAvailable()) {
+          window.localStorage.removeItem(STORAGE_KEY);
+        }
+      } catch {
+        /* best-effort wipe only */
+      }
+      this._storage.clear();
+      this._config = { ...DEFAULT_RETRY_QUEUE_CONFIG };
+    }
+  },
 
   // ── Public Methods ─────────────────────────────────────────────────────
 
@@ -488,6 +704,7 @@ export const sorobanRetryQueue = {
     };
 
     this._storage.set(id, entry);
+    this._persist();
 
     log("info", "retry_queue_enqueued", {
       correlation_id: cid,
@@ -534,6 +751,7 @@ export const sorobanRetryQueue = {
     oldest.status = "processing";
     oldest.updatedAt = new Date(safeNow).toISOString();
     this._storage.set(oldest.id, oldest);
+    this._persist();
 
     log("info", "retry_queue_dequeued", {
       correlation_id: oldest.correlationId,
@@ -581,6 +799,7 @@ export const sorobanRetryQueue = {
     }
 
     this._storage.delete(id);
+    this._persist();
 
     log("info", "retry_queue_completed", {
       correlation_id: entry.correlationId,
@@ -651,6 +870,7 @@ export const sorobanRetryQueue = {
       entry.status = "dead";
       entry.updatedAt = new Date(safeNow).toISOString();
       this._storage.set(id, entry);
+      this._persist();
 
       log("error", "retry_queue_exhausted", {
         correlation_id: entry.correlationId,
@@ -670,6 +890,7 @@ export const sorobanRetryQueue = {
     entry.nextRetryAt = safeNow + delay;
     entry.updatedAt = new Date(safeNow).toISOString();
     this._storage.set(id, entry);
+    this._persist();
 
     log("warn", "retry_queue_retry_scheduled", {
       correlation_id: entry.correlationId,
@@ -753,6 +974,7 @@ export const sorobanRetryQueue = {
     entry.nextRetryAt = Date.now();
     entry.updatedAt = new Date().toISOString();
     this._storage.set(id, entry);
+    this._persist();
 
     log("info", "retry_queue_dead_letter_requeued", {
       correlation_id: entry.correlationId,
@@ -800,6 +1022,7 @@ export const sorobanRetryQueue = {
     }
 
     this._config = { ...this._config, ...partial };
+    this._persist();
 
     log("info", "retry_queue_config_updated", {
       correlation_id: cid,
@@ -823,5 +1046,22 @@ export const sorobanRetryQueue = {
   clear(): void {
     this._storage.clear();
     this._config = { ...DEFAULT_RETRY_QUEUE_CONFIG };
+    this._persistWarningLogged = false;
+    try {
+      if (this._isLocalStorageAvailable()) {
+        window.localStorage.removeItem(STORAGE_KEY);
+      }
+    } catch {
+      /* best-effort */
+    }
   },
 };
+
+// ── Module init: hydrate state from durable storage on first load ────────
+// This must run AFTER the object literal above is fully defined so the
+// methods reference correctly.
+try {
+  sorobanRetryQueue._hydrate();
+} catch {
+  /* hydration already handles internal errors; outer catch as safety net */
+}
