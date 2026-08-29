@@ -156,7 +156,8 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
     stream.nextAction.toLowerCase() === "cancel" &&
     stream.status !== "cancelled" &&
     stream.status !== "ended" &&
-    stream.status !== "withdrawn";
+    stream.status !== "withdrawn" &&
+    stream.status !== "failed";
 
   const handleDismissError = () => {
     setError(null);
@@ -213,6 +214,9 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
       setSrAnnouncement(
         `Stream action failed: ${display.message || "Unknown error occurred"}.`,
       );
+      setTimeout(() => {
+        actionButtonRef.current?.focus();
+      }, 0);
     } finally {
       setIsProcessing(false);
     }
@@ -343,7 +347,9 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
         </div>
         <div>
           <dt>Status</dt>
-          <dd>{stream.status}</dd>
+          <dd role="status" aria-label={`Stream status: ${stream.status}`}>
+            {stream.status}
+          </dd>
         </div>
         {typeof stream.totalAmount === "number" &&
           typeof stream.accruedAmount === "number" &&

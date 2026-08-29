@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Link from "next/link";
 import type { Stream, StreamStatus } from "../../types/openapi";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -31,6 +31,7 @@ const ACTION_MAP: Record<string, string> = {
   paused: "Resume",
   ended: "Withdraw",
   withdrawn: "Settled",
+  failed: "Retry",
 };
 
 const STREAM_ACTION_SUMMARY: Record<
@@ -67,6 +68,8 @@ export function StreamDetailClient({
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDestructiveOpen, setIsDestructiveOpen] = useState(false);
   const [error, setError] = useState<StreamPayError | null>(null);
+  const [srAnnouncement, setSrAnnouncement] = useState("");
+  const actionButtonRef = useRef<HTMLButtonElement>(null);
 
   const actionSummary = STREAM_ACTION_SUMMARY[stream.id] ?? {
     amountLabel: stream.rate,
@@ -101,6 +104,7 @@ export function StreamDetailClient({
         stream.token,
         stream.label,
       );
+      setSrAnnouncement("Vesting calendar exported successfully.");
     } catch (err) {
       console.error("Failed to export ICS:", err);
       alert(
@@ -126,6 +130,7 @@ export function StreamDetailClient({
 
     setIsProcessing(true);
     setError(null);
+    setSrAnnouncement(`Processing ${nextAction.toLowerCase()} operation...`);
 
     try {
       const actionRoute = nextAction.toLowerCase();
@@ -140,7 +145,9 @@ export function StreamDetailClient({
         }),
       });
 
-      alert(`${nextAction} successful for stream ${stream.id}!`);
+      const msg = `${nextAction} successful for stream ${stream.id}!`;
+      setSrAnnouncement(msg);
+      alert(msg);
     } catch (err: unknown) {
       const normalizedError = isStreamPayError(err) ? err : normalizeError(err);
 
@@ -149,6 +156,7 @@ export function StreamDetailClient({
       }
 
       setError(normalizedError);
+      setSrAnnouncement(`Stream operation failed.`);
     } finally {
       setIsProcessing(false);
     }
@@ -160,6 +168,8 @@ export function StreamDetailClient({
 
     setIsProcessing(true);
     setError(null);
+    const actionLabel = actionRoute === "cancel" ? "Cancel" : "Withdraw";
+    setSrAnnouncement(`Processing ${actionLabel.toLowerCase()}...`);
 
     try {
       await fetchWithIdempotency(`/api/streams/${stream.id}/${actionRoute}`, {
@@ -173,13 +183,14 @@ export function StreamDetailClient({
         }),
       });
 
-      alert(
-        `${actionRoute === "cancel" ? "Cancel" : "Withdraw"} successful for stream ${stream.id}!`,
-      );
+      const msg = `${actionLabel} successful for stream ${stream.id}!`;
+      setSrAnnouncement(msg);
+      alert(msg);
     } catch (err: unknown) {
       const normalizedError = isStreamPayError(err) ? err : normalizeError(err);
 
       setError(normalizedError);
+      setSrAnnouncement(`${actionLabel} failed.`);
     } finally {
       setIsProcessing(false);
     }
@@ -187,6 +198,13 @@ export function StreamDetailClient({
 
   return (
     <main className="page-shell">
+      {/* Live Region for accessible announcements */}
+      {srAnnouncement && (
+        <div role="status" aria-live="polite" className="sr-only">
+          {srAnnouncement}
+        </div>
+      )}
+
       {/* Back to Streams navigation */}
       <nav aria-label="Breadcrumb" className="no-print">
         <Link href="/streams" className="detail-back-link">
@@ -390,6 +408,7 @@ export function StreamDetailClient({
             )}
             <div className="detail-actions-row">
               <button
+                ref={actionButtonRef}
                 className="button button--primary detail-action-btn"
                 type="button"
                 onClick={handleAction}
@@ -397,6 +416,12 @@ export function StreamDetailClient({
                   isProcessing ||
                   mutationsDisabled ||
                   stream.status === "withdrawn"
+                }
+                aria-busy={isProcessing}
+                aria-label={
+                  isProcessing
+                    ? `Processing ${nextAction} for stream ${stream.id}`
+                    : `${nextAction} stream ${stream.id}`
                 }
               >
                 {isProcessing ? "Processing..." : nextAction}
@@ -431,6 +456,11 @@ export function StreamDetailClient({
                   type="button"
                   onClick={() => setIsDestructiveOpen(true)}
                   disabled={isProcessing || mutationsDisabled}
+                  aria-label={
+                    actionSummary.destructiveAction === "cancel"
+                      ? `Cancel stream ${stream.id}`
+                      : `Withdraw funds for stream ${stream.id}`
+                  }
                 >
                   {actionSummary.destructiveAction === "cancel"
                     ? "Cancel Stream"

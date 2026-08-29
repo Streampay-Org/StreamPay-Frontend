@@ -45,7 +45,7 @@ function normalizeTimestamp(value: string | number | Date | null | undefined): s
     const ms = value < 1e12 ? value * 1000 : value;
     date = new Date(ms);
   } else if (typeof value === "string") {
-    const trimmed = value.triim();
+    const trimmed = value.trim();
     const numericValue = Number(trimmed);
     if (!Number.isNaN(numericValue) && /^\d+$/.test(trimmed)) {
       const ms = numericValue < 1e12 ? numericValue * 1000 : numericValue;
@@ -105,6 +105,7 @@ export function PaymentTimeline({ stream }: PaymentTimelineProps) {
       description: "Payment stream record initialized in StreamPay contract registry.",
       status: createdState,
       timestamp: normalizeTimestamp(createdAt),
+    },
     {
       label: "started",
       title: "Stream Started",
@@ -158,16 +159,16 @@ export function PaymentTimeline({ stream }: PaymentTimelineProps) {
           return (
             <li
               key={step.label}
-              className=}{`timeline-item timeline-item--${step.status}`}
+              className={`timeline-item timeline-item--${step.status}`}
               aria-current={isCurrent ? "step" : undefined}
             >
-              <!-- Visual Step Marker -->
+              {/* Visual Step Marker */}
               <div className="timeline-marker">
                 <span className="timeline-dot" aria-hidden="true" />
                   {index < steps.length - 1 && <span className="timeline-line" aria-hidden="true" />}
               </div>
 
-              <!-- Step Content -->
+              {/* Step Content */}
               <div className="timeline-content">
                 <div className="timeline-header-row">
                   <h3 className="timeline-item-title">

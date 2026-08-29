@@ -7,6 +7,7 @@ const statusBadgeCopy: Record<StreamStatus, string> = {
   paused: "Paused",
   cancelled: "Cancelled",
   withdrawn: "Withdrawn",
+  failed: "Failed",
 };
 
 export type { StreamStatus };
@@ -23,6 +24,7 @@ export type { StreamStatus };
  * - draft     → ○ hollow circle (not started)
  * - cancelled → ✕ crossed (aborted)
  * - withdrawn → ⇤ pulled back (reclaimed)
+ * - failed    → ⚠ warning triangle (failed)
  */
 const statusBadgeGlyph: Record<StreamStatus, string> = {
   active: "▶",
@@ -31,13 +33,14 @@ const statusBadgeGlyph: Record<StreamStatus, string> = {
   draft: "○",
   cancelled: "✕",
   withdrawn: "⇤",
+  failed: "⚠",
 };
 
 /**
  * Pattern-class fallback mapping.  `withdrawn` shares the same texture as
  * `ended` (crosshatch — "complete / locked") because both represent terminal,
  * non-flowing states.  `cancelled` has its own reverse-diagonal pattern
- * ("aborted").
+ * ("aborted"). `failed` uses the diagonal alert pattern.
  */
 const patternClassMap: Record<StreamStatus, string> = {
   active: "cb-pattern--active",
@@ -46,6 +49,7 @@ const patternClassMap: Record<StreamStatus, string> = {
   ended: "cb-pattern--ended",
   withdrawn: "cb-pattern--ended",
   cancelled: "cb-pattern--cancelled",
+  failed: "cb-pattern--cancelled",
 };
 
 /**
@@ -59,6 +63,7 @@ const modifierMap: Record<StreamStatus, string> = {
   ended: "ended",
   withdrawn: "ended",
   cancelled: "cancelled",
+  failed: "failed",
 };
 
 type StatusBadgeProps = {
@@ -67,12 +72,13 @@ type StatusBadgeProps = {
 };
 
 export function StatusBadge({ status, className = "" }: StatusBadgeProps) {
-  const label = statusBadgeCopy[status];
-  const modifier = modifierMap[status];
-  const patternClass = patternClassMap[status];
+  const label = statusBadgeCopy[status] ?? status;
+  const modifier = modifierMap[status] ?? status;
+  const patternClass = patternClassMap[status] ?? "";
 
   return (
     <span
+      role="status"
       aria-label={`Stream status: ${label}`}
       className={[
         "status-badge",
@@ -85,7 +91,7 @@ export function StatusBadge({ status, className = "" }: StatusBadgeProps) {
       {/* Decorative shape icon — the text label already conveys the status to
           assistive tech, so the glyph is hidden from screen readers. */}
       <span className={`status-icon status-icon--${status}`} aria-hidden="true">
-        {statusBadgeGlyph[status]}
+        {statusBadgeGlyph[status] ?? "•"}
       </span>
       {label}
     </span>

@@ -29,6 +29,7 @@ export function StickyStreamHeader({
   return (
     <header
       className="sticky-stream-header"
+      role="region"
       aria-label={`Stream ${streamId} summary`}
       style={{
         position: "sticky",
@@ -48,6 +49,7 @@ export function StickyStreamHeader({
       </span>
       <span
         className={`sticky-stream-header__status status-badge--${status}`}
+        role="status"
         aria-label={`Stream status: ${status}`}
       >
         {status}
