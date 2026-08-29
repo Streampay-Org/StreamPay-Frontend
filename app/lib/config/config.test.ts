@@ -366,6 +366,39 @@ describe('Stellar Network Configuration', () => {
       expect(redacted.public).toBe('data');
     });
 
+    it('should redact wallet and payment telemetry keys', () => {
+      const obj = {
+        wallet_address: 'some-address',
+        payment_method: 'credit-card',
+        cvv_code: '123',
+        iban_number: 'ES123456789',
+        amount: 500,
+        balance: 1000,
+      };
+      const redacted = redactSecrets(obj);
+      expect(redacted.wallet_address).toBe('[REDACTED]');
+      expect(redacted.payment_method).toBe('[REDACTED]');
+      expect(redacted.cvv_code).toBe('[REDACTED]');
+      expect(redacted.iban_number).toBe('[REDACTED]');
+      expect(redacted.amount).toBe('[REDACTED]');
+      expect(redacted.balance).toBe('[REDACTED]');
+    });
+
+    it('should redact wallet addresses by value even if key is public', () => {
+      const obj = {
+        PUBLIC_KEY: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRST', // 56 chars
+        destination: '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijk', // Solana 44 chars
+        credit_card: '1234-5678-9012-3456',
+        innocent_key: 'GBMIXCGFY4JOKI36TPVTOA2YUXHLZ5T6FVMSTXCUB57ZNAI4Y76XQWWM',
+      };
+      const redacted = redactSecrets(obj);
+      expect(redacted.PUBLIC_KEY).toBe('[REDACTED]');
+      expect(redacted.destination).toBe('[REDACTED]');
+      expect(redacted.credit_card).toBe('[REDACTED]');
+      expect(redacted.innocent_key).toBe('[REDACTED]');
+    });
+
+
     it('should handle null and undefined values', () => {
       const obj = {
         JWT_SECRET: null,

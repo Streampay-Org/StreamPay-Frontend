@@ -94,8 +94,19 @@ export function EventTimeline({ events }: EventTimelineProps) {
   const [activeFilter, setActiveFilter] = useState<FilterValue>("all");
 
   // Newest first; defensive copy so we never mutate the caller's array.
+  // Ledger sequence is the canonical ordering for on-chain events. Relying on
+  // raw timestamps can reorder events when node/device clocks are skewed, so
+  // compare by ledger first and only fall back to timestamp for same-ledger
+  // events. A final id tie-break keeps duplicate timestamp cases deterministic.
   const sortedEvents = useMemo(
-    () => [...events].sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
+    () =>
+      [...events].sort((a, b) => {
+        if (a.ledger !== b.ledger) return b.ledger - a.ledger;
+        if (a.timestamp !== b.timestamp) {
+          return b.timestamp.localeCompare(a.timestamp);
+        }
+        return a.id.localeCompare(b.id);
+      }),
     [events],
   );
 

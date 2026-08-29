@@ -9,11 +9,16 @@ type ErrorProps = {
   reset: () => void;
 };
 
-// Detect a Stellar/Horizon network dependency failure so we can reassure
-// users about funds instead of showing a generic server error.
 function isOutage(error: Error): boolean {
   const haystack = `${error.name} ${error.message}`.toLowerCase();
   return /stellar|horizon|soroban|\brpc\b|network service|service unavailable/.test(
+    haystack
+  );
+}
+
+function isChunkLoadError(error: Error): boolean {
+  const haystack = `${error.name} ${error.message}`.toLowerCase();
+  return /chunkloaderror|failed to fetch dynamically imported module|loading chunk/i.test(
     haystack
   );
 }
@@ -23,6 +28,14 @@ export default function GlobalError({ error, reset }: ErrorProps) {
     // Surface for telemetry; copy shown to the user stays calm and generic.
     console.error(error);
   }, [error]);
+
+  const handleReset = () => {
+    if (isChunkLoadError(error)) {
+      window.location.reload();
+    } else {
+      reset();
+    }
+  };
 
   const outage = isOutage(error);
 
@@ -39,7 +52,7 @@ export default function GlobalError({ error, reset }: ErrorProps) {
           <button
             type="button"
             className="button button--primary error-page__action"
-            onClick={() => reset()}
+            onClick={handleReset}
           >
             Try again
           </button>
@@ -68,7 +81,7 @@ export default function GlobalError({ error, reset }: ErrorProps) {
         <button
           type="button"
           className="button button--primary error-page__action"
-          onClick={() => reset()}
+          onClick={handleReset}
         >
           Try again
         </button>
