@@ -17,6 +17,12 @@ import { isStreamPayError, normalizeError } from "../../lib/errors";
 import type { StreamPayError } from "../../lib/errors";
 import { exportStreamVestingAsIcs } from "../../utils/ics";
 import type { CancelInput } from "../../lib/cancel-stream";
+import { useNetworkStatus } from "../../hooks/useNetworkStatus";
+import {
+  createOfflineMutationError,
+  createUnconfirmedMutationError,
+  extractConfirmedStreamStatus,
+} from "../../lib/mutation-confirm";
 
 type StreamDetailClientProps = {
   stream: Stream;
@@ -67,6 +73,7 @@ export function StreamDetailClient({
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDestructiveOpen, setIsDestructiveOpen] = useState(false);
   const [error, setError] = useState<StreamPayError | null>(null);
+  const { isOnline } = useNetworkStatus();
 
   const actionSummary = STREAM_ACTION_SUMMARY[stream.id] ?? {
     amountLabel: stream.rate,
@@ -124,13 +131,22 @@ export function StreamDetailClient({
       return;
     }
 
+    // Offline guard: a mutation cannot be applied while the device is
+    // offline, so we never dispatch it and never present a "success". A stale
+    // success (presented from an unconfirmed/unreachable request) is the
+    // exact failure mode this guard prevents.
+    if (!isOnline) {
+      setError(createOfflineMutationError());
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
 
     try {
       const actionRoute = nextAction.toLowerCase();
 
-      await fetchWithIdempotency(`/api/streams/${stream.id}/${actionRoute}`, {
+      const result = await fetchWithIdempotency(`/api/streams/${stream.id}/${actionRoute}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -139,6 +155,13 @@ export function StreamDetailClient({
           action: actionRoute,
         }),
       });
+
+      // Only present success when the response confirms the server-side
+      // state transition. A resolved-but-unconfirmed body is treated as
+      // failure so the UI can never claim a mutation succeeded that did not.
+      if (!extractConfirmedStreamStatus(result)) {
+        throw createUnconfirmedMutationError(nextAction);
+      }
 
       alert(`${nextAction} successful for stream ${stream.id}!`);
     } catch (err: unknown) {
@@ -158,11 +181,18 @@ export function StreamDetailClient({
     const actionRoute = actionSummary.destructiveAction;
     if (!actionRoute || mutationsDisabled) return;
 
+    // Same offline guard as handleAction: never dispatch and never present a
+    // success for an action that cannot be applied over the network.
+    if (!isOnline) {
+      setError(createOfflineMutationError());
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
 
     try {
-      await fetchWithIdempotency(`/api/streams/${stream.id}/${actionRoute}`, {
+      const result = await fetchWithIdempotency(`/api/streams/${stream.id}/${actionRoute}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -172,6 +202,12 @@ export function StreamDetailClient({
           amount: actionSummary.amountLabel,
         }),
       });
+
+      if (!extractConfirmedStreamStatus(result)) {
+        throw createUnconfirmedMutationError(
+          actionRoute === "cancel" ? "Cancel" : "Withdraw",
+        );
+      }
 
       alert(
         `${actionRoute === "cancel" ? "Cancel" : "Withdraw"} successful for stream ${stream.id}!`,

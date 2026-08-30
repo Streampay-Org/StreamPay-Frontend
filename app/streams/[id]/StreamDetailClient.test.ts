@@ -2,9 +2,13 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import type { Stream } from "../../types/openapi";
+
+type FetchMock = jest.Mock & {
+  mockResolvedValue: (value: unknown) => jest.Mock;
+};
 
 jest.mock("../../../lib/apiClient", () => ({
   fetchWithIdempotency: jest.fn().mockResolvedValue({ ok: true }),
@@ -18,6 +22,7 @@ const HeadersCtor = globalThis.Headers ?? class Headers {};
 (global as typeof globalThis & { Headers: typeof HeadersCtor }).Headers = HeadersCtor;
 
 const { StreamDetailClient } = require("./StreamDetailClient") as typeof import("./StreamDetailClient");
+const { fetchWithIdempotency } = require("../../../lib/apiClient") as { fetchWithIdempotency: FetchMock };
 
 const activeStream: Stream = {
   id: "stream-ada",
@@ -123,5 +128,95 @@ describe("StreamDetailClient", () => {
     render(React.createElement(StreamDetailClient, { stream: endedStream }));
 
     expect(screen.getByRole("button", { name: /withdraw funds/i })).toBeInTheDocument();
+  });
+});
+
+describe("StreamDetailClient offline mutation guard (#1449)", () => {
+  let alertSpy: jest.SpyInstance;
+
+  function setNavigatorOnline(onLine: boolean) {
+    Object.defineProperty(window.navigator, "onLine", {
+      value: onLine,
+      configurable: true,
+    });
+    act(() => {
+      window.dispatchEvent(new Event(onLine ? "online" : "offline"));
+    });
+  }
+
+  beforeEach(() => {
+    alertSpy = jest.spyOn(window, "alert").mockImplementation(() => {});
+    (fetchWithIdempotency as jest.Mock).mockClear();
+    (fetchWithIdempotency as jest.Mock).mockResolvedValue({
+      data: { status: "paused" },
+    });
+    setNavigatorOnline(true);
+  });
+
+  afterEach(() => {
+    alertSpy.mockRestore();
+    setNavigatorOnline(true);
+  });
+
+  it("does not dispatch a mutation or present success while offline", () => {
+    render(React.createElement(StreamDetailClient, { stream: activeStream }));
+    setNavigatorOnline(false);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
+
+    expect(fetchWithIdempotency).not.toHaveBeenCalled();
+    expect(alertSpy).not.toHaveBeenCalled();
+    expect(screen.getByTestId("error-toast")).toHaveAttribute(
+      "data-error-code",
+      "NETWORK_UNAVAILABLE",
+    );
+  });
+
+  it("presents success only when the server confirms the mutation", async () => {
+    render(React.createElement(StreamDetailClient, { stream: activeStream }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
+
+    await waitFor(() =>
+      expect(fetchWithIdempotency).toHaveBeenCalledWith(
+        "/api/streams/stream-ada/pause",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(alertSpy).toHaveBeenCalledWith(
+      "Pause successful for stream stream-ada!",
+    );
+    expect(screen.queryByTestId("error-toast")).not.toBeInTheDocument();
+  });
+
+  it("never presents success when the response does not confirm the mutation", async () => {
+    (fetchWithIdempotency as jest.Mock).mockResolvedValue({ ok: true });
+
+    render(React.createElement(StreamDetailClient, { stream: activeStream }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
+
+    await waitFor(() => expect(fetchWithIdempotency).toHaveBeenCalled());
+    expect(alertSpy).not.toHaveBeenCalled();
+    expect(screen.getByTestId("error-toast")).toHaveAttribute(
+      "data-error-code",
+      "UNKNOWN_ERROR",
+    );
+  });
+
+  it("dispatches a previously-blocked mutation after connectivity returns", async () => {
+    render(React.createElement(StreamDetailClient, { stream: activeStream }));
+    setNavigatorOnline(false);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
+    expect(fetchWithIdempotency).not.toHaveBeenCalled();
+
+    setNavigatorOnline(true);
+    fireEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
+
+    await waitFor(() => expect(fetchWithIdempotency).toHaveBeenCalledTimes(1));
+    expect(alertSpy).toHaveBeenCalledWith(
+      "Pause successful for stream stream-ada!",
+    );
   });
 });

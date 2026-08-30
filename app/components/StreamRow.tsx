@@ -11,6 +11,12 @@ import { fetchWithIdempotency } from "../../lib/apiClient";
 import { isStreamPayError } from "../lib/errors/mapper";
 import { formatErrorForDisplay } from "../lib/errors/handler";
 import type { StreamPayError } from "../lib/errors/types";
+import { useNetworkStatus } from "../hooks/useNetworkStatus";
+import {
+  createOfflineMutationError,
+  createUnconfirmedMutationError,
+  extractConfirmedStreamStatus,
+} from "../lib/mutation-confirm";
 import { LiveRegion } from "../../src/components/LiveRegion";
 import { KbdHint } from "../../src/components/KbdHint";
 import { colorFromId } from "../utils/colorFromId";
@@ -139,6 +145,7 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
   }
 
   const prefersReducedMotion = usePrefersReducedMotion();
+  const { isOnline } = useNetworkStatus();
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<StreamPayError | null>(null);
   const [isIncidentMode] = useState(false);
@@ -176,6 +183,17 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
       return;
     }
 
+    // Offline guard: never dispatch a mutation or present its success while
+    // the browser reports the device is offline.
+    if (!isOnline) {
+      const offlineError = createOfflineMutationError();
+      setError(offlineError);
+      setSrAnnouncement(
+        `Stream action not applied: ${formatErrorForDisplay(offlineError).message}`,
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
     setSrAnnouncement("");
@@ -183,7 +201,7 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
     try {
       const actionRoute = stream.nextAction.toLowerCase();
 
-      await fetchWithIdempotency(`/api/streams/${stream.id}/${actionRoute}`, {
+      const result = await fetchWithIdempotency(`/api/streams/${stream.id}/${actionRoute}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -192,6 +210,12 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
           action: actionRoute,
         }),
       });
+
+      // Only announce success when the response confirms the server-side
+      // state transition. An unconfirmed body is treated as failure.
+      if (!extractConfirmedStreamStatus(result)) {
+        throw createUnconfirmedMutationError(stream.nextAction);
+      }
 
       const successMessage = `${stream.nextAction} operation completed successfully for ${stream.recipient}.`;
       setSrAnnouncement(successMessage);

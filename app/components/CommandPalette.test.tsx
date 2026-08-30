@@ -31,6 +31,9 @@ function triggerClose() {
 describe("CommandPalette", () => {
   beforeEach(() => {
     mockPush.mockClear();
+    // jsdom does not implement scrollIntoView; the palette scrolls the active
+    // option into view on selection change.
+    (window.HTMLElement.prototype as any).scrollIntoView = jest.fn();
   });
 
   it("is hidden by default", () => {
@@ -167,5 +170,54 @@ describe("CommandPalette", () => {
     expect(screen.getByText(/navigate/i)).toBeInTheDocument();
     expect(screen.getByText(/select/i)).toBeInTheDocument();
     expect(screen.getByText(/close/i)).toBeInTheDocument();
+  });
+
+  it("exposes an explicit listbox-style autocomplete combobox (#1424)", () => {
+    render(<CommandPalette streams={mockStreams} />);
+    triggerOpen();
+
+    expect(getSearchInput()).toHaveAttribute("aria-autocomplete", "list");
+  });
+
+  it("carries the focus-layer input class instead of inline outline suppression (#1424)", () => {
+    render(<CommandPalette streams={mockStreams} />);
+    triggerOpen();
+
+    const input = getSearchInput();
+    expect(input).toHaveClass("command-palette__input");
+    expect(input.style.outline).toBe("");
+  });
+
+  it("marks the active listbox option with the focus-layer class (#1424)", () => {
+    render(<CommandPalette streams={mockStreams} />);
+    triggerOpen();
+
+    const options = screen.getAllByRole("option");
+    expect(options[0]).toHaveClass("command-palette__option--active");
+    expect(options[1]).not.toHaveClass("command-palette__option--active");
+  });
+
+  it("jumps to the first option on Home (#1424)", () => {
+    render(<CommandPalette streams={mockStreams} />);
+    triggerOpen();
+
+    const input = getSearchInput();
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Home" });
+
+    const options = screen.getAllByRole("option");
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("jumps to the last option on End (#1424)", () => {
+    render(<CommandPalette streams={mockStreams} />);
+    triggerOpen();
+
+    const input = getSearchInput();
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "End" });
+
+    const options = screen.getAllByRole("option");
+    expect(options[options.length - 1]).toHaveAttribute("aria-selected", "true");
   });
 });

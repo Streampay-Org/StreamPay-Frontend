@@ -115,6 +115,18 @@ export function CommandPalette({ streams }: CommandPaletteProps) {
       return;
     }
 
+    if (event.key === "Home") {
+      event.preventDefault();
+      setSelectedIndex(0);
+      return;
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      setSelectedIndex(filtered.length - 1);
+      return;
+    }
+
     if (event.key === "Enter" && filtered[selectedIndex]) {
       event.preventDefault();
       const selected = filtered[selectedIndex];
@@ -168,6 +180,7 @@ export function CommandPalette({ streams }: CommandPaletteProps) {
             type="text"
             role="combobox"
             aria-expanded="true"
+            aria-autocomplete="list"
             aria-controls="command-palette-list"
             aria-activedescendant={filtered[selectedIndex] ? `cp-option-${selectedIndex}` : undefined}
             aria-labelledby={titleId}
@@ -175,6 +188,7 @@ export function CommandPalette({ streams }: CommandPaletteProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleInputKeyDown}
+            className="command-palette__input"
             style={{
               width: "100%",
               padding: "0.75rem 1rem",
@@ -183,16 +197,7 @@ export function CommandPalette({ streams }: CommandPaletteProps) {
               borderRadius: "0.75rem",
               color: "var(--foreground)",
               fontSize: "1rem",
-              outline: "none",
               boxSizing: "border-box",
-            }}
-            onFocus={(e) => {
-              e.target.style.borderColor = "var(--accent)";
-              e.target.style.boxShadow = "0 0 0 2px rgba(34, 197, 94, 0.15)";
-            }}
-            onBlur={(e) => {
-              e.target.style.borderColor = "var(--border)";
-              e.target.style.boxShadow = "none";
             }}
           />
         </div>
@@ -232,6 +237,9 @@ export function CommandPalette({ streams }: CommandPaletteProps) {
                 id={`cp-option-${index}`}
                 role="option"
                 aria-selected={index === selectedIndex}
+                className={`command-palette__option${
+                  index === selectedIndex ? " command-palette__option--active" : ""
+                }`}
                 onMouseDown={() => {
                   router.push(`/streams/${stream.id}`);
                   close();
