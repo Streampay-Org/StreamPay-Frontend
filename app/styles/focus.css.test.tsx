@@ -52,4 +52,23 @@ describe("shared focus-visible layer", () => {
       ".create-stream-form .csf-field:focus:not(:focus-visible)"
     );
   });
+
+  it("includes the CommandPalette input in the focus layer (#1424)", () => {
+    expect(styleText).toContain(".command-palette__input:focus-visible");
+    expect(styleText).toContain("border-color: var(--accent) !important;");
+  });
+
+  it("suppresses the CommandPalette outline for mouse/touch focus (#1424)", () => {
+    expect(styleText).toContain(
+      ".command-palette__input:focus:not(:focus-visible)"
+    );
+  });
+
+  it("declares a visible active-option ring for CommandPalette (#1424)", () => {
+    const ruleBlock = styleText.split(
+      ".command-palette__option--active {"
+    )[1] ?? "";
+    expect(ruleBlock).toContain("outline-offset: -2px;");
+    expect(ruleBlock).toContain("inset 0 0 0 2px var(--background)");
+  });
 });

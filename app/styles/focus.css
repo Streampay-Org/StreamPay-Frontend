@@ -63,5 +63,39 @@
     box-shadow: none;
     border-color: var(--border) !important;
   }
+
+  /*
+   * CommandPalette (#1424) — visible focus treatment for dynamic controls.
+   *
+   * The palette's combobox input and its `aria-activedescendant` listbox
+   * options are dynamic controls: the input previously suppressed its native
+   * outline and relied on inline JS styling, while the "active" option was
+   * only distinguishable by its background tint. Both are covered here so
+   * keyboard (and assisted) navigation always has a visible ring.
+   */
+  .command-palette__input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--background);
+    border-color: var(--accent) !important;
+  }
+
+  .command-palette__input:focus:not(:focus-visible) {
+    outline: none;
+    box-shadow: none;
+    border-color: var(--border) !important;
+  }
+
+  /*
+   * Active listbox option. The option is not a focusable element itself
+   * (focus lives on the combobox via aria-activedescendant), so the active
+   * state gets an inset ring drawn in the theme background color to frame the
+   * accent pill on both light and dark surfaces.
+   */
+  .command-palette__option--active {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    box-shadow: inset 0 0 0 2px var(--background);
+  }
 }
 
