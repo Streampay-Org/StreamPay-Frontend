@@ -1,5 +1,6 @@
 import { redactDiagnosticBody } from "./redact";
 
+export { SdkErrorCode } from "./types";
 export type StreamStatus = "draft" | "active" | "paused" | "ended";
 
 export interface StreamPayStream {
@@ -471,7 +472,7 @@ export class StreamPayClient {
       return JSON.parse(event.data) as StreamPayStream;
     } catch {
       throw new StreamPaySdkError("SSE event payload was not valid JSON", {
-        code: "INVALID_SSE_PAYLOAD",
+        code: SdkErrorCode.INVALID_SSE_PAYLOAD,
         status: 0,
       });
     }
@@ -484,12 +485,8 @@ export class StreamPayClient {
   ): StreamPaySdkError {
     if (isErrorEnvelope(body) && body.error) {
       return new StreamPaySdkError(body.error.message ?? response.statusText, {
-        code: body.error.code ?? "UNKNOWN_ERROR",
+        code: body.error.code ?? SdkErrorCode.UNKNOWN_ERROR,
         details: redactDiagnosticBody(body.error.details),
-        requestId:
-          body.error.request_id ??
-          response.headers.get("x-request-id") ??
-          fallbackRequestId,
         requestId:
           body.error.request_id ??
           response.headers.get("x-request-id") ??
@@ -501,7 +498,7 @@ export class StreamPayClient {
     return new StreamPaySdkError(
       response.statusText || "StreamPay request failed",
       {
-        code: "HTTP_ERROR",
+        code: SdkErrorCode.HTTP_ERROR,
         details: redactDiagnosticBody(body),
         requestId: response.headers.get("x-request-id") ?? fallbackRequestId,
         status: response.status,
