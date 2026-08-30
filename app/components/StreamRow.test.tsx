@@ -3,7 +3,7 @@
  */
 
 import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { StreamRow, type StreamRowData } from "./StreamRow";
 import type { StreamStatus } from "@/app/types/openapi";
@@ -886,6 +886,76 @@ describe("StreamRow", () => {
           const { container } = render(<StreamRow stream={makeMockStream(status)} />);
           expect(container.querySelector(".stream-row__schedule")).not.toBeNull();
         },
+      );
+    });
+  });
+
+  describe("offline mutation guard (#1449)", () => {
+    const { fetchWithIdempotency } = require("../../lib/apiClient") as {
+      fetchWithIdempotency: jest.Mock;
+    };
+
+    function setNavigatorOnline(onLine: boolean) {
+      Object.defineProperty(window.navigator, "onLine", {
+        value: onLine,
+        configurable: true,
+      });
+      act(() => {
+        window.dispatchEvent(new Event(onLine ? "online" : "offline"));
+      });
+    }
+
+    beforeEach(() => {
+      fetchWithIdempotency.mockClear();
+      fetchWithIdempotency.mockResolvedValue({ data: { status: "paused" } });
+      setNavigatorOnline(true);
+    });
+
+    afterEach(() => {
+      setNavigatorOnline(true);
+    });
+
+    it("does not dispatch the mutation or announce success while offline", () => {
+      render(<StreamRow stream={baseStream} />);
+      setNavigatorOnline(false);
+
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+
+      expect(fetchWithIdempotency).not.toHaveBeenCalled();
+      expect(screen.queryByText(/operation completed successfully/i)).not.toBeInTheDocument();
+      expect(screen.getByTestId("error-toast")).toHaveAttribute(
+        "data-error-code",
+        "NETWORK_UNAVAILABLE",
+      );
+    });
+
+    it("announces success only for a confirmed mutation response", async () => {
+      render(<StreamRow stream={baseStream} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+
+      await waitFor(() =>
+        expect(fetchWithIdempotency).toHaveBeenCalledWith(
+          "/api/streams/stream-active/pause",
+          expect.objectContaining({ method: "POST" }),
+        ),
+      );
+      expect(screen.getByText(/operation completed successfully/i)).toBeInTheDocument();
+      expect(screen.queryByTestId("error-toast")).not.toBeInTheDocument();
+    });
+
+    it("never announces success when the response does not confirm the mutation", async () => {
+      fetchWithIdempotency.mockResolvedValue({ ok: true });
+
+      render(<StreamRow stream={baseStream} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+
+      await waitFor(() => expect(fetchWithIdempotency).toHaveBeenCalled());
+      expect(screen.queryByText(/operation completed successfully/i)).not.toBeInTheDocument();
+      expect(screen.getByTestId("error-toast")).toHaveAttribute(
+        "data-error-code",
+        "UNKNOWN_ERROR",
       );
     });
   });

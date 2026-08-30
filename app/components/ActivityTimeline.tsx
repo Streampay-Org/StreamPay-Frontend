@@ -74,7 +74,7 @@ export const ActivityTimeline = ({ groups }: ActivityTimelineProps) => {
                       )}
                     </div>
                     {event.link && (
-                      <Link href={event.link} className="button button--secondary" style={ minHeight: "2rem", padding: "0.4rem 0.8rem", fontSize: "0.8125rem" }>
+                      <Link href={event.link} className="button button--secondary" style={{ minHeight: "2rem", padding: "0.4rem 0.8rem", fontSize: "0.8125rem" }}>
                         View
                       </Link>
                     )}
@@ -99,14 +99,14 @@ export const ActivityTimelineSkeleton = () => {
             {[1, 2, 3].map((item) => (
               <div key={item} className="activity-item">
                 <div className="activity-marker">
-                  <div className="activity-dot" style={ background: "var(--skeleton-base)" } />
-                  <div className="activity-line" style={ background: "var(--skeleton-base)" } />
+                  <div className="activity-dot" style={{ background: "var(--skeleton-base)" }} />
+                  <div className="activity-line" style={{ background: "var(--skeleton-base)" }} />
                 </div>
                 <div className="activity-content">
-                  <div className="activity-card" style={ borderStyle: "dashed" }>
+                  <div className="activity-card" style={{ borderStyle: "dashed" }}>
                     <div className="activity-info">
-                      <div className="skeleton" style={ height: "1rem", width: "12rem", marginBottom: "0.5rem" } />
-                      <div className="skeleton" style={ height: "0.75rem", width: "4rem" } />
+                      <div className="skeleton" style={{ height: "1rem", width: "12rem", marginBottom: "0.5rem" }} />
+                      <div className="skeleton" style={{ height: "0.75rem", width: "4rem" }} />
                     </div>
                   </div>
                 </div>
