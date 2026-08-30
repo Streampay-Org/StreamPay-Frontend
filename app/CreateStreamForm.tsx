@@ -45,6 +45,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { KbdHint } from "../src/components/KbdHint";
 import { Skeleton } from "../src/components/Skeleton";
 import { LiveRegion } from "../src/components/LiveRegion";
+import { isTextEntry } from "@/lib/keyboard";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -153,13 +154,13 @@ export function CreateStreamForm({
       }
 
       // Alt + R → focus Recipient field
-      if (e.altKey && e.key.toLowerCase() === "r") {
+      if (e.altKey && e.key.toLowerCase() === "r" && !isTextEntry(e.target)) {
         e.preventDefault();
         recipientRef.current?.focus();
       }
 
       // Alt + A → focus Amount field
-      if (e.altKey && e.key.toLowerCase() === "a") {
+      if (e.altKey && e.key.toLowerCase() === "a" && !isTextEntry(e.target)) {
         e.preventDefault();
         amountRef.current?.focus();
       }

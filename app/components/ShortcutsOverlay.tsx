@@ -9,6 +9,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { isTextEntry } from "@/lib/keyboard";
 
 interface ShortcutGroup {
   label: string;
@@ -83,6 +84,7 @@ export function ShortcutsOverlay() {
 
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (isTextEntry(event.target)) return;
       if (event.key === "?") {
         event.preventDefault();
         if (isOpen) {
