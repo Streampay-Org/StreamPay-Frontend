@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useEffect } from "react";
 import styles from "./ReceiptCard.module.css";
+import { isTextEntry } from "@/lib/keyboard";
 
 const STATUS_LABELS: Record<string, string> = {
   active: "Active",
@@ -84,13 +85,7 @@ export function ReceiptCard({
 
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      const activeEl = document.activeElement;
-      const tagName = activeEl?.tagName.toLowerCase();
-      if (
-        (tagName === "input" && (activeEl as HTMLInputElement).type !== "checkbox") ||
-        tagName === "textarea" ||
-        tagName === "select"
-      ) {
+      if (isTextEntry(event.target)) {
         return;
       }
 
