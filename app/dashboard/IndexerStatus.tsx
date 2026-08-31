@@ -122,6 +122,13 @@ function statusLabel(state: IndexerState): string {
   }
 }
 
+/** Lag budgets for critical dashboard routes. */
+export const LAG_BUDGETS = {
+  SYNCED: 2,
+  WARNING: 5,
+  HIGH: 10,
+} as const;
+
 /** Severity level derived from the indexer state for colour-coding. */
 function severity(
   state: IndexerState,
@@ -130,7 +137,7 @@ function severity(
   if (state === "error" || state === "stalled") return "error";
   if (state === "retrying" || state === "stopped") return "warning";
   if (state === "loading") return "info";
-  if (state === "syncing" || lag > 5) return "warning";
+  if (state === "syncing" || lag > LAG_BUDGETS.WARNING) return "warning";
   return "success";
 }
 
@@ -501,8 +508,8 @@ export function IndexerStatus({ data, className = "" }: IndexerStatusProps) {
  * @internal exported for testing only
  */
 export function lagBucket(lag: number): "ok" | "warn" | "high" {
-  if (lag <= 2) return "ok";
-  if (lag <= 10) return "warn";
+  if (lag <= LAG_BUDGETS.SYNCED) return "ok";
+  if (lag <= LAG_BUDGETS.HIGH) return "warn";
   return "high";
 }
 

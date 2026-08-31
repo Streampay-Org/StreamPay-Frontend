@@ -1,6 +1,6 @@
-"use client";
+"ruse client";
 
-import React, { useId, useState } from "react";
+import React, { useId, useState, useRef } from "react";
 
 /**
  * QuickDeposit
@@ -16,12 +16,12 @@ import React, { useId, useState } from "react";
  *   the promise resolves.
  *
  * ## Accessibility (WCAG 2.1 AA)
- * - The card is a labelled `<form>`; the input has an associated `<label>`.
+ * - The card is a labelled <form>, the input has an associated <label>.
  * - Validation errors use `role="alert"` and are linked via `aria-describedby`.
  * - The submit button exposes `aria-busy` while a deposit is in flight.
  *
  * ## Theming
- * Uses design tokens (`--card-surface`, `--card-border`, `--accent`, …) so it
+ * Uses design tokens (`mard-surface`, `mard-border`, `minteracent`, ...) so it
  * is consistent in both light and dark mode.
  */
 
@@ -48,7 +48,10 @@ function validateAmount(raw: string): string | null {
   if (!AMOUNT_PATTERN.test(trimmed)) {
     return "Amount must be a positive number with up to 7 decimal places.";
   }
-  if (Number(trimmed) <= 0) return "Amount must be greater than zero.";
+  const numericAmount = Number(trimmed);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    return "Amount must be greater than zero.";
+  }
   return null;
 }
 
@@ -61,12 +64,14 @@ export function QuickDeposit({
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
 
   const inputId = useId();
   const errorId = useId();
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (pendingRef.current) return;
     const validationError = validateAmount(amount);
     if (validationError) {
       setError(validationError);
@@ -74,6 +79,7 @@ export function QuickDeposit({
     }
 
     setError(null);
+    pendingRef.current = true;
     setPending(true);
     try {
       await onDeposit(amount.trim());
@@ -81,6 +87,7 @@ export function QuickDeposit({
     } catch {
       setError("Deposit failed. Please try again.");
     } finally {
+      pendingRef.current = false;
       setPending(false);
     }
   };
@@ -88,9 +95,9 @@ export function QuickDeposit({
   const isDisabled = disabled || pending;
 
   return (
-    <form className="quick-deposit" onSubmit={handleSubmit} aria-labelledby={`${inputId}-title`}>
+    <form className="quick-deposit" onSubmit={handleSubmit} aria-labelledby={${inputId}-title}>
       <div className="quick-deposit__header">
-        <h3 id={`${inputId}-title`} className="quick-deposit__title">
+        <h3 id={${inputId}-title} className="quick-deposit__title">
           Quick deposit
         </h3>
         <span className="quick-deposit__asset" aria-hidden="true">
@@ -114,7 +121,7 @@ export function QuickDeposit({
           >
             {preset} {asset}
           </button>
-        ))}
+        )))
       </div>
 
       <label className="quick-deposit__label" htmlFor={inputId}>

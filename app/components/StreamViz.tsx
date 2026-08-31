@@ -54,6 +54,8 @@ export interface StreamVizProps {
   variant?: StreamVizVariant;
   /** Label for the fund unit (e.g. "XLM"). Optional. */
   unit?: string;
+  /** Maximum number of data points to render. Defaults to 500. */
+  maxDataPoints?: number;
   /** Optional CSS class forwarded to the wrapper. */
   className?: string;
   /** Show loading skeleton instead of chart. */
@@ -186,7 +188,7 @@ function ChartSkeleton({ width = 640, height = 280 }: { width?: number; height?:
  * - Axes with minimal gridlines.
  * - Padding for axis labels.
  */
-function BurnDownChart({ dataPoints, unit = "XLM" }: { dataPoints: StreamVizDataPoint[]; unit?: string }) {
+function BurnDownChart({ dataPoints, unit = "XLM", maxDataPoints = MAX_DATA_POINTS }: { dataPoints: StreamVizDataPoint[]; unit?: string; maxDataPoints?: number }) {
   const gradientId = useId();
 
   const width = Math.min(640, MAX_WIDTH);
@@ -198,9 +200,10 @@ function BurnDownChart({ dataPoints, unit = "XLM" }: { dataPoints: StreamVizData
   const remainingColor = cssVar("--chart-remaining-line", "#86EFAC");
   const accruedColor = cssVar("--chart-accrual-line", "#7DD3FC");
   // Limit data points to prevent excessive rendering
-  const limitedData = dataPoints.length > MAX_DATA_POINTS ? dataPoints.slice(-MAX_DATA_POINTS) : dataPoints;
-  if (dataPoints.length > MAX_DATA_POINTS) {
-    logger.warn(`StreamViz: dataPoints truncated from ${dataPoints.length} to ${MAX_DATA_POINTS}`);
+  const budget = Math.max(1, maxDataPoints);
+  const limitedData = dataPoints.length > budget ? dataPoints.slice(-budget) : dataPoints;
+  if (dataPoints.length > budget) {
+    logger.warn(`StreamViz: dataPoints truncated from ${dataPoints.length} to ${budget}`);
   }
 
 

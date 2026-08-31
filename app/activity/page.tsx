@@ -1,13 +1,24 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { StateTriad } from "../components/StateTriad";
 import {
-  ActivityTimeline,
   ActivityTimelineSkeleton,
-  type ActivityGroup,
+ type ActivityGroup,
 } from "../components/ActivityTimeline";
 import type { StateTriadState } from "../components/StateTriad";
+
+// Bundle budget: Keep this critical dashboard route's initial bundle small.
+// ActivityTimeline is lazy-loaded so its large visualization stays out of the
+// main JS bundle and does not jeopardize the route's performance budget.
+const ActivityTimeline = dynamic(
+  () =>
+    import("../components/ActivityTimeline").then((mod) => mod.ActivityTimeline),
+  {
+    loading: () => <ActivityTimelineSkeleton />,
+  }
+);
 
 type ActivityPageState = "loading" | "populated" | "empty" | "error";
 
@@ -70,7 +81,7 @@ export default function ActivityPage() {
             type: typeStr as any,
             title: event.description || typeStr,
             timestamp: event.timestamp,
-            link: event.streamId && !event.isDeleted ? `/streams/${event.streamId}` : undefined,
+            link: event.streamId && !event.isDeleted ? `/streams/$%{event.streamId}` : undefined,
             status: status as any,
           };
       

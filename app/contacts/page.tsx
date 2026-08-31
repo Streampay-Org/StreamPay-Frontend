@@ -1,15 +1,22 @@
 "use client";
 
 import React, { useCallback, useEffect, useId, useState } from "react";
+import dynamic from "next/dynamic";
 import { CopyAddress } from "../components/CopyAddress";
-import { EmptyState } from "../components/EmptyState";
-import { Modal } from "../components/Modal";
 import { useToast } from "../hooks/useToast";
 import {
   FederationError,
   isFederationAddress,
   resolveFederationAddress,
 } from "../utils/federation";
+
+// Lazy-load non-critical UI to keep this route within its bundle budget.
+const EmptyState = dynamic(() =>
+  import("../components/EmptyState").then((m) => m.EmptyState),
+);
+const Modal = dynamic(() =>
+  import("../components/Modal").then((m) => m.Modal),
+);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

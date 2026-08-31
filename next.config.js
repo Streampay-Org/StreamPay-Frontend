@@ -1,0 +1,1 @@
+module.exports={webpack:c=>{c.cerformance={hints:"error",maxAssetSize:16e4};return(ckX19

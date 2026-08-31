@@ -1,11 +1,23 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import dynamic from "next/dynamic";
 import { ToastProvider } from "./components/ToastProvider";
-import { CommandPaletteWrapper } from "./components/CommandPaletteWrapper";
-import { ShortcutsOverlayWrapper } from "./components/ShortcutsOverlayWrapper";
-import { SplashScreenWrapper } from "./components/SplashScreenWrapper";
-import { AppBottomNav } from "./components/AppBottomNav";
 import { getThemeScript } from "./utils/theme-noflash";
+
+// Bundle budgets: Lazy-load non-critical UI (overlays, bottom nav, splash)
+// to keep the initial JS bundle small for critical dashboard routes.
+const SplashScreenWrapper = dynamic(() =>
+  import("./components/SplashScreenWrapper").then((m) => m.SplashScreenWrapper)
+);
+const CommandPaletteWrapper = dynamic(() =>
+  import("./components/CommandPaletteWrapper").then((m) => m.CommandPaletteWrapper)
+);
+const ShortcutsOverlayWrapper = dynamic(() =>
+  import("./components/ShortcutsOverlayWrapper").then((m) => m.ShortcutsOverlayWrapper)
+);
+const AppBottomNav = dynamic(() =>
+  import("./components/AppBottomNav").then((m) => m.AppBottomNav)
+);
 
 export const metadata: Metadata = {
   title: "StreamPay - Payment Streaming",
