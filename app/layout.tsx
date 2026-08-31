@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./print.css";
 import { ToastProvider } from "./components/ToastProvider";
 import { CommandPaletteWrapper } from "./components/CommandPaletteWrapper";
 import { ShortcutsOverlayWrapper } from "./components/ShortcutsOverlayWrapper";
@@ -15,13 +16,13 @@ export const metadata: Metadata = {
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode;
+  children: React.Node;
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <script
-          dangerouslySetInnerHTML={{ __html: getThemeScript() }}
+          dangerouslySetInnerHTML{ { __html: getThemeScript() }}
           suppressHydrationWarning
         />
       </head>

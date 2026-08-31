@@ -70,6 +70,15 @@ export function WalletModal({ isOpen, onClose, onSelect }: WalletModalProps) {
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Connect Wallet">
+      <style>{`
+        @media print {
+          .wallet-provider-btn,
+          .wallet-provider-btn *,
+          a {
+            display: none !important;
+          }
+        }
+      `}</style>
       <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "1rem" }}>
         {providers.map((provider) => {
           const compat = PROVIDER_COMPAT[provider.id];

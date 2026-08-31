@@ -96,6 +96,17 @@ export function CommandPalette({ streams }: CommandPaletteProps) {
     };
   }, [isOpen]);
 
+  useEffect(() => {
+    // The open palette contains stream secrets and interactive controls; hide it when printing.
+    const style = document.createElement("style");
+    style.media = "print";
+    style.textContent = ".command-palette-overlay { display: none !important; }";
+    document.head.appendChild(style);
+    return () => {
+      document.head.removeChild(style);
+    };
+  }, []);
+
   const handleInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -133,6 +144,7 @@ export function CommandPalette({ streams }: CommandPaletteProps) {
 
   return (
     <div
+      className="command-palette-overlay"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) close();
       }}

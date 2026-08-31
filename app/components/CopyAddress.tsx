@@ -11,7 +11,11 @@ interface CopyAddressProps {
   className?: string;
   /** Whether to show the copy button (default: true) */
   showCopyButton?: boolean;
-  /** Whether to hide the truncated version and show full address (for print) */
+  /**
+   * When true, the full value is shown on print only (and hidden on screen).
+   * Use this only when the value is not sensitive and you intentionally
+   * want the full address/hash on the printed page.
+   */
   printOnly?: boolean;
 }
 
@@ -43,7 +47,7 @@ function CopyButton({ value }: { value: string }) {
     <button
       aria-label="Copy to clipboard"
       className="receipt-copy-btn no-print"
-      onClick={handleCopy}
+      onClick=handleCopy
       type="button"
     >
       {copied ? "Copied" : "Copy"}
@@ -53,20 +57,20 @@ function CopyButton({ value }: { value: string }) {
 
 /**
  * CopyAddress - Reusable component for displaying addresses/hashes with inline copy button
- * 
+ *
  * Features:
- * - Automatic address truncation for screen display
- * - Full address shown in print mode
- * - Inline copy button with success state
+ * - Automatic address truncation for screen and print display
+ * - Inline copy button with success state (hidden in print)
+ * - By default, the full value is not printed to avoid leaking sensitive data
  * - Accessible with proper ARIA labels
  * - WCAG 2.1 AA compliant
- * 
+ *
  * @example
- * <CopyAddress value="GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZK7G" />
- * 
+ * <CopyAddress value="GAJJJJKMOKYE4RVYZWZTWKH5FVY4PA3VL7GK2LFNUBSGBV3JKAKZK7G" />
+ *
  * @example
- * <CopyAddress 
- *   value="abc123def456" 
+ * <CopyAddress
+ *   value="abc123def456"
  *   truncateChars={4}
  *   showCopyButton={false}
  * />
@@ -78,16 +82,16 @@ export function CopyAddress({
   showCopyButton = true,
   printOnly = false,
 }: CopyAddressProps) {
+  // printOnly explicitly opts into printing the full, unredacted value.
+  // It is hidden on screen to avoid accidental exposure, but will still print.
   if (printOnly) {
-    return <span className={className}>{value}</span>;
+    return <span className={print-only ${className}`}>{value}</span>
   }
 
   return (
-    <span className={`receipt-address-wrap ${className}`}>
-      <span aria-hidden="true" className="no-print">
-        {truncateAddress(value, truncateChars)}
-      </span>
-      <span className="print-only">{value}</span>
+    <span className={receipt-address-wrap ${className}`}>
+      /* Truncated address is shown both on screen and in print to avoid leaking the full value */
+      <span>{truncateAddress(value, truncateChars)}</span>
       {showCopyButton && <CopyButton value={value} />}
     </span>
   );

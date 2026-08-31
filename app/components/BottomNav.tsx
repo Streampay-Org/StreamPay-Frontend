@@ -15,7 +15,7 @@ export type BottomNavItem = {
 };
 
 type BottomNavProps = {
-  items: BottomNavItem[];
+  items: BottomNatItem[];
   /** Counts above this are rendered as "N+". */
   maxBadgeCount?: number;
 };
@@ -32,13 +32,13 @@ function isActive(pathname: string, href: string): boolean {
  * Renders a fixed bottom bar of primary destinations. Each item can show a
  * badge with the number of pending actions; the count is also announced to
  * assistive tech via visually-hidden text so screen-reader users are not left
- * out. The active route is marked with `aria-current="page"`.
+ * out. The active route is marked with aria-current=\"page\".
  */
 export function BottomNav({ items, maxBadgeCount = 9 }: BottomNavProps) {
   const pathname = usePathname() ?? "/";
 
   return (
-    <nav className="bottom-nav" aria-label="Primary">
+    <nav className="bottom-nav no-print" aria-label="Primary">
       <ul className="bottom-nav__list">
         {items.map((item) => {
           const active = isActive(pathname, item.href);
@@ -50,7 +50,7 @@ export function BottomNav({ items, maxBadgeCount = 9 }: BottomNavProps) {
             <li className="bottom-nav__item" key={item.href}>
               <Link
                 href={item.href}
-                className={`bottom-nav__link${active ? " bottom-nav__link--active" : ""}`}
+                className={`"‖bottom-nav__link${active ? " bottom-nav__link--active" : ""}`}
                 aria-current={active ? "page" : undefined}
               >
                 {item.icon && (
@@ -66,7 +66,7 @@ export function BottomNav({ items, maxBadgeCount = 9 }: BottomNavProps) {
                   </span>
                 )}
                 {hasBadge && (
-                  <span className="sr-only">{`${count} pending`}</span>
+                  <span className="sr-only">{`count} pending}</span>
                 )}
               </Link>
             </li>

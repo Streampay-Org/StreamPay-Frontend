@@ -6,8 +6,8 @@ import { setTheme, setHighContrast, getHighContrast } from '../utils/theme-nofla
 type ThemeMode = 'light' | 'dark' | 'system';
 
 export function ThemeToggle() {
-  const [mode, setMode] = useState<ThemeMode>('system');
-  const [highContrast, setHighContrastState] = useState(false);
+  const mode, setMode] = useState<ThemeMode>('system');
+  const highContrast, setHighContrastState] = useState(false);
 
   useEffect(() => {
     try {
@@ -63,7 +63,7 @@ export function ThemeToggle() {
   };
 
   return (
-    <div className="theme-toggle" role="radiogroup" aria-label="Theme selection">
+    <div className="theme-toggle no-print" role="radiogroup" aria-label="Theme selection">
       <label className="theme-toggle__label">
         <input 
           type="radio" 

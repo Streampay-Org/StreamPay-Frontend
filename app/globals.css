@@ -139,6 +139,22 @@
   --font-semibold: 600;
   --font-bold: 700;
 }
+/* Omit secrets and interactive controls from printed output */
+@media print {
+  [data-secret],
+  [data-sensitive],
+  [data-private],
+  .secret,
+  .private-key,
+  button,
+  input,
+  select,
+  textarea,
+  [role="button"],
+  [contenteditable="true"] {
+    display: none !important;
+  }
+}
 
 /* ── Light Theme ── */
 .light {
