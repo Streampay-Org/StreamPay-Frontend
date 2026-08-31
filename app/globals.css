@@ -1,4 +1,6 @@
 :root {
+  /* Keep UA color-scheme in sync with the active theme class for flash-free first paint. */
+  color-scheme: dark;
   /* ── Semantic Colors - Base Dark Theme (default) ── */
   --background: #0a0a0f;
   --foreground: #e4e4e7;
@@ -142,6 +144,7 @@
 
 /* ── Light Theme ── */
 .light {
+  color-scheme: light;
   --background: #ffffff;
   --foreground: #111827;
   --accent: #16a34a;
@@ -266,6 +269,7 @@
 
 /* ── High Contrast Theme (WCAG AAA) ── */
 .high-contrast {
+  color-scheme: dark;
   --background: #000000;
   --foreground: #ffffff;
   --accent: #4ade80;
@@ -346,6 +350,7 @@
 }
 
 .light.high-contrast {
+  color-scheme: light;
   --background: #ffffff;
   --foreground: #000000;
   --accent: #059669;

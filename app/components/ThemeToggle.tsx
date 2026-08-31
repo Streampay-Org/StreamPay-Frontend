@@ -1,66 +1,11 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { setTheme, setHighContrast, getHighContrast } from '../utils/theme-noflash';
-
-type ThemeMode = 'light' | 'dark' | 'system';
+import React from 'react';
+import { useTheme } from '../hooks/useTheme';
+import type { ThemeMode } from '../lib/theme';
 
 export function ThemeToggle() {
-  const [mode, setMode] = useState<ThemeMode>('system');
-  const [highContrast, setHighContrastState] = useState(false);
-
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem('streampay-theme');
-      if (stored === 'light' || stored === 'dark') {
-        setMode(stored);
-      } else {
-        setMode('system');
-      }
-    } catch (e) {
-      setMode('system');
-    }
-  }, []);
-
-  useEffect(() => {
-    setHighContrastState(getHighContrast());
-  }, []);
-
-  useEffect(() => {
-    if (mode === 'system') {
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      
-      const handleChange = (e: MediaQueryListEvent) => {
-        document.documentElement.classList.remove('dark', 'light');
-        document.documentElement.classList.add(e.matches ? 'dark' : 'light');
-      };
-      
-      mediaQuery.addEventListener('change', handleChange);
-      return () => mediaQuery.removeEventListener('change', handleChange);
-    }
-  }, [mode]);
-
-  const handleChange = (newMode: ThemeMode) => {
-    setMode(newMode);
-    
-    if (newMode === 'system') {
-      try {
-        window.localStorage.removeItem('streampay-theme');
-      } catch (e) {}
-      
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.classList.remove('dark', 'light');
-      document.documentElement.classList.add(prefersDark ? 'dark' : 'light');
-    } else {
-      setTheme(newMode);
-    }
-  };
-
-  const handleHighContrastToggle = () => {
-    const next = !highContrast;
-    setHighContrastState(next);
-    setHighContrast(next);
-  };
+  const { mode, setMode, highContrast, toggleHighContrast } = useTheme();
 
   return (
     <div className="theme-toggle" role="radiogroup" aria-label="Theme selection">
@@ -70,7 +15,7 @@ export function ThemeToggle() {
           name="theme" 
           value="light" 
           checked={mode === 'light'} 
-          onChange={() => handleChange('light')}
+          onChange={() => setMode('light')}
           className="theme-toggle__input"
         />
         <span>Light</span>
@@ -81,7 +26,7 @@ export function ThemeToggle() {
           name="theme" 
           value="dark" 
           checked={mode === 'dark'} 
-          onChange={() => handleChange('dark')}
+          onChange={() => setMode('dark')}
           className="theme-toggle__input"
         />
         <span>Dark</span>
@@ -92,7 +37,7 @@ export function ThemeToggle() {
           name="theme" 
           value="system" 
           checked={mode === 'system'} 
-          onChange={() => handleChange('system')}
+          onChange={() => setMode('system')}
           className="theme-toggle__input"
         />
         <span>System</span>
@@ -101,7 +46,7 @@ export function ThemeToggle() {
         <input
           type="checkbox"
           checked={highContrast}
-          onChange={handleHighContrastToggle}
+          onChange={toggleHighContrast}
           className="theme-toggle__input"
           aria-label="High contrast mode"
         />

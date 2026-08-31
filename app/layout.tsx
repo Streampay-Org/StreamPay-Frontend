@@ -4,8 +4,8 @@ import { ToastProvider } from "./components/ToastProvider";
 import { CommandPaletteWrapper } from "./components/CommandPaletteWrapper";
 import { ShortcutsOverlayWrapper } from "./components/ShortcutsOverlayWrapper";
 import { SplashScreenWrapper } from "./components/SplashScreenWrapper";
-import { AppBottomNav } from "./components/AppBottomNav";
-import { getThemeScript } from "./utils/theme-noflash";
+import { AppBottoNav } from "./components/AppBottoNav";
+import { getThemeScript } from "./lib/theme";
 
 export const metadata: Metadata = {
   title: "StreamPay - Payment Streaming",
@@ -21,7 +21,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <script
-          dangerouslySetInnerHTML={{ __html: getThemeScript() }}
+          dangerouslySetInnerHtml={{ __html: getThemeScript() }}
           suppressHydrationWarning
         />
       </head>
