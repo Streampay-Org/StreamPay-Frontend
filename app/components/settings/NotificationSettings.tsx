@@ -20,6 +20,7 @@ export interface NotificationPreferences {
   productUpdates: { inApp: boolean; email: boolean };
   communityNews: { inApp: boolean; email: boolean };
   pushFallback: boolean;
+  soundEnabled?: boolean;
 }
 
 export interface NotificationSettingsProps {
@@ -74,6 +75,7 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({
     productUpdates: { inApp: false, email: false },
     communityNews: { inApp: false, email: false },
     pushFallback: true,
+    soundEnabled: true,
     ...initialPrefs,
   });
 
@@ -97,7 +99,7 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({
   const [isDirty, setIsDirty] = useState(false);
 
   const handleToggle = (
-    key: keyof Omit<typeof prefs, 'pushFallback'>,
+    key: keyof Omit<typeof prefs, 'pushFallback' | 'soundEnabled'>,
     channel: 'inApp' | 'email',
     value: boolean
   ) => {
@@ -228,6 +230,38 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({
           setIsDirty(true);
         }}
       />
+
+      <NotificationGroup
+        title="Global Preferences"
+        description="General settings that apply across all notification types."
+      >
+        <div className="setting-item">
+          <div className="setting-item__info">
+            <h3 className="setting-item__label" id="sound-toggle-label">
+              Notification Sounds
+            </h3>
+            <p className="setting-item__description">
+              Play an audible sound when a new notification arrives.
+            </p>
+          </div>
+          <div className="setting-item__actions">
+            <ToggleSwitch
+              id="sound-enabled-toggle"
+              label="Play notification sounds"
+              checked={prefs.soundEnabled ?? true}
+              disabled={isInteractionDisabled || isSaving}
+              onChange={(soundEnabled) => {
+                if (isInteractionDisabled) return;
+                setPrefs((prev) => ({
+                  ...prev,
+                  soundEnabled,
+                }));
+                setIsDirty(true);
+              }}
+            />
+          </div>
+        </div>
+      </NotificationGroup>
 
       <NotificationGroup
         title="Quiet Hours"

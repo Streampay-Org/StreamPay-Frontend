@@ -387,3 +387,131 @@ describe("GET /api/indexer/sse", () => {
     });
   });
 });
+
+// -- Backpressure & queue overflow (appended) --------------------------------
+
+describe("GET /api/indexer/sse -- backpressure & queue overflow", () => {
+  beforeEach(() => {
+    _resetAdminStateForTesting();
+    jest.clearAllMocks();
+  });
+
+  it("returns X-SSE-Queue-Capacity header on successful SSE response", async () => {
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    const cap = res.headers.get("X-SSE-Queue-Capacity");
+    expect(cap).not.toBeNull();
+    expect(Number(cap)).toBeGreaterThan(0);
+  });
+
+  it("X-SSE-Queue-Capacity reflects SSE_QUEUE_CAPACITY env override", async () => {
+    const prev = process.env.SSE_QUEUE_CAPACITY;
+    process.env.SSE_QUEUE_CAPACITY = "32";
+    try {
+      const res = await GET(makeRequest());
+      expect(res.headers.get("X-SSE-Queue-Capacity")).toBe("32");
+    } finally {
+      if (prev === undefined) delete process.env.SSE_QUEUE_CAPACITY;
+      else process.env.SSE_QUEUE_CAPACITY = prev;
+    }
+  });
+
+  it("logs a warning when SSE queue backpressure or overflow is detected", async () => {
+    const prev = process.env.SSE_QUEUE_CAPACITY;
+    process.env.SSE_QUEUE_CAPACITY = "1";
+    const { logger } = jest.requireMock<typeof import("@/app/lib/logger")>(
+      "@/app/lib/logger",
+    );
+
+    try {
+      await GET(makeRequest());
+      const warnCalls = (logger.warn as jest.Mock).mock.calls.map(
+        (c: unknown[]) => String(c[0]),
+      );
+      const hasBackpressureLog = warnCalls.some(
+        (msg) =>
+          msg.includes("backpressure") ||
+          msg.includes("dropped") ||
+          msg.includes("overflow") ||
+          msg.includes("evicted"),
+      );
+      expect(hasBackpressureLog).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.SSE_QUEUE_CAPACITY;
+      else process.env.SSE_QUEUE_CAPACITY = prev;
+    }
+  });
+
+  it("stream completes without throwing even when queue is tiny (drop policy)", async () => {
+    const prev = process.env.SSE_QUEUE_CAPACITY;
+    const prevPolicy = process.env.SSE_QUEUE_POLICY;
+    process.env.SSE_QUEUE_CAPACITY = "1";
+    process.env.SSE_QUEUE_POLICY = "drop";
+
+    try {
+      const res = await GET(makeRequest());
+      expect(res.status).toBe(200);
+      const frames = await drainFrames(res);
+      expect(frames.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      if (prev === undefined) delete process.env.SSE_QUEUE_CAPACITY;
+      else process.env.SSE_QUEUE_CAPACITY = prev;
+      if (prevPolicy === undefined) delete process.env.SSE_QUEUE_POLICY;
+      else process.env.SSE_QUEUE_POLICY = prevPolicy;
+    }
+  });
+
+  it("stream terminates cleanly with error policy on overflow", async () => {
+    const prev = process.env.SSE_QUEUE_CAPACITY;
+    const prevPolicy = process.env.SSE_QUEUE_POLICY;
+    process.env.SSE_QUEUE_CAPACITY = "1";
+    process.env.SSE_QUEUE_POLICY = "error";
+
+    try {
+      const res = await GET(makeRequest());
+      expect(res.status).toBe(200);
+      const frames = await drainFrames(res);
+      expect(frames.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      if (prev === undefined) delete process.env.SSE_QUEUE_CAPACITY;
+      else process.env.SSE_QUEUE_CAPACITY = prev;
+      if (prevPolicy === undefined) delete process.env.SSE_QUEUE_POLICY;
+      else process.env.SSE_QUEUE_POLICY = prevPolicy;
+    }
+  });
+
+  it("unknown SSE_QUEUE_POLICY value defaults to drop (no throw)", async () => {
+    const prev = process.env.SSE_QUEUE_POLICY;
+    process.env.SSE_QUEUE_POLICY = "invalid-policy";
+
+    try {
+      const res = await GET(makeRequest());
+      expect(res.status).toBe(200);
+    } finally {
+      if (prev === undefined) delete process.env.SSE_QUEUE_POLICY;
+      else process.env.SSE_QUEUE_POLICY = prev;
+    }
+  });
+
+  it("all emitted frames retain valid SSE wire format under overflow conditions", async () => {
+    const prev = process.env.SSE_QUEUE_CAPACITY;
+    const prevPolicy = process.env.SSE_QUEUE_POLICY;
+    process.env.SSE_QUEUE_CAPACITY = "1";
+    process.env.SSE_QUEUE_POLICY = "drop";
+
+    try {
+      const res = await GET(makeRequest());
+      const text = await res.text();
+      const frames = text.split("\n\n").filter(Boolean);
+      for (const frame of frames) {
+        expect(frame).toMatch(/^event:/m);
+        expect(frame).toMatch(/^data:/m);
+      }
+    } finally {
+      if (prev === undefined) delete process.env.SSE_QUEUE_CAPACITY;
+      else process.env.SSE_QUEUE_CAPACITY = prev;
+      if (prevPolicy === undefined) delete process.env.SSE_QUEUE_POLICY;
+      else process.env.SSE_QUEUE_POLICY = prevPolicy;
+    }
+  });
+});

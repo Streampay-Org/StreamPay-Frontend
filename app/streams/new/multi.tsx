@@ -470,6 +470,7 @@ export default function MultiRecipientStreamPage() {
                 role="region"
                 aria-label="Recipient allocation breakdown"
                 style={{ overflowX: "auto" }}
+                tabIndex={0}
               >
                 <table
                   style={{

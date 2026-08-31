@@ -130,4 +130,62 @@ describe("exports API integration", () => {
       },
     });
   });
+
+  it("rejects export creation with invalid filters", async () => {
+    const token = bearerToken(OWNER);
+    const request = new Request("http://localhost/api/exports", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        format: "invalid_format",
+        startDate: "not_a_date",
+      }),
+    });
+
+    const response = await createExport(request);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "VALIDATION_FAILED",
+        message: "Invalid export filters",
+        details: expect.arrayContaining([
+          expect.objectContaining({ field: "format" }),
+          expect.objectContaining({ field: "startDate" }),
+        ]),
+        request_id: expect.any(String),
+      },
+    });
+  });
+
+  it("rejects export creation with unknown fields", async () => {
+    const token = bearerToken(OWNER);
+    const request = new Request("http://localhost/api/exports", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        unknownField: "foo",
+      }),
+    });
+
+    const response = await createExport(request);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "VALIDATION_FAILED",
+        message: "Invalid export filters",
+        details: expect.arrayContaining([
+          expect.objectContaining({ message: "Unknown fields are not allowed.", code: "UNRECOGNIZED_KEYS" }),
+        ]),
+        request_id: expect.any(String),
+      },
+    });
+  });
 });

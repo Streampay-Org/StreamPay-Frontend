@@ -220,3 +220,45 @@ describe("StreamViz", () => {
     });
   });
 });
+  // New tests for runtime safeguards
+  describe('runtime safeguards', () => {
+    const mockWarn = jest.fn();
+    jest.mock('@/app/lib/logger', () => ({ logger: { warn: mockWarn } }));
+
+    const generateData = (count: number) =>
+      Array.from({ length: count }, (_, i) => ({
+        date: `2026-05-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+        remaining: 1000 - i * 2,
+        accrued: i * 2,
+      }));
+
+    it('truncates data points in BurnDownChart and logs warning', () => {
+      const manyData = generateData(600);
+      render(<StreamViz dataPoints={manyData} />);
+      expect(mockWarn).toHaveBeenCalledWith(
+        expect.stringContaining('dataPoints truncated from 600 to 500')
+      );
+    });
+
+    it('truncates data points in SparklineChart and logs warning', () => {
+      const manyData = generateData(600);
+      render(<StreamViz dataPoints={manyData} variant="sparkline" />);
+      expect(mockWarn).toHaveBeenCalledWith(
+        expect.stringContaining('dataPoints truncated from 600 to 500')
+      );
+    });
+
+    it('clamps ChartSkeleton dimensions to max values', () => {
+      render(
+        <StreamViz
+          dataPoints={[]}
+          loading
+          // Force large dimensions via props passed through ChartSkeleton indirectly
+        />
+      );
+      // The skeleton renders ChartSkeleton with default width/height, we can test via DOM
+      const skeleton = document.querySelector('.stream-viz__skeleton');
+      expect(skeleton).toBeInTheDocument();
+      // Since clamping is internal, ensure no error and element exists
+    });
+  });

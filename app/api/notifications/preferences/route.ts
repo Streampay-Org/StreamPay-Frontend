@@ -21,6 +21,7 @@ export interface NotificationPreferences {
   email: boolean;
   inApp: boolean;
   webhook: boolean;
+  soundEnabled: boolean;
   events: {
     streamCreated: boolean;
     streamCompleted: boolean;
@@ -38,6 +39,7 @@ const DEFAULT_PREFS: Omit<NotificationPreferences, "userId" | "updatedAt"> = {
   email: true,
   inApp: true,
   webhook: false,
+  soundEnabled: true,
   events: {
     streamCreated: true,
     streamCompleted: true,
@@ -50,7 +52,7 @@ const DEFAULT_PREFS: Omit<NotificationPreferences, "userId" | "updatedAt"> = {
   },
 };
 
-const TOP_LEVEL_FIELDS = ["email", "inApp", "webhook", "events", "quietHours"] as const;
+const TOP_LEVEL_FIELDS = ["email", "inApp", "webhook", "soundEnabled", "events", "quietHours"] as const;
 const EVENT_FIELDS = [
   "streamCreated",
   "streamCompleted",
@@ -109,6 +111,7 @@ interface PartialPreferencePayload {
   email?: boolean;
   inApp?: boolean;
   webhook?: boolean;
+  soundEnabled?: boolean;
   events?: Partial<NotificationPreferences["events"]>;
   quietHours?: Partial<QuietHoursConfig>;
 }
@@ -128,10 +131,12 @@ function validatePreferencePayload(body: unknown): PartialPreferencePayload | nu
   if ("email" in body && !isBoolean(body.email)) return null;
   if ("inApp" in body && !isBoolean(body.inApp)) return null;
   if ("webhook" in body && !isBoolean(body.webhook)) return null;
+  if ("soundEnabled" in body && !isBoolean(body.soundEnabled)) return null;
 
   if ("email" in body) normalized.email = body.email as boolean;
   if ("inApp" in body) normalized.inApp = body.inApp as boolean;
   if ("webhook" in body) normalized.webhook = body.webhook as boolean;
+  if ("soundEnabled" in body) normalized.soundEnabled = body.soundEnabled as boolean;
 
   if ("events" in body) {
     if (!isRecord(body.events)) return null;
@@ -187,12 +192,19 @@ export async function GET(request: Request) {
   }
 
   const preferences = getPreferences(actor.actorId);
+  const etag = computeETag(actor.actorId, preferences);
+
   logger.info("Notification preferences fetched", {
     actorId: actor.actorId,
     walletAddress: actor.walletAddress,
   });
 
-  return NextResponse.json({ preferences });
+  return NextResponse.json({ preferences }, {
+    headers: {
+      ETag: etag,
+      "Cache-Control": "private, max-age=0, must-revalidate",
+    },
+  });
 }
 
 export async function PUT(request: Request) {
@@ -228,12 +240,29 @@ export async function PUT(request: Request) {
     return createErrorResponse(
       request,
       "INVALID_BODY",
-      "Request body must be a JSON object with valid preference fields (email, inApp, webhook, events, quietHours)",
+      "Request body must be a JSON object with valid preference fields (email, inApp, webhook, soundEnabled, events, quietHours)",
       400,
     );
   }
 
   const existing = getPreferences(actor.actorId);
+  const currentEtag = computeETag(actor.actorId, existing);
+  const ifMatch = request.headers.get("if-match");
+
+  if (ifMatch && !ifNoneMatchMatches(ifMatch, currentEtag)) {
+    logger.warn("Notification preferences update conflict detected", {
+      actorId: actor.actorId,
+      ifMatch,
+      currentEtag,
+    });
+    return createErrorResponse(
+      request,
+      "STATE_CONFLICT",
+      "Notification preferences have been modified concurrently. Please reload and retry.",
+      409,
+    );
+  }
+
   const updated: NotificationPreferences = {
     ...existing,
     ...payload,
@@ -249,10 +278,17 @@ export async function PUT(request: Request) {
   };
 
   prefsStore.set(actor.actorId, updated);
+  const newEtag = computeETag(actor.actorId, updated);
+
   logger.info("Notification preferences updated", {
     actorId: actor.actorId,
     updatedFields: Object.keys(payload),
   });
 
-  return NextResponse.json({ preferences: updated });
+  return NextResponse.json({ preferences: updated }, {
+    headers: {
+      ETag: newEtag,
+      "Cache-Control": "private, max-age=0, must-revalidate",
+    },
+  });
 }

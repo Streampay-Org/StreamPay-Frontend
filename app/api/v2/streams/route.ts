@@ -25,6 +25,7 @@ import { getClientIdentity } from "@/app/lib/rate-limit";
 import { checkOrgDailyQuota, orgQuotaResponse } from "@/app/lib/org-quota";
 import { toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
 import type { Stream } from "@/app/types/openapi";
+import { withRouteTimeout } from "@/src/middleware/timeout";
 
 
 function errorResponse(code: string, message: string, status: number) {
@@ -33,7 +34,7 @@ function errorResponse(code: string, message: string, status: number) {
 }
 
 /** GET /api/v2/streams — paginated stream list in v2 shape. */
-export async function GET(request: Request) {
+async function handleV2StreamsGet(request: Request) {
   if (!request.headers.get("authorization")) {
     return errorResponse("UNAUTHORIZED", "Bearer token required.", 401);
   }
@@ -70,10 +71,14 @@ export async function GET(request: Request) {
   });
 }
 
+export async function GET(request: Request) {
+  return withRouteTimeout(request, () => handleV2StreamsGet(request));
+}
+
 /**
  * POST /api/v2/streams — create a stream, respond with v2 shape.
  */
-export async function POST(request: Request) {
+async function handleV2StreamsPost(request: Request) {
   if (!request.headers.get("authorization")) {
     return errorResponse("UNAUTHORIZED", "Bearer token required.", 401);
   }
@@ -150,4 +155,8 @@ export async function POST(request: Request) {
   if (token) db.idempotency.set(token, payload);
  
   return NextResponse.json(payload, { status: 201 });
+}
+
+export async function POST(request: Request) {
+  return withRouteTimeout(request, () => handleV2StreamsPost(request));
 }

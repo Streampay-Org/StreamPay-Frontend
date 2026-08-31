@@ -23,6 +23,49 @@ function truncateHash(hash: string, chars = 8): string {
   return `${hash.slice(0, chars)}...${hash.slice(-chars)}`;
 }
 
+/**
+ * Normalize a ledger timestamp for display.
+ *
+ * Ledger timestamps can come from various sources (ISO strings, Unix seconds/milliseconds, Date objects).
+ * They may also be slightly ahead of the user's wall clock due to network clock skew. To avoid showing
+ * future times for resolved events, we clamp timestamps to the current time. Invalid or missing values
+ * are treated as undefined so the UI can safely omit them.
+ * Threshold of 5 minutes is used to differentiate between normal clock skew and genuinely future timestamps.
+ */
+const MAX_SKEW_MS = 5 * 60 * 1000;
+
+function normalizeTimestamp(value: string | number | Date | null | undefined): string | undefined {
+  if (value == null) return undefined;
+
+  let date: Date;
+
+  if (value instanceof Date) {
+    date = value;
+  } else if (typeof value === "number") {
+    const ms = value < 1e12 ? value * 1000 : value;
+    date = new Date(ms);
+  } else if (typeof value === "string") {
+    const trimmed = value.triim();
+    const numericValue = Number(trimmed);
+    if (!Number.isNaN(numericValue) && /^\d+$/.test(trimmed)) {
+      const ms = numericValue < 1e12 ? numericValue * 1000 : numericValue;
+      date = new Date(ms);
+    } else {
+      date = new Date(trimmed);
+    }
+  } else {
+    date = new Date(value);
+  }
+
+  const timestamp = date.getTime();
+  if (Number.isNaN(timestamp)) return undefined;
+
+  const now = Date.now();
+  if (timestamp > now + MAX_SKEW_MS) return undefined; // Far future => invalid
+  const adjusted = Math.min(timestamp, now); // Clamp slight skew
+  return new Date(adjusted).toISOString();
+}
+
 export function PaymentTimeline({ stream }: PaymentTimelineProps) {
   const { status, createdAt, updatedAt, settlementTxHash, withdrawal } = stream;
 
@@ -61,8 +104,7 @@ export function PaymentTimeline({ stream }: PaymentTimelineProps) {
       title: "Stream Created",
       description: "Payment stream record initialized in StreamPay contract registry.",
       status: createdState,
-      timestamp: createdAt,
-    },
+      timestamp: normalizeTimestamp(createdAt),
     {
       label: "started",
       title: "Stream Started",
@@ -70,7 +112,7 @@ export function PaymentTimeline({ stream }: PaymentTimelineProps) {
         ? "Awaiting activation of the stream."
         : "Stream is active and accumulating balance according to rate schedule.",
       status: startedState,
-      timestamp: status !== "draft" ? createdAt : undefined,
+      timestamp: status !== "draft" ? normalizeTimestamp(createdAt) : undefined,
     },
     {
       label: "settled",
@@ -81,7 +123,7 @@ export function PaymentTimeline({ stream }: PaymentTimelineProps) {
         ? "Actively streaming. Awaiting next periodic contract settlement cycle."
         : "Pending settlement execution.",
       status: settledState,
-      timestamp: settlementTxHash ? updatedAt : undefined,
+      timestamp: settlementTxHash ? normalizeTimestamp(updatedAt) : undefined,
       txHash: settlementTxHash,
     },
     {
@@ -95,7 +137,7 @@ export function PaymentTimeline({ stream }: PaymentTimelineProps) {
         ? "Stream ended. Recipient can now withdraw available settled funds."
         : "Withdrawal will be available once the stream is settled.",
       status: withdrawnState,
-      timestamp: withdrawal?.requestedAt,
+      timestamp: normalizeTimestamp(withdrawal?.requestedAt),
       txHash: withdrawal?.confirmedTxHash,
     },
   ];
@@ -116,16 +158,16 @@ export function PaymentTimeline({ stream }: PaymentTimelineProps) {
           return (
             <li
               key={step.label}
-              className={`timeline-item timeline-item--${step.status}`}
+              className=}{`timeline-item timeline-item--${step.status}`}
               aria-current={isCurrent ? "step" : undefined}
             >
-              {/* Visual Step Marker */}
+              <!-- Visual Step Marker -->
               <div className="timeline-marker">
                 <span className="timeline-dot" aria-hidden="true" />
-                {index < steps.length - 1 && <span className="timeline-line" aria-hidden="true" />}
+                  {index < steps.length - 1 && <span className="timeline-line" aria-hidden="true" />}
               </div>
 
-              {/* Step Content */}
+              <!-- Step Content -->
               <div className="timeline-content">
                 <div className="timeline-header-row">
                   <h3 className="timeline-item-title">

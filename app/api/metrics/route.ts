@@ -2,6 +2,7 @@ import { logger } from "@/app/lib/logger";
 import { getMetrics } from "@/app/lib/rate-limit-metrics";
 import { registry } from "@/src/metrics/registry";
 import { NextResponse } from "next/server";
+import { withRouteTimeout } from "@/src/middleware/timeout";
 
 /**
  * GET /api/metrics
@@ -88,7 +89,7 @@ function renderPrometheus(): string {
   return `${lines.join("\n")}\n`;
 }
 
-export async function GET(request: Request): Promise<NextResponse> {
+async function handleMetricsGet(request: Request): Promise<NextResponse> {
   const expected = process.env.METRICS_AUTH_TOKEN;
 
   if (!expected) {
@@ -127,4 +128,8 @@ export async function GET(request: Request): Promise<NextResponse> {
     status: 200,
     headers: { "Content-Type": PROM_CONTENT_TYPE, "Cache-Control": "no-store" },
   });
+}
+
+export async function GET(request: Request): Promise<NextResponse> {
+  return withRouteTimeout(request, () => handleMetricsGet(request));
 }

@@ -153,6 +153,7 @@ export interface ActivityEvent {
   streamId?: string;
   timestamp: string;
   description: string;
+  isDeleted?: boolean;
 }
 
 export type ExportJobStatus = "pending" | "ready" | "failed" | "expired";

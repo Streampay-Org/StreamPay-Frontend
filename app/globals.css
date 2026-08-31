@@ -1588,6 +1588,7 @@ a:hover {
 }
 
 .skeleton {
+    max-width: 100%;
   animation: skeleton-pulse 1.6s ease-in-out infinite;
   background: linear-gradient(
     90deg,
@@ -4597,6 +4598,7 @@ a:hover {
 .stream-viz__table-wrap {
   max-height: 18rem;
   overflow-y: auto;
+  overflow-x: auto;
 }
 
 .stream-viz__table {

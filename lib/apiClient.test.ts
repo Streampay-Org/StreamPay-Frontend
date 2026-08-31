@@ -279,3 +279,53 @@ describe('HTTP verb helpers', () => {
     );
   });
 });
+
+describe('fetchForAccount', () => {
+  beforeEach(() => {
+    mockFetch.mockClear();
+  });
+
+  it('fetches successfully for active account', async () => {
+    const { fetchForAccount, defaultAccountFetchCoordinator } = await import('./apiClient');
+    defaultAccountFetchCoordinator.switchAccount('GA_ALICE');
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ streams: ['stream-alice'] }),
+    });
+
+    const result = await fetchForAccount('GA_ALICE', '/api/streams');
+    expect(result).toEqual({ streams: ['stream-alice'] });
+  });
+
+  it('discards response if account switches before resolution', async () => {
+    const { fetchForAccount, defaultAccountFetchCoordinator, AccountSwitchedError } = await import('./apiClient');
+    defaultAccountFetchCoordinator.switchAccount('GA_ALICE');
+
+    mockFetch.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              ok: true,
+              status: 200,
+              headers: new Headers({ 'content-type': 'application/json' }),
+              json: async () => ({ streams: ['stream-alice'] }),
+            });
+          }, 50);
+        })
+    );
+
+    const alicePromise = fetchForAccount('GA_ALICE', '/api/streams');
+    const aliceCatch = alicePromise.catch((err) => err);
+
+    // Switch to Bob while Alice is in-flight
+    defaultAccountFetchCoordinator.switchAccount('GA_BOB');
+
+    const err = await aliceCatch;
+    expect(err).toBeInstanceOf(AccountSwitchedError);
+  });
+});
+

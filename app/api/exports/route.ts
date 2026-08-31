@@ -155,6 +155,34 @@ export async function POST(request: Request) {
 
       actorId = actor.walletAddress;
 
+      let body: unknown = {};
+      if (request.headers.get("content-type")?.includes("application/json")) {
+        try {
+          body = await request.json();
+        } catch {
+          errorCode = "INVALID_JSON";
+          return createErrorResponse("INVALID_JSON", "Malformed JSON body", 400);
+        }
+      }
+
+      const { validateExportRequest } = await import("@/src/validators/exports");
+      const validation = validateExportRequest(body);
+      
+      if (!validation.success) {
+        errorCode = "VALIDATION_FAILED";
+        const context = getCorrelationContext();
+        return NextResponse.json({
+          error: {
+            code: "VALIDATION_FAILED",
+            message: "Invalid export filters",
+            details: validation.errors,
+            request_id: context?.request_id
+          }
+        }, { status: 400 });
+      }
+
+      const filters = validation.data;
+
       // Limit by the verified wallet, after auth, so a forged bearer token can
       // neither mint fresh buckets nor spend another user's budget.
       const url = getRequestUrl(request);

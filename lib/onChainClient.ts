@@ -5,6 +5,7 @@ import {
   SorobanError,
   SorobanErrorCode,
 } from '../types';
+import { validateSimulation } from '../app/lib/simulation-validator';
 
 /**
  * Mock On-Chain Client for StreamPay.
@@ -79,7 +80,7 @@ export function resetOnChainClientConfig(): void {
 }
 
 export const onChainClient = {
-  async fetchStream(streamId: string): Promise<OnChainStream> {
+  async fetchStream(network: string, streamId: string): Promise<OnChainStream> {
     if (_clientConfig.simulateUnknownError) {
       throw new SorobanError(
         SorobanErrorCode.Unknown,
@@ -104,12 +105,17 @@ export const onChainClient = {
       );
     }
 
-    if (_clientConfig.simulateSimulationFailed) {
-      throw new SorobanError(
-        SorobanErrorCode.SimulationFailed,
-        `Pre-flight simulation failed for stream ${streamId}: contract revert`,
-        { statusCode: 400, meta: { streamId, phase: 'simulation' } }
-      );
+    const simulationResult = _clientConfig.simulateSimulationFailed
+      ? { error: `Pre-flight simulation failed for stream ${streamId}: contract revert` }
+      : { results: [{ xdr: 'AAAA' }], minResourceFee: '100', cost: { cpuInsns: '100', memBytes: '100' } };
+    
+    try {
+      validateSimulation(simulationResult);
+    } catch (e: any) {
+      if (e instanceof SorobanError && e.variant === SorobanErrorCode.SimulationFailed) {
+        throw new SorobanError(SorobanErrorCode.SimulationFailed, e.message, { statusCode: 400, meta: { streamId, phase: 'simulation' } });
+      }
+      throw e;
     }
 
     const stream = MOCK_ON_CHAIN_DATA[streamId];
@@ -118,7 +124,7 @@ export const onChainClient = {
     }
 
     return stream;
-  },  async cancelStream(streamId: string): Promise<OnChainCancellationResult | null> {
+  },  async cancelStream(network: string, streamId: string): Promise<OnChainCancellationResult | null> {
     if (_clientConfig.simulateUnknownError) {
       throw new SorobanError(
         SorobanErrorCode.Unknown,
@@ -127,7 +133,7 @@ export const onChainClient = {
       );
     }
 
-    const stream = await this.fetchStream(streamId);
+    const stream = await this.fetchStream(network, streamId);
     if (!stream) {
       return null;
     }
@@ -179,7 +185,7 @@ export const onChainClient = {
     };
   },
 
-  async createStream(streamId: string, _payload: unknown): Promise<{ stream_id: string; tx_hash: string }> {
+  async createStream(network: string, streamId: string, _payload: unknown): Promise<{ stream_id: string; tx_hash: string }> {
     if (_clientConfig.simulateUnknownError) {
       throw new SorobanError(
         SorobanErrorCode.Unknown,
@@ -196,12 +202,17 @@ export const onChainClient = {
       );
     }
 
-    if (_clientConfig.simulateSimulationFailed) {
-      throw new SorobanError(
-        SorobanErrorCode.SimulationFailed,
-        `Pre-flight simulation failed for stream creation ${streamId}`,
-        { statusCode: 400, meta: { streamId, phase: 'create_simulation' } }
-      );
+    const simulationResult = _clientConfig.simulateSimulationFailed
+      ? { error: `Pre-flight simulation failed for stream creation ${streamId}` }
+      : { results: [{ xdr: 'AAAA' }], minResourceFee: '100', cost: { cpuInsns: '100', memBytes: '100' } };
+    
+    try {
+      validateSimulation(simulationResult);
+    } catch (e: any) {
+      if (e instanceof SorobanError && e.variant === SorobanErrorCode.SimulationFailed) {
+        throw new SorobanError(SorobanErrorCode.SimulationFailed, e.message, { statusCode: 400, meta: { streamId, phase: 'create_simulation' } });
+      }
+      throw e;
     }
 
     if (_clientConfig.simulateSubmitTimeout) {

@@ -27,6 +27,19 @@ class FakeEventSource implements EventSourceLike {
     const listener = this.listeners.get(type);
     listener?.({ data: JSON.stringify(data) } as MessageEvent<string>);
   }
+
+  emitRawMessage(data: string): void {
+    const event = { data } as MessageEvent<string>;
+    this.onmessage?.(event);
+  }
+
+  emitOpen(): void {
+    this.onopen?.(new Event("open"));
+  }
+
+  emitError(): void {
+    this.onerror?.(new Event("error"));
+  }
 }
 
 describe("StreamPayClient", () => {
@@ -117,6 +130,92 @@ describe("StreamPayClient", () => {
     });
   });
 
+  it("redacts sensitive fields from error-envelope details (request-body echo)", async () => {
+    const fetchFn = jest.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Invalid payload",
+            request_id: "req-api",
+            details: {
+              request: {
+                recipient: "GABC",
+                rate: "10",
+                token: "partner-token",
+                secret: "s3cr3t",
+              },
+              fieldErrors: { email: "invalid" },
+            },
+          },
+        },
+        422,
+      ),
+    );
+    const client = new StreamPayClient({ baseUrl: "https://api.streampay.test", fetchFn });
+
+    try {
+      await client.createStream({ recipient: "GABC", rate: "10", schedule: "week" });
+      throw new Error("expected createStream to reject");
+    } catch (err) {
+      const sdkError = err as StreamPaySdkError;
+      expect(sdkError.code).toBe("VALIDATION_ERROR");
+      expect(sdkError.requestId).toBe("req-api");
+      const details = sdkError.details as {
+        request: Record<string, unknown>;
+        fieldErrors: Record<string, unknown>;
+      };
+      expect(details.request.token).toBe("[REDACTED]");
+      expect(details.request.secret).toBe("[REDACTED]");
+      expect(details.request.recipient).toBe("GABC");
+      expect(details.fieldErrors.email).toBe("invalid");
+    }
+  });
+
+  it("redacts sensitive fields from non-envelope error bodies", async () => {
+    const fetchFn = jest.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          message: "backend rejected",
+          privateKey: `S${"A".repeat(55)}`,
+          nested: { authorization: "Bearer leaked" },
+        },
+        500,
+      ),
+    );
+    const client = new StreamPayClient({ baseUrl: "https://api.streampay.test", fetchFn });
+
+    try {
+      await client.listStreams();
+      throw new Error("expected listStreams to reject");
+    } catch (err) {
+      const sdkError = err as StreamPaySdkError;
+      expect(sdkError.code).toBe("HTTP_ERROR");
+      const details = sdkError.details as Record<string, unknown>;
+      expect(details.privateKey).toBe("[REDACTED]");
+      expect(details.nested).toEqual({ authorization: "[REDACTED]" });
+      expect(details.message).toBe("backend rejected");
+    }
+  });
+
+  it("redacts Stellar secret seeds inside error diagnostics regardless of key", async () => {
+    const seed = `S${"A".repeat(55)}`;
+    const fetchFn = jest.fn().mockResolvedValue(
+      jsonResponse({ value: seed, keep: "ok" }, 500),
+    );
+    const client = new StreamPayClient({ baseUrl: "https://api.streampay.test", fetchFn });
+
+    try {
+      await client.listStreams();
+      throw new Error("expected listStreams to reject");
+    } catch (err) {
+      const sdkError = err as StreamPaySdkError;
+      const details = sdkError.details as Record<string, unknown>;
+      expect(details.value).toBe("[REDACTED]");
+      expect(details.keep).toBe("ok");
+    }
+  });
+
   it("wraps SSE stream update and settlement events", () => {
     const source = new FakeEventSource();
     const factory = jest.fn(() => source);
@@ -141,5 +240,87 @@ describe("StreamPayClient", () => {
 
     subscription.close();
     expect(source.closed).toBe(true);
+  });
+
+  it("prevents duplicate SDK event subscriptions by sharing underlying EventSource", () => {
+    const source = new FakeEventSource();
+    const factory = jest.fn(() => source);
+    const client = new StreamPayClient({
+      baseUrl: "https://api.streampay.test",
+      eventSourceFactory: factory,
+    });
+
+    const sub1OnUpdate = jest.fn();
+    const sub2OnUpdate = jest.fn();
+
+    // Call subscribe twice for the same streamId
+    const sub1 = client.subscribeToStream("stream-dedup", { onUpdate: sub1OnUpdate });
+    const sub2 = client.subscribeToStream("stream-dedup", { onUpdate: sub2OnUpdate });
+
+    // Factory should have been invoked exactly ONCE
+    expect(factory).toHaveBeenCalledTimes(1);
+
+    // Both subscribers should receive events
+    source.emit("stream:updated", { id: "stream-dedup", status: "active" });
+    expect(sub1OnUpdate).toHaveBeenCalledWith({ id: "stream-dedup", status: "active" });
+    expect(sub2OnUpdate).toHaveBeenCalledWith({ id: "stream-dedup", status: "active" });
+
+    // Closing first subscription should NOT close the underlying EventSource
+    sub1.close();
+    expect(source.closed).toBe(false);
+
+    // Event still flows to remaining subscriber
+    source.emit("stream:updated", { id: "stream-dedup", status: "paused" });
+    expect(sub2OnUpdate).toHaveBeenCalledWith({ id: "stream-dedup", status: "paused" });
+    expect(sub1OnUpdate).toHaveBeenCalledTimes(1); // sub1 did not receive the second event
+
+    // Closing the last subscription cleans up and closes the EventSource
+    sub2.close();
+    expect(source.closed).toBe(true);
+  });
+
+  it("handles idempotent close calls safely without errors", () => {
+    const source = new FakeEventSource();
+    const factory = jest.fn(() => source);
+    const client = new StreamPayClient({
+      baseUrl: "https://api.streampay.test",
+      eventSourceFactory: factory,
+    });
+
+    const sub = client.subscribeToStream("stream-idem");
+    expect(() => {
+      sub.close();
+      sub.close();
+      sub.close();
+    }).not.toThrow();
+    expect(source.closed).toBe(true);
+  });
+
+  it("isolates handler errors so faulty listener does not block others", () => {
+    const source = new FakeEventSource();
+    const factory = jest.fn(() => source);
+    const client = new StreamPayClient({
+      baseUrl: "https://api.streampay.test",
+      eventSourceFactory: factory,
+    });
+
+    const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    const buggyHandler = jest.fn(() => {
+      throw new Error("handler crash");
+    });
+    const healthyHandler = jest.fn();
+
+    const sub1 = client.subscribeToStream("stream-err", { onUpdate: buggyHandler });
+    const sub2 = client.subscribeToStream("stream-err", { onUpdate: healthyHandler });
+
+    source.emit("stream:updated", { id: "stream-err", status: "active" });
+
+    expect(buggyHandler).toHaveBeenCalled();
+    expect(healthyHandler).toHaveBeenCalledWith({ id: "stream-err", status: "active" });
+
+    sub1.close();
+    sub2.close();
+    consoleSpy.mockRestore();
   });
 });

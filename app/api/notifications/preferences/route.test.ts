@@ -103,6 +103,7 @@ describe("GET /api/notifications/preferences", () => {
       email: true,
       inApp: true,
       webhook: false,
+      soundEnabled: true,
       events: {
         streamCreated: true,
         streamCompleted: true,
@@ -234,6 +235,7 @@ describe("PUT /api/notifications/preferences", () => {
         body: JSON.stringify({
           email: false,
           inApp: true,
+          soundEnabled: false,
           events: {
             streamCreated: false,
             paymentFailed: false,
@@ -257,6 +259,7 @@ describe("PUT /api/notifications/preferences", () => {
       email: false,
       inApp: true,
       webhook: false,
+      soundEnabled: false,
       events: {
         streamCreated: false,
         streamCompleted: true,
@@ -297,5 +300,41 @@ describe("PUT /api/notifications/preferences", () => {
       daysOfWeek: [1, 2, 3, 4, 5],
       allowCriticalAlerts: true,
     });
+  });
+
+  it("returns ETag on GET and rejects update with 409 STATE_CONFLICT when If-Match header fails to match", async () => {
+    const token = signToken({ sub: WALLET_ADDRESS, actorId: "actor-conflict" });
+
+    // Fetch initial preferences to get ETag
+    const getRes = await GET(requestWithAuthorization({ authorization: `Bearer ${token}` }));
+    expect(getRes.status).toBe(200);
+    const etag = getRes.headers.get("etag");
+    expect(etag).toBeTruthy();
+
+    // Valid update with matching If-Match succeeds
+    const validReq = new Request("http://localhost/api/notifications/preferences", {
+      method: "PUT",
+      headers: new Headers({
+        authorization: `Bearer ${token}`,
+        "if-match": etag!,
+      }),
+      body: JSON.stringify({ email: false }),
+    });
+    const putRes = await PUT(validReq);
+    expect(putRes.status).toBe(200);
+
+    // Stale update using previous ETag fails with 409 STATE_CONFLICT
+    const staleReq = new Request("http://localhost/api/notifications/preferences", {
+      method: "PUT",
+      headers: new Headers({
+        authorization: `Bearer ${token}`,
+        "if-match": etag!,
+      }),
+      body: JSON.stringify({ webhook: true }),
+    });
+    const conflictRes = await PUT(staleReq);
+    expect(conflictRes.status).toBe(409);
+    const conflictBody = await conflictRes.json();
+    expect(conflictBody.error.code).toBe("STATE_CONFLICT");
   });
 });

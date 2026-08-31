@@ -94,12 +94,19 @@ const SECRET_PATTERNS = [
   /api[_\s]?key/i,
   /password/i,
   /token/i,
-  /api[_\s]?key/i,
   /auth/i,
   /seed/i,
   /mnemonic/i,
   /signing[_\s]?key/i,
   /access[_\s]?key/i,
+  /wallet/i,
+  /payment/i,
+  /card/i,
+  /cvv/i,
+  /iban/i,
+  /routing/i,
+  /amount/i,
+  /balance/i,
 ];
 
 /**
@@ -112,9 +119,26 @@ const NOT_SECRET_PATTERNS = [
 ];
 
 /**
+ * Patterns for sensitive values (Wallet Addresses, Credit Cards)
+ */
+const SENSITIVE_VALUE_PATTERNS = [
+  // Stellar Public Key (Wallet Address)
+  /^G[A-Z2-7]{55}$/,
+  // Solana Public Key
+  /^[1-9A-HJ-NP-Za-km-z]{32,44}$/,
+  // Credit Card (basic approximation)
+  /\b(?:\d[ -]*?){13,16}\b/,
+];
+
+/**
  * Check if a value looks like a secret
  */
 export function isSecret(key: string, value: string): boolean {
+  // Check if value matches sensitive data patterns first (wallets, payments)
+  if (SENSITIVE_VALUE_PATTERNS.some(pattern => pattern.test(value))) {
+    return true;
+  }
+
   const keyLower = key.toLowerCase();
   
   // First check if it's explicitly NOT a secret (public keys, etc.)

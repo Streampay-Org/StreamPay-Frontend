@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useId } from "react";
+import React, { useId, useEffect, useRef, useState } from "react";
+import { LiveRegion } from "@/app/components/LiveRegion";
+import { usePrefersReducedMotion } from "@/app/hooks/usePrefersReducedMotion";
 
 /**
  * IndexerStatus
@@ -19,8 +21,17 @@ import React, { useId } from "react";
  * ## Accessibility (WCAG 2.1 AA)
  * - The card is a labelled `<section>` with an `<h2>` heading.
  * - Status is conveyed both visually (icon + colour) and textually.
- * - Numeric values use `aria-label` for screen‑reader context.
+ * - Numeric values use `aria-label` for screen-reader context.
  * - Colour is never the sole indicator of status.
+ * - **Live region**: whenever the indexer `status`, `lag`, or `message`
+ *   changes an ARIA live announcement is made so assistive technologies
+ *   pick up the update without requiring the user to move focus.
+ *   - Non-error transitions use `"polite"` politeness (reads after the
+ *     current utterance finishes).
+ *   - Error and stalled states use `"assertive"` politeness (interrupts
+ *     immediately) so critical failures are never missed.
+ * - The status indicator `<div>` carries a full `aria-label` combining the
+ *   label and severity so screen-reader users get both in a single phrase.
  *
  * ## Theming
  * Uses design tokens (`--card-surface`, `--border`, `--accent`, …) so it is
@@ -37,7 +48,7 @@ export interface IndexerStatusData {
   /** The latest known ledger sequence on the Horizon network. */
   latestLedger: number;
   /**
-   * High‑level indexer health.
+   * High-level indexer health.
    * - `loading`: the indexer has started but has not processed a ledger yet.
    * - `synced`: lag is within tolerance (≤ 2 ledgers).
    * - `syncing`: lag is noticeable but the indexer is running.
@@ -123,17 +134,129 @@ function severity(
   return "success";
 }
 
+/**
+ * Build the announcement string for a status update.
+ *
+ * This string is placed into the ARIA live region so screen readers announce
+ * the new state without requiring a focus change.  It is intentionally
+ * concise — assistive technology users do not want verbose paragraphs here.
+ *
+ * @internal exported for testing only
+ */
+export function buildAnnouncement(
+  state: IndexerState,
+  lag: number,
+  message?: string,
+): string {
+  const label = statusLabel(state);
+  const lagPart = lag > 0 ? `, lag ${lag} ledger${lag === 1 ? "" : "s"}` : "";
+  const messagePart = message ? `. ${message}` : "";
+  return `Indexer status: ${label}${lagPart}${messagePart}.`;
+}
+
+/**
+ * Whether this state warrants an assertive (interrupting) announcement.
+ * Critical failures should be announced immediately regardless of what the
+ * screen reader is currently reading.
+ *
+ * @internal exported for testing only
+ */
+export function isAssertiveState(state: IndexerState): boolean {
+  return state === "error" || state === "stalled";
+}
+
 export function IndexerStatus({ data, className = "" }: IndexerStatusProps) {
   const headingId = useId();
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   const { network, lastProcessedLedger, latestLedger, status, lastUpdatedAt, lag, message } = data;
   const sev = severity(status, lag);
   const label = statusLabel(status);
+
+  // ── Accessibility: live-region announcement ────────────────────────────────
+  // We announce status transitions to screen readers via an ARIA live region.
+  //
+  // Design decisions:
+  //   1. The live region is only updated when status, lag, or message actually
+  //      changes — not on every render — to avoid spamming the screen reader
+  //      with identical announcements on unrelated re-renders.
+  //   2. We skip the very first render (mount) because the card content is
+  //      already visible/focusable at that point; an immediate announcement
+  //      would race with the user's current reading position.
+  //   3. We use two separate LiveRegion elements — one polite and one
+  //      assertive — so we can swap between politeness levels without
+  //      unmounting the DOM node.  Unmounting and remounting a live region
+  //      causes some screen readers (NVDA, VoiceOver) to miss the first
+  //      announcement because they re-register the region before the text
+  //      updates.  Having both nodes always present and routing the message to
+  //      the correct one avoids this pitfall.
+  const [announcement, setAnnouncement] = useState<{
+    text: string;
+    assertive: boolean;
+  }>({ text: "", assertive: false });
+
+  const prevStatusRef = useRef<IndexerState | null>(null);
+  const prevLagRef = useRef<number | null>(null);
+  const prevMessageRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    const isFirstRender =
+      prevStatusRef.current === null &&
+      prevLagRef.current === null;
+
+    const statusChanged = prevStatusRef.current !== status;
+    // Only announce lag changes when the lag moves between meaningful buckets
+    // (ok ≤ 2, warning ≤ 10, high > 10) to avoid flooding the user with
+    // per-ledger noise on every tick.
+    const prevLagBucket = lagBucket(prevLagRef.current ?? lag);
+    const nextLagBucket = lagBucket(lag);
+    const lagChanged = prevLagBucket !== nextLagBucket;
+    const messageChanged = prevMessageRef.current !== message;
+
+    prevStatusRef.current = status;
+    prevLagRef.current = lag;
+    prevMessageRef.current = message;
+
+    if (isFirstRender) {
+      // Skip the initial mount — the card content is visible; no announcement
+      // needed before the user has had a chance to navigate to it.
+      return;
+    }
+
+    if (statusChanged || lagChanged || messageChanged) {
+      setAnnouncement({
+        text: buildAnnouncement(status, lag, message),
+        assertive: isAssertiveState(status),
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, lag, message]);
 
   return (
     <section
       className={`indexer-status indexer-status--${sev} ${className}`}
       aria-labelledby={headingId}
     >
+      {/*
+        Live-region pair: always-present in the DOM so screen readers register
+        them on mount. We route the announcement to either the polite or the
+        assertive node depending on severity.  The inactive node always has an
+        empty message so it never fires spurious announcements.
+      */}
+      <LiveRegion
+        message={announcement.assertive ? "" : announcement.text}
+        politeness="polite"
+        data-testid="indexer-live-region-polite"
+      />
+      <LiveRegion
+        message={announcement.assertive ? announcement.text : ""}
+        politeness="assertive"
+        data-testid="indexer-live-region-assertive"
+      />
+
       <div className="indexer-status__header">
         <h2 id={headingId} className="indexer-status__title">
           Indexer Status
@@ -172,16 +295,28 @@ export function IndexerStatus({ data, className = "" }: IndexerStatusProps) {
         </dl>
 
         <div className="indexer-status__footer">
-          <div className="indexer-status__status-indicator">
+          {/*
+            The status indicator carries a full descriptive aria-label so screen
+            readers announce "Status: Synced" rather than just the raw label.
+            The decorative dot is hidden from assistive tech (aria-hidden).
+          */}
+          <div
+            className="indexer-status__status-indicator"
+            aria-label={`Status: ${label}`}
+            data-reduced-motion={prefersReducedMotion ? "true" : "false"}
+          >
             <span
               className="indexer-status__dot"
               aria-hidden="true"
+              style={{
+                transition: prefersReducedMotion ? "none" : "background-color 0.2s ease, transform 0.2s ease",
+              }}
             />
-            <span className="indexer-status__status-label">{label}</span>
+            <span className="indexer-status__status-label" aria-hidden="true">{label}</span>
           </div>
 
           <span className="indexer-status__timestamp">
-            updated {relativeTime(lastUpdatedAt)}
+            {mounted ? "updated " + relativeTime(lastUpdatedAt) : "updated"}
           </span>
         </div>
 
@@ -351,6 +486,24 @@ export function IndexerStatus({ data, className = "" }: IndexerStatusProps) {
       `}</style>
     </section>
   );
+}
+
+/**
+ * Bucket a lag value into a named severity tier.
+ * Used to decide when lag changes are significant enough to announce.
+ *
+ * | Bucket    | Lag range   |
+ * |-----------|-------------|
+ * | `"ok"`    | 0 – 2       |
+ * | `"warn"`  | 3 – 10      |
+ * | `"high"`  | > 10        |
+ *
+ * @internal exported for testing only
+ */
+export function lagBucket(lag: number): "ok" | "warn" | "high" {
+  if (lag <= 2) return "ok";
+  if (lag <= 10) return "warn";
+  return "high";
 }
 
 export default IndexerStatus;

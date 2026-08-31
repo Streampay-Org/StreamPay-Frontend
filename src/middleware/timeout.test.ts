@@ -15,7 +15,7 @@
 
 import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
-import { withTimeout } from "./timeout";
+import { withTimeout, withRouteTimeout, ROUTE_TIMEOUT_MS } from "./timeout";
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -204,5 +204,70 @@ describe("withTimeout", () => {
       expect(elapsed).toBeLessThan(400);
       expect(result.status).toBe(504);
     });
+  });
+});
+
+// ── withRouteTimeout (route-level convenience wrapper, Issue #43) ─────────────
+//
+// `withRouteTimeout` is a thin wrapper over `withTimeout` that accepts the
+// standard `Request` and defaults the budget to `ROUTE_TIMEOUT_MS`.  These
+// tests assert the route-facing contract: happy path is returned unchanged,
+// deadline expiry yields a 504 GATEWAY_TIMEOUT envelope, and non-timeout
+// errors propagate so the route's own error handling still runs.
+
+describe("withRouteTimeout", () => {
+  it("returns the handler response when work completes within the deadline", async () => {
+    const res = await withRouteTimeout(makeRequest(), async () =>
+      NextResponse.json({ ok: true }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+  });
+
+  it("returns 504 GATEWAY_TIMEOUT when the deadline is exceeded", async () => {
+    const res = await withRouteTimeout(
+      makeRequest(),
+      async () => {
+        await sleep(500);
+        return NextResponse.json({ ok: true });
+      },
+      10,
+    );
+    expect(res.status).toBe(504);
+    const body = await res.json();
+    expect(body.error.code).toBe("GATEWAY_TIMEOUT");
+    expect(body.error.message).toContain("deadline");
+  });
+
+  it("504 body matches the standard error envelope shape", async () => {
+    const res = await withRouteTimeout(
+      makeRequest(),
+      async () => {
+        await sleep(500);
+        return NextResponse.json({ ok: true });
+      },
+      10,
+    );
+    const body = await res.json();
+    expect(body).toMatchObject({
+      error: {
+        code: "GATEWAY_TIMEOUT",
+        message: expect.any(String),
+        request_id: expect.any(String),
+      },
+    });
+  });
+
+  it("propagates non-timeout errors thrown by the handler", async () => {
+    await expect(
+      withRouteTimeout(makeRequest(), async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+  });
+
+  it("uses a positive default budget (ROUTE_TIMEOUT_MS)", () => {
+    expect(ROUTE_TIMEOUT_MS).toBeGreaterThan(0);
   });
 });

@@ -22,6 +22,8 @@ describe('NotificationSettings', () => {
   it('renders category grouped toggles for each notification channel and quiet hours', () => {
     render(<NotificationSettings />);
 
+    expect(screen.getByRole('heading', { name: 'Global Preferences' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Play notification sounds')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Quiet Hours' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Money Movement' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Product Information' })).toBeInTheDocument();
