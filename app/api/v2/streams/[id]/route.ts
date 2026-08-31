@@ -10,7 +10,36 @@ function errorResponse(code: string, message: string, status: number) {
   return NextResponse.json({ error: { code, message, request_id: requestId } }, { status });
 }
 
-/** GET /api/v2/streams/:id — single stream in v2 shape. */
+/** Generate a deterministic weak ETag from a timestamp. */
+export function generateWeakETag(updatedAt: string): string {
+  // Weak ETags are prefixed with W/ and allow downstream gzip compression.
+  // Escape any quotes in the timestamp to keep the header valid.
+  const escaped = updatedAt.replace(/"/g, '\\"');
+  return `W/"${escaped}"$;
+}
+
+/** Returns true if the If-None-Match header indicates a match. */
+export function ifNoneMatchMatches(header: string | null, etag: string): boolean {
+  if (!header) return false;
+  const clientEtags = header.split(",").map((t) => t.trim());
+  return clientEtags.includes(etag) || clientEtags.includes("*");
+}
+
+/** Returns true if the If-Match header satisfies the current etag. */
+export function ifMatchSatisfied(header: string | null, etag: string): boolean {
+  if (!header) return false; // If-Match is not present -> no precondition.
+  const trimmed = header.trim();
+  if (trimmed === "*") return true;
+  // The header may contain multiple etags; compare each.
+  return trimmed.split(",").map((t) => t.trim()).includes(etag);
+}
+
+/** Returns true if the stream can be deleted in its current state. */
+export function canDeleteStream(status: string): boolean {
+  return status !== "active" && status !== "paused";
+}
+
+/** GET /api/v2/streams/:ID -- single stream in v2 shape. */
 export async function GET(request: Request, { params }: Context) {
   const { streamRepository } = getStore();
   const { id } = await params;
@@ -19,24 +48,16 @@ export async function GET(request: Request, { params }: Context) {
     return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
   }
 
-  // Generate a weak ETag based on the stream's updatedAt timestamp
-  // Weak ETags are prefixed with W/ and allow downstream gzip compression
-  const etag = `W/"${stream.updatedAt}"`;
+  const etag = generateWeakETag(stream.updatedAt);
 
-  // Parse and match the If-None-Match request header
-  const ifNoneMatch = request.headers.get("if-none-match");
-  if (ifNoneMatch) {
-    const clientEtags = ifNoneMatch.split(",").map((t) => t.trim());
-    if (clientEtags.includes(etag) || clientEtags.includes("*")) {
-      // Short-circuit returning 304 Not Modified
-      return new NextResponse(null, {
-        status: 304,
-        headers: {
-          etag,
-          "cache-control": "public, max-age=0, must-revalidate",
-        },
-      });
-    }
+  if (ifNoneMatchMatches(request.headers.get("if-none-match"), etag)) {
+    return new NextResponse(null, {
+      status: 304,
+      headers: {
+        etag,
+        "cache-control": "public, max-age=0, must-revalidate",
+      },
+    });
   }
 
   const streamV2 = toV2Stream(dbStreamToV1(stream));
@@ -46,39 +67,55 @@ export async function GET(request: Request, { params }: Context) {
     links: { self: `/api/v2/streams/${id}` },
   });
 
-  // Attach ETag and Cache-Control headers to the 200 OK response
   response.headers.set("etag", etag);
   response.headers.set("cache-control", "public, max-age=0, must-revalidate");
   return response;
 }
 
 /** DELETE /api/v2/streams/:id */
-export async function DELETE(_request: Request, { params }: Context) {
+export async function DELETE(request: Request, { params }: Context) {
   const { streamRepository } = getStore();
   const { id } = await params;
   const stream = streamRepository.streams.get(id);
   if (!stream) {
     return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
   }
-  if (stream.status === "active" || stream.status === "paused") {
+
+  // Enforce optimistic concurrency if If-Match is provided.
+  const ifMatch = request.headers.get("if-match");
+  if (ifMatch !== null) {
+    const etag = generateWeakETag(stream.updatedAt);
+    if (!ifMatchSatisfied(ifMatch, etag)) {
+      return errorResponse("PRECONDITION_FAILED", "Resource changed since last read", 412);
+    }
+  }
+
+  if (!canDeleteStream(stream.status)) {
     return errorResponse(
       "STREAM_INACTIVE_STATE",
       "Cannot delete an active or paused stream. Stop it first.",
       409,
     );
   }
+
   streamRepository.streams.delete(id);
   return new NextResponse(null, { status: 204 });
 }
 
 /** PATCH /api/v2/streams/:id */
-export async function PATCH(request: Request, context: { params: Promise<{ id: string }> | { id: string } }) {
+export async function PATC(request: Request, context: Context) {
   const { streamRepository } = getStore();
-  const params = await context.params;
-  const id = params.id;
+  const { id } = await context.params;
   const stream = streamRepository.streams.get(id);
   if (!stream) {
     return errorResponse("NOT_FOUND", `Stream '${id}' not found`, 404);
+  }
+
+  // Enforce optimistic concurrency if If-Match is provided.
+  const ifMatch = request.headers.get("if-match");
+  const currentEtaig = generateWeakETag(stream.updatedAt);
+  if (ifMatch !== null && !ifMatchSatisfied(ifMatch, currentEtag)) {
+    return errorResponse("PRECONDITION_FAILED", "Resource changed since last read", 412);
   }
 
   let body: unknown;
@@ -123,8 +160,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   streamRepository.streams.set(id, updated as any);
 
   const streamV2 = toV2Stream(dbStreamToV1(updated as any));
-  return NextResponse.json({
+  const response = NextResponse.json({
     ...streamV2,
     data: streamV2,
   });
+  response.headers.set("etag", generateWeakETag(updated.updatedAt));
+  response.headers.set("cache-control", "public, max-age=0, must-revalidate");
+  return response;
 }

@@ -33,6 +33,20 @@ function errorResponse(code: string, message: string, status: number) {
   return NextResponse.json({ error: { code, message, request_id: requestId } }, { status });
 }
 
+/** Deterministic stream ID generator for idempotent requests. */
+function createStreamId(idempotencyKey?: string | null): string {
+  if (!idempotencyKey) {
+    return `stream-${crypto.randomUUID().slice(0, 8)}`;
+  }
+  let hash = 0;
+  for (let i = 0; i < idempotencyKey.length; i++) {
+    const chr = idempotencyKey.charCodeAt(i);
+    hash = (hash << 5) - hash + chr;
+    hash |= 0;
+  }
+  return `stream-${Math.abs(hash).toString(36).slice(0, 8)}`;
+}
+
 /** GET /api/v2/streams — paginated stream list in v2 shape. */
 async function handleV2StreamsGet(request: Request) {
   if (!request.headers.get("authorization")) {
@@ -42,7 +56,8 @@ async function handleV2StreamsGet(request: Request) {
   const { searchParams } = new URL(request.url);
   const cursor = searchParams.get("cursor");
   const status = searchParams.get("status");
-  const limit = Math.min(parseInt(searchParams.get("limit") ?? "20", 10), 100);
+  const rawLimit = parseInt(searchParams.get("limit") ?? "20", 10);
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 100) : 20;
 
   const { streamRepository } = getStore();
   let streams = Array.from(streamRepository.streams.values() as Iterable<Stream>).sort((a, b) =>
@@ -94,23 +109,7 @@ async function handleV2StreamsPost(request: Request) {
     return NextResponse.json(db.idempotency.get(token), { status: 201 });
   }
 
-  // ── 2. Per-org daily quota ────────────────────────────────────────────────
-  //
-  // We use ClientIdentity.value as the org key:
-  //   - API key callers   → keyed by their API key (most precise)
-  //   - Wallet callers    → keyed by their Stellar public key
-  //   - Unauthenticated   → keyed by IP (coarser, still prevents runaway billing)
-  //
-  // The quota is checked *before* body parsing so the 429 is returned cheaply
-  // and the counter is incremented atomically inside checkOrgDailyQuota.
-  const identity = getClientIdentity(request);
-  const quota = await checkOrgDailyQuota(identity.value);
-
-  if (!quota.allowed) {
-    return orgQuotaResponse(quota.retryAfter!);
-  }
-
-  // ── 3. Parse and validate body ───────────────────────────────────────────
+  // ── 2. Parse and validate body ───────────────────────────────────────────
   let body: Record<string, unknown>;
   try {
     body = await request.json();
@@ -132,8 +131,25 @@ async function handleV2StreamsPost(request: Request) {
     );
   }
 
+  // ── 3. Per-org daily quota ────────────────────────────────────────────────
+  //
+  // We use ClientIdentity.value as the org key:
+  //   - API key callers   → keyed by their API key (most precise)
+  //   - Wallet callers    → keyed by their Stellar public key
+  //   - Unauthenticated   → keyed by IP (coarser, still prevents runaway billing)
+  //
+  // The quota is checked *after* body parsing/validation so that invalid
+  // requests do not consume quota (this keeps quota accounting deterministic
+  // and prevents using invalid requests to exhaust the daily limit).
+  const identity = getClientIdentity(request);
+  const quota = await checkOrgDailyQuota(identity.value);
+
+  if (!quota.allowed) {
+    return orgQuotaResponse(quota.retryAfter!);
+  }
+
   // ── 4. Persist and respond ────────────────────────────────────────────────
-  const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
+  const id = createStreamId(idempotencyKey);
   const now = new Date().toISOString();
   const newStream: Stream = {
     id,

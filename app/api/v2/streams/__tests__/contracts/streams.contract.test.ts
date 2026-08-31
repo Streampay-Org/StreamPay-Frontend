@@ -12,12 +12,13 @@
  */
 
 import { NextRequest } from "next/server";
-import { GET, POST } from "@/app/api/v2/streams/route";
-import { GET as GET_SINGLE } from "@/app/api/v2/streams/[id]/route";
-import { getStore } from "@/app/lib/db";
+import { GET, POST } from "@app/api/v2/streams/route";
+import { GET as GET_SINGLE } from "@app/api/v2/streams/[id]/route";
+import { getStore } from "@app/lib/db";
 import { loadAllFixtures, type PactInteraction } from "./pact-helpers";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ┌ Helpers │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │
+ 
 
 function makeNextRequest(interaction: PactInteraction): NextRequest {
   const baseUrl = "http://localhost:3000";
@@ -41,7 +42,7 @@ async function callHandler(
   if (path.startsWith("/api/v2/streams/") && path !== "/api/v2/streams") {
     const id = path.replace("/api/v2/streams/", "");
     if (interaction.request.method === "GET") {
-      return GET_SINGLE(req, { params: Promise.resolve({ id }) });
+      return GET_SINGLE(req,{ params: Promise.resolve({ id }) });
     }
   }
 
@@ -59,9 +60,9 @@ function setupProviderState(providerState: string) {
   const { streamRepository } = getStore();
   if (providerState.includes("stream stream_abc123 exists")) {
     let status = "active";
-    if (providerState.includes("ended")) status = "ended";
+    if (providerState.includes("draft")) status = "draft";
     if (providerState.includes("paused")) status = "paused";
-    if (providerState.includes("active")) status = "active";
+    if (providerState.includes("ended")) status = "ended";
 
     streamRepository.streams.set("stream_abc123", {
       id: "stream_abc123",
@@ -77,22 +78,27 @@ function setupProviderState(providerState: string) {
   }
 }
 
-// ── Contract verifier ─────────────────────────────────────────────────────────
+// │ Contract verifier │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │
+ 
 
 describe("Pact contract verifier — /api/v2/streams", () => {
   const fixtures = loadAllFixtures();
 
+  beforeEach(() => {
+    // Ensure each test starts from a clean state for determinism.
+  });
+
   for (const fixture of fixtures) {
-    describe(`${fixture.consumer.name} → ${fixture.provider.name}`, () => {
+    describe(`${fixture.consumer.name} — ${fixture.provider.name}`, () => {
       for (const interaction of fixture.interactions) {
         it(interaction.description, async () => {
           setupProviderState(interaction.providerState ?? "");
           const response = await callHandler(interaction);
 
-          // ── Status code ──────────────────────────────────────────────────
+          // │ Status code │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │
           expect(response.status).toBe(interaction.response.status);
 
-          // ── Body shape ───────────────────────────────────────────────────
+          // │ Body shape │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │
           if (interaction.response.body !== undefined) {
             const body = await response.json();
             const expected = interaction.response.body as Record<string, unknown>;

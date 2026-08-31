@@ -17,11 +17,15 @@
           "streams": [
             {
               "id": "stream_abc123",
-              "recipient": "GABC1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234",
+              "recipient": "GARC1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234",
               "rate": "120",
+              "schedule": "month",
               "status": "active",
-              "actions": ["pause", "stop"],
-              "createdAt": "2026-01-01T00:00:00.000Z"
+              "allowed_actions": ["pause", "stop"],
+              "created_at": "2026-01-01T00:00:00.000Z",
+              "updated_at": "2026-01-01T00:00:00.000Z",
+              "token": "XLM",
+              "settlement": null
             }
           ]
         }
