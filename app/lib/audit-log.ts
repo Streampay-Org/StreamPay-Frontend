@@ -241,7 +241,6 @@ export class AppendOnlyAuditLogStore {
     return this.getPaginated({ ...filters, limit: Number.MAX_SAFE_INTEGER }).data
       .map((entry) => this.toExportRow(entry));
   }
-  }
 
   /**
    * Export rows for archived entries (soft-archived by retention plus

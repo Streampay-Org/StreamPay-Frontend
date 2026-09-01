@@ -19,6 +19,7 @@ const ALL_STATUSES: readonly StreamStatus[] = [
   "ended",
   "withdrawn",
   "cancelled",
+  "failed",
 ] as const;
 
 function makeMockStream(status: StreamStatus): StreamRowData {
@@ -29,6 +30,7 @@ function makeMockStream(status: StreamStatus): StreamRowData {
     ended: "Settle",
     withdrawn: "Details",
     cancelled: "Details",
+    failed: "Retry",
   };
   return {
     id: `stream-${status}`,

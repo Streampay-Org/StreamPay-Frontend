@@ -23,16 +23,20 @@ export function StreamEndedCard({
   className = "",
 }: StreamEndedCardProps) {
   return (
-    <Card className={`border-l-4 border-l-blue-500 bg-white dark:bg-gray-800 shadow-sm ${className}`}>
+    <Card
+      role="region"
+      aria-label={`Stream ended notification for ${streamName}`}
+      className={`border-l-4 border-l-blue-500 bg-white dark:bg-gray-800 shadow-sm ${className}`}
+    >
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" aria-hidden="true">
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             </span>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100" role="status" aria-label="Stream status: Ended">
               Stream Ended
             </h3>
           </div>
@@ -51,18 +55,20 @@ export function StreamEndedCard({
           <div className="mt-4 flex gap-3">
             {onViewDetails && (
               <button
+                type="button"
                 onClick={onViewDetails}
                 className="text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 rounded px-1"
-                aria-label="View stream details"
+                aria-label={`View stream details for ${streamName}`}
               >
                 View Details
               </button>
             )}
             {onDismiss && (
               <button
+                type="button"
                 onClick={onDismiss}
                 className="text-sm font-medium text-gray-600 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 rounded px-1"
-                aria-label="Dismiss notification"
+                aria-label={`Dismiss notification for ${streamName}`}
               >
                 Dismiss
               </button>

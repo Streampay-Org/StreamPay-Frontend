@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { errorResponse, ErrorCode } from "@app/lib/errors/server";
-import { withTimeout, WEBHOOK_TIMEOUT_MS } from "@src/middleware/timeout";
+import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
+import { withTimeout, WEBHOOK_TIMEOUT_MS } from "@/src/middleware/timeout";
 import {
   extractCorrelationContext,
   logger,
   withCorrelationContext,
-} from "@app/lib/logger";
+} from "@/app/lib/logger";
 import {
   deriveHealthStatus,
   type WebhookDeliveryStats,
