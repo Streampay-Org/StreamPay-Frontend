@@ -3,6 +3,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import '../src/styles/typography.css'; // Adjust path if needed
 import styles from './StreamTypeChip.module.css';
+import './styles/patterns.css';
+import { EmptyState } from '../src/components/EmptyState';
+import { StreamTypeChipEmptyIllustration } from './StreamTypeChipEmptyIllustration';
+import { Skeleton } from '../src/components/Skeleton';
 import { LiveRegion } from '../src/components/LiveRegion';
 
 /**
@@ -46,18 +50,35 @@ export type StreamStatus =
  * StreamTypeChip component.
  * Displays a stream type and an amount using tabular figures for better alignment.
  * Announces type/amount changes to assistive technologies via an aria-live region.
- *
- * @param {string} type - The type of stream.
- * @param {number} amount - The amount associated with the stream.
- * @param {boolean} isLoading - Whether the chip is loading.
+ * When empty, renders a themed EmptyState with a helpful CTA.
  */
 export interface StreamTypeChipProps {
-  type: string;
-  amount: number;
+  type?: string;
+  amount?: number;
   isLoading?: boolean;
+  status?: StreamStatus;
+  kbdHint?: string;
+  isEmpty?: boolean;
+  emptyTitle?: string;
+  emptyDescription?: string;
+  emptyCtaText?: string;
+  onEmptyCtaClick?: () => void;
+  className?: string;
 }
 
-export const StreamTypeChip: React.FC<StreamTypeChipProps> = ({ type, amount, isLoading = false }) => {
+export const StreamTypeChip: React.FC<StreamTypeChipProps> = ({
+  type,
+  amount,
+  isLoading = false,
+  status,
+  kbdHint,
+  isEmpty = false,
+  emptyTitle,
+  emptyDescription,
+  emptyCtaText,
+  onEmptyCtaClick,
+  className = '',
+}) => {
   const prefersReducedMotion = usePrefersReducedMotion();
   const showEmpty =
     isEmpty ||
@@ -83,14 +104,12 @@ export const StreamTypeChip: React.FC<StreamTypeChipProps> = ({ type, amount, is
     );
   }
 
-  const chipLabel = `${type} ${amount}`;
-
   const patternClass = status ? `cb-pattern--${status}` : '';
 
   if (isLoading) {
     return (
       <div
-        className={`${styles.streamTypeChip} stream-type-chip`}
+        className={`${styles.streamTypeChip} stream-type-chip ${className}`.trim()}
         data-reduced-motion={prefersReducedMotion}
         style={{
           transition: prefersReducedMotion ? 'none' : 'transform 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease',
@@ -117,8 +136,8 @@ export const StreamTypeChip: React.FC<StreamTypeChipProps> = ({ type, amount, is
 
     // First render — seed refs without announcing (avoid false positives).
     if (prevType === null) {
-      prevTypeRef.current = type;
-      prevAmountRef.current = amount;
+      prevTypeRef.current = type ?? '';
+      prevAmountRef.current = amount ?? 0;
       return;
     }
 
@@ -133,13 +152,13 @@ export const StreamTypeChip: React.FC<StreamTypeChipProps> = ({ type, amount, is
       setSrAnnouncement(`Stream amount updated to ${amount}`);
     }
 
-    prevTypeRef.current = type;
-    prevAmountRef.current = amount;
+    prevTypeRef.current = type ?? '';
+    prevAmountRef.current = amount ?? 0;
   }, [type, amount]);
 
   return (
     <div
-      className={[styles.streamTypeChip, 'stream-type-chip', patternClass].filter(Boolean).join(' ')}
+      className={[styles.streamTypeChip, 'stream-type-chip', patternClass, className].filter(Boolean).join(' ')}
       tabIndex={0}
       data-reduced-motion={prefersReducedMotion}
       data-status={status ?? undefined}
@@ -155,9 +174,14 @@ export const StreamTypeChip: React.FC<StreamTypeChipProps> = ({ type, amount, is
       <span className={`tabular-nums ${styles.amount}`}>
         {amount ?? 0}
       </span>
-      {kbdHint && <KbdHint shortcut={kbdHint} />}
+      {kbdHint && (
+        <kbd className="kbd" aria-label={`Keyboard shortcut: ${kbdHint}`}>
+          {kbdHint}
+        </kbd>
+      )}
     </div>
   );
 };
 
 export default StreamTypeChip;
+

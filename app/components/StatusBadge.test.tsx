@@ -14,6 +14,7 @@ const ALL_STATUSES: readonly StreamStatus[] = [
   "ended",
   "withdrawn",
   "cancelled",
+  "failed",
 ] as const;
 
 const STATUS_LABELS: Record<StreamStatus, string> = {
@@ -23,6 +24,7 @@ const STATUS_LABELS: Record<StreamStatus, string> = {
   ended: "Ended",
   withdrawn: "Withdrawn",
   cancelled: "Cancelled",
+  failed: "Failed",
 };
 
 describe("StatusBadge", () => {
@@ -97,6 +99,19 @@ describe("StatusBadge", () => {
     it("applies cb-pattern--cancelled for cancelled streams", () => {
       const { container } = render(<StatusBadge status="cancelled" />);
       expect(container.querySelector(".status-badge")).toHaveClass("cb-pattern--cancelled");
+    });
+
+    it("applies cb-pattern--cancelled for failed streams", () => {
+      const { container } = render(<StatusBadge status="failed" />);
+      expect(container.querySelector(".status-badge")).toHaveClass("cb-pattern--cancelled");
+    });
+
+    it("carries role=status landmark across all statuses", () => {
+      ALL_STATUSES.forEach((status) => {
+        const { container } = render(<StatusBadge status={status} />);
+        const badge = container.querySelector(".status-badge");
+        expect(badge).toHaveAttribute("role", "status");
+      });
     });
 
     it("forwards an additional className prop when provided", () => {

@@ -2,7 +2,7 @@
 
 import React, { PropsWithChildren } from "react";
 
-interface CardProps {
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   padding?: "none" | "sm" | "md" | "lg";
   onClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
   className?: string;
@@ -20,6 +20,10 @@ export const Card: React.FC<PropsWithChildren<CardProps>> = ({
   padding = "md",
   onClick,
   className = "",
+  role,
+  tabIndex,
+  onKeyDown,
+  ...rest
 }) => {
   const isClickable = !!onClick;
 
@@ -29,15 +33,22 @@ export const Card: React.FC<PropsWithChildren<CardProps>> = ({
       className={`card ${isClickable ? "card--clickable" : ""} ${className}`}
       style={{
         padding: paddingStyles[padding],
+        ...rest.style,
       }}
-      role={isClickable ? "button" : undefined}
-      tabIndex={isClickable ? 0 : undefined}
-      onKeyDown={isClickable ? (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick?.(e as any);
-        }
-      } : undefined}
+      role={role ?? (isClickable ? "button" : undefined)}
+      tabIndex={tabIndex ?? (isClickable ? 0 : undefined)}
+      onKeyDown={
+        onKeyDown ??
+        (isClickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick?.(e as any);
+              }
+            }
+          : undefined)
+      }
+      {...rest}
     >
       {children}
     </div>

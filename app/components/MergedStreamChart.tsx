@@ -54,7 +54,7 @@ export function MergedStreamChart({ streams, className = "" }: MergedStreamChart
   const aggregateStatus: StreamStatus = allEnded ? "ended" : (anyActive ? "active" : (anyPaused ? "paused" : "draft"));
 
   return (
-    <div className={`concat(className, ' ')} role="region" aria-label="Merged Stream Visualization">
+    <div className={["merged-stream-chart", className].filter(Boolean).join(" ")} role="region" aria-label="Merged Stream Visualization">
       <div className="merged-stream-chart__aggregate mb-8">
         <h3 className="merged-stream-chart__title text-lg font-semibold mb-2">Total Merged Progress</h3>
         <StreamProgress
