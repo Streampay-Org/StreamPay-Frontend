@@ -79,6 +79,32 @@ describe("StreamDetailClient", () => {
     expect(screen.getByText(/review the exact refund split/i)).toBeInTheDocument();
     expect(screen.getByTestId("recipient-payout")).toBeInTheDocument();
     expect(screen.getByTestId("sender-refund")).toBeInTheDocument();
+    expect(screen.getByTestId("cancel-stream-id")).toHaveTextContent("stream-ada");
+    expect(screen.getByTestId("cancel-amount")).toHaveTextContent("120 XLM");
+    expect(screen.getByTestId("cancel-recipient")).toHaveTextContent(
+      "Ada Creative Studio",
+    );
+    expect(screen.getByTestId("cancel-timing")).toHaveTextContent(
+      "Pays every 30 days",
+    );
+  });
+
+  it("opens a distinct pause confirmation before pausing", () => {
+    render(React.createElement(StreamDetailClient, { stream: activeStream }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
+
+    const dialog = screen.getByRole("dialog", { name: /pause stream/i });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByTestId("pause-stream-id")).toHaveTextContent("stream-ada");
+    expect(screen.getByTestId("pause-amount")).toHaveTextContent("120 XLM");
+    expect(screen.getByTestId("pause-recipient")).toHaveTextContent(
+      "Ada Creative Studio",
+    );
+    expect(screen.getByTestId("pause-timing")).toHaveTextContent(
+      "Pays every 30 days",
+    );
+    expect(screen.getByText(/not a cancellation/i)).toBeInTheDocument();
   });
 
   it("shows correct refund split in the cancel modal", () => {

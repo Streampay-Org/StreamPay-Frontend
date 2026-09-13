@@ -3678,6 +3678,12 @@ a:hover {
   color: var(--foreground);
 }
 
+.confirm-action__error {
+  margin: 0 0 1rem;
+  color: #b42318;
+  font-size: 0.875rem;
+}
+
 .confirm-action__input-wrap {
   display: grid;
   gap: 0.5rem;

@@ -9,6 +9,7 @@ import { PaymentTimeline } from "../../components/PaymentTimeline";
 import { ErrorToast } from "../../components/ErrorToast";
 import { ConfirmCancel } from "../../components/ConfirmCancel";
 import { CancelStreamModal } from "../../components/CancelStreamModal";
+import { ConfirmPauseModal } from "../../components/ConfirmPauseModal";
 import { SwitchNetwork } from "../../components/SwitchNetwork";
 import { Timestamp } from "../../components/Timestamp";
 import { CopyAddress } from "../../components/CopyAddress";
@@ -66,6 +67,7 @@ export function StreamDetailClient({
 }: StreamDetailClientProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDestructiveOpen, setIsDestructiveOpen] = useState(false);
+  const [isPauseOpen, setIsPauseOpen] = useState(false);
   const [error, setError] = useState<StreamPayError | null>(null);
 
   const actionSummary = STREAM_ACTION_SUMMARY[stream.id] ?? {
@@ -80,6 +82,23 @@ export function StreamDetailClient({
   const networkMismatch =
     walletNetwork !== undefined && walletNetwork.toLowerCase() !== network.toLowerCase();
   const mutationsDisabled = isIncidentMode || networkMismatch;
+
+  const recipientDisplay =
+    stream.label || stream.email || stream.recipient;
+  const amountDisplay = actionSummary.amountLabel || stream.rate;
+  const timingDisplay = stream.schedule || "See stream schedule";
+
+  const handlePrimaryClick = () => {
+    if (stream.status === "active") {
+      setIsPauseOpen(true);
+      return;
+    }
+    void handleAction();
+  };
+
+  const handlePauseConfirm = async () => {
+    await handleAction();
+  };
 
   const handleDismissError = () => {
     setError(null);
@@ -149,6 +168,7 @@ export function StreamDetailClient({
       }
 
       setError(normalizedError);
+      throw normalizedError;
     } finally {
       setIsProcessing(false);
     }
@@ -180,6 +200,7 @@ export function StreamDetailClient({
       const normalizedError = isStreamPayError(err) ? err : normalizeError(err);
 
       setError(normalizedError);
+      throw normalizedError;
     } finally {
       setIsProcessing(false);
     }
@@ -392,7 +413,7 @@ export function StreamDetailClient({
               <button
                 className="button button--primary detail-action-btn"
                 type="button"
-                onClick={handleAction}
+                onClick={handlePrimaryClick}
                 disabled={
                   isProcessing ||
                   mutationsDisabled ||
@@ -484,6 +505,10 @@ export function StreamDetailClient({
             recipientAddress: stream.recipient,
           }}
           tokenLabel={stream.token ?? "XLM"}
+          streamId={stream.id}
+          amountLabel={amountDisplay}
+          recipientLabel={recipientDisplay}
+          timingLabel={timingDisplay}
         />
       )}
       {actionSummary.destructiveAction === "withdraw" && (
@@ -497,6 +522,15 @@ export function StreamDetailClient({
           requiresTypedAmount={actionSummary.requiresTypedAmount}
         />
       )}
+      <ConfirmPauseModal
+        isOpen={isPauseOpen}
+        onClose={() => setIsPauseOpen(false)}
+        onConfirm={handlePauseConfirm}
+        streamId={stream.id}
+        amountLabel={amountDisplay}
+        recipientLabel={recipientDisplay}
+        timingLabel={timingDisplay}
+      />
     </main>
   );
 }

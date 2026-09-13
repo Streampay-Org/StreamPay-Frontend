@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Modal } from "./Modal";
 import { STROOPS_SCALE } from "../lib/amount";
 import { computeCancellationSplit, type CancelInput } from "../lib/cancel-stream";
@@ -15,6 +15,11 @@ type CancelStreamModalProps = {
   /** Escrow amounts (raw i128 units) used to compute the refund split. */
   split: CancelInput;
   tokenLabel?: string;
+  /** Optional confirmation summary fields (GrantFox #1362). */
+  streamId?: string;
+  amountLabel?: string;
+  recipientLabel?: string;
+  timingLabel?: string;
 };
 
 /** Format a raw i128 (stroops) amount as a trimmed decimal string. */
@@ -40,8 +45,13 @@ export function CancelStreamModal({
   stream,
   split,
   tokenLabel = "tokens",
+  streamId,
+  amountLabel,
+  recipientLabel,
+  timingLabel,
 }: CancelStreamModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const inFlightRef = useRef(false);
 
   const result = useMemo(
     () => computeCancellationSplit(stream, split),
@@ -49,21 +59,55 @@ export function CancelStreamModal({
   );
 
   const handleConfirm = async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setIsSubmitting(true);
     try {
       await onConfirm();
       onClose();
     } finally {
+      inFlightRef.current = false;
       setIsSubmitting(false);
     }
   };
 
+  const showContext = Boolean(streamId || amountLabel || recipientLabel || timingLabel);
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Cancel stream">
-      <div className="cancel-stream">
+      <div className="cancel-stream" data-testid="confirm-cancel-modal">
         <p className="cancel-stream__warning" role="alert">
           Cancelling stops all future payouts. This action cannot be undone.
         </p>
+
+        {showContext && (
+          <dl className="cancel-stream__context confirm-action__details">
+            {streamId && (
+              <div>
+                <dt>Stream</dt>
+                <dd data-testid="cancel-stream-id">{streamId}</dd>
+              </div>
+            )}
+            {amountLabel && (
+              <div>
+                <dt>Amount</dt>
+                <dd data-testid="cancel-amount">{amountLabel}</dd>
+              </div>
+            )}
+            {recipientLabel && (
+              <div>
+                <dt>Recipient</dt>
+                <dd data-testid="cancel-recipient">{recipientLabel}</dd>
+              </div>
+            )}
+            {timingLabel && (
+              <div>
+                <dt>Timing</dt>
+                <dd data-testid="cancel-timing">{timingLabel}</dd>
+              </div>
+            )}
+          </dl>
+        )}
 
         {result.ok ? (
           <>
