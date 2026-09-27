@@ -43,6 +43,8 @@ The application will fail to boot without these required variables:
 - `ALLOWED_ORIGINS` - Comma-separated list of allowed browser origins for API requests
 - `CANARY_PERCENTAGE` - Optional integer from 0 to 100 that samples requests into the canary path; sampled traffic receives the `X-Canary: true` header
 
+> **Note:** For a comprehensive inventory of all environment variables (including database, webhooks, fee-bump sponsorship, telemetry, timeouts, SSE, rate limiting, and reconciliation), see [.env.example](.env.example) and TypeScript types in [global.d.ts](global.d.ts).
+
 ### Setup
 
 1. Copy the example environment file:
