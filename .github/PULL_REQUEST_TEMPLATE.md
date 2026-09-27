@@ -69,6 +69,20 @@
 - [ ] Updated security-exemptions.json (if applicable)
 - [ ] Added security notes to code comments
 
+### Accessibility (a11y)
+
+- [ ] All interactive elements (buttons, links, form controls, custom
+      widgets) are reachable and operable via keyboard alone, with a visible
+      focus indicator.
+- [ ] Screen-reader support verified: no unlabelled regions, icon-only
+      controls have accessible names, and dynamic content updates use an
+      `aria-live` region where appropriate.
+- [ ] Animations/transitions respect the `prefers-reduced-motion` user
+      preference (or the change introduces no motion).
+- [ ] Status/state is never conveyed by color alone (icon, text, or pattern
+      is paired with any color-coded indicator).
+- [ ] N/A — this change has no user-facing UI impact.
+
 ### Checklist
 
 - [ ] No secrets or keys committed
