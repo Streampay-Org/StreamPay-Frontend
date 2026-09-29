@@ -1661,7 +1661,22 @@
             "$ref": "#/components/responses/400"
           },
           "429": {
-            "$ref": "#/components/responses/429"
+            "description": "Rate limit exceeded.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the client may retry.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "500": {
             "$ref": "#/components/responses/500"
@@ -3779,7 +3794,7 @@
                           "type": "array",
                           "description": "Array of streams that were paused by this request.",
                           "items": {
-                            "$ref": "#/components/schemas/Stream"
+                            "$ref": "#/components/schemas/StreamV1"
                           }
                         },
                         "count": {

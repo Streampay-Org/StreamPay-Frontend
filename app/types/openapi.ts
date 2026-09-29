@@ -1,3 +1,5 @@
+export type * from "./openapi.generated";
+
 export type StreamStatus = "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
 export type StreamAction = "start" | "pause" | "stop" | "settle" | "withdraw" | "cancel";
 export type WithdrawalState = "pending" | "succeeded" | "failed";
