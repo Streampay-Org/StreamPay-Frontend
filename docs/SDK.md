@@ -3,6 +3,23 @@
 `lib/sdk` exports a small TypeScript client for partners that need REST helpers
 and live stream updates without importing Next.js route internals.
 
+## OpenAPI Contract
+
+The canonical, hand-edited API specification is [`openapi.json`](../openapi.json).
+`app/types/openapi.generated.ts` is generated from that file, and
+`app/types/openapi.ts` re-exports those API types alongside the app's domain
+types. Do not edit the generated file or maintain a second OpenAPI spec.
+
+After editing `openapi.json`, regenerate the TypeScript declarations with:
+
+```sh
+npm run openapi:generate
+```
+
+Check generated files for drift with `npm run openapi:check`. `npm run smoke`
+performs this check before its other smoke checks and fails if the declarations
+are stale.
+
 ## Create a Client
 
 ```ts
