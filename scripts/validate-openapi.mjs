@@ -69,6 +69,7 @@ async function main() {
     "/api/streams/{id}/stop",
     "/api/streams/{id}/settle",
     "/api/v2/streams",
+    "/api/v2/streams/multi",
     "/api/v2/streams/{id}",
     "/api/v2/streams/{id}/start",
     "/api/v2/streams/{id}/pause",
@@ -102,7 +103,7 @@ async function main() {
   }
 
   const schemas = spec.components?.schemas || {};
-  const requiredSchemas = ["ErrorEnvelope", "StreamV1", "StreamV2"];
+  const requiredSchemas = ["ErrorEnvelope", "StreamV1", "StreamV2", "MultiRecipientStreamV2"];
   for (const s of requiredSchemas) {
     if (!schemas[s]) {
       log("ERROR", `Missing schema: ${s}`);
