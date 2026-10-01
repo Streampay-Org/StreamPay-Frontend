@@ -34,14 +34,107 @@ export interface Contact {
 
 ## Federation address resolution
 
-When the user enters a federation address (format: `user*domain.com`), the application resolves it via the Stellar federation protocol on blur of the address field:
+When the user enters a federation address (format: `user*domain.com`), the
+application resolves it through the Stellar federation protocol on **blur** of the
+address field. The implementation lives in
+[`app/utils/federation.ts`](../app/utils/federation.ts).
 
-1. If the input matches the federation format (`user*domain.com`), the app calls `resolveFederationAddress()` from `../utils/federation`.
+### Resolution sequence
+
+1. **Format check.** `isFederationAddress()` matches
+   `^[^*\s]+\*[^*\s]+\.[^*\s]+$` — a non-empty local part, exactly one `*`, and a
+   dotted domain with no whitespace. Input that fails this check raises
+   `FederationError` with code `INVALID_FORMAT` before any network call is made.
+2. **Cache lookup.** Unless the caller passes `{ bypassCache: true }`, a
+   still-fresh entry for the lower-cased address is returned immediately and no
+   network request is made (see [Cache semantics](#cache-semantics)).
+3. **`stellar.toml` discovery.** `fetchFederationServerUrl()` requests
+   `https://<domain>/.well-known/stellar.toml` with a 10-second timeout and reads
+   the `FEDERATION_SERVER` entry out of it. The request is always HTTPS, even
+   when the user typed a bare domain.
+4. **Federation query.** The discovered federation server URL is called with
+   `?q=<address>&type=name`, again with a 10-second timeout. The server is
+   expected to answer with a SEP-0002 record (`stellar_address`, `account_id`,
+   and an optional `memo_type`/`memo`).
+5. **Cache write and return.** On success the record is stored under the
+   lower-cased address and returned to the page.
+
+### UI behaviour
+
+1. If the input matches the federation format, the app calls
+   `resolveFederationAddress()`.
 2. While resolving, a spinning indicator (`⟳`) is shown inside the input field.
-3. On success, the resolved Stellar account ID is displayed beneath the input in green, and the original federation address is stored in the `federationAddress` field.
-4. On failure, the error message is displayed in red below the input, and the form submission is blocked until the address is resolved.
+3. On success, the resolved Stellar account ID is displayed beneath the input
+   (labelled `Resolved:`) and the original federation address is kept in the
+   form's `federationAddress` state.
+4. On failure, the error message is displayed below the input and the form
+   submission is blocked until the address resolves.
 
-The form accepts either a raw Stellar address (`G…` format) or a federation address. Raw addresses are stored directly without resolution.
+The form accepts either a raw Stellar address (`G…` format) or a federation
+address. Raw addresses are stored directly without resolution. Editing the
+address field clears the previous resolution, so a stale `Resolved:` value can
+never be saved against a new input.
+
+### Cache semantics
+
+| Property | Value |
+|---|---|
+| Storage | In-memory `Map`s (`cache`, `cacheTimestamps`) inside the module |
+| Key | The federation address, lower-cased |
+| TTL | `CACHE_TTL_MS` = `5 * 60 * 1000` (5 minutes) |
+| Scope | The current browser tab / module instance only |
+| Lifespan | Cleared by a page reload; never written to `localStorage` |
+| Bypass | `resolveFederationAddress(address, { bypassCache: true })` |
+| Manual clear | `clearFederationCache()` |
+
+Only entries older than the TTL are refetched; expired entries are not
+proactively evicted, they are overwritten on the next resolution. Two
+simultaneous resolutions of the same address are not deduplicated and may both
+hit the network. A resolve failure is never cached, so retrying after a
+`NETWORK_ERROR` or `SERVER_ERROR` does perform a fresh request.
+
+### Error codes
+
+`FederationError` carries a `code` from the `FederationErrorCode` union so the
+UI can distinguish "the address is wrong" from "the remote server is unhappy".
+
+| Code | Raised when | Typical fix |
+|---|---|---|
+| `INVALID_FORMAT` | The input does not match the federation pattern (from `resolveFederationAddress()` or `parseFederationAddress()`). | Correct the address to `user*domain.com`. |
+| `NETWORK_ERROR` | The `stellar.toml` or federation-server request failed or exceeded its 10-second timeout (DNS, TLS, CORS, offline, or a dropped connection). | Retry; confirm the domain is reachable over HTTPS. |
+| `NOT_FOUND` | `stellar.toml` returned a non-2xx status, contained no `FEDERATION_SERVER` entry, or the federation server answered `404` for the address. | Confirm the domain publishes `stellar.toml` and that the account exists. |
+| `SERVER_ERROR` | The federation server responded with any other non-2xx status (for example `500` or `503`). | Retry later; the federation server is failing. |
+
+Failures that are not `FederationError` — a 2xx response whose body is not valid
+JSON, or a record missing `account_id` — surface as the underlying error and are
+shown with a generic message rather than one of the codes above.
+
+### Security considerations
+
+- **HTTPS only.** Both the `stellar.toml` lookup and the federation query are
+  constructed with `https://`; the domain is never contacted over plaintext.
+- **No credentials.** Federation is an unauthenticated public protocol. No API
+  keys, signatures, or wallet secrets are attached to either request.
+- **Timeouts.** Both requests use `AbortSignal.timeout(10_000)`, so a
+  non-responsive domain cannot hang the form indefinitely.
+- **Input is only used in a query string.** The address is parsed into
+  `username`/`domain` and the domain becomes a hostname; the full address is
+  passed through `URLSearchParams`, which percent-encodes it.
+- **Client-side only.** Federation resolution happens in the browser; no contact
+  data is proxied through the StreamPay backend.
+- **The resolved address is a snapshot.** A contact stores the `account_id`
+  returned at save time, not the federation address's live value. If the domain
+  later points the same federation address at a different account, the saved
+  contact keeps the old G-address until the user edits it and lets it resolve
+  again. This is deliberate — silently following a remote server's new address
+  could redirect a payment — but it is the behaviour users ask about most often.
+- **Federation responses are untrusted input.** The returned `account_id` is used
+  as-is; the `G[A-Z2-7]{55}` check only runs on addresses the user types
+  directly, not on what the federation server returns. Verify an unexpected
+  address before sending funds to it.
+- **The federation `memo` is not used.** A contact's `memo` field is the user's
+  own free-text note; the `memo`/`memo_type` from the federation record are
+  neither displayed nor persisted.
 
 ## Validation rules
 

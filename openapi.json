@@ -26,6 +26,146 @@
       }
     },
     "schemas": {
+      "MultiRecipientLegV2": {
+        "type": "object",
+        "required": [
+          "rank",
+          "stream_id",
+          "address",
+          "percentage",
+          "amount"
+        ],
+        "properties": {
+          "rank": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "1-based position of this leg within the allocation."
+          },
+          "stream_id": {
+            "type": "string",
+            "description": "Id of the stream leg written for this recipient; fetch it with GET /api/v2/streams/{id}."
+          },
+          "address": {
+            "type": "string",
+            "description": "Stellar ed25519 public key or registered email address, as supplied."
+          },
+          "percentage": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{4})?$",
+            "description": "Share of the total, as a fixed 4-decimal string."
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{7})?$",
+            "description": "Amount owed to this leg, as a fixed 7-decimal string. The legs sum exactly to total_amount."
+          }
+        }
+      },
+      "MultiRecipientStreamV2": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "token",
+          "status",
+          "total_amount",
+          "allocated_percentage",
+          "recipient_count",
+          "start_at",
+          "end_at",
+          "created_at",
+          "settlement",
+          "recipients",
+          "links"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Identifier of the fan-out itself. It is not a stream; the legs are.",
+            "example": "stream-multi-8f3c1a90"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "multi_recipient"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string",
+            "enum": [
+              "XLM",
+              "USDC"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft"
+            ],
+            "description": "Every leg is created in `draft`; drive them with the start/pause/stop/settle endpoints."
+          },
+          "total_amount": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{7})?$",
+            "description": "Total distributed across all legs, as a fixed 7-decimal string."
+          },
+          "allocated_percentage": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{4})?$",
+            "description": "Sum of the allocation, as a fixed 4-decimal string. Always 100.0000 for an accepted request."
+          },
+          "recipient_count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "start_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "end_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "settlement": {
+            "type": "object",
+            "nullable": true,
+            "description": "Always present; null until a leg settles."
+          },
+          "recipients": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/MultiRecipientLegV2"
+            }
+          },
+          "links": {
+            "type": "object",
+            "required": [
+              "self",
+              "collection"
+            ],
+            "properties": {
+              "self": {
+                "type": "string"
+              },
+              "collection": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "CircuitBreakerState": {
         "type": "object",
         "required": [
@@ -1661,7 +1801,22 @@
             "$ref": "#/components/responses/400"
           },
           "429": {
-            "$ref": "#/components/responses/429"
+            "description": "Rate limit exceeded.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the client may retry.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "500": {
             "$ref": "#/components/responses/500"
@@ -2865,6 +3020,176 @@
         }
       }
     },
+    "/api/v2/streams/multi": {
+      "post": {
+        "operationId": "createMultiRecipientStreamV2",
+        "summary": "Create a multi-recipient (fan-out) stream (v2)",
+        "description": "Creates one stream leg per recipient, each locked to its share of a single total. Percentages must sum to 100 within 0.001 percentage points, and at most 20 recipients are accepted. The per-recipient amounts are recomputed by the server from the percentages. See docs/api/multi-recipient-stream.md.",
+        "tags": [
+          "Streams"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "token",
+                  "totalAmount",
+                  "startTime",
+                  "endTime",
+                  "recipients"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "description": "Human-readable name of the fan-out stream.",
+                    "example": "GrantFox Q3 Distribution"
+                  },
+                  "token": {
+                    "type": "string",
+                    "enum": [
+                      "XLM",
+                      "USDC"
+                    ],
+                    "description": "Asset the stream is denominated in.",
+                    "example": "XLM"
+                  },
+                  "totalAmount": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "description": "Total amount distributed across all recipients.",
+                    "example": 10000
+                  },
+                  "startTime": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Start of the streaming window (ISO-8601).",
+                    "example": "2026-09-01T09:00:00.000Z"
+                  },
+                  "endTime": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "End of the streaming window (ISO-8601). Must be strictly after startTime.",
+                    "example": "2026-12-31T23:59:00.000Z"
+                  },
+                  "recipients": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "description": "At most 20 recipients. The percentage values must sum to 100 within 0.001 percentage points.",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "address",
+                        "percentage"
+                      ],
+                      "properties": {
+                        "address": {
+                          "type": "string",
+                          "description": "Stellar ed25519 public key (Strkey) or a registered email address.",
+                          "example": "GDSBCG3OKHCMMWS5EBH2X7XOYTJRWXN2YYQPCNS5OFBU4IDO4X7OFSQA"
+                        },
+                        "percentage": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 100,
+                          "description": "Share of totalAmount for this recipient. At most 4 decimal places.",
+                          "example": 50
+                        },
+                        "amount": {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Optional echo of percentage / 100 x totalAmount. Recomputed by the server when omitted; rejected with AMOUNT_MISMATCH when it disagrees.",
+                          "example": 5000
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "examples": {
+                "two-way-split": {
+                  "summary": "Two recipients at 50% each",
+                  "value": {
+                    "name": "GrantFox Q3 Distribution",
+                    "token": "XLM",
+                    "totalAmount": 10000,
+                    "startTime": "2026-09-01T09:00:00.000Z",
+                    "endTime": "2026-12-31T23:59:00.000Z",
+                    "recipients": [
+                      {
+                        "address": "GDSBCG3OKHCMMWS5EBH2X7XOYTJRWXN2YYQPCNS5OFBU4IDO4X7OFSQA",
+                        "percentage": 50,
+                        "amount": 5000
+                      },
+                      {
+                        "address": "ada@example.com",
+                        "percentage": 50,
+                        "amount": 5000
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Fan-out created. Each recipient is returned with the id of the stream leg that was written for it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultiRecipientStreamV2"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "409": {
+            "description": "Idempotency-Key reused with a different request body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "description": "Per-org daily stream quota exceeded. Retry-After is set to the seconds until UTC midnight.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
     "/api/v2/streams/{id}": {
       "parameters": [
         {
@@ -3779,7 +4104,7 @@
                           "type": "array",
                           "description": "Array of streams that were paused by this request.",
                           "items": {
-                            "$ref": "#/components/schemas/Stream"
+                            "$ref": "#/components/schemas/StreamV1"
                           }
                         },
                         "count": {

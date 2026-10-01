@@ -47,3 +47,54 @@ Updated layout styles on `.maskLabel` and `.copyBtn` to use flex layout (`displa
   - Verifies hiding hints when `showKbdHints={false}`.
   - Tests keydown events for `'c'` and `'m'`.
   - Confirms text inputs block shortcut triggers.
+
+## Complete keyboard shortcut reference (issue #1649)
+
+Every shortcut in StreamPay is declared once in `lib/shortcuts.ts`. That module
+is the single source of truth for the `?` overlay
+(`app/components/ShortcutsOverlay.tsx`), the Help FAQ
+(`app/help/page.tsx`) and the create-stream form hints
+(`app/CreateStreamForm.tsx`). Editing the registry updates all three surfaces,
+this table, and `lib/shortcuts.test.ts` — there is no second copy to drift.
+
+| Context | Keys | What it does |
+| --- | --- | --- |
+| Global | `?` | Show keyboard shortcuts |
+| Global | `⌘/Ctrl + K` | Open command palette |
+| Global | `Esc` | Close dialogs |
+| Navigation | `Tab` | Move focus forward |
+| Navigation | `Shift + Tab` | Move focus backward |
+| Navigation | `↑ + ↓` | Navigate lists |
+| Navigation | `← + →` | Navigate tabs |
+| Navigation | `Home` | First tab |
+| Navigation | `End` | Last tab |
+| Navigation | `Enter` | Select or activate |
+| Create stream form | `Ctrl + ↵` | Submit the form |
+| Create stream form | `Esc` | Cancel and close the form |
+| Create stream form | `Alt + R` | Jump focus to the recipient field |
+| Create stream form | `Alt + A` | Jump focus to the amount field |
+| Receipt card | `M` | Toggle recipient address masking |
+| Receipt card | `C` | Copy the formatted receipt text |
+
+### Scoping rules
+
+- `Alt+R` / `Alt+A` only apply while the create-stream form is mounted, and the
+  overlay now lists them under the **Create stream form** heading.
+- `Ctrl + ↵` submits the create-stream form and is ignored unless focus is in a
+  text-entry control, so it never hijacks Enter elsewhere.
+- `Esc` closes the create-stream form (the hint on the Cancel button) as well as
+  dialogs, and is ignored when combined with Alt/Ctrl/Cmd.
+- `M` / `C` are ReceiptCard-local single-key shortcuts; they are suppressed while
+  focus is inside a text-entry control (see `lib/keyboard.ts`).
+
+### Tests
+
+- `lib/shortcuts.test.ts` — registry invariants: unique ids, context/scope
+  agreement, one group per scope, no duplicate combo inside a scope, and the
+  `Alt+R` / `Alt+A` context labels.
+- `app/components/ShortcutsOverlay.test.tsx` — one overlay row per registry
+  entry, and the form shortcuts shown under their context heading.
+- `app/help/page.test.tsx` — the FAQ renders every registry entry, so the page
+  cannot fall behind the overlay.
+- `app/CreateStreamForm.test.tsx` — `Esc` cancels the form and the button hints
+  render the registry keys verbatim.

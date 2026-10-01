@@ -6,6 +6,26 @@
  * Stellar network, and troubleshooting local-dev issues.
  */
 
+import { SHORTCUT_GROUPS, formatShortcutKeys, getShortcut } from "@/lib/shortcuts";
+
+/** Keys for a single shortcut id, e.g. "⌘/Ctrl + K". */
+function keysFor(id: string): string {
+  return formatShortcutKeys(getShortcut(id).keys);
+}
+
+/**
+ * The full reference, generated from the registry so the FAQ can never fall
+ * behind the `?` overlay or the in-form hints.
+ */
+function fullShortcutReference(): string {
+  return SHORTCUT_GROUPS.map((group) => {
+    const entries = group.shortcuts
+      .map((shortcut) => `${formatShortcutKeys(shortcut.keys)} ${shortcut.description}`)
+      .join("; ");
+    return `${group.label} — ${entries}.`;
+  }).join(" ");
+}
+
 export const metadata = {
   title: "Help & FAQ — StreamPay",
   description:
@@ -63,13 +83,13 @@ const FAQ_SECTIONS: FaqSection[] = [
         id: "shortcuts-overlay",
         question: "How do I view all available keyboard shortcuts?",
         answer:
-          'Press <kbd>?</kbd> anywhere in the app to open the Keyboard Shortcuts overlay, which lists every available shortcut. Press <kbd>?</kbd> again or <kbd>Esc</kbd> to close the overlay. Press <kbd>&#8984;/Ctrl</kbd>&thinsp;+&thinsp;<kbd>K</kbd> to open the command palette for searching streams.',
+          `Press ${keysFor("global.toggle-overlay")} anywhere in the app to open the Keyboard Shortcuts overlay, which lists every available shortcut grouped by where it applies. Press ${keysFor("global.toggle-overlay")} again or ${keysFor("global.close-dialogs")} to close it. Press ${keysFor("global.command-palette")} to open the command palette for searching streams. This page, the overlay and the in-form hints all render from one registry (lib/shortcuts.ts), so they cannot disagree.`,
       },
       {
         id: "shortcuts-list",
         question: "What keyboard shortcuts are available?",
         answer:
-          "Global shortcuts: <kbd>?</kbd> toggles the shortcuts overlay, <kbd>&#8984;/Ctrl</kbd>&thinsp;+&thinsp;<kbd>K</kbd> opens the command palette, and <kbd>Esc</kbd> closes any open dialog or panel. Navigation shortcuts: <kbd>Tab</kbd> and <kbd>Shift</kbd>&thinsp;+&thinsp;<kbd>Tab</kbd> move focus forward and backward, arrow keys navigate lists and tabs, <kbd>Home</kbd> and <kbd>End</kbd> jump to the first and last tab, and <kbd>Enter</kbd> selects or activates the focused element.",
+          `${fullShortcutReference()} Shortcuts in a scoped group are only live where that scope applies: the Create stream form shortcuts do nothing outside the form, and the Receipt card shortcuts only work while a receipt is on screen. Single-key shortcuts such as ${keysFor("receipt-card.toggle-mask")} and ${keysFor("receipt-card.copy")} are ignored while you are typing in a text field.`,
       },
     ],
   },

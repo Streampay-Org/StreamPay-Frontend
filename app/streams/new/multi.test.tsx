@@ -9,8 +9,10 @@
  * - Accessibility: WCAG 2.1 AA — labels, aria attributes, roles
  * - Validation: Next disabled until required fields are filled
  * - Behaviour: total-amount change propagates to recipient amounts
+ * - Submission: the wizard POSTs the documented payload to
+ *   POST /api/v2/streams/multi and renders the server's error message on a
+ *   rejected request
  * - Success: success screen renders after submit
- * - Error: error alert renders on submission failure
  * - TotalsBar: sticky bar shows running totals
  * - StepIndicator: progress landmark present
  */
@@ -22,11 +24,10 @@ import {
   fireEvent,
   waitFor,
   within,
-  act,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
-import MultiRecipientStreamPage from "./multi";
+import MultiRecipientStreamPage, { MULTI_STREAM_ENDPOINT } from "./multi";
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
@@ -39,8 +40,33 @@ beforeAll(() => {
   });
 });
 
+/** Body returned by a successful fan-out creation. */
+const CREATED_RESPONSE = {
+  id: "stream-multi-abcd1234",
+  kind: "multi_recipient",
+  status: "draft",
+  recipient_count: 1,
+};
+
+/** Minimal `Response`-alike: the wizard only reads `ok`, `status` and `json()`. */
+function fakeResponse(ok: boolean, status: number, body: unknown) {
+  return {
+    ok,
+    status,
+    json: async () => body,
+  } as unknown as Response;
+}
+
+/**
+ * Default: creation succeeds. Tests that need a rejected request override a
+ * single call with `fetchMock.mockResolvedValueOnce(...)`.
+ */
+let fetchMock: jest.Mock;
+
 beforeEach(() => {
   uuidCounter = 0;
+  fetchMock = jest.fn(async () => fakeResponse(true, 201, CREATED_RESPONSE));
+  (globalThis as unknown as { fetch: unknown }).fetch = fetchMock;
 });
 
 /** Fill in valid step-0 fields so the "Next" button enables. */
@@ -238,6 +264,20 @@ describe("Step 1 – Recipients", () => {
     const nextBtn = screen.getByRole("button", { name: /next: review/i });
     expect(nextBtn).toBeDisabled();
   });
+
+  it("stops adding recipients at the 20-recipient cap", async () => {
+    await renderAtStep1();
+    const addButton = screen.getByRole("button", { name: /\+ add recipient/i });
+
+    // The wizard starts with one recipient; 19 more reaches the cap.
+    for (let i = 0; i < 19; i++) {
+      fireEvent.click(addButton);
+    }
+
+    expect(screen.getAllByPlaceholderText(/GABC\.\.\. or email/i)).toHaveLength(20);
+    expect(addButton).toBeDisabled();
+    expect(screen.getByText(/maximum of 20 recipients reached/i)).toBeInTheDocument();
+  });
 });
 
 // ── Step 2: Review ────────────────────────────────────────────────────────────
@@ -347,6 +387,79 @@ describe("Form submission", () => {
     await waitFor(() => {
       const link = screen.getByRole("link", { name: /view all streams/i });
       expect(link).toHaveAttribute("href", "/streams");
+    });
+  });
+
+  it("POSTs the fan-out to POST /api/v2/streams/multi", async () => {
+    await submitForm();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(MULTI_STREAM_ENDPOINT);
+    expect(url).toBe("/api/v2/streams/multi");
+    expect(init.method).toBe("POST");
+    expect(init.headers["Content-Type"]).toBe("application/json");
+  });
+
+  it("sends a payload that matches the documented request contract", async () => {
+    await submitForm();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(Object.keys(body).sort()).toEqual([
+      "endTime",
+      "name",
+      "recipients",
+      "startTime",
+      "token",
+      "totalAmount",
+    ]);
+    expect(body.name).toBe("GrantFox Q3 Distribution");
+    expect(body.token).toBe("XLM");
+    expect(body.totalAmount).toBe(1000);
+    expect(body.startTime).toBe("2026-09-01T09:00");
+    expect(body.endTime).toBe("2026-12-31T23:59");
+    expect(body.recipients).toEqual([
+      { address: "GABC1234567890", percentage: 100, amount: 1000 },
+    ]);
+  });
+
+  it("surfaces the server's validation message when the request is rejected", async () => {
+    fetchMock.mockResolvedValueOnce(
+      fakeResponse(422, {
+        error: { code: "VALIDATION_ERROR", message: "One or more fields are invalid." },
+      }),
+    );
+
+    await submitForm();
+
+    await waitFor(() => {
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent("One or more fields are invalid.");
+    });
+
+    // The wizard stays on the review step so the user can correct the payload.
+    expect(
+      screen.getByRole("heading", { name: /review & confirm/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to a generic message when the server returns no error body", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => {
+        throw new Error("not json");
+      },
+    } as unknown as Response);
+
+    await submitForm();
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(/HTTP 500/);
     });
   });
 });

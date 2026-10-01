@@ -5,6 +5,7 @@
 import { render } from "@testing-library/react";
 const { screen, within } = require("@testing-library/react") as any;
 import HelpPage from "./page";
+import { SHORTCUT_GROUPS, formatShortcutKeys, getShortcut } from "@/lib/shortcuts";
 
 describe("HelpPage", () => {
   it("renders the page shell and hero", () => {
@@ -122,5 +123,48 @@ describe("HelpPage", () => {
   it("does not render any tabindex overrides", () => {
     const { container } = render(<HelpPage />);
     expect(container.querySelectorAll("[tabindex]")).toHaveLength(0);
+  });
+});
+
+describe("HelpPage — keyboard shortcut reference (issue #1649)", () => {
+  it("renders every registry shortcut in the reference answer", () => {
+    render(<HelpPage />);
+
+    const answer = document.querySelector("#shortcuts-list")?.textContent ?? "";
+    expect(answer.length).toBeGreaterThan(0);
+
+    for (const group of SHORTCUT_GROUPS) {
+      expect(answer).toContain(group.label);
+      for (const shortcut of group.shortcuts) {
+        expect(answer).toContain(shortcut.description);
+        expect(answer).toContain(formatShortcutKeys(shortcut.keys));
+      }
+    }
+  });
+
+  it("names the overlay toggle and command palette keys from the registry", () => {
+    render(<HelpPage />);
+
+    const answer =
+      document.querySelector("#shortcuts-overlay")?.textContent ?? "";
+    expect(answer).toContain("Keyboard Shortcuts overlay");
+    expect(answer).toContain("lib/shortcuts.ts");
+    expect(answer).toContain(
+      formatShortcutKeys(getShortcut("global.toggle-overlay").keys),
+    );
+    expect(answer).toContain(
+      formatShortcutKeys(getShortcut("global.close-dialogs").keys),
+    );
+    expect(answer).toContain(
+      formatShortcutKeys(getShortcut("global.command-palette").keys),
+    );
+  });
+
+  it("keeps the shortcuts section reachable from the quick-jump nav", () => {
+    render(<HelpPage />);
+
+    expect(
+      screen.getByRole("link", { name: "Keyboard Shortcuts" }),
+    ).toHaveAttribute("href", "#keyboard-shortcuts");
   });
 });

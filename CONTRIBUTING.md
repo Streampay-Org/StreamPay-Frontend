@@ -31,6 +31,31 @@ see [docs/backend-contributing.md](docs/backend-contributing.md).
 - Avoid coupling tests to private implementation details — prefer
   observable behavior at the module boundary.
 
+## Accessibility
+
+All UI changes should meet WCAG 2.1 AA. Before opening a pull request,
+verify keyboard operability, screen-reader labelling, and motion/color
+handling for anything you touched, and check the corresponding box in the
+PR template's Accessibility section. A few examples from this codebase to
+use as reference:
+
+- **Focus management** — interactive elements need a visible
+  `:focus-visible` outline and a sane tab order. See
+  [docs/createstreamform-focus-visible.md](docs/createstreamform-focus-visible.md)
+  and [docs/streamprogress-focus-accessibility.md](docs/streamprogress-focus-accessibility.md).
+- **Live regions** — state changes that don't move focus (copy-to-clipboard,
+  toasts, filter results) must be announced to screen readers via
+  `aria-live`. See [docs/receiptcard-aria-live.md](docs/receiptcard-aria-live.md)
+  and [docs/streamtypechip-aria-live.md](docs/streamtypechip-aria-live.md).
+- **Reduced motion** — animations and transitions must fall back to a
+  static state when `prefers-reduced-motion: reduce` is set. See
+  [docs/WALLET_BADGE_REDUCED_MOTION.md](docs/WALLET_BADGE_REDUCED_MOTION.md).
+- **Color-only status** — never rely on color alone to convey state; pair
+  it with an icon, text, or pattern.
+
+For a worked example of a full accessibility self-check on a feature, see
+[design/streams-search-filter/WCAG_SELF_CHECK.md](design/streams-search-filter/WCAG_SELF_CHECK.md).
+
 ## Reporting issues
 
 When filing a bug, please include:

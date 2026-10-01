@@ -10,34 +10,14 @@ import React, {
   useState,
 } from "react";
 import { isTextEntry } from "@/lib/keyboard";
+import { SHORTCUT_GROUPS } from "@/lib/shortcuts";
 
-interface ShortcutGroup {
-  label: string;
-  shortcuts: { keys: string[]; description: string }[];
-}
-
-const GROUPS: ShortcutGroup[] = [
-  {
-    label: "Global",
-    shortcuts: [
-      { keys: ["?"], description: "Show keyboard shortcuts" },
-      { keys: ["⌘/Ctrl", "K"], description: "Open command palette" },
-      { keys: ["Esc"], description: "Close dialogs" },
-    ],
-  },
-  {
-    label: "Navigation",
-    shortcuts: [
-      { keys: ["Tab"], description: "Move focus forward" },
-      { keys: ["Shift", "Tab"], description: "Move focus backward" },
-      { keys: ["↑", "↓"], description: "Navigate lists" },
-      { keys: ["←", "→"], description: "Navigate tabs" },
-      { keys: ["Home"], description: "First tab" },
-      { keys: ["End"], description: "Last tab" },
-      { keys: ["Enter"], description: "Select or activate" },
-    ],
-  },
-];
+//
+// The shortcut list is not defined here: it lives in `lib/shortcuts.ts`, which
+// the Help FAQ and the create-stream form hints also read. Rows render the
+// registry's own `context` so the overlay can never disagree with the rest of
+// the app about which scope a shortcut belongs to (issue #1649).
+//
 
 export function ShortcutsOverlay() {
   const [isOpen, setIsOpen] = useState(false);
@@ -263,8 +243,8 @@ export function ShortcutsOverlay() {
             flex: 1,
           }}
         >
-          {GROUPS.map((group) => (
-            <div key={group.label} style={{ marginBottom: "1.25rem" }}>
+          {SHORTCUT_GROUPS.map((group) => (
+            <div key={group.scope} style={{ marginBottom: "1.25rem" }}>
               <h3
                 style={{
                   fontSize: "0.75rem",
@@ -286,7 +266,11 @@ export function ShortcutsOverlay() {
               >
                 {group.shortcuts.map((shortcut) => (
                   <div
-                    key={shortcut.description}
+                    key={shortcut.id}
+                    data-shortcut-id={shortcut.id}
+                    data-shortcut-scope={shortcut.scope}
+                    data-shortcut-context={shortcut.context}
+                    title={`${shortcut.context}: ${shortcut.description}`}
                     style={{
                       display: "flex",
                       justifyContent: "space-between",

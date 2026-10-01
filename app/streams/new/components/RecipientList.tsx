@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { Card } from "../../../components/Card";
 import { CopyAddress } from "../../../components/CopyAddress";
+import { MAX_RECIPIENTS, allocationSumsToTarget } from "@/app/lib/multi-recipient";
 
 export interface Recipient {
   id: string;
@@ -55,6 +56,7 @@ export function RecipientList({ totalAmount, recipients, onChange }: RecipientLi
   }, [preset, recipients.length, totalAmount, onChange, recipients]);
 
   const handleAddRecipient = () => {
+    if (recipients.length >= MAX_RECIPIENTS) return;
     const newRecipient: Recipient = {
       id: crypto.randomUUID(),
       address: "",
@@ -86,6 +88,10 @@ export function RecipientList({ totalAmount, recipients, onChange }: RecipientLi
   };
 
   const totalPercentage = recipients.reduce((sum, r) => sum + r.percentage, 0);
+  const atRecipientCap = recipients.length >= MAX_RECIPIENTS;
+  const allocationComplete = allocationSumsToTarget(
+    recipients.map((r) => r.percentage),
+  );
 
   return (
     <Card padding="lg" className="recipient-list-card">
@@ -215,19 +221,31 @@ export function RecipientList({ totalAmount, recipients, onChange }: RecipientLi
       </div>
 
       <div style={{ marginTop: "1.5rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <button 
-          type="button" 
-          onClick={handleAddRecipient}
-          className="button button--secondary"
-          style={{ fontSize: "var(--text-sm)", padding: "0.5rem 1rem" }}
-        >
-          + Add Recipient
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <button
+            type="button"
+            onClick={handleAddRecipient}
+            className="button button--secondary"
+            disabled={atRecipientCap}
+            aria-describedby={atRecipientCap ? "recipient-cap-hint" : undefined}
+            style={{ fontSize: "var(--text-sm)", padding: "0.5rem 1rem" }}
+          >
+            + Add Recipient
+          </button>
+          {atRecipientCap && (
+            <span id="recipient-cap-hint" style={{ fontSize: "var(--text-sm)", color: "var(--muted-light)" }}>
+              Maximum of {MAX_RECIPIENTS} recipients reached.
+            </span>
+          )}
+        </div>
 
-        <div style={{ 
-          fontSize: "var(--text-sm)", 
-          color: totalPercentage > 100 ? "var(--error)" : (totalPercentage === 100 ? "var(--success)" : "var(--warning)")
-        }}>
+        <div
+          role="status"
+          style={{
+            fontSize: "var(--text-sm)",
+            color: totalPercentage > 100 ? "var(--error)" : (allocationComplete ? "var(--success)" : "var(--warning)")
+          }}
+        >
           Total Allocated: {totalPercentage.toFixed(2)}%
         </div>
       </div>

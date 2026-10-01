@@ -11,8 +11,11 @@
  *   - `Ctrl + ↵`  → Submit (shown on the Create Stream button)
  *   - `Alt + R`   → Jump focus to the Recipient field
  *   - `Alt + A`   → Jump focus to the Amount field
- *   These hints are rendered with `<KbdHint>` and are also keyboard-active
- *   via a `keydown` listener on the form element.
+ *   These hints are rendered with `<KbdHint>`, are keyboard-active via a
+ *   `keydown` listener, and every key label comes from the shared registry in
+ *   `lib/shortcuts.ts` (`create-stream-form.*`) — the same registry the `?`
+ *   overlay and the Help FAQ read. There is no hand-written copy of a shortcut
+ *   left in this file, so the hints cannot drift from the real bindings.
  *
  * ### skel-v7 — Themed loading skeleton
  *   When the `isLoading` prop is `true` the form body is replaced with a
@@ -46,6 +49,7 @@ import { KbdHint } from "../src/components/KbdHint";
 import { Skeleton } from "../src/components/Skeleton";
 import { LiveRegion } from "../src/components/LiveRegion";
 import { isTextEntry } from "@/lib/keyboard";
+import { shortcutKeys } from "@/lib/shortcuts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -137,6 +141,14 @@ export function CreateStreamForm({
   const recipientRef = useRef<HTMLInputElement>(null);
   const amountRef = useRef<HTMLInputElement>(null);
 
+  // ── Cancel handler ─────────────────────────────────────────────────────────
+  // Declared before the keydown listener so the Esc binding can call it.
+
+  const handleCancel = useCallback(() => {
+    setAnnouncement("Stream creation cancelled.");
+    onCancel?.();
+  }, [onCancel]);
+
   // ── Keyboard shortcut handler ──────────────────────────────────────────────
 
   useEffect(() => {
@@ -164,11 +176,19 @@ export function CreateStreamForm({
         e.preventDefault();
         amountRef.current?.focus();
       }
+
+      // Esc → cancel / close the form. This is the binding the Cancel button
+      // advertises, and it is ignored when combined with Alt/Ctrl/Cmd so OS
+      // and browser shortcuts are never shadowed.
+      if (e.key === "Escape" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        handleCancel();
+      }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [handleCancel]);
 
   // ── Submit handler ─────────────────────────────────────────────────────────
 
@@ -190,12 +210,6 @@ export function CreateStreamForm({
     }
   };
 
-  // ── Cancel handler ─────────────────────────────────────────────────────────
-
-  const handleCancel = () => {
-    setAnnouncement("Stream creation cancelled.");
-    onCancel?.();
-  };
 
   // ── Render skeleton ────────────────────────────────────────────────────────
 
@@ -248,7 +262,7 @@ export function CreateStreamForm({
             </label>
             {/* Keyboard shortcut hint: Alt+R focuses this field */}
             <KbdHint
-              keys={["Alt", "R"]}
+              keys={shortcutKeys("create-stream-form.focus-recipient")}
               label="Jump to recipient field"
               aria-hidden
             />
@@ -285,7 +299,7 @@ export function CreateStreamForm({
               </label>
               {/* Keyboard shortcut hint: Alt+A focuses this field */}
               <KbdHint
-                keys={["Alt", "A"]}
+                keys={shortcutKeys("create-stream-form.focus-amount")}
                 label="Jump to amount field"
                 aria-hidden
               />
@@ -334,7 +348,7 @@ export function CreateStreamForm({
           >
             Cancel
             <KbdHint
-              keys={["Esc"]}
+              keys={shortcutKeys("create-stream-form.cancel")}
               label="Cancel and go back"
               className="button__kbd"
               aria-hidden
@@ -351,7 +365,7 @@ export function CreateStreamForm({
             {isSubmitting ? "Creating…" : "Create Stream"}
             {!isSubmitting && (
               <KbdHint
-                keys={["Ctrl", "↵"]}
+                keys={shortcutKeys("create-stream-form.submit")}
                 label="Submit with keyboard"
                 className="button__kbd"
                 aria-hidden

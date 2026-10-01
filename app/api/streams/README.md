@@ -1,5 +1,8 @@
 ## Streams API
 
+> Stream templates (`/api/streams/template`) and the `/templates` page are
+> documented separately in [`docs/api/stream-templates.md`](../../docs/api/stream-templates.md).
+
 ### Endpoints
 
 #### GET /api/streams/:id/events (SSE)

@@ -4,26 +4,39 @@
 
 This repository implements comprehensive security scanning as part of the CI/CD pipeline. This guide explains how to configure branch protection to enforce security gates.
 
-## Security Workflows
+## Workflow inventory and merge gates
 
-### 1. Security Scans (`.github/workflows/security.yml`)
+The repository has six workflows. The table below describes the workflow files
+as they are currently configured; it is the source of truth when deciding why
+a check ran and whether a failure blocks a merge.
 
-**Triggers:**
-- Pull requests to `main`
-- Pushes to `main`
-- Nightly schedule (2 AM UTC)
-- Manual dispatch
+> **Current gating status:** every job in all six workflows sets
+> `continue-on-error: true`, and most individual steps do too. Therefore all
+> workflow results are **advisory today**. A repository ruleset can still list
+> a check name as required, but a soft-failing job will report success even when
+> one of its checks fails. Remove job/step-level `continue-on-error` from any
+> check before relying on it as an enforcement gate.
 
-**Jobs:**
-- **CodeQL SAST** (`codeql`) - Static analysis for JavaScript/TypeScript
-- **Dependency Audit** (`dependency-scan`) - npm vulnerability scanning
-- **Container Scan** (`container-scan`) - Docker image scanning (conditional)
-- **Security Summary** (`security-summary`) - PR comments and notifications
+| Workflow | Triggers and path filters | Jobs and purpose | Merge status | Local equivalent |
+| --- | --- | --- | --- | --- |
+| [CI](../.github/workflows/ci.yml) | Every push and pull request to `main`; no path filter. | `build-test`: validates the testnet-only environment, builds the Next.js app, runs Jest, then runs the API smoke suite. | **Advisory** (`continue-on-error` on the job and every step). | `npm ci`, then `STELLAR_NETWORK=testnet JWT_SECRET=streampay-dev-secret-do-not-use-in-prod NODE_ENV=test npm run build`, `npm test`, and `npm run smoke`. |
+| [Clippy Lint Gate](../.github/workflows/clippy.yml) | Pushes and pull requests to `main` that change `contracts/**` or the workflow file. | `clippy` (`clippy pedantic`): compiles/lints all contract features for `wasm32v1-none`, treating warnings as errors inside the command. | **Advisory** (the job and steps soft-fail). | From `contracts/`: `cargo clippy --target wasm32v1-none --lib --all-features -- -W clippy::pedantic -D warnings`. |
+| [Gas Budget Regression](../.github/workflows/gas.yml) | Pushes and pull requests to `main` that change `contracts/**` or the workflow file; also manual dispatch. | `gas-budget`: creates optimized WASM, compares the first artifact with `contracts/gas-budget.json`, and uploads the WASM and budget file. | **Advisory** (the job and steps soft-fail). | From `contracts/`: `cargo build --target wasm32v1-none --release`; compare `wc -c target/wasm32v1-none/release/*.wasm` with `baseline_wasm_bytes` and `max_regression_percent` in `gas-budget.json`. |
+| [Security Scans](../.github/workflows/security.yml) | **Manual dispatch only.** It does not currently run on pushes, pull requests, or a schedule. | `codeql`: JavaScript/TypeScript SAST; `dependency-scan`: npm audit plus exemption validation; `container-scan`: Docker/Trivy when a Dockerfile exists; `security-summary`: downloads results and summarizes them. | **Advisory** (all four jobs soft-fail; the CodeQL analyze step is strict inside a soft-failing job). | Run `npm audit`; validate `.github/security-exemptions.json`; if Docker is applicable, build the image and scan it with Trivy. CodeQL requires the CodeQL CLI or a manual workflow run and has no npm script. |
+| [Contract Smoke Tests](../.github/workflows/smoke.yml) | Pushes and pull requests to `main` that change `contracts/**`, `scripts/smoke*.sh`, `scripts/smoke*.ts`, or the workflow file; also manual dispatch with an optional contract id. | `contract-smoke`: installs Node/Rust/Stellar tooling, creates and funds a throwaway testnet identity, builds/deploys the contract (or reuses the supplied id), and runs the contract CLI smoke test. | **Advisory** (the job and every step soft-fail). | Install the Stellar CLI, run `npm ci`, `bash scripts/build-grantfox-contract.sh`, then `bash scripts/smoke.sh --contract` with `STELLAR_NETWORK=testnet`, `STELLAR_SEED_SECRET_KEY`, and optionally `CONTRACT_ID`. |
+| [WASM Size Budget](../.github/workflows/wasm-size.yml) | Pushes and pull requests to `main` that change `contracts/**` or the workflow file. | `wasm-size-check`: builds release WASM and checks every artifact against the hard-coded 100 KiB limit. | **Advisory** (the job and steps soft-fail). | From `contracts/`: `cargo build --target wasm32v1-none --release`; verify each release `.wasm` reports no more than `102400` bytes with `wc -c`. |
 
-### 2. Standard CI (`.github/workflows/ci.yml`)
+### Interpreting a check result
 
-**Jobs:**
-- Build and test validation
+- A workflow omitted from a pull request usually means its path filters did not
+  match. Security Scans is absent unless someone starts it manually.
+- A red step inside one of the current jobs is evidence that the associated
+  validation failed, even when the overall job is green because it soft-fails.
+- GitHub branch protection/rulesets—not the workflow file—decide which named
+  checks are required. Keep the names below synchronized with the job names.
+- For a genuinely blocking gate, remove `continue-on-error` at both the job and
+  critical-step level, run the workflow once, and then add its check name to the
+  `main` ruleset.
 
 ## Branch Protection Configuration
 
@@ -44,11 +57,11 @@ To enforce security gates, configure branch protection rules for `main`:
 - ✅ **Require status checks to pass before merging**
   - ✅ Require branches to be up to date before merging
   
-  **Required status checks:**
+  **Recommended status checks after making those jobs strict:**
   - `build-test` (from CI workflow)
   - `CodeQL SAST` (from Security workflow)
   - `Dependency Security Audit` (from Security workflow)
-  - `Container Security Scan` (optional - only if Dockerfile exists)
+  - `Container Security Scan` (optional; do not require a conditional check unless it always runs)
 
 - ✅ **Require conversation resolution before merging**
 - ✅ **Include administrators** (recommended for security compliance)

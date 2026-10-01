@@ -12,6 +12,7 @@ import React from "react";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { CreateStreamForm } from "./CreateStreamForm";
+import { shortcutKeys } from "@/lib/shortcuts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -539,5 +540,38 @@ describe("CreateStreamForm — tokens-v7 (design-token BEM class hooks)", () => 
     render(<CreateStreamForm onSubmit={resolvedSubmit()} isLoading />);
     const skel = screen.getByTestId("create-stream-skeleton");
     expect(skel.getAttribute("style") ?? "").not.toMatch(/gap:\s*[0-9]/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Registry-backed shortcuts (issue #1649)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("CreateStreamForm — registry-backed shortcuts (issue #1649)", () => {
+  it("renders the submit hint straight from the shared registry", () => {
+    render(<CreateStreamForm onSubmit={resolvedSubmit()} />);
+    const submitBtn = screen.getByRole("button", { name: /create stream/i });
+    const texts = Array.from(submitBtn.querySelectorAll("kbd")).map((kbd) => kbd.textContent);
+    expect(texts).toEqual(shortcutKeys("create-stream-form.submit"));
+  });
+
+  it("cancels the form when Escape is pressed, matching the Cancel hint", () => {
+    const onCancel = jest.fn();
+    render(<CreateStreamForm onSubmit={resolvedSubmit()} onCancel={onCancel} />);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves modified Escape keystrokes to the browser", () => {
+    const onCancel = jest.fn();
+    render(<CreateStreamForm onSubmit={resolvedSubmit()} onCancel={onCancel} />);
+
+    fireEvent.keyDown(document, { key: "Escape", altKey: true });
+    fireEvent.keyDown(document, { key: "Escape", ctrlKey: true });
+    fireEvent.keyDown(document, { key: "Escape", metaKey: true });
+
+    expect(onCancel).not.toHaveBeenCalled();
   });
 });
