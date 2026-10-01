@@ -5,6 +5,7 @@
 import { render } from "@testing-library/react";
 const { fireEvent, screen } = require("@testing-library/react") as any;
 import { ShortcutsOverlay } from "./ShortcutsOverlay";
+import { SHORTCUTS, getShortcut } from "@/lib/shortcuts";
 
 function triggerOpen() {
   fireEvent.keyDown(document, { key: "?" });
@@ -158,5 +159,65 @@ describe("ShortcutsOverlay", () => {
     // The footer should mention that ? toggles the overlay
     const footerText = document.body.textContent || "";
     expect(footerText).toContain("?");
+  });
+});
+
+describe("ShortcutsOverlay — registry parity (issue #1649)", () => {
+  it("renders exactly one row per shortcut in the shared registry", () => {
+    render(<ShortcutsOverlay />);
+    triggerOpen();
+
+    for (const shortcut of SHORTCUTS) {
+      const row = document.body.querySelector(
+        `[data-shortcut-id="${shortcut.id}"]`
+      );
+      expect(row).not.toBeNull();
+      expect(row).toHaveAttribute("data-shortcut-context", shortcut.context);
+    }
+
+    const rows = document.body.querySelectorAll("[data-shortcut-id]");
+    expect(rows).toHaveLength(SHORTCUTS.length);
+  });
+
+  it("labels the form shortcuts with the 'Create stream form' context", () => {
+    render(<ShortcutsOverlay />);
+    triggerOpen();
+
+    expect(screen.getByText("Create stream form")).toBeInTheDocument();
+    expect(screen.getByText("Receipt card")).toBeInTheDocument();
+
+    const recipientRow = document.body.querySelector(
+      '[data-shortcut-id="create-stream-form.focus-recipient"]'
+    ) as HTMLElement;
+    const amountRow = document.body.querySelector(
+      '[data-shortcut-id="create-stream-form.focus-amount"]'
+    ) as HTMLElement;
+
+    expect(recipientRow).not.toBeNull();
+    expect(amountRow).not.toBeNull();
+    expect(recipientRow.getAttribute("data-shortcut-context")).toBe(
+      "Create stream form"
+    );
+    expect(amountRow.getAttribute("data-shortcut-context")).toBe(
+      "Create stream form"
+    );
+    expect(recipientRow.textContent).toContain("Alt");
+    expect(recipientRow.textContent).toContain("R");
+    expect(amountRow.textContent).toContain("Alt");
+    expect(amountRow.textContent).toContain("A");
+  });
+
+  it("renders keys and descriptions from the registry, not a local copy", () => {
+    render(<ShortcutsOverlay />);
+    triggerOpen();
+
+    const shortcut = getShortcut("global.command-palette");
+    const row = document.body.querySelector(
+      '[data-shortcut-id="global.command-palette"]'
+    ) as HTMLElement;
+
+    expect(row.textContent).toContain(shortcut.description);
+    expect(row.textContent).toContain(shortcut.keys[0]);
+    expect(row.textContent).toContain(shortcut.keys[1]);
   });
 });
