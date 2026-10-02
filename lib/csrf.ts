@@ -34,13 +34,13 @@ export function isCsrfProtectedMethod(method: string): boolean {
 }
 
 export function generateCsrfToken(): string {
-  if (typeof globalThis.crypto?.getRandomValues === 'function') {
-    const bytes = new Uint8Array(32);
-    globalThis.crypto.getRandomValues(bytes);
-    return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
+  if (typeof globalThis.crypto?.getRandomValues !== 'function') {
+    throw new Error('Web Crypto API (crypto.getRandomValues) is required to generate secure CSRF tokens.');
   }
 
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const bytes = new Uint8Array(32);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
 }
 
 export function getCsrfCookieValue(request: NextRequest | Request): string | null {
