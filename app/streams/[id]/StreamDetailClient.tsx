@@ -162,15 +162,17 @@ export function StreamDetailClient({
     setError(null);
 
     try {
+      const body =
+        actionRoute === "withdraw"
+          ? { action: actionRoute }
+          : { action: actionRoute, amount: actionSummary.amountLabel };
+
       await fetchWithIdempotency(`/api/streams/${stream.id}/${actionRoute}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          action: actionRoute,
-          amount: actionSummary.amountLabel,
-        }),
+        body: JSON.stringify(body),
       });
 
       alert(

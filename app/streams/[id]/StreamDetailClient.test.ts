@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import type { Stream } from "../../types/openapi";
 
@@ -123,5 +123,32 @@ describe("StreamDetailClient", () => {
     render(React.createElement(StreamDetailClient, { stream: endedStream }));
 
     expect(screen.getByRole("button", { name: /withdraw funds/i })).toBeInTheDocument();
+  });
+
+  it("omits the display-label amount from the withdraw request body", async () => {
+    const { fetchWithIdempotency } = require("../../../lib/apiClient") as {
+      fetchWithIdempotency: jest.Mock;
+    };
+    fetchWithIdempotency.mockClear();
+    const alertSpy = jest.spyOn(window, "alert").mockImplementation(() => {});
+
+    render(React.createElement(StreamDetailClient, { stream: endedStream }));
+
+    fireEvent.click(screen.getByRole("button", { name: /withdraw funds/i }));
+
+    const dialog = screen.getByRole("dialog", { name: /withdraw funds/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: /continue/i }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /^withdraw funds$/i }));
+
+    await waitFor(() => expect(fetchWithIdempotency).toHaveBeenCalledTimes(1));
+
+    const [url, init] = fetchWithIdempotency.mock.calls[0];
+    const body = JSON.parse(init.body);
+
+    expect(url).toBe("/api/streams/stream-yusuf/withdraw");
+    expect(body).toEqual({ action: "withdraw" });
+    expect(JSON.stringify(body)).not.toContain("18 XLM");
+
+    alertSpy.mockRestore();
   });
 });
