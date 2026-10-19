@@ -4,21 +4,33 @@
 
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { axe } from "jest-axe";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import TemplatesPage from "./page";
 
 const mockPush = jest.fn();
+const mockReplace = jest.fn();
+const mockRouter = {
+  push: mockPush,
+  replace: mockReplace,
+  back: jest.fn(),
+  forward: jest.fn(),
+  refresh: jest.fn(),
+  prefetch: jest.fn(),
+};
 
-jest.mock("next/navigation", () => ({
-  useRouter: () => ({
-    push: mockPush,
-    replace: jest.fn(),
-    back: jest.fn(),
-    forward: jest.fn(),
-    refresh: jest.fn(),
-    prefetch: jest.fn(),
-  }),
-  usePathname: () => "/templates",
-}));
+// Use the shared __mocks__/next/navigation.js rather than a page-only mock.
+jest.mock("next/navigation");
+
+function setUrl(query = "") {
+  jest.mocked(useSearchParams).mockReturnValue(new URLSearchParams(query) as ReturnType<typeof useSearchParams>);
+}
+
+async function renderLoaded() {
+  const view = render(<TemplatesPage />);
+  await screen.findByRole("tablist", { name: "Template categories" });
+  return view;
+}
 
 const TEMPLATES = [
   {
@@ -60,7 +72,13 @@ const TEMPLATES = [
 
 beforeEach(() => {
   jest.useFakeTimers();
+  // jsdom has no layout or scrolling implementation.
+  HTMLElement.prototype.scrollIntoView = jest.fn();
   mockPush.mockClear();
+  mockReplace.mockClear();
+  jest.mocked(useRouter).mockReturnValue(mockRouter);
+  jest.mocked(usePathname).mockReturnValue("/templates");
+  setUrl();
 
   global.fetch = jest.fn().mockResolvedValue({
     ok: true,
@@ -69,18 +87,20 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  jest.runOnlyPendingTimers();
+  act(() => jest.runOnlyPendingTimers());
   jest.useRealTimers();
   jest.restoreAllMocks();
 });
 
 describe("TemplatesPage", () => {
   it("shows loading skeleton while fetching templates", () => {
+    global.fetch = jest.fn(() => new Promise<Response>(() => {}));
     render(<TemplatesPage />);
     expect(screen.getByRole("status")).toHaveTextContent(/loading templates/i);
   });
 
   it("renders the page heading", () => {
+    global.fetch = jest.fn(() => new Promise<Response>(() => {}));
     render(<TemplatesPage />);
     expect(
       screen.getByRole("heading", { name: /start with a template/i }),
@@ -88,6 +108,7 @@ describe("TemplatesPage", () => {
   });
 
   it("renders the browse templates section heading", () => {
+    global.fetch = jest.fn(() => new Promise<Response>(() => {}));
     render(<TemplatesPage />);
     expect(
       screen.getByRole("heading", { name: /browse templates/i }),
@@ -107,15 +128,15 @@ describe("TemplatesPage", () => {
     expect(screen.getByText("Savings Roundup")).toBeInTheDocument();
   });
 
-  it("renders the template region with correct count", async () => {
+  it("renders the template panel with the result count", async () => {
     render(<TemplatesPage />);
 
     await act(async () => {
       jest.advanceTimersByTime(1000);
     });
 
-    const region = screen.getByRole("region", { name: /showing 4 templates/i });
-    expect(region).toBeInTheDocument();
+    const panel = screen.getByRole("tabpanel", { name: "All" });
+    expect(within(panel).getByRole("status")).toHaveTextContent("Showing 4 templates");
   });
 
   it("clears aria-busy once templates are loaded", async () => {
@@ -325,6 +346,7 @@ describe("TemplatesPage", () => {
   });
 
   it("cleans up fetch abort on unmount", () => {
+    global.fetch = jest.fn(() => new Promise<Response>(() => {}));
     const abortSpy = jest.spyOn(AbortController.prototype, "abort");
     const { unmount } = render(<TemplatesPage />);
     unmount();
@@ -405,5 +427,205 @@ describe("TemplatesPage", () => {
     });
 
     expect(screen.getByPlaceholderText(/search templates/i)).toBeInTheDocument();
+  });
+
+  it("automatically selects Savings and moves focus with ArrowRight", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    await renderLoaded();
+    act(() => screen.getByRole("tab", { name: "All" }).focus());
+
+    await user.keyboard("{ArrowRight}");
+
+    const savings = screen.getByRole("tab", { name: "Savings" });
+    expect(savings).toHaveFocus();
+    expect(savings).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Savings" })).toHaveTextContent("Monthly Savings");
+  });
+
+  it("supports End, Home and arrow-key wrapping", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    await renderLoaded();
+    act(() => screen.getByRole("tab", { name: "All" }).focus());
+
+    for (const [key, label] of [
+      ["{End}", "Custom"],
+      ["{ArrowRight}", "All"],
+      ["{ArrowLeft}", "Custom"],
+      ["{Home}", "All"],
+    ]) {
+      await user.keyboard(key);
+      const tab = screen.getByRole("tab", { name: label });
+      expect(tab).toHaveFocus();
+      expect(tab).toHaveAttribute("aria-selected", "true");
+    }
+  });
+
+  it("keeps only the active tab in the tab order and lets Tab leave the list", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    await renderLoaded();
+    await user.click(screen.getByRole("tab", { name: "Income" }));
+
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.filter((tab) => tab.tabIndex === 0)).toEqual([screen.getByRole("tab", { name: "Income" })]);
+    tabs.filter((tab) => tab.textContent !== "Income").forEach((tab) => {
+      expect(tab).toHaveAttribute("tabindex", "-1");
+      expect(tab).toHaveAttribute("aria-selected", "false");
+    });
+    await user.tab();
+    expect(screen.getByRole("searchbox", { name: "Search templates" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("tabpanel", { name: "Income" })).toHaveFocus();
+  });
+
+  it("links every tab to the panel, including the empty state", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    await renderLoaded();
+
+    screen.getAllByRole("tab").forEach((tab) => {
+      expect(tab.id).not.toBe("");
+      expect(tab).toHaveAttribute("aria-controls", "template-panel");
+    });
+    await user.click(screen.getByRole("tab", { name: "Custom" }));
+    const panel = screen.getByRole("tabpanel", { name: "Custom" });
+    expect(panel).toHaveAttribute("id", "template-panel");
+    expect(panel).toHaveAttribute("aria-labelledby", screen.getByRole("tab", { selected: true }).id);
+    expect(within(panel).getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+  });
+
+  it("restores category and search from a shared URL without replacing it on mount", async () => {
+    setUrl("category=bills&q=host");
+    await renderLoaded();
+
+    expect(screen.getByRole("tab", { name: "Bills" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("searchbox")).toHaveValue("host");
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("replaces the URL immediately when selecting Income and preserves other parameters", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    setUrl("ref=shared");
+    await renderLoaded();
+    await user.click(screen.getByRole("tab", { name: "Income" }));
+
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledWith("/templates?ref=shared&category=income", { scroll: false });
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it("filters search immediately but replaces the URL only once after 300ms", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    await renderLoaded();
+    await user.type(screen.getByRole("searchbox"), "savings");
+
+    expect(screen.queryByText("Freelancer Income")).not.toBeInTheDocument();
+    act(() => jest.advanceTimersByTime(299));
+    expect(mockReplace).not.toHaveBeenCalled();
+    act(() => jest.advanceTimersByTime(1));
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledWith("/templates?q=savings", { scroll: false });
+  });
+
+  it("falls back to All for an unknown category", async () => {
+    setUrl("category=bogus");
+    await renderLoaded();
+
+    expect(screen.getByRole("tab", { name: "All" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getAllByRole("article")).toHaveLength(TEMPLATES.length);
+  });
+
+  it("restarts the debounce after each edit and safely encodes the final search", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    await renderLoaded();
+    await user.type(screen.getByRole("searchbox"), "a");
+    act(() => jest.advanceTimersByTime(250));
+    await user.type(screen.getByRole("searchbox"), " & b");
+    act(() => jest.advanceTimersByTime(299));
+    expect(mockReplace).not.toHaveBeenCalled();
+    act(() => jest.advanceTimersByTime(1));
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledWith("/templates?q=a+%26+b", { scroll: false });
+  });
+
+  it("removes default category and empty search parameters", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    setUrl("category=savings&q=savings");
+    await renderLoaded();
+    await user.click(screen.getByRole("tab", { name: "All" }));
+    expect(mockReplace).toHaveBeenLastCalledWith("/templates?q=savings", { scroll: false });
+    await user.clear(screen.getByRole("searchbox"));
+    act(() => jest.advanceTimersByTime(300));
+    expect(mockReplace).toHaveBeenLastCalledWith("/templates", { scroll: false });
+  });
+
+  it("clears filter parameters immediately, cancels pending search and restores focus", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    setUrl("category=bills&q=host&ref=shared");
+    await renderLoaded();
+    await user.type(screen.getByRole("searchbox"), "missing");
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    expect(screen.getByRole("searchbox")).toHaveValue("");
+    expect(screen.getByRole("tab", { name: "All" })).toHaveFocus();
+    expect(mockReplace).toHaveBeenCalledWith("/templates?ref=shared", { scroll: false });
+    act(() => jest.advanceTimersByTime(300));
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes the query string entirely when clearing the only parameters", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    setUrl("category=bills&q=missing");
+    await renderLoaded();
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    expect(mockReplace).toHaveBeenCalledWith("/templates", { scroll: false });
+  });
+
+  it("preserves pending search across category replacements without flushing its debounce", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    const { rerender } = await renderLoaded();
+    await user.type(screen.getByRole("searchbox"), "host");
+    await user.click(screen.getByRole("tab", { name: "Bills" }));
+    expect(mockReplace).toHaveBeenLastCalledWith("/templates?category=bills", { scroll: false });
+
+    setUrl("category=bills");
+    rerender(<TemplatesPage />);
+    expect(screen.getByRole("searchbox")).toHaveValue("host");
+    act(() => jest.advanceTimersByTime(300));
+    expect(mockReplace).toHaveBeenLastCalledWith("/templates?category=bills&q=host", { scroll: false });
+    expect(mockReplace).toHaveBeenCalledTimes(2);
+  });
+
+  it("restores filters on URL navigation and cancels an outdated search", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    const { rerender } = await renderLoaded();
+    await user.type(screen.getByRole("searchbox"), "unfinished");
+
+    setUrl("category=income&q=freelancer");
+    rerender(<TemplatesPage />);
+    expect(screen.getByRole("tab", { name: "Income" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("searchbox")).toHaveValue("freelancer");
+    act(() => jest.advanceTimersByTime(300));
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("cancels a pending search when unmounted", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    const { unmount } = await renderLoaded();
+    await user.type(screen.getByRole("searchbox"), "savings");
+    unmount();
+    act(() => jest.advanceTimersByTime(300));
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("has no axe violations in populated and empty panels", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    const { container } = await renderLoaded();
+    jest.useRealTimers();
+    expect(await axe(container)).toHaveNoViolations();
+    jest.useFakeTimers();
+    await user.click(screen.getByRole("tab", { name: "Custom" }));
+    jest.useRealTimers();
+    expect(await axe(container)).toHaveNoViolations();
+    jest.useFakeTimers();
   });
 });
