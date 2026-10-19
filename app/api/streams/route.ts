@@ -20,6 +20,7 @@ import type { Stream } from "@/app/types/openapi";
 import { createCacheHeaders, createStrongEtag, isIfNoneMatchMatch } from "@/src/middleware/etag";
 import { observeStreamsRequest } from "@/src/metrics/registry";
 import { withRouteTimeout } from "@/src/middleware/timeout";
+import { resolveRequestTenantOrDefault } from "@/app/lib/tenant";
 
 function errorResponse(code: string, message: string, status: number) {
   return createErrorResponse(code, message, status);
@@ -251,6 +252,7 @@ async function handleStreamsPost(request: Request) {
       recipient: recipientValue,
       schedule: scheduleValue,
       status: "draft",
+      tenantId: resolveRequestTenantOrDefault(request),
       updatedAt: now,
       token: normalisedToken,
     };

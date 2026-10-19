@@ -259,6 +259,12 @@
             "description": "Unique stream identifier.",
             "example": "stream-abc12345"
           },
+          "tenantId": {
+            "type": "string",
+            "readOnly": true,
+            "description": "Owning tenant. Stamped at creation from the verified JWT tenant claim or `x-tenant-id`. Defaults to `public` when the request carries no tenant context.",
+            "example": "tenant-org-xyz"
+          },
           "recipient": {
             "type": "string",
             "description": "Stellar public key of the payment recipient.",
@@ -1839,8 +1845,8 @@
         {
           "name": "x-tenant-id",
           "in": "header",
-          "required": true,
-          "description": "Tenant context for multi-tenant isolation. Must be a non-empty string.",
+          "required": false,
+          "description": "Tenant context for multi-tenant isolation. Optional: when absent or blank the request resolves to the `public` default tenant. Values are trimmed before use.",
           "schema": {
             "type": "string",
             "example": "tenant-org-xyz"
@@ -1934,23 +1940,6 @@
                         "self": "/api/v1/streams/stream-def67890"
                       }
                     }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing or empty `x-tenant-id` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                },
-                "example": {
-                  "error": {
-                    "code": "MISSING_TENANT",
-                    "message": "Tenant ID header is required",
-                    "request_id": "req_01HZ9ABCDEF"
                   }
                 }
               }
@@ -2082,23 +2071,13 @@
             }
           },
           "400": {
-            "description": "Missing `x-tenant-id` header or invalid JSON body.",
+            "description": "Invalid JSON body. Unknown fields are rejected with `UNKNOWN_FIELD`.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 },
                 "examples": {
-                  "missing-tenant": {
-                    "summary": "x-tenant-id header absent",
-                    "value": {
-                      "error": {
-                        "code": "MISSING_TENANT",
-                        "message": "Tenant ID header is required",
-                        "request_id": "req_01HZ9ABCDEF"
-                      }
-                    }
-                  },
                   "invalid-json": {
                     "summary": "Malformed JSON body",
                     "value": {
@@ -2149,23 +2128,6 @@
         "responses": {
           "204": {
             "description": "Stream deleted. No response body."
-          },
-          "400": {
-            "description": "Missing or empty `x-tenant-id` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                },
-                "example": {
-                  "error": {
-                    "code": "MISSING_TENANT",
-                    "message": "Tenant ID header is required",
-                    "request_id": "req_01HZ9ABCDEF"
-                  }
-                }
-              }
-            }
           },
           "404": {
             "$ref": "#/components/responses/404"

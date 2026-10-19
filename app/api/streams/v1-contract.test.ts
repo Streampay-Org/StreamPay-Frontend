@@ -17,6 +17,7 @@ import { db, resetDb } from "@/app/lib/db";
 import { POST as createStream } from "@/app/api/streams/route";
 import { GET as getStream } from "@/app/api/streams/[id]/route";
 import { V1_SUNSET_DATE, V1_DEPRECATION_DATE } from "@/app/lib/api-version";
+import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
 
 const VALID_STELLAR_KEY = "GDSBCG3OKHCMMWS5EBH2X7XOYTJRWXN2YYQPCNS5OFBU4IDO4X7OFSQA";
 
@@ -34,7 +35,10 @@ function postRequest(body: unknown, headers: Record<string, string> = {}) {
   });
 }
 
-beforeEach(() => resetDb());
+beforeEach(() => {
+  resetDb();
+  resetRateLimitStore();
+});
 
 // ── Create response shape (POST /api/streams) ─────────────────────────────
 

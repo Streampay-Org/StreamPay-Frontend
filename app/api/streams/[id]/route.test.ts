@@ -15,7 +15,7 @@ describe("Stream Details Route - GET /api/streams/:id and mutations", () => {
     // Populate tenant field on the stream in DB for testing finding by tenant
     const stream = db.streams.get(streamId);
     if (stream) {
-      (stream as any).tenant = tenantId;
+      (stream as any).tenantId = tenantId;
       db.streams.set(streamId, stream);
     }
 
@@ -23,15 +23,17 @@ describe("Stream Details Route - GET /api/streams/:id and mutations", () => {
     process.env.STREAMPAY_CACHE_DISABLED = "true";
   });
 
-  it("returns 400 Bad Request if tenant ID is empty/missing", async () => {
+  it("falls back to the default tenant when x-tenant-id is missing", async () => {
+    // The fixture is owned by org-acme, so the public default tenant must not
+    // be able to read it — but the request must be a 404, never a 400.
     const req = new Request(`http://localhost/api/streams/${streamId}`, {
       method: "GET",
-      headers: {}, // no x-tenant-id
+      headers: {}, // no x-tenant-id -> public
     });
     const res = await GET(req, { params: Promise.resolve({ id: streamId }) });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
     const body = await res.json();
-    expect(body.error.code).toBe("MISSING_TENANT");
+    expect(body.error.code).toBe("STREAM_NOT_FOUND");
   });
 
   it("handles GET cache HIT and MISS correctly", async () => {
@@ -235,7 +237,7 @@ describe("Stream Details Route - GET /api/streams/:id ETag + 304 short-circuit",
     resetRateLimitStore();
     const stream = db.streams.get(streamId);
     if (stream) {
-      (stream as any).tenant = tenantId;
+      (stream as any).tenantId = tenantId;
       db.streams.set(streamId, stream);
     }
     process.env.STREAMPAY_CACHE_DISABLED = "true";
@@ -408,7 +410,7 @@ describe("Stream Details Route - GET /api/streams/:id ETag + 304 short-circuit",
     const altStreamDbKey = `${streamId}-alt`;
     const altStream = {
       id: altStreamDbKey,
-      tenant: altTenant,
+      tenantId: altTenant,
       recipient: "Other Tenant Recipient",
       rate: "0 XLM",
       schedule: "alt schedule",

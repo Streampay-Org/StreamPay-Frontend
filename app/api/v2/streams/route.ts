@@ -26,6 +26,7 @@ import { checkOrgDailyQuota, orgQuotaResponse } from "@/app/lib/org-quota";
 import { toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
 import type { Stream } from "@/app/types/openapi";
 import { withRouteTimeout } from "@/src/middleware/timeout";
+import { resolveRequestTenantOrDefault } from "@/app/lib/tenant";
 
 
 function errorResponse(code: string, message: string, status: number) {
@@ -143,6 +144,7 @@ async function handleV2StreamsPost(request: Request) {
     status: "draft",
     nextAction: "start",
     createdAt: now,
+    tenantId: resolveRequestTenantOrDefault(request),
     updatedAt: now,
     token: "XLM",
   };

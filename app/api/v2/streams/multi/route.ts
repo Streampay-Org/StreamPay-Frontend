@@ -49,6 +49,7 @@ import {
 } from "@/app/lib/multi-recipient";
 import type { Stream } from "@/app/types/openapi";
 import { withRouteTimeout } from "@/src/middleware/timeout";
+import { resolveRequestTenantOrDefault } from "@/app/lib/tenant";
 
 /** Idempotency scope, kept distinct from single-recipient stream creation. */
 const IDEMPOTENCY_SCOPE = "v2.streams.multi";
@@ -241,6 +242,7 @@ async function handleMultiRecipientPost(request: Request) {
       status: "draft",
       nextAction: "start",
       createdAt: now,
+      tenantId: resolveRequestTenantOrDefault(request),
       updatedAt: now,
       token: asset,
       totalAmount: amountText,

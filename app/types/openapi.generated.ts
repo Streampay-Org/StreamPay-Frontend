@@ -114,9 +114,9 @@ export interface paths {
     "/api/streams/{id}": {
         parameters: {
             query?: never;
-            header: {
-                /** @description Tenant context for multi-tenant isolation. Must be a non-empty string. */
-                "x-tenant-id": string;
+            header?: {
+                /** @description Tenant context for multi-tenant isolation. Optional: when absent or blank the request resolves to the `public` default tenant. Values are trimmed before use. */
+                "x-tenant-id"?: string;
             };
             path: {
                 /** @description Stream identifier. */
@@ -713,6 +713,11 @@ export interface components {
              * @example stream-abc12345
              */
             id: string;
+            /**
+             * @description Owning tenant. Stamped at creation from the verified JWT tenant claim or `x-tenant-id`. Defaults to `public` when the request carries no tenant context.
+             * @example tenant-org-xyz
+             */
+            readonly tenantId?: string;
             /**
              * @description Stellar public key of the payment recipient.
              * @example GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG
@@ -1501,9 +1506,9 @@ export interface operations {
     getStream: {
         parameters: {
             query?: never;
-            header: {
-                /** @description Tenant context for multi-tenant isolation. Must be a non-empty string. */
-                "x-tenant-id": string;
+            header?: {
+                /** @description Tenant context for multi-tenant isolation. Optional: when absent or blank the request resolves to the `public` default tenant. Values are trimmed before use. */
+                "x-tenant-id"?: string;
             };
             path: {
                 /** @description Stream identifier. */
@@ -1528,24 +1533,6 @@ export interface operations {
                             self: string;
                         };
                     };
-                };
-            };
-            /** @description Missing or empty `x-tenant-id` header. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "error": {
-                     *         "code": "MISSING_TENANT",
-                     *         "message": "Tenant ID header is required",
-                     *         "request_id": "req_01HZ9ABCDEF"
-                     *       }
-                     *     }
-                     */
-                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             404: components["responses"]["404"];
@@ -1573,9 +1560,9 @@ export interface operations {
     updateStream: {
         parameters: {
             query?: never;
-            header: {
-                /** @description Tenant context for multi-tenant isolation. Must be a non-empty string. */
-                "x-tenant-id": string;
+            header?: {
+                /** @description Tenant context for multi-tenant isolation. Optional: when absent or blank the request resolves to the `public` default tenant. Values are trimmed before use. */
+                "x-tenant-id"?: string;
             };
             path: {
                 /** @description Stream identifier. */
@@ -1621,7 +1608,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Missing `x-tenant-id` header or invalid JSON body. */
+            /** @description Invalid JSON body. Unknown fields are rejected with `UNKNOWN_FIELD`. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -1655,9 +1642,9 @@ export interface operations {
     deleteStream: {
         parameters: {
             query?: never;
-            header: {
-                /** @description Tenant context for multi-tenant isolation. Must be a non-empty string. */
-                "x-tenant-id": string;
+            header?: {
+                /** @description Tenant context for multi-tenant isolation. Optional: when absent or blank the request resolves to the `public` default tenant. Values are trimmed before use. */
+                "x-tenant-id"?: string;
             };
             path: {
                 /** @description Stream identifier. */
@@ -1673,24 +1660,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Missing or empty `x-tenant-id` header. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "error": {
-                     *         "code": "MISSING_TENANT",
-                     *         "message": "Tenant ID header is required",
-                     *         "request_id": "req_01HZ9ABCDEF"
-                     *       }
-                     *     }
-                     */
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
             };
             404: components["responses"]["404"];
             409: components["responses"]["409"];

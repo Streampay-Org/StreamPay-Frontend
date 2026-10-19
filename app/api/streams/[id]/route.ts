@@ -6,6 +6,7 @@ import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { streamCache } from "@/app/lib/cache";
+import { resolveRequestTenantOrDefault } from "@/app/lib/tenant";
 
 /**
  * Resolve the active Stellar network identifier for cache scoping.
@@ -84,10 +85,7 @@ export async function GET(
     return rateLimited;
   }
 
-  const tenant = request.headers.get("x-tenant-id");
-  if (!tenant || tenant.trim() === "") {
-    return errorResponse("MISSING_TENANT", "Tenant ID header is required", 400);
-  }
+  const tenant = resolveRequestTenantOrDefault(request);
 
   // Network-scoped cache check: a testnet entry cannot leak into a mainnet request.
   const cachedStream = streamCache.get(tenant, id, currentNetwork());
@@ -141,10 +139,7 @@ export async function POST(
     return rateLimited;
   }
 
-  const tenant = request.headers.get("x-tenant-id");
-  if (!tenant || tenant.trim() === "") {
-    return errorResponse("MISSING_TENANT", "Tenant ID header is required", 400);
-  }
+  const tenant = resolveRequestTenantOrDefault(request);
 
   const stream = db.streams.findOne ? db.streams.findOne(tenant, id) : null;
   if (!stream) {
@@ -181,10 +176,7 @@ export async function DELETE(request: Request, { params }: Context) {
     return rateLimited;
   }
 
-  const tenant = request.headers.get("x-tenant-id");
-  if (!tenant || tenant.trim() === "") {
-    return errorResponse("MISSING_TENANT", "Tenant ID header is required", 400);
-  }
+  const tenant = resolveRequestTenantOrDefault(request);
 
   const stream = db.streams.findOne ? db.streams.findOne(tenant, id) : null;
   if (!stream) {

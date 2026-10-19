@@ -177,12 +177,17 @@ export interface AuthenticatedActor {
   actorId: string;
   walletAddress: string;
   role: AuditActorRole;
+  /** Tenant claim from the verified token, when one was issued. */
+  tenantId?: string;
 }
 
 interface TokenClaims {
   sub?: string;
   role?: string;
   actorId?: string;
+  tenantId?: string;
+  tenant_id?: string;
+  tenant?: string;
   iss?: string;
   aud?: string | string[];
 }
@@ -266,6 +271,10 @@ export function tryAuthenticateRequest(request: Request): AuthenticatedActor | n
 
       if (!verified.sub) return null;
 
+      const claimTenant = [verified.tenantId, verified.tenant_id, verified.tenant].find(
+        (value): value is string => typeof value === "string" && value.trim().length > 0,
+      );
+
       return {
         actorId:
           typeof verified.actorId === "string" && verified.actorId.length > 0
@@ -273,6 +282,7 @@ export function tryAuthenticateRequest(request: Request): AuthenticatedActor | n
             : verified.sub,
         walletAddress: verified.sub,
         role: normalizeRole(verified.role),
+        ...(claimTenant ? { tenantId: claimTenant.trim() } : {}),
       };
     } catch {
       // Try the next configured secret.
