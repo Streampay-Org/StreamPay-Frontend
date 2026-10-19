@@ -1,3 +1,4 @@
+import { generateRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { isSecret, redactSecrets } from './config';
 
@@ -39,21 +40,7 @@ function parseTraceparent(traceparent: string | null): string | undefined {
 
 // Extract correlation context from headers
 export function extractCorrelationContext(headers: Headers): CorrelationContext {
-  const correlationIdHeader = headers.get('x-correlation-id') || headers.get('correlation-id');
-  const requestId = headers.get('x-request-id') || headers.get('request-id') || correlationIdHeader || generateUUID();
-  const correlationId = correlationIdHeader || requestId;
-  const traceparent = parseTraceparent(headers.get('traceparent'));
-  const streamId = headers.get('x-stream-id') || headers.get('stream-id') || undefined;
-  const jobId = headers.get('x-job-id') || headers.get('job-id') || undefined;
 
-  return {
-    request_id: requestId,
-    correlation_id: correlationId,
-    traceparent,
-    stream_id: streamId,
-    job_id: jobId,
-  };
-}
 
 // Get current correlation context
 export function getCorrelationContext(): CorrelationContext | undefined {
@@ -69,6 +56,35 @@ export function withCorrelationContext<T>(
 }
 
 // Set correlation context without callback (for sync operations)
+export function extractCorrelationContext(headers: Headers): CorrelationContext {
+  const rawRequestId =
+    headers.get("x-request-id") ||
+    headers.get("request-id") ||
+    headers.get("x-correlation-id");
+
+  let request_id: string;
+  let request_id_rejected = false;
+
+  if (rawRequestId && isValidRequestId(rawRequestId)) {
+    request_id = rawRequestId;
+  } else if (rawRequestId) {
+    request_id = generateRequestId();
+    request_id_rejected = true;
+  } else {
+    request_id = generateRequestId();
+  }
+
+  const rawStream = headers.get("x-stream-id") || headers.get("stream-id") || undefined;
+  const stream_id =
+    rawStream && isValidRequestId(rawStream) ? rawStream : undefined;
+
+  return {
+    request_id,
+    ...(request_id_rejected ? { request_id_rejected: true } : {}),
+    ...(stream_id ? { stream_id } : {}),
+    // keep other fields your type already has
+  };
+}
 export function setCorrelationContext(context: CorrelationContext): void {
   correlationContext.enterWith(context);
 }
