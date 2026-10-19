@@ -221,7 +221,7 @@ describe("GET /api/streams query validation", () => {
 
   it("never repeats a stream while walking the pages (property)", async () => {
     await fc.assert(
-      fc.property(
+      fc.asyncProperty(
         fc.array(fc.integer({ min: 1, max: 3 }), { minLength: 1, maxLength: 12 }),
         fc.integer({ min: 1, max: 4 }),
         async (gaps, limit) => {
