@@ -172,7 +172,11 @@ export const db = {
         const store = getStore().streamRepository.streams;
         const row = store.get(id);
         if (!row) return null;
-        return (row as any).tenant === tenant ? row : null;
+        // `tenantId` is the persisted field. Read the legacy `tenant` field as
+        // a fallback for one release so rows written before tenant stamping
+        // keep resolving for their existing owner.
+        const rowTenant = (row as any).tenantId ?? (row as any).tenant;
+        return rowTenant === tenant ? row : null;
       }
     });
   },

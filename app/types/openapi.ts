@@ -45,6 +45,11 @@ export interface CancellationSplit {
 
 export interface Stream {
   id: string;
+  /**
+   * Owning tenant. Stamped at creation from the request tenant context
+   * (`public` when none is supplied). Never empty for newly created streams.
+   */
+  tenantId?: string;
   recipient: string;
   rate: string;
   schedule: string;

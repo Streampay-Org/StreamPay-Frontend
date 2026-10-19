@@ -10,6 +10,7 @@ import type {
 } from "@/app/lib/db";
 import type { ActivityEvent, ExportJob, Stream, User } from "@/app/types/openapi";
 import { createActivityTimelineStore, type ActivityTimelineStore, activityEventToTimelineEntry } from "@/app/lib/repositories/activity-timeline";
+import { DEFAULT_TENANT } from "@/app/lib/tenant";
 
 // Keep seeded demo timestamps recent (no-op under Jest).
 const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
@@ -41,6 +42,7 @@ const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
     status: "active",
     nextAction: "pause",
     createdAt: demoDate("2026-04-01T09:00:00Z"),
+    tenantId: DEFAULT_TENANT,
     updatedAt: demoDate("2026-04-28T10:30:00Z"),
     email: "fixture-user-1@example.test", // non-real domain
     label: "Design Retainer Q2",
@@ -55,6 +57,7 @@ const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
     status: "draft",
     nextAction: "start",
     createdAt: demoDate("2026-04-10T14:00:00Z"),
+    tenantId: DEFAULT_TENANT,
     updatedAt: demoDate("2026-04-28T11:00:00Z"),
     email: "fixture-user-2@example.test", // non-real domain
     memo: "April Support batch",
@@ -68,6 +71,7 @@ const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
     status: "ended",
     nextAction: "withdraw",
     createdAt: demoDate("2026-04-15T08:00:00Z"),
+    tenantId: DEFAULT_TENANT,
     updatedAt: demoDate("2026-04-27T20:00:00Z"),
     token: "XLM",
   },

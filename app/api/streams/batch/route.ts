@@ -14,6 +14,7 @@ import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { checkTokenAllowed, checkTokenAllowedForOrg, normaliseToken } from "@/app/lib/token-allowlist";
 import { validateCreateStreamBody } from "@/app/lib/stream-validation";
 import { orgDb } from "@/app/lib/org-db";
+import { resolveRequestTenantOrDefault } from "@/app/lib/tenant";
 
 const MAX_BATCH_SIZE = 20;
 
@@ -258,6 +259,7 @@ export async function POST(request: NextRequest) {
       recipient: input.recipient,
       schedule: input.schedule,
       status: "draft" as const,
+      tenantId: resolveRequestTenantOrDefault(request),
       updatedAt: now,
       token: input.token,
     };
