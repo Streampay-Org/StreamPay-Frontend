@@ -5,6 +5,7 @@ import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { getCorrelationContext, logger, withCorrelationContext } from "@/app/lib/logger";
 import { withRouteTimeout } from "@/src/middleware/timeout";
+import { resolveRequestId, isValidRequestId, generateRequestId } from "@/lib/requestId";
 
 function createErrorResponse(code: string, message: string, status: number) {
   const context = getCorrelationContext();
@@ -29,8 +30,6 @@ async function handleActivityGet(request: Request) {
   const streamId = searchParams.get("streamId");
   const type = searchParams.get("type");
   const limit = Math.min(Number.parseInt(searchParams.get("limit") || "20", 10), 100);
-
-  import { resolveRequestId, isValidRequestId, generateRequestId } from "@/lib/requestId";
 
   const request_id = resolveRequestId(
     request instanceof Request ? request.headers : new Headers(),
