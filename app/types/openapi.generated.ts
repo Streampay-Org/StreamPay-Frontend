@@ -8,7 +8,7 @@ export interface paths {
         };
         /**
          * List activity events
-         * @description Returns a paginated, cursor-based list of activity events. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId and event type.
+         * @description Returns a paginated, cursor-based list of activity events for the authenticated caller. Only events for streams the caller sends or receives, plus the caller's own wallet events, are returned. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId and event type.
          */
         get: operations["listActivity"];
         put?: never;
@@ -894,6 +894,11 @@ export interface components {
              */
             streamId?: string;
             /**
+             * @description Wallet that produced a non-stream event (for example wallet.connected).
+             * @example GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV
+             */
+            actorAddress?: string;
+            /**
              * Format: date-time
              * @description ISO-8601 timestamp of the event.
              * @example 2026-04-28T09:00:00Z
@@ -904,6 +909,8 @@ export interface components {
              * @example Stream 'Design Retainer' created and set to draft.
              */
             description: string;
+            /** @description Whether the associated stream no longer exists. Such events are not linkable. */
+            isDeleted?: boolean;
         };
         PaginatedMeta: {
             /** @description Whether additional results are available. */
@@ -1073,9 +1080,9 @@ export interface operations {
                 limit?: number;
                 /** @description Opaque base64-encoded composite cursor (timestamp|id) for cursor-based pagination. Obtained from meta.nextCursor of the previous response. */
                 cursor?: string;
-                /** @description Filter events by associated stream identifier. */
+                /** @description Filter events by associated stream identifier. Must match the id charset [A-Za-z0-9._:-]+ and belong to the caller; a non-owned streamId returns 404. */
                 streamId?: string;
-                /** @description Filter events by type (e.g. stream.created, wallet.connected). */
+                /** @description Filter events by a known type (e.g. stream.created, wallet.connected). */
                 type?: string;
             };
             header?: never;
@@ -1093,7 +1100,43 @@ export interface operations {
                     "application/json": components["schemas"]["ActivityResponse"];
                 };
             };
-            /** @description Unprocessable entity — malformed cursor. */
+            /** @description Unauthorized — missing or invalid bearer token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "UNAUTHORIZED",
+                     *         "message": "Missing or invalid authorization header",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found — the requested streamId does not exist or is not owned by the caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "STREAM_NOT_FOUND",
+                     *         "message": "Stream 'stream-abc12345' not found",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable entity — invalid limit (INVALID_LIMIT), type, streamId, or cursor. */
             422: {
                 headers: {
                     [name: string]: unknown;

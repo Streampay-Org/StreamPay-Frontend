@@ -153,6 +153,8 @@ export interface ActivityEvent {
   id: string;
   type: string;
   streamId?: string;
+  /** Wallet that produced a non-stream event (for example `wallet.connected`). */
+  actorAddress?: string;
   timestamp: string;
   description: string;
   isDeleted?: boolean;
