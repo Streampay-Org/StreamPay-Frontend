@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { NextResponse } from "next/server";
+import { resolveRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
 import type { AuditActorRole } from "@/app/types/audit";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -188,8 +189,6 @@ interface TokenClaims {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-import { resolveRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
 
 function createErrorResponse(
   request: Request,
