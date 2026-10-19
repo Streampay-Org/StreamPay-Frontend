@@ -261,6 +261,9 @@ describe("GET /api/streams query validation", () => {
 
           // Every stream is seen exactly once, in list order.
           expect(seen).toEqual(expected);
+
+          // fast-check requires an explicit `true` from the predicate.
+          return true;
         },
       ),
       { numRuns: 20, seed: 42 },
