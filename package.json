@@ -4,6 +4,8 @@
   "private": true,
   "description": "StreamPay Dashboard â€” Stellar wallet integration and stream management",
   "scripts": {
+    "typecheck:core": "tsc -p tsconfig.strict-core.json --noEmit",
+    "typecheck": "tsc --noEmit",
     "dev": "node scripts/run-from-realpath.mjs next dev",
     "build": "node scripts/run-from-realpath.mjs next build",
     "start": "node scripts/run-from-realpath.mjs next start",
