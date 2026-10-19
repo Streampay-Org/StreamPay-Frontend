@@ -2685,6 +2685,53 @@ a:hover {
   height: 6rem;
 }
 
+/* ─── /streams/[id] loading skeleton ───────────────────────────────────────── */
+
+.detail-loading {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.detail-loading__hero {
+  display: grid;
+}
+
+.detail-loading__section,
+.detail-loading__field-stack {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.detail-loading__grid {
+  margin-top: 1.5rem;
+}
+
+.detail-loading__field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.detail-loading__timeline {
+  display: grid;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.detail-loading__timeline-stage {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+}
+
+/* Reduced motion: honour the user's OS preference even though the Skeleton
+   component is rendered before any JS runs. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 .receipt-share-btn {
   align-items: center;
   background: transparent;
