@@ -55,6 +55,10 @@ interface OptionalEnvVars {
   INTERNAL_SERVICE_CURRENT_KEY_ID?: string;
   /** Allowed request freshness window in seconds */
   INTERNAL_SERVICE_CLOCK_SKEW_SECONDS?: string;
+  /** CI provider flag (set automatically in continuous integration) */
+  CI?: string;
+  /** GitHub Actions flag (set automatically on GitHub runners) */
+  GITHUB_ACTIONS?: string;
   /** Anomaly detection threshold for stream creation burst */
   ANOMALY_CREATION_THRESHOLD?: string;
   /** Anomaly detection threshold for settlement rate spike */
@@ -171,11 +175,16 @@ export function redactSecrets(obj: Record<string, unknown>): Record<string, unkn
 }
 
 /**
- * Validate that CI is not using production credentials
+ * Validate that CI is not using production credentials.
+ *
+ * The flag and secret are passed in from the call-time environment snapshot
+ * so validation never reads stale module-load state.
  */
-function validateCIEnvironment(env: string, network: StellarNetwork): void {
-  const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
-  
+function validateCIEnvironment(
+  isCI: boolean,
+  network: StellarNetwork,
+  jwtSecret: string
+): void {
   if (isCI && network === 'mainnet') {
     throw new ConfigValidationError(
       'CI environment detected with mainnet network configuration. ' +
@@ -183,7 +192,7 @@ function validateCIEnvironment(env: string, network: StellarNetwork): void {
     );
   }
   
-  if (isCI && process.env.JWT_SECRET && process.env.JWT_SECRET !== 'streampay-dev-secret-do-not-use-in-prod') {
+  if (isCI && jwtSecret !== 'streampay-dev-secret-do-not-use-in-prod') {
     throw new ConfigValidationError(
       'CI environment detected with production JWT_SECRET. ' +
       'CI must use test/dev secrets only.'
@@ -265,15 +274,14 @@ function validateStellarNetwork(network: StellarNetwork): StellarNetworkProfile 
  *   (fail-fast at boot — no silent fallback to a hardcoded placeholder).
  * - The dev placeholder is only tolerated in NODE_ENV=development|test.
  */
-function validateJwtSecret(secret: string | undefined): string {
+function validateJwtSecret(secret: string | undefined, environment: string): string {
   if (!secret) {
     throw new ConfigValidationError(
       'JWT_SECRET environment variable is required'
     );
   }
   
-  const env   = process.env.NODE_ENV ?? "development";
-  const isDev = env === "development" || env === "test";
+  const isDev = environment === "development" || environment === "test";
 
   if (secret === 'streampay-dev-secret-do-not-use-in-prod' && !isDev) {
     throw new ConfigValidationError(
@@ -294,17 +302,20 @@ function validateJwtSecret(secret: string | undefined): string {
 function validateInternalServiceAuth(
   env: RequiredEnvVars & OptionalEnvVars
 ): ValidatedConfig["internalServiceAuth"] {
+  // The legacy shared token is deprecated and must never be used in production,
+  // even when HMAC keys are also configured.
+  if (env.NODE_ENV === "production" && env.INTERNAL_AUTH_TOKEN) {
+    throw new ConfigValidationError(
+      "INTERNAL_AUTH_TOKEN is not allowed in production. Configure INTERNAL_SERVICE_HMAC_KEYS and INTERNAL_SERVICE_CURRENT_KEY_ID instead."
+    );
+  }
+
   const hasHmacConfig =
     typeof env.INTERNAL_SERVICE_HMAC_KEYS === "string" ||
     typeof env.INTERNAL_SERVICE_CURRENT_KEY_ID === "string" ||
     typeof env.INTERNAL_SERVICE_CLOCK_SKEW_SECONDS === "string";
 
   if (!hasHmacConfig) {
-    if (env.NODE_ENV === "production" && env.INTERNAL_AUTH_TOKEN) {
-      throw new ConfigValidationError(
-        "INTERNAL_AUTH_TOKEN is not allowed in production. Configure INTERNAL_SERVICE_HMAC_KEYS and INTERNAL_SERVICE_CURRENT_KEY_ID instead."
-      );
-    }
     return undefined;
   }
 
@@ -417,19 +428,23 @@ function validateAnomalyThresholds(
  * @throws ConfigValidationError if configuration is invalid
  */
 export function validateConfig(): ValidatedConfig {
+  // Read the environment on every invocation so runtime/test overrides are
+  // always honored instead of being frozen at module import time.
   const env = process.env as unknown as RequiredEnvVars & OptionalEnvVars;
+  const environment = env.NODE_ENV || 'development';
+  const isCI = env.CI === 'true' || env.GITHUB_ACTIONS === 'true';
   
   // Validate network
   const networkProfile = validateStellarNetwork(env.STELLAR_NETWORK);
   
   // Validate JWT secret
-  const jwtSecret = validateJwtSecret(env.JWT_SECRET);
+  const jwtSecret = validateJwtSecret(env.JWT_SECRET, environment);
   
   // Validate CI environment
-  validateCIEnvironment(env.NODE_ENV || 'development', networkProfile.name);
+  validateCIEnvironment(isCI, networkProfile.name, jwtSecret);
   
   // Validate ALLOWED_ORIGINS for browser API requests
-  const allowedOrigins = validateAllowedOrigins(env.ALLOWED_ORIGINS, env.NODE_ENV || 'development');
+  const allowedOrigins = validateAllowedOrigins(env.ALLOWED_ORIGINS, environment);
   
   // Validate anomaly thresholds
   const anomalyThresholds = validateAnomalyThresholds(
@@ -444,7 +459,7 @@ export function validateConfig(): ValidatedConfig {
     network: networkProfile,
     jwtSecret,
     serviceName: env.SERVICE_NAME || 'streampay-frontend',
-    environment: env.NODE_ENV || 'development',
+    environment,
     internalAuthToken: env.INTERNAL_AUTH_TOKEN,
     allowedOrigins,
     anomalyThresholds,
