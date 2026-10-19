@@ -638,7 +638,7 @@ export default function MultiRecipientStreamPage() {
                   aria-live="assertive"
                   style={{
                     padding: "0.75rem 1rem",
-                    background: "var(--error-bg, rgba(220,38,38,0.08))",
+                    background: "var(--system-error-bg)",
                     border: "1px solid var(--error)",
                     borderRadius: "var(--radius-md)",
                     color: "var(--error)",

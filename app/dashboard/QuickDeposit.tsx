@@ -21,7 +21,7 @@ import React, { useId, useState } from "react";
  * - The submit button exposes `aria-busy` while a deposit is in flight.
  *
  * ## Theming
- * Uses design tokens (`--card-surface`, `--card-border`, `--accent`, …) so it
+ * Uses design tokens (`--panel`, `--border`, `--accent`, …) so it
  * is consistent in both light and dark mode.
  */
 
@@ -158,8 +158,8 @@ export function QuickDeposit({
           flex-direction: column;
           gap: 0.75rem;
           padding: 1.25rem;
-          background: var(--card-surface);
-          border: 1px solid var(--card-border);
+          background: var(--panel);
+          border: 1px solid var(--border);
           border-radius: 1rem;
           width: 100%;
           max-width: 28rem;
@@ -195,7 +195,7 @@ export function QuickDeposit({
           font-size: 0.85rem;
           color: var(--text, inherit);
           background: transparent;
-          border: 1px solid var(--card-border);
+          border: 1px solid var(--border);
           border-radius: 0.5rem;
           cursor: pointer;
         }
@@ -215,8 +215,8 @@ export function QuickDeposit({
           padding: 0.6rem 0.75rem;
           font-size: 1rem;
           color: var(--text, inherit);
-          background: var(--bg, transparent);
-          border: 1px solid var(--card-border);
+          background: var(--background);
+          border: 1px solid var(--border);
           border-radius: 0.5rem;
         }
         .quick-deposit__input:focus-visible {
