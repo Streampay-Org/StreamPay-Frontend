@@ -225,7 +225,12 @@ describe("GET /api/streams query validation", () => {
         fc.array(fc.integer({ min: 1, max: 3 }), { minLength: 1, maxLength: 12 }),
         fc.integer({ min: 1, max: 4 }),
         async (gaps, limit) => {
+          // Every case starts from an empty store and a fresh rate-limit
+          // bucket, so the walk only sees the seeded rows and is never
+          // throttled by the requests the previous cases made.
+          resetRateLimitStore();
           clearStreams();
+
           const expected: string[] = [];
           let minute = 0;
           gaps.forEach((gap, index) => {
@@ -241,16 +246,12 @@ describe("GET /api/streams query validation", () => {
 
           do {
             guard += 1;
-            if (guard > 40) {
-              return false;
-            }
+            expect(guard).toBeLessThanOrEqual(40);
             const query = cursor
               ? `?limit=${limit}&cursor=${encodeURIComponent(cursor)}`
               : `?limit=${limit}`;
             const res = await listStreams(getRequest(query));
-            if (res.status !== 200) {
-              return false;
-            }
+            expect(res.status).toBe(200);
             const body = await res.json();
             for (const stream of body.data) {
               seen.push(stream.id);
@@ -258,13 +259,8 @@ describe("GET /api/streams query validation", () => {
             cursor = body.meta.nextCursor;
           } while (cursor);
 
-          if (seen.length !== expected.length) {
-            return false;
-          }
-          if (new Set(seen).size !== seen.length) {
-            return false;
-          }
-          return seen.join(",") === expected.join(",");
+          // Every stream is seen exactly once, in list order.
+          expect(seen).toEqual(expected);
         },
       ),
       { numRuns: 20, seed: 42 },
