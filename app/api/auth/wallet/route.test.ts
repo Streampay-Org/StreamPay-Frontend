@@ -9,7 +9,7 @@ jest.mock("@/src/middleware/accessLog", () => ({
 /**
  * Build a minimal Headers-like object for test assertions.
  */
-function mockHeaders(init?: Record<string, string>): Record<string, string | null> {
+function mockHeaders(init?: Record<string, string>) {
   const store: Record<string, string> = {};
   if (init) {
     for (const [k, v] of Object.entries(init)) {
@@ -47,7 +47,7 @@ jest.mock("next/server", () => {
       body: T,
       init?: { status?: number; headers?: Record<string, string> },
     ) {
-      return new MockNextResponse(body, init) as unknown as import("next/server").NextResponse;
+      return new MockNextResponse(body, init);
     }
 
     async json(): Promise<unknown> {
@@ -60,7 +60,7 @@ jest.mock("next/server", () => {
   }
 
   return {
-    NextResponse: MockNextResponse as unknown as typeof import("next/server").NextResponse,
+    NextResponse: MockNextResponse,
     NextRequest: class MockNextRequest {},
   };
 });
@@ -75,6 +75,7 @@ function makeGetRequest(params: Record<string, string> = {}) {
   return {
     nextUrl: { searchParams, pathname: "/api/auth/wallet" },
     headers: { get: () => null },
+    // This fixture supplies only the request fields consumed by the wallet route.
   } as unknown as import("next/server").NextRequest;
 }
 
@@ -102,6 +103,7 @@ function makePostRequest(
       get: (name: string) =>
         name === "csrf-token" ? (csrfCookie ? { value: csrfCookie } : undefined) : undefined,
     },
+    // This fixture supplies only the request fields consumed by the wallet route.
   } as unknown as import("next/server").NextRequest;
 }
 

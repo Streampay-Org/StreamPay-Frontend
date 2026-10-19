@@ -201,7 +201,7 @@ export async function GET(request: Request): Promise<Response> {
     recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
     // rateLimitResponse returns a NextResponse; we need a plain Response for
     // the SSE path, but the rate-limit rejection is not SSE so NextResponse is fine.
-    return rateLimitResponse(rateResult.retryAfter!) as unknown as Response;
+    return rateLimitResponse(rateResult.retryAfter!);
   }
 
   recordRequest(url.pathname);
