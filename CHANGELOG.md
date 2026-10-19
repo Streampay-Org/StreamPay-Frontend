@@ -55,6 +55,14 @@ API versioning follows the policy in [README.md#api-versioning](README.md#api-ve
   (gzip/brotli for all responses).
 
 ### Added
+- Prometheus metrics on `GET|POST /api/exports`: `export_requests_total`
+  (counter) and `export_request_duration_seconds` (histogram), labelled by
+  `status` and `method`, registered in `src/metrics/registry.ts` and
+  exposed through `GET /api/metrics`. Every response path (200/201/401/422/
+  429/500) records exactly one counter increment and one histogram
+  observation. Covered by `app/api/exports/exports.metrics.test.ts`, which is
+  no longer quarantined in `jest.config.js`. Restores the work first
+  proposed in #1282.
 - Cursor pagination on `GET /api/reconciliation` over stable
   `(created_at, id)` ordering with `meta.nextCursor` / `meta.hasNext`.
   Malformed cursors return `422 INVALID_CURSOR`. Documented in
