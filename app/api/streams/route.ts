@@ -9,17 +9,14 @@ import {
   setIdempotency,
 } from "@/app/lib/db";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
-import { logAccessEvent } from "@/src/middleware/accessLog";
 import { streamsRateLimit } from "@/src/middleware/rateLimit";
-import { checkTokenAllowed, normaliseToken } from "@/app/lib/token-allowlist";
 import {
-  validateCreateStreamBody,
   validateListStreamsQuery,
 } from "@/app/lib/stream-validation";
-import type { Stream } from "@/app/types/openapi";
 import { createCacheHeaders, createStrongEtag, isIfNoneMatchMatch } from "@/src/middleware/etag";
 import { observeStreamsRequest } from "@/src/metrics/registry";
 import { withRouteTimeout } from "@/src/middleware/timeout";
+import { createStreamCore } from "@/app/lib/stream-create-core";
 
 function errorResponse(code: string, message: string, status: number) {
   return createErrorResponse(code, message, status);
@@ -159,7 +156,7 @@ async function handleStreamsPost(request: Request) {
   let status = 201;
 
   try {
-    const { idempotencyStore, streamRepository } = getStore();
+    const { idempotencyStore } = getStore();
     const rateLimitResult = await streamsRateLimit(request, "POST", "/api/streams");
     if (!rateLimitResult.allowed) {
       status = rateLimitResult.response.status;
@@ -194,19 +191,20 @@ async function handleStreamsPost(request: Request) {
       }
     }
 
-    // ── Schema validation (shared) ────────────────────────────────────────
-    const validationErrors = validateCreateStreamBody(body);
-    if (validationErrors.length > 0) {
+    const result = await createStreamCore(body, { dryRun: false });
+    if (!result.ok) {
       status = 422;
-      logger.warn("Stream creation validation failed", {
-        errors: validationErrors,
-      });
+      if (result.code === "VALIDATION_ERROR") {
+        logger.warn("Stream creation validation failed", { errors: result.details });
+      } else if (result.code === "TOKEN_NOT_ALLOWED") {
+        logger.warn("Stream creation rejected: token not in allowlist");
+      }
       return NextResponse.json(
         {
           error: {
-            code: "VALIDATION_ERROR",
-            message: "One or more fields are invalid.",
-            details: validationErrors,
+            code: result.code,
+            message: result.message,
+            ...(result.details ? { details: result.details } : {}),
             request_id: getCorrelationContext()?.request_id,
           },
         },
@@ -214,49 +212,8 @@ async function handleStreamsPost(request: Request) {
       );
     }
 
-    const { rate, recipient, schedule, token: rawToken } = body as {
-      rate?: string;
-      recipient?: string;
-      schedule?: string;
-      token?: string;
-    };
-
-    const rateValue = rate ?? "";
-    const recipientValue = recipient ?? "";
-    const scheduleValue = schedule ?? "";
-    const tokenStr = rawToken?.trim() || "XLM";
-    let normalisedToken: string;
-    try {
-      normalisedToken = normaliseToken(tokenStr);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      status = 422;
-      return createErrorResponse("INVALID_TOKEN", `Invalid token format: ${msg}`, 422);
-    }
-
-    const allowlistResult = await checkTokenAllowed(normalisedToken);
-    if (!allowlistResult.accepted) {
-      status = 422;
-      logger.warn("Stream creation rejected: token not in allowlist", { token: normalisedToken });
-      return createErrorResponse("TOKEN_NOT_ALLOWED", allowlistResult.reason, 422);
-    }
-
-    const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
-    const now = new Date().toISOString();
-    const newStream: Stream = {
-      createdAt: now,
-      id,
-      nextAction: "start",
-      rate: rateValue,
-      recipient: recipientValue,
-      schedule: scheduleValue,
-      status: "draft",
-      updatedAt: now,
-      token: normalisedToken,
-    };
-
-    streamRepository.streams.set(id, newStream);
-    const payload = { data: newStream, links: { self: `/api/v1/streams/${id}` } };
+    const stream = result.stream;
+    const payload = { data: stream, links: { self: `/api/v1/streams/${stream.id}` } };
 
     if (token) {
       setIdempotency(idempotencyStore, token, fingerprint, 201, payload);

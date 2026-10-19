@@ -91,6 +91,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/streams/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview stream creation without side effects
+         * @description Runs the same recipient, rate, schedule, token normalization, and token allowlist checks as POST /api/streams. Does not write to stream, idempotency, or quota stores. Cost estimation is null with a reason when the normalized asset is unsupported.
+         */
+        post: operations["previewStream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/dryrun": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deprecated legacy stream dry-run alias
+         * @deprecated
+         * @description Deprecated alias for POST /api/streams/preview. Legacy amountPerInterval is mapped to rate, asset to token, and intervalSeconds must exactly match a supported schedule duration.
+         */
+        post: operations["dryrunStreamDeprecated"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/streams/search": {
         parameters: {
             query?: never;
@@ -1432,6 +1473,134 @@ export interface operations {
                 };
             };
             500: components["responses"]["500"];
+        };
+    };
+    previewStream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Stellar public key. */
+                    recipient: string;
+                    /** @description Positive decimal stream rate. */
+                    rate: string;
+                    /** @enum {string} */
+                    schedule: "second" | "minute" | "hour" | "day" | "week" | "month" | "year";
+                    /** @description Optional XLM or CODE:ISSUER token. */
+                    token?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Valid dry-run stream preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** @constant */
+                            valid: true;
+                            estimated_events: {
+                                type: string;
+                                description: string;
+                            }[];
+                            /** @description Null when the normalized token is unsupported by the cost estimator. */
+                            cost_estimate: Record<string, never> | null;
+                            cost_estimate_reason?: string;
+                            preview_stream: Record<string, never>;
+                        };
+                        meta: {
+                            /** @constant */
+                            dry_run: true;
+                            request_id: string;
+                        };
+                    };
+                };
+            };
+            /** @description Validation or token allowlist failure. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** @constant */
+                            valid: false;
+                            validation_errors?: Record<string, never>[];
+                            cost_estimate?: Record<string, never> | null;
+                            preview_stream?: Record<string, never> | null;
+                        };
+                        error: components["schemas"]["ErrorEnvelope"]["error"];
+                    };
+                };
+            };
+            /** @description Write-tier rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    dryrunStreamDeprecated: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    recipient: string;
+                    /** @description Accepted for legacy compatibility and ignored by preview. */
+                    sender?: string;
+                    asset: string;
+                    amountPerInterval: number | string;
+                    /** @description Must exactly match a supported schedule duration: 1, 60, 3600, 86400, 604800, 2592000, or 31536000. */
+                    intervalSeconds: number;
+                    durationSeconds?: number;
+                    memo?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Preview response. Deprecation and Sunset headers are included. */
+            200: {
+                headers: {
+                    Deprecation?: string;
+                    Sunset?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description Invalid stream body or unsupported interval. */
+            422: {
+                headers: {
+                    Deprecation?: string;
+                    Sunset?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Write-tier rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     searchStreams: {

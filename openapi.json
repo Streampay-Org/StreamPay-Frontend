@@ -1605,6 +1605,297 @@
         }
       }
     },
+    "/api/streams/preview": {
+      "post": {
+        "operationId": "previewStream",
+        "summary": "Preview stream creation without side effects",
+        "description": "Runs the same recipient, rate, schedule, token normalization, and token allowlist checks as POST /api/streams. Does not write to stream, idempotency, or quota stores. Cost estimation is null with a reason when the normalized asset is unsupported.",
+        "security": [],
+        "tags": [
+          "Streams v1"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "recipient",
+                  "rate",
+                  "schedule"
+                ],
+                "properties": {
+                  "recipient": {
+                    "type": "string",
+                    "description": "Stellar public key."
+                  },
+                  "rate": {
+                    "type": "string",
+                    "description": "Positive decimal stream rate."
+                  },
+                  "schedule": {
+                    "type": "string",
+                    "enum": [
+                      "second",
+                      "minute",
+                      "hour",
+                      "day",
+                      "week",
+                      "month",
+                      "year"
+                    ]
+                  },
+                  "token": {
+                    "type": "string",
+                    "description": "Optional XLM or CODE:ISSUER token."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Valid dry-run stream preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "valid",
+                        "estimated_events",
+                        "cost_estimate",
+                        "preview_stream"
+                      ],
+                      "properties": {
+                        "valid": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "estimated_events": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "type",
+                              "description"
+                            ],
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "cost_estimate": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "description": "Null when the normalized token is unsupported by the cost estimator."
+                        },
+                        "cost_estimate_reason": {
+                          "type": "string"
+                        },
+                        "preview_stream": {
+                          "type": "object"
+                        }
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": [
+                        "dry_run",
+                        "request_id"
+                      ],
+                      "properties": {
+                        "dry_run": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation or token allowlist failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "valid"
+                      ],
+                      "properties": {
+                        "valid": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "validation_errors": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "cost_estimate": {
+                          "type": [
+                            "object",
+                            "null"
+                          ]
+                        },
+                        "preview_stream": {
+                          "type": [
+                            "object",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    "error": {
+                      "$ref": "#/components/schemas/ErrorEnvelope/properties/error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Write-tier rate limit exceeded."
+          }
+        }
+      }
+    },
+    "/api/streams/dryrun": {
+      "post": {
+        "operationId": "dryrunStreamDeprecated",
+        "summary": "Deprecated legacy stream dry-run alias",
+        "description": "Deprecated alias for POST /api/streams/preview. Legacy amountPerInterval is mapped to rate, asset to token, and intervalSeconds must exactly match a supported schedule duration.",
+        "deprecated": true,
+        "security": [],
+        "tags": [
+          "Streams v1"
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "recipient",
+                  "asset",
+                  "amountPerInterval",
+                  "intervalSeconds"
+                ],
+                "properties": {
+                  "recipient": {
+                    "type": "string"
+                  },
+                  "sender": {
+                    "type": "string",
+                    "description": "Accepted for legacy compatibility and ignored by preview."
+                  },
+                  "asset": {
+                    "type": "string"
+                  },
+                  "amountPerInterval": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "intervalSeconds": {
+                    "type": "integer",
+                    "description": "Must exactly match a supported schedule duration: 1, 60, 3600, 86400, 604800, 2592000, or 31536000."
+                  },
+                  "durationSeconds": {
+                    "type": "integer"
+                  },
+                  "memo": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preview response. Deprecation and Sunset headers are included.",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "example": "@1792368000"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Tue, 19 Oct 2027 00:00:00 GMT"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The same response shape as POST /api/streams/preview."
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid stream body or unsupported interval.",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Tue, 19 Oct 2027 00:00:00 GMT"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Write-tier rate limit exceeded."
+          }
+        }
+      }
+    },
     "/api/streams/search": {
       "get": {
         "operationId": "searchStreams",
