@@ -39,6 +39,3 @@ export function applyRequestIdPolicy(
   response.set(REQUEST_ID_HEADER, resolved);
   return resolved;
 }
-
-// Deliberate temporary type error to demonstrate the blocking core CI gate for #1713.
-const strictCoreGateProbe: number = "this must fail typechecking";
