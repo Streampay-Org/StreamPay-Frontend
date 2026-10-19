@@ -4,6 +4,7 @@ import { withIdempotency, settleStore } from "@/app/lib/idempotency";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 import { getStellarSettlementClient } from "@/app/lib/stellar";
 
 type Context = { params: Promise<{ id: string }> };
@@ -78,6 +79,16 @@ export async function POST(
         const settlement = await getStellarSettlementClient().settleStream({ streamId: id });
 
         db.streams.set(id, updatedStream);
+
+        appendStreamHistoryEvent({
+          streamId: id,
+          type: "settled",
+          fromStatus: stream.status,
+          toStatus: "ended",
+          at: updatedStream.updatedAt,
+          actorWallet: getHeader(request, "Actor-Wallet-Address"),
+          txHash: settlement.txHash,
+        });
 
         recordPrivilegedStreamAuditEvent({
           action: "stream.settle",

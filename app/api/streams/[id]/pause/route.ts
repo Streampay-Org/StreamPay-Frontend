@@ -57,6 +57,7 @@ import { streamsRateLimit } from "@/src/middleware/rateLimit";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 
 function createErrorResponse(code: string, message: string, status: number) {
   const context = getCorrelationContext();
@@ -183,6 +184,15 @@ export async function POST(
     };
 
     db.streams.set(id, updated);
+
+    appendStreamHistoryEvent({
+      streamId: id,
+      type: "paused",
+      fromStatus: "active",
+      toStatus: "paused",
+      at: now,
+      actorWallet: actorAddress,
+    });
 
     recordPrivilegedStreamAuditEvent({
       action: "stream.pause",

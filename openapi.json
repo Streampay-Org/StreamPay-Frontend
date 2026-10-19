@@ -741,6 +741,40 @@
             }
           }
         }
+      },
+      "StreamHistoryEntry": {
+        "type": "object",
+        "required": ["id", "streamId", "type", "toStatus", "at"],
+        "description": "Immutable lifecycle event for a stream. No PII — actor wallet truncated to 6 chars.",
+        "properties": {
+          "id":         { "type": "string", "description": "Unique entry id.", "example": "3c4d5e6f-7a8b-9c0d-e1f2-a3b4c5d6e7f8" },
+          "streamId":   { "type": "string", "description": "Owning stream id.", "example": "stream-abc12345" },
+          "type":       { "type": "string", "enum": ["created","started","paused","resumed","stopped","settled","withdrawn","cancelled"] },
+          "fromStatus": { "type": "string", "nullable": true, "description": "Status before transition; absent for 'created'." },
+          "toStatus":   { "type": "string", "description": "Status after transition." },
+          "at":         { "type": "string", "format": "date-time", "description": "ISO-8601 UTC timestamp.", "example": "2026-06-01T09:00:00.000Z" },
+          "actor":      { "type": "string", "nullable": true, "description": "First 6 chars of actor wallet (no PII).", "example": "GABCDE" },
+          "txHash":     { "type": "string", "nullable": true, "description": "On-chain tx hash (once indexer is wired)." },
+          "amountRaw":  { "type": "string", "nullable": true, "description": "Human-readable amount label, e.g. '120 XLM'." }
+        }
+      },
+      "StreamHistoryResponse": {
+        "type": "object",
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/StreamHistoryEntry" },
+            "description": "History entries, newest first."
+          },
+          "meta": {
+            "type": "object",
+            "required": ["nextCursor"],
+            "properties": {
+              "nextCursor": { "type": "string", "nullable": true, "description": "Opaque cursor for the next page; null when none remain." }
+            }
+          }
+        }
       }
     },
     "responses": {
@@ -2347,6 +2381,32 @@
           "500": {
             "$ref": "#/components/responses/500"
           }
+        }
+      }
+    },
+    "/api/streams/{id}/history": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "example": "stream-abc12345" }, "description": "Stream identifier." },
+        { "name": "x-tenant-id", "in": "header", "required": true, "schema": { "type": "string" }, "description": "Tenant id — must match the stream's owner." }
+      ],
+      "get": {
+        "operationId": "getStreamHistory",
+        "summary": "Paginated lifecycle event history for a stream",
+        "description": "Returns a newest-first paginated list of committed lifecycle events. No PII. Uses composite (at, id) cursor.",
+        "tags": ["Streams"],
+        "parameters": [
+          { "name": "limit",  "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }, "description": "Max entries per page." },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" }, "description": "Opaque cursor from meta.nextCursor of the previous response." }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of lifecycle events.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StreamHistoryResponse" } } }
+          },
+          "400": { "$ref": "#/components/responses/400" },
+          "404": { "$ref": "#/components/responses/404" },
+          "422": { "$ref": "#/components/responses/422" },
+          "500": { "$ref": "#/components/responses/500" }
         }
       }
     },

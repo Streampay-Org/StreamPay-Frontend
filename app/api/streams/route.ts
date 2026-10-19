@@ -20,6 +20,7 @@ import type { Stream } from "@/app/types/openapi";
 import { createCacheHeaders, createStrongEtag, isIfNoneMatchMatch } from "@/src/middleware/etag";
 import { observeStreamsRequest } from "@/src/metrics/registry";
 import { withRouteTimeout } from "@/src/middleware/timeout";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 
 function errorResponse(code: string, message: string, status: number) {
   return createErrorResponse(code, message, status);
@@ -256,6 +257,15 @@ async function handleStreamsPost(request: Request) {
     };
 
     streamRepository.streams.set(id, newStream);
+
+    appendStreamHistoryEvent({
+      streamId: id,
+      type: "created",
+      toStatus: "draft",
+      at: now,
+      actorWallet: getHeader(request, "Actor-Wallet-Address"),
+    });
+
     const payload = { data: newStream, links: { self: `/api/v1/streams/${id}` } };
 
     if (token) {

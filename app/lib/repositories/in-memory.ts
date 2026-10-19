@@ -10,6 +10,7 @@ import type {
 } from "@/app/lib/db";
 import type { ActivityEvent, ExportJob, Stream, User } from "@/app/types/openapi";
 import { createActivityTimelineStore, type ActivityTimelineStore, activityEventToTimelineEntry } from "@/app/lib/repositories/activity-timeline";
+import { createStreamHistoryStore } from "@/app/lib/repositories/stream-history";
 
 // Keep seeded demo timestamps recent (no-op under Jest).
 const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
@@ -271,6 +272,7 @@ export function createInMemoryPersistenceStore(seedTimeline?: boolean): Persiste
   const store: PersistenceStore = {
     kind: "memory",
     activityTimeline: timeline,
+    streamHistory: createStreamHistoryStore(),
     streamRepository: new InMemoryStreamRepository(),
     idempotencyStore: new InMemoryIdempotencyStore(),
     exportRepository: new InMemoryExportRepository(),

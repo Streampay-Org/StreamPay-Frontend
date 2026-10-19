@@ -5,6 +5,7 @@ import { withIdempotency, withdrawStore } from "@/app/lib/idempotency";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 import { evaluateWithdrawalState } from "@/app/lib/withdraw-finality";
 import { maybeFeeBump } from "@/lib/feeBump";
 
@@ -90,6 +91,15 @@ export async function POST(
 
       const updated = finalResult.stream;
       db.streams.set(id, updated);
+
+      appendStreamHistoryEvent({
+        streamId: id,
+        type: "withdrawn",
+        fromStatus: "ended",
+        toStatus: updated.status,
+        at: new Date().toISOString(),
+        actorWallet: actorAddress,
+      });
 
       const payload = {
         alert: finalResult.alert,

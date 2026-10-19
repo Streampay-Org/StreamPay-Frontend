@@ -9,6 +9,7 @@ import {
 } from "@/app/lib/db";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -108,6 +109,15 @@ export async function POST(
       updatedAt: new Date().toISOString(),
     };
     db.streams.set(id, updatedStream);
+
+    appendStreamHistoryEvent({
+      streamId: id,
+      type: isResume ? "resumed" : "started",
+      fromStatus: stream.status,
+      toStatus: "active",
+      at: updatedStream.updatedAt,
+      actorWallet: actorAddress,
+    });
 
     const payload = { data: updatedStream };
     if (token) {
