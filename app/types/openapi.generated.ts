@@ -114,9 +114,9 @@ export interface paths {
     "/api/streams/{id}": {
         parameters: {
             query?: never;
-            header: {
-                /** @description Tenant context for multi-tenant isolation. Must be a non-empty string. */
-                "x-tenant-id": string;
+            header?: {
+                /** @description Tenant context for multi-tenant isolation. Optional: when absent or blank the request resolves to the `public` default tenant. Values are trimmed before use. */
+                "x-tenant-id"?: string;
             };
             path: {
                 /** @description Stream identifier. */
@@ -134,11 +134,11 @@ export interface paths {
         get: operations["getStream"];
         put?: never;
         /**
-         * Update a payment stream (v1, deprecated)
+         * Update stream metadata (v1, deprecated)
          * @deprecated
-         * @description Partially updates a stream by merging the request body fields. **Deprecated** — there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.
+         * @description Updates only the allowlisted metadata fields `description`, `webhook_url` and `tags`. Lifecycle fields (`status`, `recipient`, amounts, addresses, hashes, `withdrawal`, `cancellation`, `tenantId`, `id`, `createdAt`) are never writable here and may only change through the lifecycle routes. **Deprecated** — there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.
          *
-         *     The `updatedAt` field is always refreshed. Cache is invalidated on success.
+         *     The `updatedAt` field is always refreshed. Requests are serialised per stream; the cache is invalidated only on success.
          */
         post: operations["updateStream"];
         /**
@@ -713,6 +713,11 @@ export interface components {
              * @example stream-abc12345
              */
             id: string;
+            /**
+             * @description Owning tenant. Stamped at creation from the verified JWT tenant claim or `x-tenant-id`. Defaults to `public` when the request carries no tenant context.
+             * @example tenant-org-xyz
+             */
+            readonly tenantId?: string;
             /**
              * @description Stellar public key of the payment recipient.
              * @example GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG
@@ -1501,9 +1506,9 @@ export interface operations {
     getStream: {
         parameters: {
             query?: never;
-            header: {
-                /** @description Tenant context for multi-tenant isolation. Must be a non-empty string. */
-                "x-tenant-id": string;
+            header?: {
+                /** @description Tenant context for multi-tenant isolation. Optional: when absent or blank the request resolves to the `public` default tenant. Values are trimmed before use. */
+                "x-tenant-id"?: string;
             };
             path: {
                 /** @description Stream identifier. */
@@ -1528,24 +1533,6 @@ export interface operations {
                             self: string;
                         };
                     };
-                };
-            };
-            /** @description Missing or empty `x-tenant-id` header. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "error": {
-                     *         "code": "MISSING_TENANT",
-                     *         "message": "Tenant ID header is required",
-                     *         "request_id": "req_01HZ9ABCDEF"
-                     *       }
-                     *     }
-                     */
-                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             404: components["responses"]["404"];
@@ -1573,9 +1560,11 @@ export interface operations {
     updateStream: {
         parameters: {
             query?: never;
-            header: {
-                /** @description Tenant context for multi-tenant isolation. Must be a non-empty string. */
-                "x-tenant-id": string;
+            header?: {
+                /** @description Tenant context for multi-tenant isolation. Optional: when absent or blank the request resolves to the `public` default tenant. Values are trimmed before use. */
+                "x-tenant-id"?: string;
+                /** @description Retries with the same key and body replay the original response. Reusing a key with a different body returns `409 IDEMPOTENCY_CONFLICT`. */
+                "Idempotency-Key"?: string;
             };
             path: {
                 /** @description Stream identifier. */
@@ -1587,30 +1576,36 @@ export interface operations {
             content: {
                 /**
                  * @example {
-                 *       "rate": "150"
+                 *       "description": "Q3 retainer",
+                 *       "tags": [
+                 *         "design"
+                 *       ]
                  *     }
                  */
                 "application/json": {
                     /**
-                     * @description New rate amount.
-                     * @example 150
+                     * @description Human-readable stream description.
+                     * @example Q3 retainer
                      */
-                    rate?: string;
+                    description?: string;
                     /**
-                     * @example month
-                     * @enum {string}
+                     * Format: uri
+                     * @description Webhook URL notified when the stream changes.
+                     * @example https://example.com/webhooks/stream
                      */
-                    schedule?: "second" | "minute" | "hour" | "day" | "week" | "month" | "year";
+                    webhook_url?: string;
                     /**
-                     * @description New asset code.
-                     * @example USDC
+                     * @description Up to 10 tags, each 1-50 characters.
+                     * @example [
+                     *       "design"
+                     *     ]
                      */
-                    token?: string;
+                    tags?: string[];
                 };
             };
         };
         responses: {
-            /** @description Stream updated. */
+            /** @description Metadata updated. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1621,7 +1616,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Missing `x-tenant-id` header or invalid JSON body. */
+            /** @description Body is not valid JSON or contains a field outside the metadata allowlist. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -1631,6 +1626,40 @@ export interface operations {
                 };
             };
             404: components["responses"]["404"];
+            /** @description The stream is terminal (`withdrawn` or `cancelled`) or the idempotency key was reused with a different body. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description One or more allowlisted fields failed schema validation. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "VALIDATION_ERROR",
+                     *         "message": "One or more fields are invalid.",
+                     *         "details": [
+                     *           {
+                     *             "field": "description",
+                     *             "code": "TOO_BIG",
+                     *             "message": "String must contain at most 280 character(s)"
+                     *           }
+                     *         ],
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             /** @description Rate limit exceeded. */
             429: {
                 headers: {
@@ -1655,9 +1684,9 @@ export interface operations {
     deleteStream: {
         parameters: {
             query?: never;
-            header: {
-                /** @description Tenant context for multi-tenant isolation. Must be a non-empty string. */
-                "x-tenant-id": string;
+            header?: {
+                /** @description Tenant context for multi-tenant isolation. Optional: when absent or blank the request resolves to the `public` default tenant. Values are trimmed before use. */
+                "x-tenant-id"?: string;
             };
             path: {
                 /** @description Stream identifier. */
@@ -1673,24 +1702,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Missing or empty `x-tenant-id` header. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "error": {
-                     *         "code": "MISSING_TENANT",
-                     *         "message": "Tenant ID header is required",
-                     *         "request_id": "req_01HZ9ABCDEF"
-                     *       }
-                     *     }
-                     */
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
             };
             404: components["responses"]["404"];
             409: components["responses"]["409"];

@@ -44,6 +44,7 @@ import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { validateCreateStreamBody } from "@/app/lib/stream-validation";
 import { checkTokenAllowed, normaliseToken } from "@/app/lib/token-allowlist";
+import { resolveRequestTenantOrDefault } from "@/app/lib/tenant";
 
 const MAX_ROWS = 500;
 
@@ -312,6 +313,7 @@ export async function POST(request: Request) {
         recipient: row.recipient,
         schedule: row.schedule,
         status: "draft" as const,
+        tenantId: resolveRequestTenantOrDefault(request),
         updatedAt: now,
         token: normalisedToken,
         memo: row.memo || undefined,
