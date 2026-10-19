@@ -7,8 +7,9 @@ import {
   setIdempotency,
   withLock,
 } from "@/app/lib/db";
-import { getCorrelationContext, logger } from "@/app/lib/logger";
+import { getCorrelationContext } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
+import { executeStreamAction } from "@/app/lib/stream-executor";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -66,18 +67,6 @@ export async function POST(
       return createErrorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
     }
 
-    // Allow both draft→active (initial start) and paused→active (resume).
-    // Any other status is an illegal transition.
-    if (stream.status !== "draft" && stream.status !== "paused") {
-      return createErrorResponse(
-        "INVALID_STREAM_STATE",
-        `Cannot start a stream in '${stream.status}' status. Stream must be draft or paused.`,
-        409,
-      );
-    }
-
-    const isResume = stream.status === "paused";
-
     const actorAddress = getHeader(request, "Actor-Wallet-Address");
     // Use "start" for initial activation; "resume" maps to "start" in the org policy
     const orgAction = "start" as const;
@@ -97,28 +86,19 @@ export async function POST(
       }
     }
 
-    const updatedStream = {
-      ...stream,
-      nextAction: "pause" as const,
-      // Clear pausedAt when resuming — the field only tracks when the stream
-      // entered paused state and is meaningless once it is active again.
-      // Cleared here to prevent stale timestamps appearing in API responses.
-      pausedAt: undefined as string | undefined,
-      status: "active" as const,
-      updatedAt: new Date().toISOString(),
-    };
-    db.streams.set(id, updatedStream);
+    const execResult = await executeStreamAction(id, "start", {
+      actor: actorAddress,
+      request,
+    });
 
-    const payload = { data: updatedStream };
+    if (!execResult.ok) {
+      return createErrorResponse(execResult.code, execResult.error, execResult.status);
+    }
+
+    const payload = { data: execResult.data };
     if (token) {
       setIdempotency(db.idempotency, token, fingerprint, 200, payload);
     }
-
-    logger.info(isResume ? "Stream resumed successfully" : "Stream started successfully", {
-      streamId: id,
-      action: isResume ? "resume" : "start",
-      status: "success",
-    });
 
     return NextResponse.json(payload);
   });

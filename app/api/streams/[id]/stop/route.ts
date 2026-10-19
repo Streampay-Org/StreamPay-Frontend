@@ -7,9 +7,9 @@ import {
   setIdempotency,
   withLock,
 } from "@/app/lib/db";
-import { getCorrelationContext, logger } from "@/app/lib/logger";
+import { getCorrelationContext } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
-import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { executeStreamAction } from "@/app/lib/stream-executor";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -84,43 +84,19 @@ export async function POST(
       }
     }
 
-    if (stream.status !== "active" && stream.status !== "draft") {
-      return createErrorResponse(
-        "INVALID_STREAM_STATE",
-        "Only active or draft streams can be stopped",
-        409
-      );
-    }
-
-    const before = structuredClone(stream);
-    const updatedStream = {
-      ...stream,
-      nextAction: "withdraw" as const,
-      status: "ended" as const,
-      updatedAt: new Date().toISOString(),
-    };
-    db.streams.set(id, updatedStream);
-
-    recordPrivilegedStreamAuditEvent({
-      action: "stream.stop.override",
-      after: updatedStream as unknown as Record<string, unknown>,
-      before: before as unknown as Record<string, unknown>,
-      metadata: { resultingStatus: updatedStream.status },
+    const execResult = await executeStreamAction(id, "stop", {
+      actor: actorAddress,
       request,
-      streamId: id,
-      targetAccount: updatedStream.recipient,
     });
 
-    const payload = { data: updatedStream };
+    if (!execResult.ok) {
+      return createErrorResponse(execResult.code, execResult.error, execResult.status);
+    }
+
+    const payload = { data: execResult.data };
     if (token) {
       setIdempotency(db.idempotency, token, fingerprint, 200, payload);
     }
-
-    logger.info("Stream stopped successfully", {
-      streamId: id,
-      action: "stop",
-      status: "success",
-    });
 
     return NextResponse.json(payload);
   });

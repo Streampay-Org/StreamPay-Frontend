@@ -4304,6 +4304,165 @@
           }
         }
       }
+    },
+    "/api/streams/{id}/approvals": {
+      "get": {
+        "operationId": "listStreamApprovals",
+        "summary": "List active pending approvals for an org stream",
+        "description": "Returns pending approval requests for the specified org-owned stream.",
+        "tags": [
+          "Streams"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stream identifier"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of active approvals."
+          }
+        }
+      },
+      "post": {
+        "operationId": "initiateStreamApproval",
+        "summary": "Initiate multi-sig approval for an action",
+        "description": "Initiates an approval request for gated actions (stop, settle) when org policy requires multi-sig.",
+        "tags": [
+          "Streams"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stream identifier"
+          },
+          {
+            "name": "Actor-Wallet-Address",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stellar wallet address of the actor initiating the approval"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "action"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "settle",
+                      "stop"
+                    ],
+                    "description": "Action requiring approval"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Approval request initiated."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          }
+        }
+      }
+    },
+    "/api/streams/{id}/approvals/{approvalId}/approve": {
+      "post": {
+        "operationId": "approveStreamAction",
+        "summary": "Cast approval vote on pending stream action",
+        "description": "Casts a vote on an active approval request. When the threshold is met, executes the action exactly once.",
+        "tags": [
+          "Streams"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stream identifier"
+          },
+          {
+            "name": "approvalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Pending approval identifier"
+          },
+          {
+            "name": "Actor-Wallet-Address",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stellar wallet address of the voter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approval vote recorded and action executed if threshold met."
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "410": {
+            "description": "Approval has expired."
+          },
+          "502": {
+            "description": "Downstream execution failed (retryable)."
+          }
+        }
+      }
     }
   },
   "tags": [

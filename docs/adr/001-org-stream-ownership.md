@@ -69,13 +69,48 @@ A stream's optional `orgId` field (stored in `orgDb.streamOwnership`) links it t
 | stop     |  ✅   |        |         |        |
 | withdraw |  ✅   |        |   ✅    |        |
 
-### 3. Two-Step Approval Gate
+### 3. Two-Step Approval Gate & Lifecycle
 
-When `policy.requireApprovals > 1`, actions in `{"settle", "stop"}` are **gated** behind an approval workflow:
+When `policy.requireApprovals > 1`, actions in `{"settle", "stop"}` (and policy-governed actions) are **gated** behind an approval workflow:
 
 1. Eligible member **initiates** → creates a `PendingApproval` record (`status: "pending"`).
-2. A second eligible member **approves** → if `approvals.length >= requiredCount`, the action is auto-executed and `status` transitions to `"approved"`.
-3. Approvals expire after **24 hours** if not completed.
+2. Eligible member **approves** (`POST /api/streams/:id/approvals/:approvalId/approve`) → records vote.
+3. Once `approvals.length >= requiredCount` (`thresholdMet: true`), the approved action is executed **exactly once** inside `withLock(streamId)` using `executeStreamAction()`.
+4. Approvals expire after **24 hours** (`APPROVAL_TTL_MS = 86_400_000`). Expired approvals reject further votes with `410 APPROVAL_EXPIRED`.
+
+#### Approval State Machine Diagram
+
+```
+                 [ Initiate ]
+                      │
+                      ▼
+                 ┌─────────┐
+                 │ pending │ ◄── [ Vote below threshold ]
+                 └────┬────┘
+                      │
+       Threshold met  │
+    (Inside withLock) │
+                      ▼
+                 ┌──────────┐
+                 │ approved │
+                 └────┬─────┘
+                      │
+        ┌─────────────┼─────────────┐
+        │             │             │
+        ▼             ▼             ▼
+   [ Success ]   [ State Drift ] [ Expired ]
+        │             │             │
+        ▼             ▼             ▼
+  ┌──────────┐   ┌─────────┐   ┌─────────┐
+  │ executed │   │  failed │   │ expired │
+  └──────────┘   └─────────┘   └─────────┘
+```
+
+- `pending` → `approved`: Transition when voter count meets required threshold.
+- `approved` → `executed`: Transitioned atomically upon successful completion of `executeStreamAction`. Sets `executedAt`. Subsequent votes return `409 APPROVAL_ALREADY_EXECUTED`.
+- `approved` → `failed`: If the stream state drifted while awaiting votes (e.g. stream stopped meanwhile and can no longer transition), the approval is marked `failed` with `failureReason: "ILLEGAL_TRANSITION"` and returns `409 ILLEGAL_TRANSITION`.
+- `pending` / `approved` → `expired`: If current time exceeds `expiresAt`, marked `expired` and returns `410 APPROVAL_EXPIRED`.
+- **Transient downstream errors**: If an external dependency fails during execution (e.g. Stellar settlement client rejecting with 502), the approval remains `approved` (not executed) and is safe to retry.
 
 For `requireApprovals = 1` (default), all actions are immediate — no approval record is created.
 

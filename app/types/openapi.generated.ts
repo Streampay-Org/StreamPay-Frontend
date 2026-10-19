@@ -621,6 +621,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/streams/{id}/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List active pending approvals for an org stream
+         * @description Returns pending approval requests for the specified org-owned stream.
+         */
+        get: operations["listStreamApprovals"];
+        put?: never;
+        /**
+         * Initiate multi-sig approval for an action
+         * @description Initiates an approval request for gated actions (stop, settle) when org policy requires multi-sig.
+         */
+        post: operations["initiateStreamApproval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/{id}/approvals/{approvalId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cast approval vote on pending stream action
+         * @description Casts a vote on an active approval request. When the threshold is met, executes the action exactly once.
+         */
+        post: operations["approveStreamAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2732,6 +2776,110 @@ export interface operations {
             400: components["responses"]["400"];
             403: components["responses"]["403"];
             500: components["responses"]["500"];
+        };
+    };
+    listStreamApprovals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Stream identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of active approvals. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    initiateStreamApproval: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Stellar wallet address of the actor initiating the approval */
+                "Actor-Wallet-Address": string;
+            };
+            path: {
+                /** @description Stream identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Action requiring approval
+                     * @enum {string}
+                     */
+                    action: "settle" | "stop";
+                };
+            };
+        };
+        responses: {
+            /** @description Approval request initiated. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["400"];
+            401: components["responses"]["401"];
+            403: components["responses"]["403"];
+            404: components["responses"]["404"];
+            409: components["responses"]["409"];
+        };
+    };
+    approveStreamAction: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Stellar wallet address of the voter */
+                "Actor-Wallet-Address": string;
+            };
+            path: {
+                /** @description Stream identifier */
+                id: string;
+                /** @description Pending approval identifier */
+                approvalId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Approval vote recorded and action executed if threshold met. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["401"];
+            403: components["responses"]["403"];
+            404: components["responses"]["404"];
+            409: components["responses"]["409"];
+            /** @description Approval has expired. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Downstream execution failed (retryable). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
 }

@@ -56,7 +56,7 @@ import {
 import { streamsRateLimit } from "@/src/middleware/rateLimit";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
-import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { executeStreamAction } from "@/app/lib/stream-executor";
 
 function createErrorResponse(code: string, message: string, status: number) {
   const context = getCorrelationContext();
@@ -156,55 +156,20 @@ export async function POST(
       }
     }
 
-    // ── State guard ───────────────────────────────────────────────────────
-    if (stream.status !== "active") {
-      return createErrorResponse(
-        "INVALID_STREAM_STATE",
-        `Cannot pause a stream in '${stream.status}' status. Stream must be active.`,
-        409,
-      );
-    }
-
-    // ── Mutation ──────────────────────────────────────────────────────────
-    const now = new Date().toISOString();
-    const before = structuredClone(stream);
-
-    const updated = {
-      ...stream,
-      /**
-       * pausedAt: ISO-8601 UTC timestamp recorded the moment this stream
-       * enters paused status. Maps to the Soroban contract's `paused_at`
-       * storage field. Cleared by the /start endpoint on resume.
-       */
-      pausedAt: now,
-      nextAction: "stop" as const,
-      status: "paused" as const,
-      updatedAt: now,
-    };
-
-    db.streams.set(id, updated);
-
-    recordPrivilegedStreamAuditEvent({
-      action: "stream.pause",
-      after: updated as any,
-      before: before as any,
+    const execResult = await executeStreamAction(id, "pause", {
+      actor: actorAddress,
       request: req,
-      streamId: id,
-      targetAccount: updated.recipient,
     });
 
-    const responseBody = { data: updated };
+    if (!execResult.ok) {
+      return createErrorResponse(execResult.code, execResult.error, execResult.status);
+    }
+
+    const responseBody = { data: execResult.data };
 
     if (token) {
       setIdempotency(db.idempotency, token, fingerprint, 200, responseBody);
     }
-
-    logger.info("Stream paused successfully", {
-      action: "pause",
-      pausedAt: now,
-      status: "success",
-      streamId: id,
-    });
 
     return NextResponse.json(responseBody);
   });

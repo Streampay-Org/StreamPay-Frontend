@@ -2,11 +2,9 @@ import { NextResponse } from "next/server";
 import { streamsRateLimit } from "@/src/middleware/rateLimit";
 import { db, withLock } from "@/app/lib/db";
 import { withIdempotency, withdrawStore } from "@/app/lib/idempotency";
-import { getCorrelationContext, logger } from "@/app/lib/logger";
+import { getCorrelationContext } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
-import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
-import { evaluateWithdrawalState } from "@/app/lib/withdraw-finality";
-import { maybeFeeBump } from "@/lib/feeBump";
+import { executeStreamAction } from "@/app/lib/stream-executor";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -31,7 +29,6 @@ export async function POST(
     return rateCheck.response;
   }
 
-  // (original id extraction moved above)
   const actorAddress = getHeader(request, "Actor-Wallet-Address");
 
   // IDEMPOTENCY: Withdraw is non-idempotent by nature — this wrapper ensures retries return the original response without re-executing the withdrawal
@@ -58,64 +55,19 @@ export async function POST(
         }
       }
 
-      if (stream.status !== "ended") {
-        if (stream.status === "withdrawn") {
-          const payload = { data: stream, withdrawal: stream.withdrawal };
-          return NextResponse.json(payload);
-        }
-        return createErrorResponse("INVALID_STREAM_STATE", "Only ended streams can be withdrawn from", 409);
+      const execResult = await executeStreamAction(id, "withdraw", {
+        actor: actorAddress,
+        request,
+      });
+
+      if (!execResult.ok) {
+        return createErrorResponse(execResult.code, execResult.error, execResult.status);
       }
-
-      const before = structuredClone(stream);
-      let evaluationResult = await evaluateWithdrawalState(stream, new Date(), fetch);
-
-      // ── Fee-bump: if the withdrawal failed due to insufficient fees,
-      //    automatically attempt a fee-bump resubmission ─────────────────
-      const { result: finalResult, feeBump } = await maybeFeeBump(
-        { stream: evaluationResult.stream, alert: evaluationResult.alert },
-        fetch,
-      );
-
-      if (feeBump.bumped) {
-        logger.info("Fee-bump transaction submitted successfully", {
-          streamId: id,
-          newTxHash: feeBump.newTxHash,
-        });
-      } else if (feeBump.error) {
-        logger.warn("Fee-bump attempt failed", {
-          streamId: id,
-          error: feeBump.error,
-        });
-      }
-
-      const updated = finalResult.stream;
-      db.streams.set(id, updated);
 
       const payload = {
-        alert: finalResult.alert,
-        data: updated,
-        withdrawal: updated.withdrawal,
-        ...(feeBump.bumped ? { feeBump: { bumped: true, newTxHash: feeBump.newTxHash } } : {}),
+        data: execResult.data,
+        ...(execResult.extra || {}),
       };
-
-      recordPrivilegedStreamAuditEvent({
-        action: "stream.withdraw",
-        after: updated as any,
-        before: before as any,
-        metadata: {
-          resultingStatus: updated.status,
-          withdrawalState: updated.withdrawal?.state ?? null,
-        },
-        request,
-        streamId: id,
-        targetAccount: updated.recipient,
-      });
-
-      logger.info("Stream withdrawn successfully", {
-        streamId: id,
-        action: "withdraw",
-        status: "success",
-      });
 
       return NextResponse.json(payload);
     });
