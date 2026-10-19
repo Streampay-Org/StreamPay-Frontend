@@ -1,8 +1,9 @@
 /** @jest-environment node */
 import { GET, POST, DELETE } from "./route";
-import { db, resetDb } from "@/app/lib/db";
-import { createCache } from "@/app/lib/cache";
+import { db, getStore, resetDb } from "@/app/lib/db";
+import { createCache, streamCache } from "@/app/lib/cache";
 import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
+import { auditLogStore, resetAuditLogStore } from "@/app/lib/audit-log";
 
 describe("Stream Details Route - GET /api/streams/:id and mutations", () => {
   const streamId = "stream-ada";
@@ -170,7 +171,7 @@ describe("Stream Details Route - GET /api/streams/:id and mutations", () => {
       const reqPOST = new Request(`http://localhost/api/streams/${streamId}`, {
         method: "POST",
         headers: { "x-tenant-id": tenantId, "Content-Type": "application/json" },
-        body: JSON.stringify({ label: "Updated Label" }),
+        body: JSON.stringify({ description: "Updated Label" }),
       });
       const resPOST = await POST(reqPOST, { params: Promise.resolve({ id: streamId }) });
       expect(resPOST.status).toBe(200);
@@ -204,7 +205,7 @@ describe("Stream Details Route - GET /api/streams/:id and mutations", () => {
     const reqPOST = new Request(`http://localhost/api/streams/non-existent`, {
       method: "POST",
       headers: { "x-tenant-id": tenantId, "Content-Type": "application/json" },
-      body: JSON.stringify({ label: "Updated Label" }),
+      body: JSON.stringify({ description: "Updated Label" }),
     });
     const resPOST = await POST(reqPOST, { params: Promise.resolve({ id: "non-existent" }) });
     expect(resPOST.status).toBe(404);
@@ -439,7 +440,7 @@ describe("Stream Details Route - GET /api/streams/:id ETag + 304 short-circuit",
     const req = new Request(`http://localhost/api/streams/${streamId}`, {
       method: "POST",
       headers: { "x-tenant-id": tenantId, "Content-Type": "application/json" },
-      body: JSON.stringify({ label: "Renamed Stream" }),
+      body: JSON.stringify({ description: "Renamed Stream" }),
     });
     const post = await POST(req, { params: Promise.resolve({ id: streamId }) });
     expect(post.status).toBe(200);
@@ -506,4 +507,231 @@ describe("Stream Details Route - GET /api/streams/:id ETag + 304 short-circuit",
     expect(res.status).toBe(200);
     return res.headers.get("ETag") as string;
   }
+});
+
+describe("Stream Details Route - POST allowlisted metadata updates", () => {
+  const streamId = "stream-ada";
+  const tenantId = "org-acme";
+
+  type StreamRecord = Record<string, unknown>;
+
+  function ctx(id: string) {
+    return { params: Promise.resolve({ id }) };
+  }
+
+  function postRequest(body: unknown, headers: Record<string, string> = {}) {
+    return new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-tenant-id": tenantId,
+        ...headers,
+      },
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    });
+  }
+
+  beforeEach(() => {
+    resetDb();
+    resetRateLimitStore();
+    resetAuditLogStore();
+    process.env.STREAMPAY_CACHE_DISABLED = "true";
+
+    const stream = db.streams.get(streamId);
+    if (stream) {
+      (stream as any).tenantId = tenantId;
+      db.streams.set(streamId, stream);
+    }
+  });
+
+  it("rejects an attempt to change status with 400 UNKNOWN_FIELD", async () => {
+    const before = db.streams.get(streamId)!;
+
+    const res = await POST(postRequest({ status: "withdrawn" }), ctx(streamId));
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("UNKNOWN_FIELD");
+    expect(body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: "status" })]),
+    );
+    expect(db.streams.get(streamId)!.status).toBe(before.status);
+  });
+
+  it("rejects an attempt to change recipient with 400 UNKNOWN_FIELD", async () => {
+    const before = db.streams.get(streamId)!;
+
+    const res = await POST(
+      postRequest({ recipient: "GDSBCG3OKHCMMWS5EBH2X7XOYTJRWXN2YYQPCNS5OFBU4IDO4X7OFSQA" }),
+      ctx(streamId),
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("UNKNOWN_FIELD");
+    expect(db.streams.get(streamId)!.recipient).toBe(before.recipient);
+  });
+
+  it("applies only allowlisted metadata fields and bumps updatedAt", async () => {
+    const before = db.streams.get(streamId)!;
+
+    const res = await POST(
+      postRequest({ description: "Q3 retainer", tags: ["design"] }),
+      ctx(streamId),
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.description).toBe("Q3 retainer");
+    expect(body.data.tags).toEqual(["design"]);
+    expect(body.data.recipient).toBe(before.recipient);
+    expect(body.data.status).toBe(before.status);
+    expect(body.data.label).toBe(before.label);
+    expect(Date.parse(body.data.updatedAt)).toBeGreaterThan(Date.parse(before.updatedAt));
+  });
+
+  it("returns 422 with field details when description exceeds 280 characters", async () => {
+    const res = await POST(
+      postRequest({ description: "a".repeat(281) }),
+      ctx(streamId),
+    );
+
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.details[0].field).toBe("description");
+  });
+
+  it("refuses metadata edits on a withdrawn stream", async () => {
+    const stream = db.streams.get(streamId)!;
+    const withdrawn = { ...stream, status: "withdrawn" as const };
+    db.streams.set(streamId, withdrawn);
+
+    const res = await POST(postRequest({ description: "Too late" }), ctx(streamId));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("INVALID_STREAM_STATE");
+    expect(db.streams.get(streamId)!.description).toBeUndefined();
+  });
+
+  it("replays the same response and writes one audit event for an identical idempotent retry", async () => {
+    const headers = { "Idempotency-Key": "update-key-1" };
+
+    const first = await POST(postRequest({ description: "Idempotent" }, headers), ctx(streamId));
+    const second = await POST(postRequest({ description: "Idempotent" }, headers), ctx(streamId));
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual(await first.json());
+
+    const events = auditLogStore.list({ action: "stream.update", targetId: streamId });
+    expect(events).toHaveLength(1);
+  });
+
+  it("returns 409 IDEMPOTENCY_CONFLICT when the key is reused with a different body", async () => {
+    const headers = { "Idempotency-Key": "update-key-2" };
+
+    await POST(postRequest({ description: "First body" }, headers), ctx(streamId));
+    const res = await POST(postRequest({ description: "Second body" }, headers), ctx(streamId));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("IDEMPOTENCY_CONFLICT");
+    expect(db.streams.get(streamId)!.description).toBe("First body");
+  });
+
+  it("serialises concurrent edits so the final state equals the last applied write", async () => {
+    const store = getStore().streamRepository.streams;
+    const originalSet = store.set.bind(store);
+    const writes: StreamRecord[] = [];
+
+    const setSpy = jest.spyOn(store, "set").mockImplementation((key, value) => {
+      if (key === streamId) {
+        writes.push(value as unknown as StreamRecord);
+      }
+      originalSet(key, value);
+    });
+
+    try {
+      const [first, second] = await Promise.all([
+        POST(postRequest({ description: "concurrent-A" }), ctx(streamId)),
+        POST(postRequest({ description: "concurrent-B" }), ctx(streamId)),
+      ]);
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(writes).toHaveLength(2);
+
+      const final = db.streams.get(streamId)!;
+      expect(final.description).toBe(writes[writes.length - 1].description);
+      expect(["concurrent-A", "concurrent-B"]).toContain(final.description);
+    } finally {
+      setSpy.mockRestore();
+    }
+  });
+
+  it("does not invalidate the cache on a rejected edit", async () => {
+    process.env.STREAMPAY_CACHE_DISABLED = "false";
+    const cached = db.streams.get(streamId)!;
+    streamCache.set(tenantId, streamId, cached, "testnet");
+    const invalidateSpy = jest.spyOn(streamCache, "invalidate");
+
+    try {
+      const res = await POST(postRequest({ status: "withdrawn" }), ctx(streamId));
+
+      expect(res.status).toBe(400);
+      expect(invalidateSpy).not.toHaveBeenCalled();
+      expect(streamCache.get(tenantId, streamId, "testnet")).toEqual(cached);
+    } finally {
+      invalidateSpy.mockRestore();
+      streamCache.invalidate(tenantId, streamId, "testnet");
+    }
+  });
+
+  it("writes exactly one stream.update audit record with the changed field list", async () => {
+    const res = await POST(
+      postRequest({ description: "Audited", tags: ["a"] }),
+      ctx(streamId),
+    );
+    expect(res.status).toBe(200);
+
+    const events = auditLogStore.list({ action: "stream.update", targetId: streamId });
+    expect(events).toHaveLength(1);
+    expect(events[0].metadata?.changedFields).toBe("description,tags");
+  });
+
+  it("applies the documented error precedence", async () => {
+    // 404 before JSON parsing.
+    const missing = await POST(
+      new Request("http://localhost/api/streams/does-not-exist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-tenant-id": tenantId },
+        body: "not-json",
+      }),
+      ctx("does-not-exist"),
+    );
+    expect(missing.status).toBe(404);
+
+    // JSON parsing before schema validation.
+    const malformed = await POST(postRequest("not-json"), ctx(streamId));
+    expect(malformed.status).toBe(400);
+    expect((await malformed.json()).error.code).toBe("INVALID_REQUEST");
+
+    // Schema validation before the terminal guard.
+    const stream = db.streams.get(streamId)!;
+    db.streams.set(streamId, { ...stream, status: "withdrawn" as const });
+    const schemaFirst = await POST(postRequest({ status: "withdrawn" }), ctx(streamId));
+    expect(schemaFirst.status).toBe(400);
+    expect((await schemaFirst.json()).error.code).toBe("UNKNOWN_FIELD");
+
+    // Terminal guard before idempotency conflict.
+    db.streams.set(streamId, { ...stream, status: "active" as const });
+    const headers = { "Idempotency-Key": "precedence-key" };
+    await POST(postRequest({ description: "Before terminal" }, headers), ctx(streamId));
+    db.streams.set(streamId, { ...stream, status: "withdrawn" as const });
+    const terminalFirst = await POST(
+      postRequest({ description: "After terminal" }, headers),
+      ctx(streamId),
+    );
+    expect(terminalFirst.status).toBe(409);
+    expect((await terminalFirst.json()).error.code).toBe("INVALID_STREAM_STATE");
+  });
 });

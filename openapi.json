@@ -1972,11 +1972,22 @@
       },
       "post": {
         "operationId": "updateStream",
-        "summary": "Update a payment stream (v1, deprecated)",
-        "description": "Partially updates a stream by merging the request body fields. **Deprecated** \u2014 there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.\n\nThe `updatedAt` field is always refreshed. Cache is invalidated on success.",
+        "summary": "Update stream metadata (v1, deprecated)",
+        "description": "Updates only the allowlisted metadata fields `description`, `webhook_url` and `tags`. Lifecycle fields (`status`, `recipient`, amounts, addresses, hashes, `withdrawal`, `cancellation`, `tenantId`, `id`, `createdAt`) are never writable here and may only change through the lifecycle routes. **Deprecated** \u2014 there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.\n\nThe `updatedAt` field is always refreshed. Requests are serialised per stream; the cache is invalidated only on success.",
         "deprecated": true,
         "tags": [
           "Streams v1"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Retries with the same key and body replay the original response. Reusing a key with a different body returns `409 IDEMPOTENCY_CONFLICT`.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -1984,42 +1995,49 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "Partial stream fields to update. Any top-level `StreamV1` field may be included.",
+                "additionalProperties": false,
+                "description": "Allowlisted metadata fields only. Any other field returns `400 UNKNOWN_FIELD`.",
                 "properties": {
-                  "rate": {
+                  "description": {
                     "type": "string",
-                    "description": "New rate amount.",
-                    "example": "150"
+                    "minLength": 1,
+                    "maxLength": 280,
+                    "description": "Human-readable stream description.",
+                    "example": "Q3 retainer"
                   },
-                  "schedule": {
+                  "webhook_url": {
                     "type": "string",
-                    "enum": [
-                      "second",
-                      "minute",
-                      "hour",
-                      "day",
-                      "week",
-                      "month",
-                      "year"
-                    ],
-                    "example": "month"
+                    "format": "uri",
+                    "description": "Webhook URL notified when the stream changes.",
+                    "example": "https://example.com/webhooks/stream"
                   },
-                  "token": {
-                    "type": "string",
-                    "description": "New asset code.",
-                    "example": "USDC"
+                  "tags": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 50
+                    },
+                    "description": "Up to 10 tags, each 1-50 characters.",
+                    "example": [
+                      "design"
+                    ]
                   }
                 }
               },
               "example": {
-                "rate": "150"
+                "description": "Q3 retainer",
+                "tags": [
+                  "design"
+                ]
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Stream updated.",
+            "description": "Metadata updated.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2034,35 +2052,24 @@
                   }
                 },
                 "examples": {
-                  "rate-updated": {
-                    "summary": "Rate updated successfully",
+                  "metadata-updated": {
+                    "summary": "Description and tags updated",
                     "value": {
                       "data": {
                         "id": "stream-abc12345",
+                        "tenantId": "tenant-org-xyz",
                         "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
                         "rate": "150",
                         "schedule": "month",
                         "status": "draft",
                         "nextAction": "start",
                         "token": "XLM",
+                        "description": "Q3 retainer",
+                        "tags": [
+                          "design"
+                        ],
                         "createdAt": "2024-01-15T10:00:00.000Z",
                         "updatedAt": "2024-01-15T11:30:00.000Z"
-                      }
-                    }
-                  },
-                  "rate-and-token-updated": {
-                    "summary": "Rate and token updated",
-                    "value": {
-                      "data": {
-                        "id": "stream-abc12345",
-                        "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
-                        "rate": "200",
-                        "schedule": "month",
-                        "status": "draft",
-                        "nextAction": "start",
-                        "token": "USDC",
-                        "createdAt": "2024-01-15T10:00:00.000Z",
-                        "updatedAt": "2024-01-15T11:35:00.000Z"
                       }
                     }
                   }
@@ -2071,7 +2078,7 @@
             }
           },
           "400": {
-            "description": "Invalid JSON body. Unknown fields are rejected with `UNKNOWN_FIELD`.",
+            "description": "Body is not valid JSON or contains a field outside the metadata allowlist.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2087,6 +2094,23 @@
                         "request_id": "req_01HZ9ABCDEF"
                       }
                     }
+                  },
+                  "unknown-field": {
+                    "summary": "Lifecycle field rejected",
+                    "value": {
+                      "error": {
+                        "code": "UNKNOWN_FIELD",
+                        "message": "Unknown field(s) for this endpoint: status.",
+                        "details": [
+                          {
+                            "field": "status",
+                            "code": "UNKNOWN_FIELD",
+                            "message": "Field 'status' is not writable on this endpoint."
+                          }
+                        ],
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
                   }
                 }
               }
@@ -2094,6 +2118,62 @@
           },
           "404": {
             "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "The stream is terminal (`withdrawn` or `cancelled`) or the idempotency key was reused with a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "invalid-stream-state": {
+                    "summary": "Terminal stream",
+                    "value": {
+                      "error": {
+                        "code": "INVALID_STREAM_STATE",
+                        "message": "Stream 'stream-abc12345' is withdrawn and cannot be updated.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "idempotency-conflict": {
+                    "summary": "Idempotency key reused with a different body",
+                    "value": {
+                      "error": {
+                        "code": "IDEMPOTENCY_CONFLICT",
+                        "message": "Idempotency key has been used with a different request.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "One or more allowlisted fields failed schema validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "One or more fields are invalid.",
+                    "details": [
+                      {
+                        "field": "description",
+                        "code": "TOO_BIG",
+                        "message": "String must contain at most 280 character(s)"
+                      }
+                    ],
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
           },
           "429": {
             "description": "Rate limit exceeded.",
