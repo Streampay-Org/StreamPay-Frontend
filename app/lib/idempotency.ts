@@ -16,6 +16,32 @@ export interface IdempotencyStore {
   set(key: string, record: IdempotencyRecord): Promise<void>;
 }
 
+/**
+ * Binding applied to every idempotency record.
+ *
+ * `resourceId` is folded into the storage key, so an `Idempotency-Key` that is
+ * reused against a different resource can never resolve to (and replay) another
+ * resource's cached response. `actorId` is folded into the request fingerprint,
+ * so a replay attempted by a different caller is reported as a conflict instead
+ * of leaking the original caller's response.
+ */
+export interface IdempotencyScope {
+  /** Resource the record belongs to, e.g. the stream id. */
+  resourceId: string;
+  /** Authenticated caller the record belongs to, e.g. the wallet address. */
+  actorId?: string;
+}
+
+/**
+ * Builds an unambiguous, resource-scoped storage key.
+ *
+ * The resource id is length-prefixed so that no combination of resource id and
+ * client key can collide with a different pair.
+ */
+export function scopedIdempotencyKey(resourceId: string, key: string): string {
+  return `${resourceId.length}:${resourceId}:${key}`;
+}
+
 // Helper to create a namespaced store backed by the existing persistence layer
 export function createNamespacedStore(namespace: string): IdempotencyStore {
   const backing = db.idempotency as any;
@@ -74,11 +100,24 @@ function makeHash(input: string) {
   return createHash("sha256").update(input).digest("hex");
 }
 
+/**
+ * Runs a mutating request under an idempotency key.
+ *
+ * The record is bound to `scope.resourceId` (the stream being mutated) and,
+ * when present, `scope.actorId` (the authenticated caller):
+ *
+ * - the storage key carries the resource id, so the same client key used on a
+ *   different stream never replays that stream's cached response;
+ * - the request fingerprint carries the resource id and the caller, so a
+ *   replay by a different caller is answered with `409 IdempotencyKeyReused`
+ *   instead of the original response.
+ */
 export async function withIdempotency(
   request: Request,
   routeId: string,
   store: IdempotencyStore,
-  handler: () => Promise<NextResponse>
+  handler: () => Promise<NextResponse>,
+  scope: IdempotencyScope
 ): Promise<NextResponse> {
   const key = request.headers?.get?.("Idempotency-Key");
 
@@ -93,7 +132,8 @@ export async function withIdempotency(
   // Read and normalise the request body. Hash body separately to avoid creating
   // a fingerprint that leaks or scales poorly for large payloads.
   // The body is hashed first so the outer fingerprint becomes:
-  //   SHA-256(idempotency_key + ":" + routeId + ":" + SHA-256(body_json))
+  //   SHA-256(idempotency_key + NUL + routeId + NUL + resource_id + NUL +
+  //            actor_id + NUL + SHA-256(body_json))
   let bodyJson: unknown = null;
   try {
     const text = await request.text();
@@ -103,14 +143,24 @@ export async function withIdempotency(
   }
 
   const bodyHash = makeHash(JSON.stringify(bodyJson ?? null));
-  const fingerprint = makeHash(`${key}:${routeId}:${bodyHash}`);
+
+  // Bind the record to the resource and the caller. The storage key carries
+  // the resource id, so a key reused against another stream never resolves to
+  // this record; the fingerprint carries the resource and the caller, so a
+  // replay by a different caller is a conflict rather than a replay.
+  const resourceId = (scope.resourceId ?? "").trim();
+  const actorId = (scope.actorId ?? "").trim();
+  const storeKey = scopedIdempotencyKey(resourceId, key);
+  const fingerprint = makeHash(
+    [key, routeId, resourceId, actorId, bodyHash].join("\u0000"),
+  );
 
   // Try reading existing record. If the backing store fails, we log and
   // allow the request through — degraded replay protection is preferable to
   // blocking mutating operations.
   let existing: IdempotencyRecord | null = null;
   try {
-    existing = await store.get(key);
+    existing = await store.get(storeKey);
   } catch (err: any) {
     logger.error("Idempotency store read failed; proceeding without replay protection", { err: err?.message });
     existing = null;
@@ -143,7 +193,7 @@ export async function withIdempotency(
   }
 
   try {
-    await store.set(key, { fingerprint, statusCode: response.status, body: respBody, createdAt: Date.now() });
+    await store.set(storeKey, { fingerprint, statusCode: response.status, body: respBody, createdAt: Date.now() });
   } catch (err: any) {
     logger.error("Idempotency store write failed; response not persisted", { err: err?.message });
   }

@@ -26,6 +26,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const actorAddress = getHeader(request, "Actor-Wallet-Address");
   // IDEMPOTENCY: Settle is non-idempotent by nature — this wrapper ensures retries return the original response without re-executing the settlement
   return withIdempotency(request, "settle", settleStore, async () => {
     return withLock(id, async () => {
@@ -34,7 +35,6 @@ export async function POST(
         return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
       }
 
-      const actorAddress = getHeader(request, "Actor-Wallet-Address");
       const policyResult = actorAddress
         ? checkStreamOrgPolicy(id, actorAddress, "settle")
         : null;
@@ -104,5 +104,5 @@ export async function POST(
         return errorResponse("SETTLEMENT_FAILED", "Failed to settle stream on Stellar/Soroban", 502);
       }
     });
-  });
+  }, { resourceId: id, actorId: actorAddress ?? undefined });
 }

@@ -12,6 +12,15 @@
   connection. Documented in `docs/SSE-HEARTBEATS.md`.
 - `POST /api/webhooks` now applies strict Zod body validation. Requests must include a non-empty `eventType`; unknown top-level fields now return `400 INVALID_INPUT`.
 
+### Fixed
+- **Idempotency records are now scoped to the stream id and the calling wallet** (#1720):
+  `POST /api/streams/:id/settle` and `POST /api/streams/:id/withdraw` now store
+  their idempotency record under a key that contains the stream id, and the
+  request fingerprint contains the acting wallet. An `Idempotency-Key` reused on
+  a different stream can no longer replay the first stream's cached response,
+  and a replay by a different wallet is answered with `409` instead of the
+  original body. See `docs/api/idempotency-scoping.md`.
+
 All notable API changes to StreamPay are documented here.  
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).  
 API versioning follows the policy in [README.md#api-versioning](README.md#api-versioning).
