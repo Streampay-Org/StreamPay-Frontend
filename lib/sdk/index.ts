@@ -344,7 +344,7 @@ export class StreamPayClient {
         } catch (err) {
           for (const sub of subscribers) {
             try {
-              sub.onError?.(event as unknown as Event);
+              sub.onError?.(event);
             } catch {
               // ignore secondary error
             }
@@ -371,7 +371,7 @@ export class StreamPayClient {
         } catch (err) {
           for (const sub of subscribers) {
             try {
-              sub.onError?.(event as unknown as Event);
+              sub.onError?.(event);
             } catch {
               // ignore secondary error
             }

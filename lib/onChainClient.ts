@@ -80,7 +80,7 @@ export function resetOnChainClientConfig(): void {
 }
 
 export const onChainClient = {
-  async fetchStream(network: string, streamId: string): Promise<OnChainStream> {
+  async fetchStream(network: string, streamId: string): Promise<OnChainStream | null> {
     if (_clientConfig.simulateUnknownError) {
       throw new SorobanError(
         SorobanErrorCode.Unknown,
