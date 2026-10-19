@@ -32,7 +32,16 @@ API versioning follows the policy in [README.md#api-versioning](README.md#api-ve
   and a focused test suite (`page.resp.test.tsx`) covering class presence,
   structural integrity, and mobile bottom-sheet behaviour. All 19
   CreateStreamForm tests pass.
-
+- **Stream list pagination now uses strict keyset cursors** (#1738):
+  `GET /api/streams` and `GET /api/v2/streams` encode the cursor as
+  `base64(<createdAt>|<id>)` instead of `base64(<stream id>)`, and the payload is
+  validated strictly. A malformed cursor is now rejected with `422
+  INVALID_CURSOR` instead of decoding to a junk id, and a cursor whose stream
+  was deleted resumes at the right position instead of silently returning page
+  one again. `GET /api/v2/streams` also validates `limit` and `status` through
+  the shared `validateListStreamsQuery` schema. Plain-id cursors are still
+  accepted for one release and are logged as deprecated. See
+  `docs/api/streams-cursor.md`.
 ### Performance (issue #85 — reduce initial render time)
 - **SplashScreen delay reduced**: mandatory display time cut from 2 400 ms to
   400 ms and fade-out from 600 ms to 300 ms, removing ~2.3 s of forced
