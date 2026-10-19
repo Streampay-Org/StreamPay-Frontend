@@ -19,7 +19,6 @@ const config = {
     "<rootDir>/__tests__/openapi-auth-wallet.test.ts",
     "<rootDir>/__tests__/openapi-webhooks.test.ts",
     "<rootDir>/__tests__/wallet-metrics.test.ts",
-    "<rootDir>/app/api/audit/export/route.test.ts",
     "<rootDir>/app/api/exports/exports.accessLog.test.ts",
     "<rootDir>/app/api/exports/exports.metrics.test.ts",
     "<rootDir>/app/api/exports/exports.test.ts",
