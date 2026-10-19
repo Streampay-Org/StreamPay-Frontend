@@ -3295,6 +3295,49 @@ a:hover {
   margin-top: var(--space-3);
 }
 
+/**
+ * Inline outcome for stream lifecycle actions.
+ *
+ * Always rendered so the live region exists before its text changes; emptied
+ * of layout when there is nothing to announce. `overflow-wrap` keeps long
+ * stream IDs from overflowing the card at 320px.
+ */
+.detail-action-status {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  line-height: 1.4;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.detail-action-status:empty {
+  margin-top: 0;
+  padding: 0;
+  border-width: 0;
+}
+
+.detail-action-status:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.detail-action-status--success {
+  background: var(--system-success-bg);
+  border-color: var(--system-success-border);
+  color: var(--system-success-text);
+}
+
+.detail-action-status--error {
+  background: var(--system-error-bg);
+  border-color: var(--system-error-border);
+  color: var(--system-error-text);
+}
+
 .detail-incident-warning {
   color: var(--error);
   font-size: var(--text-xs);
