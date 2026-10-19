@@ -27,11 +27,11 @@ function makeEvent(id: string): WebhookEvent {
 function createDeliveryAt(store: WebhookDeliveryStore, deliveryId: string, createdAt: string) {
   const realDate = Date;
   const fixed = new realDate(createdAt);
-  jest.spyOn(global, 'Date').mockImplementation(() => fixed as unknown as Date);
+  const dateSpy = jest.spyOn(global, 'Date').mockImplementation(() => fixed);
   try {
     return store.createDelivery(deliveryId, endpoint, makeEvent(deliveryId));
   } finally {
-    (global.Date as unknown as jest.SpyInstance).mockRestore();
+    dateSpy.mockRestore();
   }
 }
 

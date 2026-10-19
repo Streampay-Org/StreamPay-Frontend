@@ -58,10 +58,10 @@ export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
  * Reads the `x-request-id` header forwarded by the gateway/load-balancer,
  * or generates a lightweight fallback so every response always carries one.
  */
-function resolveRequestId(): string {
+async function resolveRequestId(): Promise<string> {
   try {
-    const hdrs = headers();
-    const forwarded = (hdrs as unknown as { get(name: string): string | null }).get("x-request-id");
+    const hdrs = await headers();
+    const forwarded = hdrs.get("x-request-id");
     if (forwarded) return forwarded;
   } catch {
     // headers() throws outside a request context (e.g. unit tests)
@@ -77,13 +77,13 @@ function resolveRequestId(): string {
  * @param status  - HTTP status code (default 500)
  * @param context - Optional structured context to preserve (will be serialized safely)
  */
-export function errorResponse(
+export async function errorResponse(
   code: string,
   message: string,
   status = 500,
   context?: Record<string, unknown>,
-): NextResponse<ErrorEnvelope> {
-  const request_id = resolveRequestId();
+): Promise<NextResponse<ErrorEnvelope>> {
+  const request_id = await resolveRequestId();
   const error : ErrorEnvelope["error"] = {
     code,
     message,
@@ -91,11 +91,11 @@ export function errorResponse(
     ...(context ? { details: context } : {}),
   };
 
-  return new NextResponse(
+  return new NextResponse<ErrorEnvelope>(
     safeJson({ error }),
     {
       status,
       headers: { "Content-Type": "application/json" },
     },
-  ) as unknown as NextResponse<ErrorEnvelope>;
+  );
 }
