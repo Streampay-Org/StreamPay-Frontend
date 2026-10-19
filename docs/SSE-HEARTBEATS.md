@@ -34,6 +34,20 @@ All three routes use `createSseConnection()` from `app/lib/sse.ts`. The helper
 owns the `ReadableStreamDefaultController`: routes call `send()` to emit data
 events and never close the controller themselves.
 
+## Stream event subscription authorization
+
+Both `GET /api/streams/events` and `GET /api/streams/:id/events` use the shared
+`authorizeStreamSubscriber()` policy. After tenant matching, a subscriber may
+connect when they are the stream recipient or sender, a member of the owning
+organization (any org role), an administrator, or a user whose non-empty email
+matches the stream's non-empty email case-insensitively. Streams without a
+tenant stamp belong to the `default` tenant; the per-stream route also uses
+that tenant when `x-tenant-id` is omitted.
+
+Tenant mismatches return the same generic 404 as missing streams to avoid
+revealing stream existence. Other unauthorized subscriptions return 403, with
+no stream fields included in either error response.
+
 ## Configuration (env-tunable per request)
 
 | Variable | Default | Meaning |
