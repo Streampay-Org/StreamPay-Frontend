@@ -120,6 +120,7 @@ describe("StreamDetailPage (persistence-store backed)", () => {
   it.each([
     [
       "stream-kemi",
+      "Kemi Onboarding Support",
       "32 XLM / week",
       "April Support batch",
       "GBVZZ5QKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2Z",
@@ -127,14 +128,17 @@ describe("StreamDetailPage (persistence-store backed)", () => {
     ],
     [
       "stream-yusuf",
+      "Yusuf QA Partnership",
       "18 XLM / day",
       "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
       "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGYWDEAVQBMJ87WGNB55IAA",
       "Withdraw",
     ],
-  ])("renders seeded %s detail from the store", async (id, rate, memo, recipient, action) => {
+  ])("renders seeded %s detail from the store", async (id, label, rate, memo, recipient, action) => {
     await renderDetailPage(id);
 
+    // Header keeps the demo name the old fixture showed (not the "Payment Stream" fallback)
+    expect(screen.getAllByText(label)[0]).toBeInTheDocument();
     expect(screen.getByText(id)).toBeInTheDocument();
     expect(screen.getAllByText(rate)[0]).toBeInTheDocument();
     expect(screen.getByText(memo)).toBeInTheDocument();

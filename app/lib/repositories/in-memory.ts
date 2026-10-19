@@ -60,6 +60,7 @@ const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
     schedule: "Draft stream ready to launch",
     status: "draft",
     nextAction: "start",
+    label: "Kemi Onboarding Support",
     createdAt: demoDate("2026-04-10T14:00:00Z"),
     updatedAt: demoDate("2026-04-28T11:00:00Z"),
     email: "fixture-user-2@example.test", // non-real domain
@@ -77,6 +78,7 @@ const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
     schedule: "Ended yesterday with funds available",
     status: "ended",
     nextAction: "withdraw",
+    label: "Yusuf QA Partnership",
     createdAt: demoDate("2026-04-15T08:00:00Z"),
     updatedAt: demoDate("2026-04-27T20:00:00Z"),
     token: "XLM",

@@ -14,7 +14,7 @@ export const DEFAULT_STREAM_TENANT_ID = "default-tenant";
 /** Cookie the browser may carry to scope page renders to a tenant. */
 export const TENANT_COOKIE_NAME = "sp_tenant_id";
 
-/** Header the dashboard's API layer already allow-lists for calls actor identity. */
+/** Header the dashboard's API layer already allow-lists for carrying the caller's actor identity. */
 export const ACTOR_HEADER_NAME = "x-streampay-actor-id";
 
 export interface StreamViewerContext {
