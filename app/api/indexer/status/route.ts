@@ -21,10 +21,11 @@
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+import { withRouteSpan } from "@/lib/routeSpan";
 import { applyRateLimit } from "@/src/middleware/rateLimit";
 import { getIndexerStatus } from "./status";
 
-export async function GET(request: Request) {
+async function handleIndexerStatusGet(request: Request) {
   const rateLimited = await applyRateLimit(request, "indexer/status", "GET");
   if (rateLimited) return rateLimited;
 
@@ -63,4 +64,8 @@ export async function GET(request: Request) {
       "X-Accel-Buffering": "no",
     },
   });
+}
+
+export async function GET(request: Request) {
+  return withRouteSpan("/api/indexer/status", () => handleIndexerStatusGet(request));
 }

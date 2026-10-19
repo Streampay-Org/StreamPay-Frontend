@@ -575,8 +575,10 @@ export class Tracer {
 
     span.setAttributes(attributes);
 
-    // Propagate traceparent into the AsyncLocalStorage correlation context
-    const correlation = correlationContext.getStore();
+    // Propagate traceparent into the AsyncLocalStorage correlation context.
+    // Optional chaining keeps the tracer usable in environments/tests where
+    // the logger module is mocked without a real AsyncLocalStorage instance.
+    const correlation = correlationContext?.getStore?.();
     if (correlation) {
       correlation.traceparent = traceparent;
     }
@@ -624,7 +626,7 @@ export class Tracer {
    * store (set by `app/lib/logger.ts → extractCorrelationContext`).
    */
   private _ambientTraceContext(): TraceContext | null {
-    const store = correlationContext.getStore();
+    const store = correlationContext?.getStore?.();
     if (!store?.traceparent) return null;
     return parseTraceparent(store.traceparent);
   }

@@ -1,5 +1,6 @@
 import { logger } from "@/app/lib/logger";
 import { getMetrics } from "@/app/lib/rate-limit-metrics";
+import { withRouteSpan } from "@/lib/routeSpan";
 import { registry } from "@/src/metrics/registry";
 import { NextResponse } from "next/server";
 import { withRouteTimeout } from "@/src/middleware/timeout";
@@ -130,6 +131,8 @@ async function handleMetricsGet(request: Request): Promise<NextResponse> {
   });
 }
 
-export async function GET(request: Request): Promise<NextResponse> {
-  return withRouteTimeout(request, () => handleMetricsGet(request));
+export async function GET(request: Request): Promise<Response> {
+  return withRouteSpan("/api/metrics", () =>
+    withRouteTimeout(request, () => handleMetricsGet(request)),
+  );
 }
