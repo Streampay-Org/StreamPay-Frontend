@@ -58,6 +58,7 @@ import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 
 function createErrorResponse(code: string, message: string, status: number) {
   const context = getCorrelationContext();
@@ -192,6 +193,13 @@ export async function POST(
       toStatus: "paused",
       at: now,
       actorWallet: actorAddress,
+    });
+    publishStreamChange({
+      action: "pause",
+      actor: actorAddress ?? undefined,
+      after: updated,
+      before,
+      correlationId: getCorrelationContext()?.correlation_id,
     });
 
     recordPrivilegedStreamAuditEvent({

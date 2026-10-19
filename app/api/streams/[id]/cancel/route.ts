@@ -38,6 +38,7 @@ import { getCorrelationContext } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
@@ -250,6 +251,13 @@ export async function POST(
       toStatus: "cancelled",
       at: now,
       actorWallet: actorAddress,
+    });
+    publishStreamChange({
+      action: "cancel",
+      actor: actorAddress ?? undefined,
+      after: updatedStream,
+      before,
+      correlationId: getCorrelationContext()?.correlation_id,
     });
 
     // ── Audit log ─────────────────────────────────────────────────────────────

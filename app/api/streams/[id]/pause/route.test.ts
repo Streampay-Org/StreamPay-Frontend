@@ -15,8 +15,9 @@
 
 import { POST as pausePOST } from "./route";
 import { POST as startPOST } from "@/app/api/streams/[id]/start/route";
-import { db, resetDb } from "@/app/lib/db";
+import { db, getStore, resetDb } from "@/app/lib/db";
 import { auditLogStore, resetAuditLogStore } from "@/app/lib/audit-log";
+import { eventBus } from "@/app/lib/event-bus";
 import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
 import { _resetOrgDbForTesting } from "@/app/lib/org-db";
 
@@ -386,6 +387,67 @@ describe("audit log", () => {
     const entries = auditLogStore.list({ targetId: DRAFT_STREAM });
     const pauseEntries = entries.filter((e) => e.action === "stream.pause");
     expect(pauseEntries).toHaveLength(0);
+  });
+});
+
+// ─── Event publication ────────────────────────────────────────────────────────
+
+describe("event publication", () => {
+  function listen(streamId: string): { events: any[]; detach: () => void } {
+    const events: any[] = [];
+    const listener = (data: any) => events.push(data);
+    eventBus.on(`stream:updated:${streamId}`, listener);
+    return {
+      detach: () => eventBus.off(`stream:updated:${streamId}`, listener),
+      events,
+    };
+  }
+
+  it("publishes one redacted stream:updated and one activity event", async () => {
+    const collector = listen(ACTIVE_STREAM);
+    try {
+      const res = await pausePOST(pauseReq(ACTIVE_STREAM), ctx(ACTIVE_STREAM));
+      expect(res.status).toBe(200);
+
+      expect(collector.events).toHaveLength(1);
+      expect(collector.events[0].status).toBe("paused");
+      expect(collector.events[0]).not.toHaveProperty("email");
+      expect(collector.events[0]).not.toHaveProperty("label");
+      expect(collector.events[0]).not.toHaveProperty("memo");
+      expect(collector.events[0]).not.toHaveProperty("partnerId");
+
+      const timeline = getStore().activityTimeline.query({
+        limit: 10,
+        streamId: ACTIVE_STREAM,
+      });
+      expect(timeline.data).toHaveLength(1);
+      expect(timeline.data[0].type).toBe("stream.pause");
+    } finally {
+      collector.detach();
+    }
+  });
+
+  it("does not publish on an idempotent replay", async () => {
+    const collector = listen(ACTIVE_STREAM);
+    try {
+      const key = "pause-event-replay";
+      await pausePOST(pauseReq(ACTIVE_STREAM, { idempotencyKey: key }), ctx(ACTIVE_STREAM));
+      await pausePOST(pauseReq(ACTIVE_STREAM, { idempotencyKey: key }), ctx(ACTIVE_STREAM));
+      expect(collector.events).toHaveLength(1);
+    } finally {
+      collector.detach();
+    }
+  });
+
+  it("does not publish when the transition is rejected", async () => {
+    const collector = listen(DRAFT_STREAM);
+    try {
+      const res = await pausePOST(pauseReq(DRAFT_STREAM), ctx(DRAFT_STREAM));
+      expect(res.status).toBe(409);
+      expect(collector.events).toHaveLength(0);
+    } finally {
+      collector.detach();
+    }
   });
 });
 
