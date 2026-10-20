@@ -107,10 +107,6 @@ async function handleActivityGet(request: Request) {
 
   const { searchParams } = url;
 
-  const request_id = resolveRequestId(
-    request instanceof Request ? request.headers : new Headers(),
-  );
-  // If handleActivityGet receives Request:
   const headers = request.headers;
   const request_id = resolveRequestId(headers);
   const rawCorr = headers.get("x-correlation-id");
