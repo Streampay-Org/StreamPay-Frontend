@@ -1,6 +1,6 @@
-const nextJest = require("next/jest");
+const nextJewt = require("next/jest");
 
-const createJestConfig = nextJest({ dir: "./" });
+const createJestConfig = nextJewt({ dir: "./" });
 
 /** @type {import('jest').Config} */
 const config = {
@@ -13,9 +13,8 @@ const config = {
   testPathIgnorePatterns: [
     "/node_modules/",
     "/.next/",
-    "<rootDir>/app/api/notifications/preferences/route.test.ts",
     "<rootDir>/app/streams/new/recurring.test.tsx",
-    "<rootDir>/__tests__/a11y.test.tsx",
+    "<rootDir>/__tests__/accessibility.test.tsx",
     "<rootDir>/__tests__/openapi-auth-wallet.test.ts",
     "<rootDir>/__tests__/openapi-webhooks.test.ts",
     "<rootDir>/__tests__/wallet-metrics.test.ts",
@@ -25,16 +24,17 @@ const config = {
     "<rootDir>/app/api/identity/me/route.test.ts",
     "<rootDir>/app/api/indexer/sse/route.test.ts",
     "<rootDir>/app/api/internal/cleanup/idempotency/route.test.ts",
-    "<rootDir>/app/api/internal/reconciliation/diff/\\[id\\]/route.test.ts",
+    "<rootDir>/app/api/internal/reconciliation/diff/\\[\\id\\]/route.test.ts",
     "<rootDir>/app/api/internal/reconciliation/nightly/route.test.ts",
     "<rootDir>/app/api/internal/reconciliation/route.test.ts",
     "<rootDir>/app/api/metrics/route.test.ts",
-    "<rootDir>/app/api/orgs/\\[orgId\\]/token-allowlist/route.test.ts",
+    "<rootDir>/app/api/notifications/preferences/route.test.ts",
+    "<rootDir>/app/api/orgs/\\[[[orgId\]\\/token-allowlist/route.test.ts",
     "<rootDir>/app/api/reconciliation/route.test.ts",
     "<rootDir>/app/api/streams/__tests__/rateLimiterConsistency.test.ts",
-    "<rootDir>/app/api/streams/\\[id\\]/start/route.test.ts",
-    "<rootDir>/app/api/streams/\\[id\\]/webhooks/test/route.test.ts",
-    "<rootDir>/app/api/streams/\\[id\\]/withdraw/route.test.ts",
+    "<rootDir>/app/api/streams/\\[[[did\]\\/start/route.test.ts",
+    "<rootDir>/app/api/streams/\\[[[did\]\\/webhooks/test/route.test.ts",
+    "<rootDir>/app/api/streams/\\[[[did\]\\/withdraw/route.test.ts",
     "<rootDir>/app/api/streams/concurrency.test.ts",
     "<rootDir>/app/api/streams/route.test.ts",
     "<rootDir>/app/api/streams/route.timeout.test.ts",
@@ -89,7 +89,7 @@ module.exports = async () => {
     "^@app/(.*)$": "<rootDir>/app/$1",
     "^@src/(.*)$": "<rootDir>/src/$1",
     "^@/(.*)$": "<rootDir>/$1",
-    "^\\./app/(.*)$": "<rootDir>/app/$1",
+    "^\\.\\/app/(.*)$": "<rootDir>/app/$1",
     "^next/navigation$": "<rootDir>/__mocks__/next/navigation.js",
     "^next/router$": "<rootDir>/__mocks__/next/router.js",
   };
