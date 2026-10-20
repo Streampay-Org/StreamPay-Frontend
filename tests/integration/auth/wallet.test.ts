@@ -54,7 +54,7 @@ describe("wallet authentication integration", () => {
 
     expect(challengeResponse.status).toBe(200);
     const challengeBody = await challengeResponse.json();
-    expect(challengeBody.challenge).toMatch(/^streampay_auth_/);
+    expect(challengeBody.challenge).toMatch(/^streampay-auth:v1:/);
     expect(Date.parse(challengeBody.expires_at)).toBeGreaterThan(Date.now());
 
     const csrfToken = "wallet-integration-csrf";
@@ -90,7 +90,7 @@ describe("wallet authentication integration", () => {
         },
         body: JSON.stringify({
           address: VALID_ADDRESS,
-          challenge: "streampay_auth_1721800000000_integration",
+          challenge: "streampay-auth:v1:nKlQNln6SV4hJ6pm6jNMSBVlcqo7r8Pjcj9mqLA_oRg|http://localhost|2024-01-15T10:05:00.000Z",
           signature: "integration-signature",
         }),
       }),

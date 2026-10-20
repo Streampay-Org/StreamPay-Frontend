@@ -48,7 +48,7 @@ export interface paths {
         };
         /**
          * Issue a wallet authentication challenge
-         * @description Returns a one-time nonce the client must sign with their Stellar private key, then submit to `POST /api/auth/wallet`.
+         * @description Returns a one-time challenge the client must sign with their Stellar private key, then submit to `POST /api/auth/wallet`. Challenges are generated with a CSPRNG and have the format `streampay-auth:v1:<nonce>|<origin>|<expires_at>`, where `nonce` is a 43-character base64url value, `origin` is this deployment's origin, and `expires_at` is the ISO-8601 expiry included in the signed message. Responses always have `Cache-Control: no-store` and never answer `304 Not Modified`. The paginated listing mode was removed: `cursor` and `limit` now return `400 UNSUPPORTED_QUERY` because listing outstanding challenges would let unauthenticated callers harvest live challenges for any address.
          */
         get: operations["getWalletChallenge"];
         put?: never;
@@ -807,8 +807,8 @@ export interface components {
         };
         WalletChallenge: {
             /**
-             * @description One-time nonce the client must sign with their Stellar private key.
-             * @example streampay_auth_1716000000000_x7k2m
+             * @description One-time challenge the client must sign with their Stellar private key: `streampay-auth:v1:<nonce>|<origin>|<expires_at>`.
+             * @example streampay-auth:v1:nKlQNln6SV4hJ6pm6jNMSBVlcqo7r8Pjcj9mqLA_oRg|https://app.streampay.io|2024-01-15T10:05:00.000Z
              */
             challenge: string;
             /**
@@ -1214,7 +1214,24 @@ export interface operations {
                     "application/json": components["schemas"]["WalletChallenge"];
                 };
             };
-            400: components["responses"]["400"];
+            /** @description Unsupported query parameters — this endpoint does not list outstanding challenges. `cursor` or `limit` are rejected. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "UNSUPPORTED_QUERY",
+                     *         "message": "Query parameters 'cursor' and 'limit' are not supported.",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             /** @description IP rate limit exceeded for challenge issuance (20 req/min per IP). */
             429: {
                 headers: {
@@ -1256,8 +1273,8 @@ export interface operations {
                      */
                     address: string;
                     /**
-                     * @description The nonce returned by GET /api/auth/wallet.
-                     * @example streampay_auth_1716000000000_x7k2m
+                     * @description The challenge returned by GET /api/auth/wallet (shape `streampay-auth:v1:<nonce>|<origin>|<expires_at>`).
+                     * @example streampay-auth:v1:nKlQNln6SV4hJ6pm6jNMSBVlcqo7r8Pjcj9mqLA_oRg|https://app.streampay.io|2024-01-15T10:05:00.000Z
                      */
                     challenge: string;
                     /**
