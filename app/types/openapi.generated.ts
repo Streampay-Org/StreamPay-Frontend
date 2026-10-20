@@ -183,6 +183,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/streams/{id}/history": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant id — must match the stream's owner. */
+                "x-tenant-id": string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Paginated lifecycle event history for a stream
+         * @description Returns a newest-first paginated list of committed lifecycle events. No PII. Uses composite (at, id) cursor.
+         */
+        get: operations["getStreamHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/streams/{id}/stop": {
         parameters: {
             query?: never;
@@ -206,6 +232,34 @@ export interface paths {
          * @description Permanently stops a stream, transitioning it to `ended` status. Valid from `active` or `draft` states. This action is irreversible. **Deprecated** — use `POST /api/v2/streams/{id}/stop` instead.
          */
         post: operations["stopStream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Caller wallet address (used for org policy evaluation on org-owned streams). */
+                "Actor-Wallet-Address"?: string;
+                /** @description Client-generated key (UUID recommended) to make the request idempotent. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a payment stream and split escrow funds
+         * @description Terminates an active or paused stream early and splits the escrowed funds: recipient earned payout and sender unvested refund. Authorization: verified stream sender matching `senderAddress` (individual streams) OR canceller role in org policy (org-owned streams). Unclaimed streams cannot be cancelled (403 SENDER_UNKNOWN). Unauthorized callers receive 403 SENDER_AUTH_REQUIRED.
+         */
+        post: operations["cancelStream"];
         delete?: never;
         options?: never;
         head?: never;
@@ -756,6 +810,17 @@ export interface components {
              * @example 2024-01-15T10:00:00.000Z
              */
             updatedAt: string;
+            /**
+             * @description Stellar wallet address of the stream sender (payer). Stored at creation time.
+             * @example GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc5XJLGH5
+             */
+            senderAddress?: string | null;
+            /**
+             * @description Stream ownership state: individual, org, or unclaimed.
+             * @example individual
+             * @enum {string}
+             */
+            ownership?: "individual" | "org" | "unclaimed";
         };
         StreamV2: {
             /**
@@ -804,6 +869,17 @@ export interface components {
                 /** @example XLM */
                 currency: string;
             } | null;
+            /**
+             * @description Stellar wallet address of the stream sender (payer). Stored at creation time.
+             * @example GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc5XJLGH5
+             */
+            senderAddress?: string | null;
+            /**
+             * @description Stream ownership state: individual, org, or unclaimed.
+             * @example individual
+             * @enum {string}
+             */
+            ownership?: "individual" | "org" | "unclaimed";
         };
         WalletChallenge: {
             /**
@@ -935,6 +1011,48 @@ export interface components {
                  * @example /api/activity?limit=20
                  */
                 self: string;
+            };
+        };
+        /** @description Immutable lifecycle event for a stream. No PII — actor wallet truncated to 6 chars. */
+        StreamHistoryEntry: {
+            /**
+             * @description Unique entry id.
+             * @example 3c4d5e6f-7a8b-9c0d-e1f2-a3b4c5d6e7f8
+             */
+            id: string;
+            /**
+             * @description Owning stream id.
+             * @example stream-abc12345
+             */
+            streamId: string;
+            /** @enum {string} */
+            type: "created" | "started" | "paused" | "resumed" | "stopped" | "settled" | "withdrawn" | "cancelled";
+            /** @description Status before transition; absent for 'created'. */
+            fromStatus?: string | null;
+            /** @description Status after transition. */
+            toStatus: string;
+            /**
+             * Format: date-time
+             * @description ISO-8601 UTC timestamp.
+             * @example 2026-06-01T09:00:00.000Z
+             */
+            at: string;
+            /**
+             * @description First 6 chars of actor wallet (no PII).
+             * @example GABCDE
+             */
+            actor?: string | null;
+            /** @description On-chain tx hash (once indexer is wired). */
+            txHash?: string | null;
+            /** @description Human-readable amount label, e.g. '120 XLM'. */
+            amountRaw?: string | null;
+        };
+        StreamHistoryResponse: {
+            /** @description History entries, newest first. */
+            data: components["schemas"]["StreamHistoryEntry"][];
+            meta: {
+                /** @description Opaque cursor for the next page; null when none remain. */
+                nextCursor: string | null;
             };
         };
     };
@@ -1844,6 +1962,41 @@ export interface operations {
             500: components["responses"]["500"];
         };
     };
+    getStreamHistory: {
+        parameters: {
+            query?: {
+                /** @description Max entries per page. */
+                limit?: number;
+                /** @description Opaque cursor from meta.nextCursor of the previous response. */
+                cursor?: string;
+            };
+            header: {
+                /** @description Tenant id — must match the stream's owner. */
+                "x-tenant-id": string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated list of lifecycle events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StreamHistoryResponse"];
+                };
+            };
+            400: components["responses"]["400"];
+            404: components["responses"]["404"];
+            422: components["responses"]["422"];
+            500: components["responses"]["500"];
+        };
+    };
     stopStream: {
         parameters: {
             query?: never;
@@ -1924,6 +2077,69 @@ export interface operations {
                      *       }
                      *     }
                      */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    cancelStream: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Caller wallet address (used for org policy evaluation on org-owned streams). */
+                "Actor-Wallet-Address"?: string;
+                /** @description Client-generated key (UUID recommended) to make the request idempotent. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stream cancelled successfully. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["StreamV1"];
+                        /** @description Full refund-split breakdown. */
+                        cancellation: Record<string, never>;
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Forbidden: sender authentication required (SENDER_AUTH_REQUIRED), stream is unclaimed (SENDER_UNKNOWN), or org policy denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["404"];
+            /** @description Conflict: stream already in terminal state or idempotency conflict. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            422: components["responses"]["422"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };

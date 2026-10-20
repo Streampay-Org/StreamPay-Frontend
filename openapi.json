@@ -317,6 +317,24 @@
             "format": "date-time",
             "description": "ISO-8601 last-updated timestamp.",
             "example": "2024-01-15T10:00:00.000Z"
+          },
+          "senderAddress": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stellar wallet address of the stream sender (payer). Stored at creation time.",
+            "example": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc5XJLGH5"
+          },
+          "ownership": {
+            "type": "string",
+            "enum": [
+              "individual",
+              "org",
+              "unclaimed"
+            ],
+            "description": "Stream ownership state: individual, org, or unclaimed.",
+            "example": "individual"
           }
         }
       },
@@ -404,6 +422,24 @@
               }
             ],
             "description": "Settlement details once the stream has been settled, otherwise `null`. Clients must handle `null` explicitly."
+          },
+          "senderAddress": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stellar wallet address of the stream sender (payer). Stored at creation time.",
+            "example": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc5XJLGH5"
+          },
+          "ownership": {
+            "type": "string",
+            "enum": [
+              "individual",
+              "org",
+              "unclaimed"
+            ],
+            "description": "Stream ownership state: individual, org, or unclaimed.",
+            "example": "individual"
           }
         }
       },
@@ -2602,6 +2638,115 @@
                     "message": "Too many requests. Retry after 30 seconds.",
                     "request_id": "req_01HZ9ABCDEF"
                   }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/streams/{id}/cancel": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "Actor-Wallet-Address",
+          "in": "header",
+          "required": false,
+          "description": "Caller wallet address (used for org policy evaluation on org-owned streams).",
+          "schema": {
+            "type": "string",
+            "example": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc5XJLGH5"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": false,
+          "description": "Client-generated key (UUID recommended) to make the request idempotent.",
+          "schema": {
+            "type": "string",
+            "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "cancelStream",
+        "summary": "Cancel a payment stream and split escrow funds",
+        "description": "Terminates an active or paused stream early and splits the escrowed funds: recipient earned payout and sender unvested refund. Authorization: verified stream sender matching `senderAddress` (individual streams) OR canceller role in org policy (org-owned streams). Unclaimed streams cannot be cancelled (403 SENDER_UNKNOWN). Unauthorized callers receive 403 SENDER_AUTH_REQUIRED.",
+        "tags": [
+          "Streams v1"
+        ],
+        "responses": {
+          "200": {
+            "description": "Stream cancelled successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "cancellation"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/StreamV1"
+                    },
+                    "cancellation": {
+                      "type": "object",
+                      "description": "Full refund-split breakdown."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "description": "Forbidden: sender authentication required (SENDER_AUTH_REQUIRED), stream is unclaimed (SENDER_UNKNOWN), or org policy denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict: stream already in terminal state or idempotency conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
