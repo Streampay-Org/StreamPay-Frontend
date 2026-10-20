@@ -9,7 +9,9 @@ if (typeof globalThis.setImmediate === "undefined") {
 
 if (typeof globalThis.crypto === "undefined" || typeof globalThis.crypto.randomUUID === "undefined") {
   const gCrypto = globalThis.crypto || {};
-  gCrypto.randomUUID = gCrypto.randomUUID || crypto.randomUUID;
+  if (!gCrypto.randomUUID) {
+    gCrypto.randomUUID = crypto.randomUUID;
+  }
   globalThis.crypto = gCrypto;
 }
 
@@ -37,6 +39,9 @@ if (typeof window !== "undefined") {
   if (!window.crypto.randomUUID) {
     window.crypto.randomUUID = crypto.randomUUID;
   }
+  if (typeof window.crypto.getRandomValues === "undefined") {
+    window.crypto.getRandomValues = crypto.getRandomValues.bind(crypto);
+  }
   window.structuredClone = window.structuredClone || globalThis.structuredClone;
   window.TextEncoder = window.TextEncoder || TextEncoder;
   window.TextDecoder = window.TextDecoder || TextDecoder;
@@ -53,6 +58,9 @@ if (typeof global !== "undefined") {
   global.crypto = global.crypto || globalThis.crypto;
   if (!global.crypto.randomUUID) {
     global.crypto.randomUUID = crypto.randomUUID;
+  }
+  if (typeof global.crypto.getRandomValues === "undefined") {
+    global.crypto.getRandomValues = crypto.getRandomValues.bind(crypto);
   }
   global.structuredClone = global.structuredClone || globalThis.structuredClone;
   global.TextEncoder = global.TextEncoder || TextEncoder;
