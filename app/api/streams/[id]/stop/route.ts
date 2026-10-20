@@ -11,6 +11,7 @@ import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { enqueueStreamLifecycleWebhook } from "@/app/lib/stream-webhook-lifecycle";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -120,6 +121,12 @@ export async function POST(
       request,
       streamId: id,
       targetAccount: updatedStream.recipient,
+    });
+
+    enqueueStreamLifecycleWebhook({
+      action: "stop",
+      after: updatedStream as unknown as Record<string, unknown>,
+      before: before as unknown as Record<string, unknown>,
     });
 
     const payload = { data: updatedStream };
