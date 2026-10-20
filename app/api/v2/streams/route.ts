@@ -19,11 +19,17 @@
  */
 
 import { NextResponse } from "next/server";
-import { db, idempotencyToken, getStore } from "@/app/lib/db";
+import {
+  checkIdempotency,
+  computeFingerprint,
+  idempotencyToken,
+  setIdempotency,
+  getStore,
+} from "@/app/lib/db";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { getClientIdentity } from "@/app/lib/rate-limit";
 import { checkOrgDailyQuota, orgQuotaResponse } from "@/app/lib/org-quota";
-import { toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
+import { toV2Stream, dbStreamToV1, type StreamV2 } from "@/app/lib/api-version";
 import { validateListStreamsQuery } from "@/app/lib/stream-validation";
 import {
   decodeStreamCursor,
@@ -31,8 +37,9 @@ import {
   isAfterCursor,
   type StreamCursor,
 } from "@/app/lib/stream-cursor";
-import type { Stream } from "@/app/types/openapi";
 import { withRouteTimeout } from "@/src/middleware/timeout";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
+import { createStreamCore } from "@/app/lib/stream-core";
 
 
 function errorResponse(code: string, message: string, status: number) {
@@ -132,38 +139,9 @@ export async function GET(request: Request) {
  * POST /api/v2/streams — create a stream, respond with v2 shape.
  */
 async function handleV2StreamsPost(request: Request) {
-  if (!request.headers.get("authorization")) {
-    return errorResponse("UNAUTHORIZED", "Bearer token required.", 401);
-  }
+  const { idempotencyStore } = getStore();
 
-  // ── 1. Idempotency ────────────────────────────────────────────────────────
-  const idempotencyKey = request.headers.get("Idempotency-Key");
-  const token = idempotencyKey
-    ? idempotencyToken("v2.streams.create", idempotencyKey)
-    : null;
-
-  if (token && db.idempotency.has(token)) {
-    // Replayed request — return the cached response without counting against quota.
-    return NextResponse.json(db.idempotency.get(token), { status: 201 });
-  }
-
-  // ── 2. Per-org daily quota ────────────────────────────────────────────────
-  //
-  // We use ClientIdentity.value as the org key:
-  //   - API key callers   → keyed by their API key (most precise)
-  //   - Wallet callers    → keyed by their Stellar public key
-  //   - Unauthenticated   → keyed by IP (coarser, still prevents runaway billing)
-  //
-  // The quota is checked *before* body parsing so the 429 is returned cheaply
-  // and the counter is incremented atomically inside checkOrgDailyQuota.
-  const identity = getClientIdentity(request);
-  const quota = await checkOrgDailyQuota(identity.value);
-
-  if (!quota.allowed) {
-    return orgQuotaResponse(quota.retryAfter!);
-  }
-
-  // ── 3. Parse and validate body ───────────────────────────────────────────
+  // ── 1. Parse JSON body ───────────────────────────────────────────────────
   let body: Record<string, unknown>;
   try {
     body = await request.json();
@@ -171,45 +149,100 @@ async function handleV2StreamsPost(request: Request) {
     return errorResponse("INVALID_REQUEST", "Request body must be valid JSON", 400);
   }
 
-  const { recipient, rate, schedule } = body as {
-    recipient?: string;
-    rate?: string;
-    schedule?: string;
-  };
+  // ── 2. Idempotency check ─────────────────────────────────────────────────
+  const idempotencyKey = request.headers.get("Idempotency-Key");
+  const token = idempotencyKey
+    ? idempotencyToken("v2.streams.create", idempotencyKey)
+    : null;
 
-  if (!recipient || !rate || !schedule) {
-    return errorResponse(
-      "VALIDATION_ERROR",
-      "One or more fields are invalid.",
-      422,
-    );
+  const fingerprint = computeFingerprint("POST", "/api/v2/streams", body);
+
+  if (token) {
+    const cached = checkIdempotency(idempotencyStore, token, fingerprint);
+    if (cached) {
+      if (!cached.ok) {
+        return NextResponse.json(
+          {
+            error: {
+              code: "IDEMPOTENCY_CONFLICT",
+              message: "Idempotency key has been used with a different request.",
+              request_id: getCorrelationContext()?.request_id,
+            },
+          },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json(cached.body, { status: cached.status });
+    }
   }
 
-  // ── 4. Persist and respond ────────────────────────────────────────────────
-  const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
-  const now = new Date().toISOString();
-  const newStream: Stream = {
-    id,
-    recipient: String(recipient),
-    rate: String(rate),
-    schedule: String(schedule),
-    status: "draft",
-    nextAction: "start",
-    createdAt: now,
-    updatedAt: now,
-    token: "XLM",
+  // ── 3. Validate, check allowlist, charge quota, and persist via shared core
+  const authenticatedActor = tryAuthenticateRequest(request);
+  const senderAddress = authenticatedActor?.walletAddress ?? null;
+  const ownership: "individual" | "unclaimed" = authenticatedActor ? "individual" : "unclaimed";
+  const actorWallet = request.headers.get("Actor-Wallet-Address") ?? senderAddress;
+
+  const coreResult = await createStreamCore({
+    body,
+    actorWallet,
+    senderAddress,
+    ownership,
+    beforePersist: async () => {
+      const identity = getClientIdentity(request);
+      const quota = await checkOrgDailyQuota(identity.value);
+      if (!quota.allowed) {
+        return { ok: false, response: orgQuotaResponse(quota.retryAfter!) };
+      }
+      return { ok: true };
+    },
+  });
+
+  if (!coreResult.ok) {
+    if (coreResult.response) {
+      return coreResult.response;
+    }
+    if (coreResult.details) {
+      const requestId = getCorrelationContext()?.request_id ?? `req-${crypto.randomUUID()}`;
+      return NextResponse.json(
+        {
+          error: {
+            code: coreResult.code,
+            message: coreResult.message,
+            details: coreResult.details,
+            request_id: requestId,
+          },
+        },
+        { status: coreResult.status },
+      );
+    }
+    return errorResponse(coreResult.code, coreResult.message, coreResult.status);
+  }
+
+  const streamV2 = toV2Stream(dbStreamToV1(coreResult.stream));
+  const { createdAt: _ca, nextAction: _na, updatedAt: _ua, ...cleanV2 } = streamV2 as StreamV2 & {
+    createdAt?: string;
+    nextAction?: string;
+    updatedAt?: string;
+  };
+  const data = {
+    ...cleanV2,
+    updated_at: coreResult.stream.updatedAt,
+  };
+  const payload = {
+    ...streamV2,
+    updated_at: coreResult.stream.updatedAt,
+    data,
+    links: { self: `/api/v2/streams/${streamV2.id}` },
   };
 
-  db.streams.set(id, newStream);
+  if (token) {
+    setIdempotency(idempotencyStore, token, fingerprint, 201, payload);
+  }
 
-  const stream = toV2Stream(dbStreamToV1(newStream));
-  const payload = stream;
- 
-  if (token) db.idempotency.set(token, payload);
- 
   return NextResponse.json(payload, { status: 201 });
 }
 
 export async function POST(request: Request) {
   return withRouteTimeout(request, () => handleV2StreamsPost(request));
 }
+

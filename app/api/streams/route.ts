@@ -15,16 +15,12 @@ import {
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { logAccessEvent } from "@/src/middleware/accessLog";
 import { streamsRateLimit } from "@/src/middleware/rateLimit";
-import { checkTokenAllowed, normaliseToken } from "@/app/lib/token-allowlist";
-import {
-  validateCreateStreamBody,
-  validateListStreamsQuery,
-} from "@/app/lib/stream-validation";
-import type { Stream } from "@/app/types/openapi";
+import { validateListStreamsQuery } from "@/app/lib/stream-validation";
 import { createCacheHeaders, createStrongEtag, isIfNoneMatchMatch } from "@/src/middleware/etag";
 import { observeStreamsRequest } from "@/src/metrics/registry";
 import { withRouteTimeout } from "@/src/middleware/timeout";
-import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
+import { createStreamCore } from "@/app/lib/stream-core";
 
 function errorResponse(code: string, message: string, status: number) {
   return createErrorResponse(code, message, status);
@@ -211,78 +207,38 @@ async function handleStreamsPost(request: Request) {
       }
     }
 
-    // ── Schema validation (shared) ────────────────────────────────────────
-    const validationErrors = validateCreateStreamBody(body);
-    if (validationErrors.length > 0) {
-      status = 422;
-      logger.warn("Stream creation validation failed", {
-        errors: validationErrors,
-      });
-      return NextResponse.json(
-        {
-          error: {
-            code: "VALIDATION_ERROR",
-            message: "One or more fields are invalid.",
-            details: validationErrors,
-            request_id: getCorrelationContext()?.request_id,
-          },
-        },
-        { status },
-      );
-    }
+    const authenticatedActor = tryAuthenticateRequest(request);
+    const senderAddress = authenticatedActor?.walletAddress ?? null;
+    const ownership: "individual" | "unclaimed" = authenticatedActor ? "individual" : "unclaimed";
+    const actorWallet = getHeader(request, "Actor-Wallet-Address") ?? senderAddress;
 
-    const { rate, recipient, schedule, token: rawToken } = body as {
-      rate?: string;
-      recipient?: string;
-      schedule?: string;
-      token?: string;
-    };
-
-    const rateValue = rate ?? "";
-    const recipientValue = recipient ?? "";
-    const scheduleValue = schedule ?? "";
-    const tokenStr = rawToken?.trim() || "XLM";
-    let normalisedToken: string;
-    try {
-      normalisedToken = normaliseToken(tokenStr);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      status = 422;
-      return createErrorResponse("INVALID_TOKEN", `Invalid token format: ${msg}`, 422);
-    }
-
-    const allowlistResult = await checkTokenAllowed(normalisedToken);
-    if (!allowlistResult.accepted) {
-      status = 422;
-      logger.warn("Stream creation rejected: token not in allowlist", { token: normalisedToken });
-      return createErrorResponse("TOKEN_NOT_ALLOWED", allowlistResult.reason, 422);
-    }
-
-    const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
-    const now = new Date().toISOString();
-    const newStream: Stream = {
-      createdAt: now,
-      id,
-      nextAction: "start",
-      rate: rateValue,
-      recipient: recipientValue,
-      schedule: scheduleValue,
-      status: "draft",
-      updatedAt: now,
-      token: normalisedToken,
-    };
-
-    streamRepository.streams.set(id, newStream);
-
-    appendStreamHistoryEvent({
-      streamId: id,
-      type: "created",
-      toStatus: "draft",
-      at: now,
-      actorWallet: getHeader(request, "Actor-Wallet-Address"),
+    const coreResult = await createStreamCore({
+      body,
+      actorWallet,
+      senderAddress,
+      ownership,
     });
 
-    const payload = { data: newStream, links: { self: `/api/v1/streams/${id}` } };
+    if (!coreResult.ok) {
+      status = coreResult.status;
+      if (coreResult.details) {
+        return NextResponse.json(
+          {
+            error: {
+              code: coreResult.code,
+              message: coreResult.message,
+              details: coreResult.details,
+              request_id: getCorrelationContext()?.request_id,
+            },
+          },
+          { status },
+        );
+      }
+      return createErrorResponse(coreResult.code, coreResult.message, status);
+    }
+
+    const newStream = coreResult.stream;
+    const payload = { data: newStream, links: { self: `/api/v1/streams/${newStream.id}` } };
 
     if (token) {
       setIdempotency(idempotencyStore, token, fingerprint, 201, payload);
