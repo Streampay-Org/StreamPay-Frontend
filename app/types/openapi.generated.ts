@@ -183,6 +183,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/streams/{id}/history": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant id — must match the stream's owner. */
+                "x-tenant-id": string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Paginated lifecycle event history for a stream
+         * @description Returns a newest-first paginated list of committed lifecycle events. No PII. Uses composite (at, id) cursor.
+         */
+        get: operations["getStreamHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/streams/{id}/stop": {
         parameters: {
             query?: never;
@@ -478,35 +504,7 @@ export interface paths {
          * Webhook delivery system health
          * @description Returns the health status of the webhook delivery system along with subscription and delivery statistics.
          */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Health status retrieved */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": unknown;
-                    };
-                };
-                /** @description Failed to retrieve health stats */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": unknown;
-                    };
-                };
-            };
-        };
+        get: operations["getWebhookHealth"];
         put?: never;
         post?: never;
         delete?: never;
@@ -615,6 +613,294 @@ export interface paths {
          * @description **Non-production only.** Returns a base64-encoded signature for the given payload. Returns 403 in production.
          */
         post: operations["debugKmsSign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/healthz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Liveness probe
+         * @description Returns service liveness status without checking external dependencies.
+         */
+        get: operations["getHealthz"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/readyz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Readiness probe
+         * @description Checks database and dependency readiness before accepting traffic.
+         */
+        get: operations["getReadyz"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Scrape Prometheus metrics
+         * @description Exports application and runtime metrics in Prometheus text exposition format.
+         */
+        get: operations["getMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/wallet/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Wallet authentication subsystem health
+         * @description Returns health status of the wallet challenge and session store.
+         */
+        get: operations["getWalletAuthHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/identity/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export authenticated user profile and personal data
+         * @description Returns the authenticated subject profile, preferences, and stream history for GDPR data portability.
+         */
+        get: operations["getIdentityMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/identity/me/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Erase authenticated user personal data
+         * @description Anonymizes or deletes off-chain personal data associated with the authenticated wallet address.
+         */
+        delete: operations["deleteIdentityMe"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get notification preferences
+         * @description Returns notification channel and event preferences for the authenticated user.
+         */
+        get: operations["getNotificationPreferences"];
+        /**
+         * Update notification preferences
+         * @description Updates notification channel and event preferences for the authenticated user.
+         */
+        put: operations["updateNotificationPreferences"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/indexer/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stellar indexer status
+         * @description Returns the latest indexed ledger sequence, lag metrics, and indexer health status.
+         */
+        get: operations["getIndexerStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/indexer/sse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Subscribe to real-time indexer server-sent events
+         * @description Opens a Server-Sent Events (SSE) stream emitting real-time contract and ledger indexing updates.
+         */
+        get: operations["streamIndexerEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List data export jobs
+         * @description Lists export jobs created by the authenticated user.
+         */
+        get: operations["listExports"];
+        put?: never;
+        /**
+         * Create a data export job
+         * @description Enqueues an asynchronous CSV or JSON export job for streams or activity records.
+         */
+        post: operations["createExport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/exports/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export worker subsystem health
+         * @description Returns health status and queue depth for the asynchronous export subsystem.
+         */
+        get: operations["getExportsHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/exports/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get or download an export job
+         * @description Returns the status or downloadable artifact of a specific export job.
+         */
+        get: operations["getExportById"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/audit/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List archived audit log batches
+         * @description Returns metadata for archived cold-storage audit log batches.
+         */
+        get: operations["listAuditArchives"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/audit/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export tamper-evident audit log entries
+         * @description Exports audit log entries in CSV or JSONL format with cryptographic hash chain fields.
+         */
+        get: operations["exportAuditLog"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -935,6 +1221,48 @@ export interface components {
                  * @example /api/activity?limit=20
                  */
                 self: string;
+            };
+        };
+        /** @description Immutable lifecycle event for a stream. No PII — actor wallet truncated to 6 chars. */
+        StreamHistoryEntry: {
+            /**
+             * @description Unique entry id.
+             * @example 3c4d5e6f-7a8b-9c0d-e1f2-a3b4c5d6e7f8
+             */
+            id: string;
+            /**
+             * @description Owning stream id.
+             * @example stream-abc12345
+             */
+            streamId: string;
+            /** @enum {string} */
+            type: "created" | "started" | "paused" | "resumed" | "stopped" | "settled" | "withdrawn" | "cancelled";
+            /** @description Status before transition; absent for 'created'. */
+            fromStatus?: string | null;
+            /** @description Status after transition. */
+            toStatus: string;
+            /**
+             * Format: date-time
+             * @description ISO-8601 UTC timestamp.
+             * @example 2026-06-01T09:00:00.000Z
+             */
+            at: string;
+            /**
+             * @description First 6 chars of actor wallet (no PII).
+             * @example GABCDE
+             */
+            actor?: string | null;
+            /** @description On-chain tx hash (once indexer is wired). */
+            txHash?: string | null;
+            /** @description Human-readable amount label, e.g. '120 XLM'. */
+            amountRaw?: string | null;
+        };
+        StreamHistoryResponse: {
+            /** @description History entries, newest first. */
+            data: components["schemas"]["StreamHistoryEntry"][];
+            meta: {
+                /** @description Opaque cursor for the next page; null when none remain. */
+                nextCursor: string | null;
             };
         };
     };
@@ -1844,6 +2172,41 @@ export interface operations {
             500: components["responses"]["500"];
         };
     };
+    getStreamHistory: {
+        parameters: {
+            query?: {
+                /** @description Max entries per page. */
+                limit?: number;
+                /** @description Opaque cursor from meta.nextCursor of the previous response. */
+                cursor?: string;
+            };
+            header: {
+                /** @description Tenant id — must match the stream's owner. */
+                "x-tenant-id": string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated list of lifecycle events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StreamHistoryResponse"];
+                };
+            };
+            400: components["responses"]["400"];
+            404: components["responses"]["404"];
+            422: components["responses"]["422"];
+            500: components["responses"]["500"];
+        };
+    };
     stopStream: {
         parameters: {
             query?: never;
@@ -2584,6 +2947,35 @@ export interface operations {
             500: components["responses"]["500"];
         };
     };
+    getWebhookHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Health status retrieved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Failed to retrieve health stats */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     adminRedeliverWebhook: {
         parameters: {
             query?: never;
@@ -2775,6 +3167,388 @@ export interface operations {
             400: components["responses"]["400"];
             403: components["responses"]["403"];
             500: components["responses"]["500"];
+        };
+    };
+    getHealthz: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Service is alive. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "ok";
+                    };
+                };
+            };
+        };
+    };
+    getReadyz: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Service is ready. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "ready" | "degraded";
+                    };
+                };
+            };
+            /** @description Service unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Prometheus metrics payload. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            401: components["responses"]["401"];
+            500: components["responses"]["500"];
+        };
+    };
+    getWalletAuthHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Wallet auth subsystem status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "ok" | "degraded";
+                    };
+                };
+            };
+            /** @description Service unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getIdentityMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authenticated user identity export. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    deleteIdentityMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Personal data erased. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getNotificationPreferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notification preferences. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["401"];
+        };
+    };
+    updateNotificationPreferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Updated notification preferences. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: components["responses"]["400"];
+            401: components["responses"]["401"];
+        };
+    };
+    getIndexerStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current indexer status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    streamIndexerEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE event stream. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+        };
+    };
+    listExports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Export jobs list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["401"];
+        };
+    };
+    createExport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Export job created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: components["responses"]["400"];
+            401: components["responses"]["401"];
+        };
+    };
+    getExportsHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Export subsystem health. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    getExportById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Unique identifier of the export job. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Export job details or artifact. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["401"];
+            404: components["responses"]["404"];
+        };
+    };
+    listAuditArchives: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Archived audit batches. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["401"];
+        };
+    };
+    exportAuditLog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Exported audit log entries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["401"];
         };
     };
 }
