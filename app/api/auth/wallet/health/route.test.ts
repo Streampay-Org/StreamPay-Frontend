@@ -341,9 +341,16 @@ describe("GET /api/auth/wallet/health", () => {
   });
 
   it("status code is 503 when overall status is degraded", async () => {
-    // Verify the mapping rule: degraded => 503
-    const degradedStatus: WalletHealthReport["status"] = "degraded";
-    expect(degradedStatus === "ok" ? 200 : 503).toBe(503);
+    const originalSecret = process.env.JWT_SECRET;
+    try {
+      process.env.JWT_SECRET = "too-short";
+      const response = await GET(makeRequest());
+      expect(response.status).toBe(503);
+      expect((await response.json()).status).toBe("degraded");
+    } finally {
+      if (originalSecret === undefined) delete process.env.JWT_SECRET;
+      else process.env.JWT_SECRET = originalSecret;
+    }
   });
 
   it("checked_at timestamps are valid ISO 8601 strings", async () => {

@@ -89,10 +89,10 @@ describe("EventTimeline", () => {
     expect(allChip).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("shows an empty message when there are no events", () => {
+  it("shows 'No events yet.' when the events array is empty", () => {
     render(<EventTimeline events={[]} />);
 
-    expect(screen.getByText(/no contract events match this filter yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/no events yet/i)).toBeInTheDocument();
     expect(screen.queryAllByRole("listitem")).toHaveLength(0);
   });
 

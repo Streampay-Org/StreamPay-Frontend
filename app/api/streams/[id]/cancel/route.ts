@@ -37,6 +37,7 @@ import {
 import { getCorrelationContext } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
@@ -241,6 +242,15 @@ export async function POST(
       cancellation,
     };
     db.streams.set(id, updatedStream);
+
+    appendStreamHistoryEvent({
+      streamId: id,
+      type: "cancelled",
+      fromStatus: stream.status,
+      toStatus: "cancelled",
+      at: now,
+      actorWallet: actorAddress,
+    });
 
     // ── Audit log ─────────────────────────────────────────────────────────────
     recordPrivilegedStreamAuditEvent({

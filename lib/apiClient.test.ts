@@ -14,7 +14,7 @@ import { isStreamPayError } from '@/app/lib/errors/mapper';
 
 // Mock global fetch
 const mockFetch = jest.fn();
-global.fetch = mockFetch as unknown as typeof fetch;
+global.fetch = mockFetch;
 
 describe('fetchWithIdempotency', () => {
   beforeEach(() => {

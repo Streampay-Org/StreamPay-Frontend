@@ -9,7 +9,8 @@ import {
 } from "@/app/lib/db";
 import { getCorrelationContext } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
-import { executeStreamAction } from "@/app/lib/stream-executor";
+import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -84,8 +85,38 @@ export async function POST(
       }
     }
 
-    const execResult = await executeStreamAction(id, "stop", {
-      actor: actorAddress,
+    if (stream.status !== "active" && stream.status !== "draft") {
+      return createErrorResponse(
+        "INVALID_STREAM_STATE",
+        "Only active or draft streams can be stopped",
+        409
+      );
+    }
+
+    const before = structuredClone(stream);
+    const now = new Date().toISOString();
+    const updatedStream = {
+      ...stream,
+      nextAction: "withdraw" as const,
+      status: "ended" as const,
+      updatedAt: now,
+    };
+    db.streams.set(id, updatedStream);
+
+    appendStreamHistoryEvent({
+      streamId: id,
+      type: "stopped",
+      fromStatus: stream.status,
+      toStatus: "ended",
+      at: now,
+      actorWallet: actorAddress,
+    });
+
+    recordPrivilegedStreamAuditEvent({
+      action: "stream.stop.override",
+      after: updatedStream as unknown as Record<string, unknown>,
+      before: before as unknown as Record<string, unknown>,
+      metadata: { resultingStatus: updatedStream.status },
       request,
     });
 

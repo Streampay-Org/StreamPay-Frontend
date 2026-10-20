@@ -10,6 +10,7 @@ import type {
 } from "@/app/lib/db";
 import type { ActivityEvent, ExportJob, Stream, User } from "@/app/types/openapi";
 import { createActivityTimelineStore, type ActivityTimelineStore, activityEventToTimelineEntry } from "@/app/lib/repositories/activity-timeline";
+import { createStreamHistoryStore } from "@/app/lib/repositories/stream-history";
 
 // Keep seeded demo timestamps recent (no-op under Jest).
 const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
@@ -35,7 +36,7 @@ const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
 /* test-fixture */ const initialStreams: Stream[] = [
   {
     id: "stream-ada",
-    recipient: "Ada Creative Studio",
+    recipient: "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZK7G",
     rate: "120 XLM / month",
     schedule: "Pays every 30 days",
     status: "active",
@@ -46,30 +47,54 @@ const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
     label: "Design Retainer Q2",
     partnerId: "PARTNER-FIXTURE-1", // synthetic partner id
     token: "XLM",
+    settlementTxHash:
+      "c3f8a12e4b76d09e1a23f456bc78d90e1f234a5678b9c0d1e2f3a4b5c6d7e8f9",
+    totalAmount: "3600000000",
+    vestedAmount: "1800000000",
+    releasedAmount: "1200000000",
+    senderAddress: "GSENDER00000000000000000000000000000000000000000000",
   },
   {
     id: "stream-kemi",
-    recipient: "Kemi Onboarding Support",
+    recipient: "GBVZZ5QKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2Z",
     rate: "32 XLM / week",
     schedule: "Draft stream ready to launch",
     status: "draft",
     nextAction: "start",
+    label: "Kemi Onboarding Support",
     createdAt: demoDate("2026-04-10T14:00:00Z"),
     updatedAt: demoDate("2026-04-28T11:00:00Z"),
     email: "fixture-user-2@example.test", // non-real domain
     memo: "April Support batch",
     token: "XLM",
+    totalAmount: "1280000000",
+    vestedAmount: "0",
+    releasedAmount: "0",
+    senderAddress: "GSENDER00000000000000000000000000000000000000000000",
   },
   {
     id: "stream-yusuf",
-    recipient: "Yusuf QA Partnership",
+    recipient: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGYWDEAVQBMJ87WGNB55IAA",
     rate: "18 XLM / day",
     schedule: "Ended yesterday with funds available",
     status: "ended",
     nextAction: "withdraw",
+    label: "Yusuf QA Partnership",
     createdAt: demoDate("2026-04-15T08:00:00Z"),
     updatedAt: demoDate("2026-04-27T20:00:00Z"),
     token: "XLM",
+    settlementTxHash:
+      "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+    withdrawal: {
+      state: "pending",
+      requestedAt: demoDate("2026-04-27T20:15:00Z"),
+      lastCheckedAt: demoDate("2026-04-27T20:20:00Z"),
+      attempts: 1,
+    },
+    totalAmount: "540000000",
+    vestedAmount: "540000000",
+    releasedAmount: "0",
+    senderAddress: "GSENDER00000000000000000000000000000000000000000000",
   },
 ];
 
@@ -271,6 +296,7 @@ export function createInMemoryPersistenceStore(seedTimeline?: boolean): Persiste
   const store: PersistenceStore = {
     kind: "memory",
     activityTimeline: timeline,
+    streamHistory: createStreamHistoryStore(),
     streamRepository: new InMemoryStreamRepository(),
     idempotencyStore: new InMemoryIdempotencyStore(),
     exportRepository: new InMemoryExportRepository(),

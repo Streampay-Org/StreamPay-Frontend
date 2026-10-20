@@ -16,6 +16,17 @@ import {
   DEFAULT_QUIET_HOURS,
   validatePartialQuietHours,
 } from "@/app/lib/quiet-hours";
+import {
+  buildLimitsConfig,
+  createBodySizeTooLargeResponse,
+  getBodySizeLimit,
+} from "@/lib/bodySize";
+import {
+  BodyTooLargeError,
+  InvalidJsonError,
+  readJsonBody,
+} from "@/lib/readJsonBody";
+import { resolveRequestId } from "@/lib/requestId";
 
 export interface NotificationPreferences {
   userId: string;
@@ -231,9 +242,28 @@ export async function PUT(request: Request) {
 
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
-    return createErrorResponse(request, "INVALID_JSON", "Request body must be valid JSON", 400);
+    const limits = buildLimitsConfig();
+    const maxBytes = getBodySizeLimit(url.pathname, limits) ?? limits.default;
+    body = await readJsonBody(request, { maxBytes });
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) {
+      return createBodySizeTooLargeResponse(
+        error.receivedBytes,
+        error.maxBytes,
+        resolveRequestId(request.headers),
+      );
+    }
+    if (error instanceof InvalidJsonError) {
+      return createErrorResponse(
+        request,
+        error.code,
+        error.code === "EMPTY_BODY"
+          ? "Request body is required"
+          : "Request body must be valid JSON",
+        400,
+      );
+    }
+    throw error;
   }
 
   const payload = validatePreferencePayload(body);

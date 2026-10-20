@@ -3,7 +3,9 @@ import { db, withLock } from "@/app/lib/db";
 import { withIdempotency, settleStore } from "@/app/lib/idempotency";
 import { getCorrelationContext } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
-import { executeStreamAction } from "@/app/lib/stream-executor";
+import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { getStellarSettlementClient } from "@/app/lib/stellar";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -25,6 +27,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const actorAddress = getHeader(request, "Actor-Wallet-Address");
   // IDEMPOTENCY: Settle is non-idempotent by nature — this wrapper ensures retries return the original response without re-executing the settlement
   return withIdempotency(request, "settle", settleStore, async () => {
     return withLock(id, async () => {
@@ -33,7 +36,6 @@ export async function POST(
         return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
       }
 
-      const actorAddress = getHeader(request, "Actor-Wallet-Address");
       const policyResult = actorAddress
         ? checkStreamOrgPolicy(id, actorAddress, "settle")
         : null;
@@ -55,11 +57,42 @@ export async function POST(
         request,
       });
 
-      if (!execResult.ok) {
-        return errorResponse(execResult.code, execResult.error, execResult.status);
+        appendStreamHistoryEvent({
+          streamId: id,
+          type: "settled",
+          fromStatus: stream.status,
+          toStatus: "ended",
+          at: updatedStream.updatedAt,
+          actorWallet: getHeader(request, "Actor-Wallet-Address"),
+          txHash: settlement.txHash,
+        });
+
+        recordPrivilegedStreamAuditEvent({
+          action: "stream.settle",
+          after: updatedStream as any,
+          before: before as any,
+          metadata: {
+            settlementTxHash: settlement.txHash,
+          },
+          request,
+          streamId: id,
+          targetAccount: updatedStream.recipient,
+        });
+
+        const payload = { data: { ...updatedStream, settlement } };
+
+        logger.info("Stream settled successfully", {
+          streamId: id,
+          action: "settle",
+          status: "success",
+        });
+
+        return NextResponse.json(payload);
+      } catch {
+        return errorResponse("SETTLEMENT_FAILED", "Failed to settle stream on Stellar/Soroban", 502);
       }
 
       return NextResponse.json({ data: execResult.data });
     });
-  });
+  }, { resourceId: id, actorId: actorAddress ?? undefined });
 }

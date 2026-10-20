@@ -15,6 +15,23 @@ export interface WithdrawalStatus {
   failureCode?: string;
 }
 
+export type * from "./openapi.generated";
+
+export type StreamStatus = "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+export type StreamAction = "start" | "pause" | "stop" | "settle" | "withdraw" | "cancel";
+export type WithdrawalState = "pending" | "succeeded" | "failed";
+
+export interface WithdrawalStatus {
+  state: WithdrawalState;
+  requestedAt: string;
+  lastCheckedAt: string;
+  attempts: number;
+  settlementTxHash?: string;
+  confirmedTxHash?: string;
+  horizonCursor?: string;
+  failureCode?: string;
+}
+
 /**
  * Describes the refund split produced by cancel_stream.
  *
@@ -50,12 +67,15 @@ export interface Stream {
   schedule: string;
   status: StreamStatus;
   nextAction?: StreamAction;
-  email?: string;       // PII
-  label?: string;       // PII
-  memo?: string;        // PII
-  partnerId?: string;   // PII
+  email?: string; // PII
+  label?: string; // PII
+  memo?: string; // PII
+  partnerId?: string; // PII
   createdAt: string;
   updatedAt: string;
+  startTime?: string;
+  endTime?: string;
+  totalAmount?: string;
   settlementTxHash?: string;
   withdrawal?: WithdrawalStatus;
   /**
@@ -153,6 +173,8 @@ export interface ActivityEvent {
   id: string;
   type: string;
   streamId?: string;
+  /** Wallet that produced a non-stream event (for example `wallet.connected`). */
+  actorAddress?: string;
   timestamp: string;
   description: string;
   isDeleted?: boolean;

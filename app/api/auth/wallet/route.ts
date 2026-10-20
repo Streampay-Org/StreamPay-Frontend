@@ -14,6 +14,18 @@ import {
   validateWalletChallengeQuery,
   validateWalletVerifyBody,
 } from "@/app/lib/auth-wallet-validation";
+import {
+  buildLimitsConfig,
+  createBodySizeTooLargeResponse,
+  extractPathname,
+  getBodySizeLimit,
+} from "@/lib/bodySize";
+import {
+  BodyTooLargeError,
+  InvalidJsonError,
+  readJsonBody,
+} from "@/lib/readJsonBody";
+import { resolveRequestId } from "@/lib/requestId";
 import type { ValidationError } from "@/app/lib/stream-validation";
 import { encodeCompositeCursor, decodeCompositeCursor } from "@/app/lib/db";
 import {
@@ -411,15 +423,31 @@ export async function POST(req: NextRequest) {
         try {
           let body: unknown;
           try {
-            body = await req.json();
-          } catch {
-            return validationErrorResponse("Wallet verify validation failed", [
-              {
-                field: "body",
-                code: "INVALID_JSON",
-                message: "Request body must be valid JSON.",
-              },
-            ]);
+            const limits = buildLimitsConfig();
+            const maxBytes =
+              getBodySizeLimit(extractPathname(req), limits) ?? limits.default;
+            body = await readJsonBody(req, { maxBytes });
+          } catch (error) {
+            if (error instanceof BodyTooLargeError) {
+              return createBodySizeTooLargeResponse(
+                error.receivedBytes,
+                error.maxBytes,
+                resolveRequestId(req.headers),
+              );
+            }
+            if (error instanceof InvalidJsonError) {
+              return validationErrorResponse("Wallet verify validation failed", [
+                {
+                  field: "body",
+                  code: error.code,
+                  message:
+                    error.code === "EMPTY_BODY"
+                      ? "Request body is required."
+                      : "Request body must be valid JSON.",
+                },
+              ]);
+            }
+            throw error;
           }
 
           const validationErrors = validateWalletVerifyBody(body);

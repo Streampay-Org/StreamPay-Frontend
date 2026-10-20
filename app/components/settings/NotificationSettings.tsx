@@ -298,7 +298,7 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({
                   Time when quiet hours begin (inclusive, HH:mm).
                 </p>
                 {validationErrors.startTime && (
-                  <p className="input-error" role="alert" style={{ color: 'var(--color-error, #e53e3e)', fontSize: '0.8125rem' }}>
+                  <p className="input-error" role="alert" style={{ color: 'var(--system-error-text)', fontSize: '0.8125rem' }}>
                     {validationErrors.startTime}
                   </p>
                 )}
@@ -327,7 +327,7 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({
                   Time when notifications resume (exclusive, HH:mm).
                 </p>
                 {validationErrors.endTime && (
-                  <p className="input-error" role="alert" style={{ color: 'var(--color-error, #e53e3e)', fontSize: '0.8125rem' }}>
+                  <p className="input-error" role="alert" style={{ color: 'var(--system-error-text)', fontSize: '0.8125rem' }}>
                     {validationErrors.endTime}
                   </p>
                 )}
@@ -356,7 +356,7 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({
                   Quiet hours schedule evaluates against wall-clock time in this timezone with Daylight Saving Time (DST) safety.
                 </p>
                 {validationErrors.timezone && (
-                  <p className="input-error" role="alert" style={{ color: 'var(--color-error, #e53e3e)', fontSize: '0.8125rem' }}>
+                  <p className="input-error" role="alert" style={{ color: 'var(--system-error-text)', fontSize: '0.8125rem' }}>
                     {validationErrors.timezone}
                   </p>
                 )}

@@ -1,6 +1,6 @@
 # StreamPay
 
-**Real-time payment streaming on Stellar.** StreamPay is a dashboard for paying collaborators, vendors and grant
+StreamPay is a dashboard for paying collaborators, vendors and grant
 recipients in a continuous flow instead of lump sums: create a stream, watch funds accrue, pause or stop at any time,
 and let the recipient withdraw what has vested.
 
@@ -30,7 +30,7 @@ git clone https://github.com/Streampay-Org/StreamPay-Frontend.git
 cd StreamPay-Frontend
 npm ci
 cp .env.example .env.local   # then edit, see "Environment variables"
-npm run dev                  # http://localhost:3000
+npm run dev              # http://localhost:3000
 ```
 
 Minimal `.env.local` for local development:
@@ -74,7 +74,7 @@ app/lib/        Server-side helpers: auth, config validation, errors, audit log,
 lib/, src/      Shared clients, middleware (rate limit, timeout, ETag) and metrics
 contracts/      Soroban escrow contract (Rust)
 docs/           Long-form documentation and runbooks
-scripts/        Operational scripts (reconciliation, backfills, OpenAPI tooling)
+scripts/         Operational scripts (reconciliation, backfills, OpenAPI tooling)
 middleware.ts   Edge middleware: CORS, CSRF, body-size caps, request ids, fingerprinting
 ```
 
@@ -100,6 +100,21 @@ error envelope. Stellar and Soroban calls go through a client with caching and c
 CLI: `vercel link && vercel env add JWT_SECRET production && vercel --prod`.
 
 A container image is also available via the included `Dockerfile` (Next.js standalone output).
+
+## Contract fees
+
+The Soroban escrow contract in [`contracts/`](contracts) charges fees on withdrawal. The fee
+rate is fixed per stream at creation (`stream.fee_bps`) and is paid to the configured
+fee collector. Both withdrawal entrypoints use the same economics:
+
+| Entrypoint | Fee rate charged | Fee recipient | Authorization |
+|------------|------------------|---------------|---------------|
+| `withdraw` | `stream.fee_bps` | fee collector | recipient or allowlisted withdrawer |
+| `withdraw_with_max_fee_bps` / `withdraw_guarded` | `stream.fee_bps` | fee collector | recipient or allowlisted withdrawer |
+
+The guarded variant additionally rejects the call with `FeeTooHigh` when `stream.fee_bps > max_fee_bps`,
+before any state change. The global `fee_bps` / `default_fee_bps` admin knobs only see the
+default applied to newly created streams; they are never charged at withdrawal time.
 
 ## Contributing
 

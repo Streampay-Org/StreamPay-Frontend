@@ -1,106 +1,141 @@
 # Contract Events Panel
 
-The contract events panel surfaces recent **on-chain contract events** for a
-single stream and lets users filter them by event type. It lives on a dedicated
-stream-detail sub-page and is linked from the stream's **Stream Operations**
-actions.
+The contract events panel surfaces recent **lifecycle events** for a single
+stream and lets users filter them by event type. It lives on a dedicated
+stream-detail sub-page reachable from the stream's **Stream Operations** actions.
 
 ## Where it lives
 
 | Path | Purpose |
 |------|---------|
-| `/streams/{id}/events` | Page route — contract events panel for a stream |
-| `app/streams/[id]/events/page.tsx` | Server component; resolves the stream and supplies event data |
-| `app/components/EventTimeline.tsx` | Client component; renders the filterable timeline |
+| `/streams/{id}/events` | Page route |
+| `app/streams/[id]/events/page.tsx` | Server component — loads first page, validates stream |
+| `app/streams/[id]/events/StreamEventsClient.tsx` | Client component — handles "Load more" |
+| `app/components/EventTimeline.tsx` | Filterable, accessible timeline |
+| `app/api/streams/[id]/history/route.ts` | `GET /api/streams/:id/history` — paginated endpoint |
+| `app/lib/repositories/stream-history.ts` | Append-only per-stream event store |
+| `app/lib/stream-history-writer.ts` | Write-path helper called by lifecycle routes |
 
-The panel is reachable from the **View Contract Events** action on
-`/streams/{id}` (the stream detail page).
-
-## On-chain event scheme
-
-All stream-level events are emitted by the `streampay-stream` Soroban contract
-using a two-topic layout:
+## Architecture
 
 ```
-topic[0] = Symbol("stream")
-topic[1] = Symbol("<event_name>")   e.g. "created", "started", …
-data     = vec-encoded struct fields (see table below)
+Lifecycle route POST (pause, start, stop, settle, withdraw, cancel)
+  └─ appendStreamHistoryEvent()       ← write-path helper
+       └─ StreamHistoryStore.append() ← append-only in-memory store
+
+GET /api/streams/:id/history?cursor=&limit=
+  └─ StreamHistoryStore.query()       ← composite (at, id) cursor pagination
+       └─ { data, meta: { nextCursor } }
+
+/streams/{id}/events — server component
+  └─ first page read from store
+  └─ StreamEventsClient (client)
+       └─ EventTimeline (filterable list + "Load more")
 ```
 
-The `upgrade` event uses `("StreamPay", "upgraded")` as its topic pair.
+## Event store
 
-### Lifecycle event reference
-
-| Event name | Emitted by | Payload fields (in order) |
-|------------|-----------|--------------------------|
-| `created`  | `create_stream` | `stream_id`, `sender`, `recipient`, `token`, `total_amount`, `timestamp` |
-| `started`  | `start_stream`  | `stream_id`, `start_time`, `end_time`, `timestamp` |
-| `paused`   | `pause`         | `stream_id`, `sender`, `pause_time`, `timestamp` |
-| `resumed`  | `resume`        | `stream_id`, `sender`, `end_time`, `timestamp` |
-| `withdrawn`| `withdraw`      | `stream_id`, `recipient`, `amount`, `timestamp` |
-| `settled`  | `withdraw` (full drain) or `settle` | `stream_id`, `recipient`, `total_amount`, `timestamp` |
-| `cancelled`| `cancel_stream` | `stream_id`, `cancelled_by`, `returned_amount`, `released_amount`, `timestamp` |
-| `amended`  | `amend_stream`  | `stream_id`, `amended_by`, `new_rate_per_second`, `new_end_time`, `timestamp` |
-| `upgraded` | `upgrade`       | `new_wasm_hash` (single value, topics `"StreamPay"/"upgraded"`) |
-
-**Invariants:**
-- Events are emitted **after** the successful state mutation and any token transfer.
-- Failed calls (returning `Err`) emit **no events**.
-- When a full `withdraw` settles a stream, **two** events are emitted in sequence: `withdrawn` then `settled`.
-- `settle` emits only `settled` (one event).
-
-### Admin utility events
-
-| Event name | Emitted by | Topics | Payload |
-|------------|-----------|--------|---------|
-| `set_pause` | `set_paused` | `("stream", "set_pause")` | `(admin, paused, timestamp)` |
-| `set_admin` | `set_admin`  | `("stream", "set_admin")` | `(old_admin, new_admin, timestamp)` |
-| `set_token` | `set_token_allowed` | `("stream", "set_token")` | `(admin, token, allowed, timestamp)` |
-
-## Frontend event model
-
-Each event uses the `ContractEvent` shape exported from
-`app/components/EventTimeline.tsx`:
+### Entry shape
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `id` | `string` | Stable key |
-| `type` | `ContractEventType` | `created`, `started`, `paused`, `resumed`, `withdrawn`, `settled`, `cancelled`, `amended` |
-| `summary` | `string` | Human-readable description |
-| `timestamp` | `string` | ISO-8601 UTC; rendered relative via `Timestamp` |
-| `txHash` | `string` | Soroban transaction hash (copy + truncate via `CopyAddress`) |
-| `ledger` | `number` | Ledger sequence number |
-| `amount` | `string?` | Optional value label for fund-moving events (e.g. `"120 XLM"`) |
+| `id` | `string` | UUID, stable |
+| `streamId` | `string` | Owning stream |
+| `type` | `StreamHistoryEventType` | See table below |
+| `fromStatus` | `string?` | Status before transition; absent for `created` |
+| `toStatus` | `string` | Status after transition |
+| `at` | `string` | ISO-8601 UTC timestamp |
+| `actor` | `string?` | First 6 chars of actor wallet — **no PII** |
+| `txHash` | `string?` | On-chain tx hash (once indexer wired) |
+| `amountRaw` | `string?` | Human-readable amount (e.g. `"120 XLM"`) |
 
-Events are sorted newest-first inside the component, so callers may pass them in
-any order.
+### Lifecycle events written
+
+| Event | Written by | Transition |
+|-------|-----------|-----------|
+| `created` | `POST /api/streams` | → draft |
+| `started` | `POST /api/streams/:id/start` (draft→active) | draft → active |
+| `resumed` | `POST /api/streams/:id/start` (paused→active) | paused → active |
+| `paused` | `POST /api/streams/:id/pause` | active → paused |
+| `stopped` | `POST /api/streams/:id/stop` | active/draft → ended |
+| `settled` | `POST /api/streams/:id/settle` | active/paused → ended |
+| `withdrawn` | `POST /api/streams/:id/withdraw` | ended → withdrawn |
+| `cancelled` | `POST /api/streams/:id/cancel` | active/paused → cancelled |
+
+**Invariants:**
+- Entries are **never mutated** (append-only).
+- Idempotent replays intercepted by the idempotency layer produce **no entry**.
+- Failed calls (route returns 4xx/5xx before calling the writer) produce **no entry**.
+- No PII — no email, label, memo, or full wallet address.
+
+## API endpoint: `GET /api/streams/:id/history`
+
+**Headers required:** `x-tenant-id` (same visibility contract as `GET /api/streams/:id`)
+
+**Query parameters:**
+
+| Parameter | Default | Range |
+|-----------|---------|-------|
+| `limit` | 20 | 1–100 |
+| `cursor` | — | From `meta.nextCursor` |
+
+**Response (200):**
+```json
+{
+  "data": [
+    {
+      "id": "3c4d5e6f-7a8b-9c0d-e1f2-a3b4c5d6e7f8",
+      "streamId": "stream-abc12345",
+      "type": "paused",
+      "fromStatus": "active",
+      "toStatus": "paused",
+      "at": "2026-06-01T09:02:00.000Z",
+      "actor": "GABCDE"
+    }
+  ],
+  "meta": { "nextCursor": "<string | null>" }
+}
+```
+
+| Status | Code | Reason |
+|--------|------|--------|
+| 400 | `MISSING_TENANT` | `x-tenant-id` absent or blank |
+| 404 | `STREAM_NOT_FOUND` | Stream not in tenant |
+| 422 | `VALIDATION_ERROR` | `limit` out of range |
+
+## Frontend model
+
+`StreamHistoryEntry` → `ContractEvent` mapping (in `page.tsx` / `StreamEventsClient.tsx`):
+
+| `ContractEvent` field | Source |
+|-----------------------|--------|
+| `id` | `entry.id` |
+| `type` | `entry.type` |
+| `summary` | `buildSummary(entry)` — localized description |
+| `timestamp` | `entry.at` |
+| `txHash` | `entry.txHash` (optional) |
+| `amount` | `entry.amountRaw` (optional) |
 
 ## Filtering
 
-The filter toolbar is a single-select segmented control. A chip is rendered for
-**All** plus each event type that actually appears in the data, each showing a
-count. The active chip is exposed via `aria-pressed`, and the visible-event
-count is announced through a `role="status"` live region for screen readers.
+Single-select segmented control. Chips shown for **All** + each type present in data.
+Active chip exposed via `aria-pressed`. Count changes announced via `role="status"` / `aria-live`.
 
-## Accessibility & theming
+## Accessibility (WCAG 2.1 AA)
 
-- Filter controls are real `<button>`s inside a labelled `group`, fully
-  keyboard operable with visible focus rings.
-- Result-count changes are announced politely via `aria-live`.
-- The timeline reuses the shared `.activity-*` styles and design tokens, so it
-  is responsive across breakpoints and consistent in light and dark mode.
+- Filter controls are real `<button>`s in a labelled `role="group"`.
+- The timeline uses semantic `<ul>` / `<li>` markup.
+- After "Load more", focus moves to the first newly-loaded item (managed via `useEffect` + forwarded `ref`).
+- "Load more" button uses `disabled` + `aria-busy` during loading.
+- "No events yet" empty state is a `<p>` inside the accessible `<section>`.
 
-## API status
+## Future: on-chain indexer
 
-This is a **UI-only** feature. No API routes were added or changed. The page
-currently renders mocked events that mirror the placeholder streams used across
-the app (see `app/streams/[id]/page.tsx`). To wire real data, replace
-`MOCK_EVENTS` in the page with a fetch against the chain indexer (see
-[horizon-indexer.md](horizon-indexer.md) and
-[live-events-protocol.md](live-events-protocol.md)) and map the result to
-`ContractEvent[]`.
+`txHash` and `ledger` are optional in both the store entry and `ContractEvent`. Once
+the Horizon indexer is wired, populate them in `appendStreamHistoryEvent()` and pass
+`ledger` through to the `ContractEvent` shape.
 
-> Note: `GET /api/streams/{id}/events` already exists and is a **Server-Sent
-> Events** stream for live deltas — it is unrelated to this read-only panel.
-> A future durable list endpoint should use a distinct path such as
-> `/api/streams/{id}/contract-events`.
+See [horizon-indexer.md](horizon-indexer.md) and [live-events-protocol.md](live-events-protocol.md).
+
+> **Note:** `GET /api/streams/{id}/events` is a **Server-Sent Events** endpoint for live
+> deltas — it is unrelated to this read-only history endpoint at `/api/streams/{id}/history`.

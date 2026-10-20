@@ -4,7 +4,10 @@ import { db, withLock } from "@/app/lib/db";
 import { withIdempotency, withdrawStore } from "@/app/lib/idempotency";
 import { getCorrelationContext } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
-import { executeStreamAction } from "@/app/lib/stream-executor";
+import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { evaluateWithdrawalState } from "@/app/lib/withdraw-finality";
+import { maybeFeeBump } from "@/lib/feeBump";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -64,6 +67,18 @@ export async function POST(
         return createErrorResponse(execResult.code, execResult.error, execResult.status);
       }
 
+      const updated = finalResult.stream;
+      db.streams.set(id, updated);
+
+      appendStreamHistoryEvent({
+        streamId: id,
+        type: "withdrawn",
+        fromStatus: "ended",
+        toStatus: updated.status,
+        at: new Date().toISOString(),
+        actorWallet: actorAddress,
+      });
+
       const payload = {
         data: execResult.data,
         ...(execResult.extra || {}),
@@ -71,5 +86,5 @@ export async function POST(
 
       return NextResponse.json(payload);
     });
-  });
+  }, { resourceId: id, actorId: actorAddress ?? undefined });
 }

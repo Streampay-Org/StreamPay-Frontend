@@ -9,7 +9,7 @@ import {
 } from "@/app/lib/db";
 import { getCorrelationContext } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
-import { executeStreamAction } from "@/app/lib/stream-executor";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -95,7 +95,16 @@ export async function POST(
       return createErrorResponse(execResult.code, execResult.error, execResult.status);
     }
 
-    const payload = { data: execResult.data };
+    appendStreamHistoryEvent({
+      streamId: id,
+      type: isResume ? "resumed" : "started",
+      fromStatus: stream.status,
+      toStatus: "active",
+      at: updatedStream.updatedAt,
+      actorWallet: actorAddress,
+    });
+
+    const payload = { data: updatedStream };
     if (token) {
       setIdempotency(db.idempotency, token, fingerprint, 200, payload);
     }
