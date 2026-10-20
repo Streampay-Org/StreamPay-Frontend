@@ -33,16 +33,19 @@ function pauseReq(
 ): Request {
   const headers: Record<string, string> = {};
   if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
-  if (opts.actor) headers["Actor-Wallet-Address"] = opts.actor;
+  const actor = opts.actor !== undefined ? opts.actor : PAUSER_ADDR;
+  if (actor) headers["Actor-Wallet-Address"] = actor;
   return new Request(`http://localhost/api/streams/${streamId}/pause`, {
     method: "POST",
     headers,
   });
 }
 
-function startReq(streamId: string, opts: { idempotencyKey?: string } = {}): Request {
+function startReq(streamId: string, opts: { idempotencyKey?: string; actor?: string } = {}): Request {
   const headers: Record<string, string> = {};
   if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
+  const actor = opts.actor !== undefined ? opts.actor : PAUSER_ADDR;
+  if (actor) headers["Actor-Wallet-Address"] = actor;
   return new Request(`http://localhost/api/streams/${streamId}/start`, {
     method: "POST",
     headers,
@@ -351,11 +354,10 @@ describe("RBAC — org-owned stream (stream-ada → org-acme)", () => {
     expect((await res.json()).error.code).toBe("NOT_ORG_MEMBER");
   });
 
-  it("no Actor-Wallet-Address header skips RBAC (individually-owned path)", async () => {
-    // stream-ada is org-owned, but without the header the policy check is
-    // skipped (opt-in pattern) — the stream still pauses.
-    const res = await pausePOST(pauseReq(ACTIVE_STREAM), ctx(ACTIVE_STREAM));
-    expect(res.status).toBe(200);
+  it("no Actor-Wallet-Address header requires actor on org-owned stream -> 403 ACTOR_REQUIRED", async () => {
+    const res = await pausePOST(pauseReq(ACTIVE_STREAM, { actor: "" }), ctx(ACTIVE_STREAM));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("ACTOR_REQUIRED");
   });
 });
 

@@ -35,7 +35,8 @@ import {
   withLock,
 } from "@/app/lib/db";
 import { getCorrelationContext } from "@/app/lib/logger";
-import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
+import { enforceStreamRbac } from "@/app/lib/org-policy";
+import { orgDb } from "@/app/lib/org-db";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
@@ -159,22 +160,11 @@ export async function POST(
 
     if (!isSender) {
       // Fall through to org-policy check.
-      const policyResult = actorAddress
-        ? checkStreamOrgPolicy(id, actorAddress, "stop") // "stop" covers canceller role
-        : null;
-
-      if (policyResult) {
-        if (!policyResult.allowed) {
-          return createErrorResponse(policyResult.code, policyResult.message, policyResult.httpStatus);
-        }
-        if (policyResult.requiresApproval) {
-          return createErrorResponse(
-            "APPROVAL_REQUIRED",
-            "This cancellation requires multi-sig approval. Please initiate an approval request.",
-            409,
-          );
-        }
-      } else if (!actorAddress) {
+      const rbacError = enforceStreamRbac(request, id, "stop"); // "stop" covers canceller role
+      if (rbacError) {
+        return rbacError;
+      }
+      if (!actorAddress && !orgDb.streamOwnership.get(id)) {
         // No actor header and stream is not org-owned — reject unauthenticated cancel.
         return createErrorResponse(
           "UNAUTHORIZED",

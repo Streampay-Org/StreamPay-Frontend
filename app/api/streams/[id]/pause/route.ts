@@ -55,7 +55,7 @@ import {
 } from "@/app/lib/db";
 import { streamsRateLimit } from "@/src/middleware/rateLimit";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
-import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
+import { enforceStreamRbac, resolveActorAddress } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 
@@ -71,6 +71,20 @@ function getHeader(req: Request, name: string): string | null {
   return req.headers?.get?.(name) ?? null;
 }
 
+/**
+ * POST /api/streams/:id/pause
+ *
+ * Pauses an active stream.
+ *
+ * Actor resolution order:
+ * 1. Verified JWT `sub` claim (Bearer token).
+ * 2. `Actor-Wallet-Address` header (fallback only when STREAMPAY_ALLOW_ACTOR_HEADER=true).
+ * If both are present and differ, returns 403 ACTOR_MISMATCH.
+ *
+ * RBAC ordering:
+ * Runs after 404 stream existence check and before state transition validation,
+ * inside the stream lock.
+ */
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -136,26 +150,8 @@ export async function POST(
     }
 
     // ── Org RBAC ──────────────────────────────────────────────────────────
-    const actorAddress = getHeader(req, "Actor-Wallet-Address");
-    const policyResult = actorAddress
-      ? checkStreamOrgPolicy(id, actorAddress, "pause")
-      : null;
-    if (policyResult) {
-      if (!policyResult.allowed) {
-        return createErrorResponse(
-          policyResult.code,
-          policyResult.message,
-          policyResult.httpStatus,
-        );
-      }
-      if (policyResult.requiresApproval) {
-        return createErrorResponse(
-          "APPROVAL_REQUIRED",
-          "This action requires multi-sig approval. Please initiate an approval request.",
-          409,
-        );
-      }
-    }
+    const rbacError = enforceStreamRbac(req, id, "pause");
+    if (rbacError) return rbacError;
 
     // ── State guard ───────────────────────────────────────────────────────
     if (stream.status !== "active") {
@@ -185,13 +181,20 @@ export async function POST(
 
     db.streams.set(id, updated);
 
+    let actorAddress: string | null = null;
+    try {
+      actorAddress = resolveActorAddress(req);
+    } catch {
+      actorAddress = getHeader(req, "Actor-Wallet-Address");
+    }
+
     appendStreamHistoryEvent({
       streamId: id,
       type: "paused",
       fromStatus: "active",
       toStatus: "paused",
       at: now,
-      actorWallet: actorAddress,
+      actorWallet: actorAddress ?? undefined,
     });
 
     recordPrivilegedStreamAuditEvent({

@@ -21,7 +21,13 @@ function stopReq(streamId: string, idempotencyKey?: string, extra: Record<string
   return new Request(`http://localhost/api/streams/${streamId}/stop`, { method: "POST", headers });
 }
 
-beforeEach(() => { resetDb(); resetRateLimitStore(); resetAuditLogStore(); });
+beforeEach(() => {
+  resetDb();
+  resetRateLimitStore();
+  resetAuditLogStore();
+  const base = db.streams.get("stream-ada")!;
+  db.streams.set("stream-indiv-active", { ...base, id: "stream-indiv-active", status: "active" });
+});
 
 describe("POST /api/streams/[id]/start � idempotency", () => {
   const STREAM = "stream-kemi";
@@ -80,7 +86,7 @@ describe("POST /api/streams/[id]/start � idempotency", () => {
 });
 
 describe("POST /api/streams/[id]/stop � idempotency", () => {
-  const STREAM = "stream-ada";
+  const STREAM = "stream-indiv-active";
 
   it("no key: returns 200 and sets stream to ended", async () => {
     const res = await stopPOST(stopReq(STREAM), ctx(STREAM));
@@ -193,8 +199,8 @@ describe("Token scoping", () => {
   it("same key on different streams uses different cache slots", async () => {
     const KEY = "cross-stream-key";
     await startPOST(startReq("stream-kemi", KEY), ctx("stream-kemi"));
-    await stopPOST(stopReq("stream-ada", KEY), ctx("stream-ada"));
+    await stopPOST(stopReq("stream-indiv-active", KEY), ctx("stream-indiv-active"));
     expect(db.idempotency.has(`streams.start.stream-kemi:${KEY}`)).toBe(true);
-    expect(db.idempotency.has(`streams.stop.stream-ada:${KEY}`)).toBe(true);
+    expect(db.idempotency.has(`streams.stop.stream-indiv-active:${KEY}`)).toBe(true);
   });
 });

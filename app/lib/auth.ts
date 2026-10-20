@@ -205,7 +205,6 @@ function createErrorResponse(
     },
   );
 }
-}
 
 /**
  * Validates double-submit CSRF tokens using constant-time comparison.
@@ -304,18 +303,18 @@ export function requireAuditLogAccess(
   const actor = tryAuthenticateRequest(request);
   if (!actor) {
     return createErrorResponse(
-  request,
-  "UNAUTHORIZED",
-  "Missing or invalid authorization header",
-  401,
-);
-// ...
-return createErrorResponse(
-  request,
-  "FORBIDDEN",
-  "You do not have permission to access audit logs",
-  403,
-);
+      request,
+      "UNAUTHORIZED",
+      "Missing or invalid authorization header",
+      401,
+    );
+  }
+
+  const allowedRoles =
+    access === "export" ? AUDIT_LOG_EXPORT_ROLES : AUDIT_LOG_READ_ROLES;
+  if (!allowedRoles.has(actor.role)) {
+    return createErrorResponse(
+      request,
       "FORBIDDEN",
       "You do not have permission to access audit logs",
       403,

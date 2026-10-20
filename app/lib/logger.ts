@@ -1,4 +1,4 @@
-import { generateRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
+import { generateRequestId, isValidRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { isSecret, redactSecrets } from './config';
 
@@ -38,10 +38,6 @@ function parseTraceparent(traceparent: string | null): string | undefined {
   return traceparent;
 }
 
-// Extract correlation context from headers
-export function extractCorrelationContext(headers: Headers): CorrelationContext {
-
-
 // Get current correlation context
 export function getCorrelationContext(): CorrelationContext | undefined {
   return correlationContext.getStore();
@@ -55,7 +51,7 @@ export function withCorrelationContext<T>(
   return correlationContext.run(context, callback);
 }
 
-// Set correlation context without callback (for sync operations)
+// Extract correlation context from headers
 export function extractCorrelationContext(headers: Headers): CorrelationContext {
   const rawRequestId =
     headers.get("x-request-id") ||
@@ -74,15 +70,25 @@ export function extractCorrelationContext(headers: Headers): CorrelationContext 
     request_id = generateRequestId();
   }
 
+  const correlation_id =
+    headers.get("x-correlation-id") ||
+    headers.get("correlation-id") ||
+    request_id;
+
   const rawStream = headers.get("x-stream-id") || headers.get("stream-id") || undefined;
   const stream_id =
     rawStream && isValidRequestId(rawStream) ? rawStream : undefined;
 
+  const traceparent = parseTraceparent(headers.get("traceparent"));
+  const jobId = headers.get("x-job-id") || headers.get("job-id") || undefined;
+
   return {
     request_id,
+    correlation_id,
     ...(request_id_rejected ? { request_id_rejected: true } : {}),
     ...(stream_id ? { stream_id } : {}),
-    // keep other fields your type already has
+    ...(traceparent ? { traceparent } : {}),
+    ...(jobId ? { job_id: jobId } : {}),
   };
 }
 export function setCorrelationContext(context: CorrelationContext): void {
