@@ -11,6 +11,21 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: 'standalone',
+  env: {
+    NEXT_PUBLIC_BUILD_ID:
+      process.env.NEXT_PUBLIC_BUILD_ID || process.env.BUILD_ID || "development",
+  },
+  async headers() {
+    return [
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache" },
+          { key: "Service-Worker-Allowed", value: "/" },
+        ],
+      },
+    ];
+  },
   // CI blocks regressions with typecheck:core (tsconfig.strict-core.json).
   // scripts/typecheck-report.mjs reports remaining full-project debt.
   // Remove ignoreBuildErrors once the stream workstream and the full

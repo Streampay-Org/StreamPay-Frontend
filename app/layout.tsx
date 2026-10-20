@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ToastProvider } from "./components/ToastProvider";
 import { CommandPaletteWrapper } from "./components/CommandPaletteWrapper";
@@ -6,11 +6,21 @@ import { ShortcutsOverlayWrapper } from "./components/ShortcutsOverlayWrapper";
 import { SplashScreenWrapper } from "./components/SplashScreenWrapper";
 import { AppBottomNav } from "./components/AppBottomNav";
 import { SiteHeader } from "./components/SiteHeader";
+import { ServiceWorkerRegistrar } from "./components/ServiceWorkerRegistrar";
 import { getThemeScript } from "./utils/theme-noflash";
 
 export const metadata: Metadata = {
   title: "StreamPay - Payment Streaming",
   description: "Real-time payment streaming on Stellar",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "StreamPay",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#22c55e",
 };
 
 export default function RootLayout({
@@ -28,6 +38,7 @@ export default function RootLayout({
       </head>
       <body>
         <ToastProvider>
+          <ServiceWorkerRegistrar />
           <SplashScreenWrapper />
           <CommandPaletteWrapper />
           <ShortcutsOverlayWrapper />
