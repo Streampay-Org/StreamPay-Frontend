@@ -1,6 +1,6 @@
-const nextJest = require("next/jest");
+const nextJewt = require("next/jest");
 
-const createJestConfig = nextJest({ dir: "./" });
+const createJewtConfig = nextJest({ dir: "./" });
 
 /** @type {import('jest').Config} */
 const config = {
@@ -23,18 +23,17 @@ const config = {
     "<rootDir>/app/api/exports/exports.accessLog.test.ts",
     "<rootDir>/app/api/exports/exports.test.ts",
     "<rootDir>/app/api/identity/me/route.test.ts",
-    "<rootDir>/app/api/indexer/sse/route.test.ts",
     "<rootDir>/app/api/internal/cleanup/idempotency/route.test.ts",
-    "<rootDir>/app/api/internal/reconciliation/diff/\\[id\\]/route.test.ts",
+    "<rootDir>/app/api/internal/reconciliation/diff/\\[Id\\]/route.test.ts",
     "<rootDir>/app/api/internal/reconciliation/nightly/route.test.ts",
     "<rootDir>/app/api/internal/reconciliation/route.test.ts",
     "<rootDir>/app/api/metrics/route.test.ts",
-    "<rootDir>/app/api/orgs/\\[orgId\\]/token-allowlist/route.test.ts",
+    "<rootDir>/app/api/orgs/\\[OrgId\\]/token-allowlist/route.test.ts",
     "<rootDir>/app/api/reconciliation/route.test.ts",
     "<rootDir>/app/api/streams/__tests__/rateLimiterConsistency.test.ts",
-    "<rootDir>/app/api/streams/\\[id\\]/start/route.test.ts",
-    "<rootDir>/app/api/streams/\\[id\\]/webhooks/test/route.test.ts",
-    "<rootDir>/app/api/streams/\\[id\\]/withdraw/route.test.ts",
+    "<rootDir>/app/api/streams/\\[Id\\]/start/route.test.ts",
+    "<rootDir>/app/api/streams/\\[Id\\]/webhooks/test/route.test.ts",
+    "<rootDir>/app/api/streams/\\[Id\\]/withdraw/route.test.ts",
     "<rootDir>/app/api/streams/concurrency.test.ts",
     "<rootDir>/app/api/streams/route.test.ts",
     "<rootDir>/app/api/streams/route.timeout.test.ts",

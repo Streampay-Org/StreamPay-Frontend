@@ -1,0 +1,21 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "feat/issue-1678-cap-concurrent-api-indexer-sse-connections-per",
+    "fix/issue-1694-rebuild-welcometour-on-a-real-focus-trap",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "feat/issue-1678-cap-concurrent-api-indexer-sse-connections-per": "main",
+    "fix/issue-1694-rebuild-welcometour-on-a-real-focus-trap": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "feat/issue-1678-cap-concurrent-api-indexer-sse-connections-per",
+    "fix/issue-1694-rebuild-welcometour-on-a-real-focus-trap",
+    "origin"
+  ]
+}
