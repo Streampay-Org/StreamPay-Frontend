@@ -1687,6 +1687,224 @@
         }
       }
     },
+    "/api/streams/import": {
+      "post": {
+        "operationId": "importStreams",
+        "summary": "Bulk-import payment streams from CSV or JSON rows",
+        "description": "Validates and bulk-imports up to 500 payment streams with partial-import semantics (207 Multi-Status).\n\nWhen `dryRun=false` (the default), the `Idempotency-Key` header is required. Requests are fingerprinted by their canonical row list: replaying the same key and rows returns the original 207 response; reusing a key with different rows returns 409 `IDEMPOTENCY_CONFLICT`; a concurrent replay while the first request is in flight returns 409 `IDEMPOTENCY_IN_FLIGHT`.\n\nEach row is identified by an optional `external_id` column/field or a SHA-256 hash of the normalised `(recipient, rate, schedule, token, memo)` tuple. Duplicate rows within the same batch or previously imported by the same caller are reported with `status: \"duplicate\"` and the existing `streamId`.",
+        "tags": [
+          "Streams v1"
+        ],
+        "parameters": [
+          {
+            "name": "dryRun",
+            "in": "query",
+            "required": false,
+            "description": "When `true`, validates rows without persisting streams or touching the idempotency store.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required when `dryRun=false`. Client-generated idempotency key for safe retries.",
+            "schema": {
+              "type": "string",
+              "example": "import-batch-2026-10-20-01"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "text/csv": {
+              "schema": {
+                "type": "string",
+                "description": "CSV payload with headers `recipient,rate,schedule,token,memo,external_id`."
+              }
+            },
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "csv"
+                    ],
+                    "properties": {
+                      "csv": {
+                        "type": "string",
+                        "description": "Raw CSV string with header row."
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "rows"
+                    ],
+                    "properties": {
+                      "rows": {
+                        "type": "array",
+                        "maxItems": 500,
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "recipient",
+                            "schedule"
+                          ],
+                          "properties": {
+                            "recipient": {
+                              "type": "string"
+                            },
+                            "rate": {
+                              "type": "string"
+                            },
+                            "amount": {
+                              "type": "string"
+                            },
+                            "schedule": {
+                              "type": "string"
+                            },
+                            "token": {
+                              "type": "string"
+                            },
+                            "asset": {
+                              "type": "string"
+                            },
+                            "memo": {
+                              "type": "string"
+                            },
+                            "external_id": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "207": {
+            "description": "Multi-Status per-row import summary and results.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "summary",
+                    "results"
+                  ],
+                  "properties": {
+                    "summary": {
+                      "type": "object",
+                      "required": [
+                        "total",
+                        "valid",
+                        "failed"
+                      ],
+                      "properties": {
+                        "total": {
+                          "type": "integer"
+                        },
+                        "valid": {
+                          "type": "integer"
+                        },
+                        "failed": {
+                          "type": "integer"
+                        },
+                        "imported": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "row",
+                          "status"
+                        ],
+                        "properties": {
+                          "row": {
+                            "type": "integer"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "imported",
+                              "duplicate",
+                              "valid",
+                              "error"
+                            ]
+                          },
+                          "streamId": {
+                            "type": "string"
+                          },
+                          "errors": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "field",
+                                "code",
+                                "message"
+                              ],
+                              "properties": {
+                                "field": {
+                                  "type": "string"
+                                },
+                                "code": {
+                                  "type": "string"
+                                },
+                                "message": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "409": {
+            "description": "Idempotency conflict (`IDEMPOTENCY_CONFLICT`) or in-flight request with the same key (`IDEMPOTENCY_IN_FLIGHT`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway timeout when persistence exceeds the route deadline.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/streams/search": {
       "get": {
         "operationId": "searchStreams",

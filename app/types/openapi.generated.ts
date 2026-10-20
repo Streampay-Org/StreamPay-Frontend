@@ -91,6 +91,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/streams/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk-import payment streams from CSV or JSON rows
+         * @description Validates and bulk-imports up to 500 payment streams with partial-import semantics (207 Multi-Status).
+         *
+         *     When `dryRun=false` (the default), the `Idempotency-Key` header is required. Requests are fingerprinted by their canonical row list: replaying the same key and rows returns the original 207 response; reusing a key with different rows returns 409 `IDEMPOTENCY_CONFLICT`; a concurrent replay while the first request is in flight returns 409 `IDEMPOTENCY_IN_FLIGHT`.
+         *
+         *     Each row is identified by an optional `external_id` column/field or a SHA-256 hash of the normalised `(recipient, rate, schedule, token, memo)` tuple. Duplicate rows within the same batch or previously imported by the same caller are reported with `status: "duplicate"` and the existing `streamId`.
+         */
+        post: operations["importStreams"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/streams/search": {
         parameters: {
             query?: never;
@@ -177,6 +201,32 @@ export interface paths {
          * @description Transitions a stream from `draft` (or `paused`) to `active`, initiating payment disbursements. **Deprecated** — use `POST /api/v2/streams/{id}/start` instead.
          */
         post: operations["startStream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/{id}/history": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant id — must match the stream's owner. */
+                "x-tenant-id": string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Paginated lifecycle event history for a stream
+         * @description Returns a newest-first paginated list of committed lifecycle events. No PII. Uses composite (at, id) cursor.
+         */
+        get: operations["getStreamHistory"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -937,6 +987,48 @@ export interface components {
                 self: string;
             };
         };
+        /** @description Immutable lifecycle event for a stream. No PII — actor wallet truncated to 6 chars. */
+        StreamHistoryEntry: {
+            /**
+             * @description Unique entry id.
+             * @example 3c4d5e6f-7a8b-9c0d-e1f2-a3b4c5d6e7f8
+             */
+            id: string;
+            /**
+             * @description Owning stream id.
+             * @example stream-abc12345
+             */
+            streamId: string;
+            /** @enum {string} */
+            type: "created" | "started" | "paused" | "resumed" | "stopped" | "settled" | "withdrawn" | "cancelled";
+            /** @description Status before transition; absent for 'created'. */
+            fromStatus?: string | null;
+            /** @description Status after transition. */
+            toStatus: string;
+            /**
+             * Format: date-time
+             * @description ISO-8601 UTC timestamp.
+             * @example 2026-06-01T09:00:00.000Z
+             */
+            at: string;
+            /**
+             * @description First 6 chars of actor wallet (no PII).
+             * @example GABCDE
+             */
+            actor?: string | null;
+            /** @description On-chain tx hash (once indexer is wired). */
+            txHash?: string | null;
+            /** @description Human-readable amount label, e.g. '120 XLM'. */
+            amountRaw?: string | null;
+        };
+        StreamHistoryResponse: {
+            /** @description History entries, newest first. */
+            data: components["schemas"]["StreamHistoryEntry"][];
+            meta: {
+                /** @description Opaque cursor for the next page; null when none remain. */
+                nextCursor: string | null;
+            };
+        };
     };
     responses: {
         /** @description Bad request — invalid input. */
@@ -1477,6 +1569,88 @@ export interface operations {
             500: components["responses"]["500"];
         };
     };
+    importStreams: {
+        parameters: {
+            query?: {
+                /** @description When `true`, validates rows without persisting streams or touching the idempotency store. */
+                dryRun?: boolean;
+            };
+            header?: {
+                /** @description Required when `dryRun=false`. Client-generated idempotency key for safe retries. */
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/csv": string;
+                "application/json": {
+                    /** @description Raw CSV string with header row. */
+                    csv: string;
+                } | {
+                    rows: {
+                        recipient: string;
+                        rate?: string;
+                        amount?: string;
+                        schedule: string;
+                        token?: string;
+                        asset?: string;
+                        memo?: string;
+                        external_id?: string;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Multi-Status per-row import summary and results. */
+            207: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        summary: {
+                            total: number;
+                            valid: number;
+                            failed: number;
+                            imported?: number;
+                        };
+                        results: {
+                            row: number;
+                            /** @enum {string} */
+                            status: "imported" | "duplicate" | "valid" | "error";
+                            streamId?: string;
+                            errors?: {
+                                field: string;
+                                code: string;
+                                message: string;
+                            }[];
+                        }[];
+                    };
+                };
+            };
+            400: components["responses"]["400"];
+            /** @description Idempotency conflict (`IDEMPOTENCY_CONFLICT`) or in-flight request with the same key (`IDEMPOTENCY_IN_FLIGHT`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Gateway timeout when persistence exceeds the route deadline. */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     searchStreams: {
         parameters: {
             query?: {
@@ -1841,6 +2015,41 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
+            500: components["responses"]["500"];
+        };
+    };
+    getStreamHistory: {
+        parameters: {
+            query?: {
+                /** @description Max entries per page. */
+                limit?: number;
+                /** @description Opaque cursor from meta.nextCursor of the previous response. */
+                cursor?: string;
+            };
+            header: {
+                /** @description Tenant id — must match the stream's owner. */
+                "x-tenant-id": string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated list of lifecycle events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StreamHistoryResponse"];
+                };
+            };
+            400: components["responses"]["400"];
+            404: components["responses"]["404"];
+            422: components["responses"]["422"];
             500: components["responses"]["500"];
         };
     };
