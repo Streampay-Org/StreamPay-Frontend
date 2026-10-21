@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ErrorRecovery } from "./components/ErrorRecovery";
-import { reportClientError } from "./lib/reportClientError";
+import { reportClientError } from "@/lib/reportClientError";
 
 type ErrorProps = {
   error: Error & { digest?: string };
@@ -15,7 +15,7 @@ const CHUNK_RELOAD_WINDOW_MS = 30_000;
 
 function isOutage(error: Error): boolean {
   const haystack = `${error.name} ${error.message}`.toLowerCase();
-  return /stellar|horizon|soroban||\brpc\b|network service|service unavailable/.test(
+  return /stellar|horizon|soroban|\brpc\b|network service|service unavailable/.test(
     haystack
   );
 }
@@ -64,7 +64,7 @@ export default function GlobalError({ error, reset }: ErrorProps) {
   const handleReset = () => {
     if (!isChunkLoadError(error)) {
       reset();
-      return {} as void;
+      return;
     }
 
     const now = Date.now();
@@ -85,7 +85,7 @@ export default function GlobalError({ error, reset }: ErrorProps) {
     return (
       <ErrorRecovery
         variant="server"
-        eyebrole="Update available"
+        eyebrow="Update available"
         heading="A new version is available"
         body="StreamPay has been updated. Reload to get the latest version."
         helperNote="If reloading keeps failing, support can help."

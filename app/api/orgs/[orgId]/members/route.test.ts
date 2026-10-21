@@ -135,7 +135,7 @@ describe("Org Members API", () => {
       const walletAddress = "GCHUNK7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNR";
       const req = makeChunkedPostRequest(
         streamFromChunks([
-          JSON.stringify({ walletAddress }),
+          `{"walletAddress":"${walletAddress}"`,
           ',"role":"viewer"}',
         ]),
       );

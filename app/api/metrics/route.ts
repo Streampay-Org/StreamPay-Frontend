@@ -24,6 +24,14 @@ import { withRouteTimeout } from "@/src/middleware/timeout";
  * - `403` — token present but incorrect.
  * - `503` — endpoint disabled (no token configured).
  *
+ * ## Route labels
+ * `streampay_requests_total` and `streampay_rate_limit_throttled_total` are
+ * labelled with a route *template*, never with a raw pathname. Id-like path
+ * segments (stream ids, org ids, UUIDs, numeric ids, ...) collapse to `:id`,
+ * and a route that does not match a known template is reported as `other`.
+ * At most 200 labels are kept; every new route beyond that budget is folded
+ * into `other`, so the label set cannot grow without bound.
+ *
  * ## Metrics surface
  * Two metric sources are concatenated:
  *

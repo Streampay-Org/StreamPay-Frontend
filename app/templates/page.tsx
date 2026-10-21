@@ -1,5 +1,5 @@
 "use client";
-import "./templates.module.css";
+import "./templates.css";
 
 import {
   Suspense,

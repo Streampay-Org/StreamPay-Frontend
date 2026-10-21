@@ -1,4 +1,4 @@
-import "./Explainer.module.css";
+import "./Explainer.css";
 import Link from "next/link";
 
 const STEPS = [

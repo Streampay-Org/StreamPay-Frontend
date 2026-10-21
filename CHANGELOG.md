@@ -40,6 +40,17 @@
   and a replay by a different wallet is answered with `409` instead of the
   original body. See `docs/api/idempotency-scoping.md`.
 
+- **Rate-limit metrics are labelled with route templates and the label set is
+  bounded** (#1681): `streampay_requests_total` and
+  `streampay_rate_limit_throttled_total` are no longer keyed by the raw
+  request pathname. Id-like segments (stream ids, org ids, UUIDs, numeric ids,
+  ...) collapse to `:id`, unknown routes are reported as `other`, and at most
+  200 labels are kept per counter map, so a stream id can no longer add a new
+  time series and a new map entry. Throttle logs now redact the client
+  identity: IPv4 addresses are truncated to their `/24` network, IPv6
+  addresses to their `/48` network, wallet addresses to their first and last
+  four characters, and API keys to a salted hash.
+
 All notable API changes to StreamPay are documented here.  
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).  
 API versioning follows the policy in [README.md#api-versioning](README.md#api-versioning).

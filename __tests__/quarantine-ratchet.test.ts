@@ -161,7 +161,9 @@ describe("Quarantine Ratchet", () => {
   test("Scenario 5: jest.config.js resolved config testPathIgnorePatterns contains manifest entries", async () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const jestConfigFn = require("../jest.config.js");
-    const resolved = await jestConfigFn();
+    const resolved = jestConfigFn.testPathIgnorePatterns
+      ? { testPathIgnorePatterns: jestConfigFn.testPathIgnorePatterns }
+      : await jestConfigFn();
     expect(resolved.testPathIgnorePatterns).toBeDefined();
 
     for (const entry of manifest.entries) {

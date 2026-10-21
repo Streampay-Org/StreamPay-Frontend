@@ -15,23 +15,6 @@ export interface WithdrawalStatus {
   failureCode?: string;
 }
 
-export type * from "./openapi.generated";
-
-export type StreamStatus = "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
-export type StreamAction = "start" | "pause" | "stop" | "settle" | "withdraw" | "cancel";
-export type WithdrawalState = "pending" | "succeeded" | "failed";
-
-export interface WithdrawalStatus {
-  state: WithdrawalState;
-  requestedAt: string;
-  lastCheckedAt: string;
-  attempts: number;
-  settlementTxHash?: string;
-  confirmedTxHash?: string;
-  horizonCursor?: string;
-  failureCode?: string;
-}
-
 /**
  * Describes the refund split produced by cancel_stream.
  *
@@ -78,7 +61,6 @@ export interface Stream {
   updatedAt: string;
   startTime?: string;
   endTime?: string;
-  totalAmount?: string;
   settlementTxHash?: string;
   withdrawal?: WithdrawalStatus;
   /**

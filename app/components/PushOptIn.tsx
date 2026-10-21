@@ -1,5 +1,5 @@
 "use client";
-import "./PushOptIn.module.css";
+import "./PushOptIn.css";
 
 import { useEffect, useMemo, useState } from "react";
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db, getStore } from "@/app/lib/db";
+import { getStore } from "@/app/lib/db";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
+import { authorizeStreamSubscriber, DEFAULT_STREAM_TENANT } from "@/app/lib/stream-subscriber-auth";
 import { eventBus } from "@/app/lib/event-bus";
 import { logger, getCorrelationContext, extractCorrelationContext, setCorrelationContext, withStreamContext } from "@/app/lib/logger";
 import {
@@ -90,24 +91,8 @@ export async function GET(
     );
   }
 
-  // 3. Validate Tenant ID
-  const tenant = request.headers.get("x-tenant-id");
-  if (!tenant || tenant.trim() === "") {
-    logger.warn("Missing tenant ID in SSE request", {
-      streamId,
-      actorId: actor.actorId,
-    });
-    return NextResponse.json(
-      { 
-        error: { 
-          code: "MISSING_TENANT", 
-          message: "Tenant ID header (x-tenant-id) is required",
-          request_id: getCorrelationContext()?.request_id 
-        } 
-      }, 
-      { status: 400 }
-    );
-  }
+  // 3. Resolve Tenant ID (optional; defaults like the collection route)
+  const tenant = request.headers.get("x-tenant-id")?.trim() || DEFAULT_STREAM_TENANT;
 
   // 4. Fetch Stream
   const { streamRepository } = getStore();
@@ -131,30 +116,30 @@ export async function GET(
     );
   }
 
-  // 5. Authorization Check
-  // Users can only subscribe to streams where they are the recipient
-  // or if they have admin role
-  const isOwner = 
-    (stream as any).recipient === actor.walletAddress || 
-    (stream as any).email && (db.users.get(actor.walletAddress)?.email === (stream as any).email) ||
-    actor.role === "admin";
+  // 5. Authorization Check — shared with the collection SSE route so both
+  // entry points make the same decision for the same principal.
+  const authorization = authorizeStreamSubscriber(actor, stream, tenant);
 
-  if (!isOwner) {
+  if (!authorization.ok) {
+    const notFound = authorization.status === 404;
     logger.warn("Unauthorized SSE subscription attempt", {
       actorId: actor.actorId,
       streamId,
       tenant,
+      status: authorization.status,
       walletAddress: actor.walletAddress,
     });
     return NextResponse.json(
-      { 
-        error: { 
-          code: "FORBIDDEN", 
-          message: "You do not have permission to subscribe to this stream",
-          request_id: getCorrelationContext()?.request_id 
-        } 
-      }, 
-      { status: 403 }
+      {
+        error: {
+          code: notFound ? "NOT_FOUND" : "FORBIDDEN",
+          message: notFound
+            ? `Stream '${streamId}' not found`
+            : "You do not have permission to subscribe to this stream",
+          request_id: getCorrelationContext()?.request_id,
+        },
+      },
+      { status: authorization.status },
     );
   }
 

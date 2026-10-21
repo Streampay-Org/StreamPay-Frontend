@@ -1,4 +1,4 @@
-import type { Stream } from "@/lib/types";
+import type { Stream } from "@/app/types/openapi";
 
 /**
  * Result of a vesting computation.
@@ -67,10 +67,11 @@ export function vestedAmount(stream: Stream, nowMs: number | bigint): VestedResu
     return { ok: true, value: 0n };
   }
 
-  const total = toBigIntMs(stream.total);
+  const total = toBigIntMs((stream as Stream & { total?: unknown }).total);
   const start = toBigIntMs(stream.startTime);
   const end = toBigIntMs(stream.endTime);
-  const totalPaused = toBigIntMs(stream.totalPausedMs) ?? 0n;
+  const totalPaused =
+    toBigIntMs((stream as Stream & { totalPausedMs?: unknown }).totalPausedMs) ?? 0n;
   const pausedAt = toBigIntMs(stream.pausedAt);
   const now = typeof nowMs === "bigint" ? nowMs : BigInt(Math.trunc(nowMs));
 

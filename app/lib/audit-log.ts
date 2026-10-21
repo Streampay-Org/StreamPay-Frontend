@@ -238,7 +238,7 @@ export class AppendOnlyAuditLogStore {
   }
 
   exportRows(filters: AuditListFilters = {}): AuditExportRow[] {
-    return this.getPaginated({ ...filters, limit: Number.MAX_SAFE_INTEGER }).data
+    return this.getPaginated({ ...filters, limit: filters.limit ?? 250 }).data
       .map((entry) => this.toExportRow(entry));
   }
 

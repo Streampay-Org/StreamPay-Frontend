@@ -1,4 +1,4 @@
-import "./docs.module.css";
+import "./docs.css";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { groupOpenApiRoutesByTag } from "./openapi-routes";

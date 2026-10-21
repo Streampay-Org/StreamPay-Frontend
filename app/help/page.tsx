@@ -1,4 +1,4 @@
-import "./help.module.css";
+import "./help.css";
 
 /**
  * Help & FAQ page for StreamPay.
@@ -9,205 +9,14 @@ import "./help.module.css";
  * Stellar network, and troubleshooting local-dev issues.
  */
 
-import { SHORTCUT_GROUPS, formatShortcutKeys, getShortcut } from "@/lib/shortcuts";
 import { FAQ_SECTIONS } from "./faq-data";
 import FaqSearch from "./FaqSearch";
-import type { FaqItem, FaqSection } from "./faq-data";
-
-/** Keys for a single shortcut id, e.g. "⌘/Ctrl + K". */
-function keysFor(id: string): string {
-  return formatShortcutKeys(getShortcut(id).keys);
-}
-
-/**
- * The full reference, generated from the registry so the FAQ can never fall
- * behind the `?` overlay or the in-form hints.
- */
-function fullShortcutReference(): string {
-  return SHORTCUT_GROUPS.map((group) => {
-    const entries = group.shortcuts
-      .map((shortcut) => `${formatShortcutKeys(shortcut.keys)} ${shortcut.description}`)
-      .join("; ");
-    return `${group.label} — ${entries}.`;
-  }).join(" ");
-}
 
 export const metadata = {
   title: "Help & FAQ — StreamPay",
   description:
     "Answers to the most common questions about StreamPay, Stellar wallets, and payment streams.",
 };
-
-export const FAQ_SECTIONS: FaqSection[] = [
-  {
-    id: "getting-started",
-    title: "Getting Started",
-    items: [
-      {
-        id: "what-is-streampay",
-        question: "What is StreamPay?",
-        answer:
-          "StreamPay is a dashboard for creating and managing real-time payment streams on the Stellar network. Instead of sending a lump-sum payment, you can stream funds continuously over a set period — useful for payroll, subscriptions, grants, and recurring payments.",
-      },
-      {
-        id: "connect-wallet",
-        question: "How do I connect my Stellar wallet?",
-        answer:
-          'Click \u201cConnect Wallet\u201d on the home page. StreamPay uses a challenge/signature flow: you\u2019ll receive a one-time nonce, sign it with your Stellar private key via your wallet software, and submit the signature to receive a bearer token. No private key is ever sent to the server.',
-      },
-      {
-        id: "supported-wallets",
-        question: "Which wallets are supported?",
-        answer:
-          "Any wallet that can sign a Stellar challenge transaction — including Freighter, LOBSTR, and command-line tools such as stellar-cli. Hardware wallets that expose a Stellar signing interface are also compatible.",
-      },
-      {
-        id: "testnet-vs-mainnet",
-        question: "How do I switch between testnet and mainnet?",
-        answer:
-          "The network is selected at deployment time via the STELLAR_NETWORK environment variable (\"testnet\" or \"mainnet\"). Testnet assets are clearly labelled in the UI to prevent accidental mainnet operations. Contact your administrator to change the active network for a given deployment.",
-      },
-    ],
-  },
-  {
-    id: "keyboard-shortcuts",
-    title: "Keyboard Shortcuts",
-    items: [
-      {
-        id: "shortcuts-overlay",
-        question: "How do I view all available keyboard shortcuts?",
-        answer:
-          `Press ${keysFor("global.toggle-overlay")} anywhere in the app to open the Keyboard Shortcuts overlay, which lists every available shortcut grouped by where it applies. Press ${keysFor("global.toggle-overlay")} again or ${keysFor("global.close-dialogs")} to close it. Press ${keysFor("global.command-palette")} to open the command palette for searching streams. This page, the overlay and the in-form hints all render from one registry (lib/shortcuts.ts), so they cannot disagree.`,
-      },
-      {
-        id: "shortcuts-list",
-        question: "What keyboard shortcuts are available?",
-        answer:
-          `${fullShortcutReference()} Shortcuts in a scoped group are only live where that scope applies: the Create stream form shortcuts do nothing outside the form, and the Receipt card shortcuts only work while a receipt is on screen. Single-key shortcuts such as ${keysFor("receipt-card.toggle-mask")} and ${keysFor("receipt-card.copy")} are ignored while you are typing in a text field.`,
-      },
-    ],
-  },
-  {
-    id: "payment-streams",
-    title: "Payment Streams",
-    items: [
-      {
-        id: "create-stream",
-        question: "How do I create a payment stream?",
-        answer:
-          "Navigate to Streams → New Stream. Enter the recipient's Stellar address, the total amount, the start date, and the end date. Funds are escrowed on-chain when the stream is created (Draft state) and begin vesting linearly once activated.",
-      },
-      {
-        id: "stream-states",
-        question: "What are the different stream states?",
-        answer:
-          "A stream moves through: Draft (created, not yet streaming), Active (vesting linearly), Paused (accrual frozen, vested funds still withdrawable), Settled (all funds released, terminal), and Cancelled (sender ended early — unvested funds refund to sender).",
-      },
-      {
-        id: "pause-stream",
-        question: "Can I pause or cancel a stream?",
-        answer:
-          "Yes. Active streams can be paused and later resumed. You can also cancel a stream at any time — the recipient keeps all vested funds up to the moment of cancellation, and the remaining unvested balance is refunded to you.",
-      },
-      {
-        id: "withdraw-funds",
-        question: "How does a recipient withdraw vested funds?",
-        answer:
-          "Any portion that has vested is available for withdrawal at any time while the stream is Active or Paused. The recipient initiates a withdrawal from the stream detail page, which submits an on-chain transaction to release the vested balance.",
-      },
-      {
-        id: "proration",
-        question: "How are mid-month starts and short months handled?",
-        answer:
-          "All calculations use UTC day boundaries for proration. Mid-month starts and last-day pauses are prorated using inclusive UTC days. Short months use actual day counts — no fixed 30- or 32-day approximation. Local time display may shift with DST, but calculations remain UTC.",
-      },
-    ],
-  },
-  {
-    id: "account-security",
-    title: "Account & Security",
-    items: [
-      {
-        id: "session-security",
-        question: "How are sessions secured?",
-        answer:
-          "Sessions use short-lived JWT bearer tokens signed with a server-side secret (JWT_SECRET, minimum 32 characters). Tokens are scoped to a single wallet address and expire after a fixed interval. All writes require a valid token.",
-      },
-      {
-        id: "cors",
-        question: "Why am I seeing CORS errors?",
-        answer:
-          "Your origin must be listed in the ALLOWED_ORIGINS environment variable (comma-separated). For local development the default is http://localhost:3000. Ask your administrator to add your origin if you are running on a different host or port.",
-      },
-      {
-        id: "private-key-safety",
-        question: "Does StreamPay ever see my private key?",
-        answer:
-          "No. The challenge/signature authentication flow only transmits your public address and the signature of a one-time nonce. Your private key stays in your wallet and is never sent over the network.",
-      },
-    ],
-  },
-  {
-    id: "troubleshooting",
-    title: "Troubleshooting",
-    items: [
-      {
-        id: "app-wont-start",
-        question: "The app won't start — I see a STELLAR_NETWORK error.",
-        answer:
-          "Copy .env.example to .env.local and set STELLAR_NETWORK=testnet (or mainnet). The application performs fail-fast validation on startup and refuses to run with missing or invalid configuration.",
-      },
-      {
-        id: "jwt-errors",
-        question: "I'm getting JWT errors during local authentication.",
-        answer:
-          "Ensure JWT_SECRET in .env.local is at least 32 characters long. You can generate a suitable value with: openssl rand -base64 32",
-      },
-      {
-        id: "stale-build",
-        question: "I see stale UI after a code change.",
-        answer:
-          "Delete the .next/ directory and rebuild: rm -rf .next && npm run build. Stale build artifacts occasionally cause unexpected behaviour after significant dependency or configuration changes.",
-      },
-      {
-        id: "port-in-use",
-        question: "Port 3000 is already in use.",
-        answer:
-          "Start the dev server on an alternative port: PORT=3001 npm run dev. You will also need to add the new origin to ALLOWED_ORIGINS in your .env.local.",
-      },
-      {
-        id: "balance-lag",
-        question: "My wallet balance looks out of date.",
-        answer:
-          "StreamPay uses a short-TTL read-through cache for account and balance reads to keep the UI responsive during Horizon/Soroban outages. If the circuit breaker is open, stale reads may be served. Balances are eventually consistent and may lag the chain by the cache TTL. Refreshing the page will re-fetch the latest data when the network recovers.",
-      },
-    ],
-  },
-  {
-    id: "api-integration",
-    title: "API & Integration",
-    items: [
-      {
-        id: "api-versioning",
-        question: "Which API version should I use?",
-        answer:
-          "Use /api/v2/streams — it is the current supported version. The /api/v1/streams path was deprecated on 2026-04-28 and will stop responding on 2026-12-31. Deprecated responses include Deprecation and Sunset headers per RFC 9745.",
-      },
-      {
-        id: "v1-to-v2-migration",
-        question: "How do I migrate from v1 to v2?",
-        answer:
-          "The main changes are: the actions field is renamed to allowed_actions, timestamps are now snake_case (createdAt → created_at), and a new settlement field appears (null until settled). See docs/api-v2-migration.md for the full field-by-field diff and migration checklist. Deadline: 2026-12-31.",
-      },
-      {
-        id: "webhooks",
-        question: "Does StreamPay support webhooks?",
-        answer:
-          "Yes. POST /api/webhooks/dlq receives dead-letter queue events, and GET /api/webhooks/deliveries lists past delivery attempts. See docs/webhook-delivery.md for the full event schema and retry behaviour.",
-      },
-    ],
-  },
-];
 
 export default function HelpPage() {
   return (
@@ -223,8 +32,6 @@ export default function HelpPage() {
         </div>
       </header>
 
-      <FaqSearch sections={FAQ_SECTIONS} />
-
       <div className="help-layout">
         {/* Quick-jump nav */}
         <nav aria-label="FAQ sections" className="help-nav">
@@ -239,32 +46,9 @@ export default function HelpPage() {
           </ul>
         </nav>
 
-        {/* FAQ content */}
+        {/* FAQ content (client island renders the sections + search) */}
         <div className="help-content">
-          {FAQ_SECTIONS.map((section) => (
-            <section
-              key={section.id}
-              id={section.id}
-              aria-labelledby={`${section.id}-heading`}
-              className="help-section"
-            >
-              <h2
-                id={`${section.id}-heading`}
-                className="help-section__title"
-              >
-                {section.title}
-              </h2>
-
-              <dl className="faq-list">
-                {section.items.map((item) => (
-                  <div key={item.id} id={item.id} className="faq-item">
-                    <dt id={`${item.id}-question`} className="faq-item__question" tabIndex={-1}>{item.question}</dt>
-                    <dd className="faq-item__answer">{item.answer}</dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-          ))}
+          <FaqSearch sections={FAQ_SECTIONS} />
         </div>
       </div>
     </main>

@@ -1,18 +1,18 @@
 /* Extracted from globals.css; selectors stay global to preserve markup and tests. */
-:global(.explainer) {
+.explainer {
 
   display: grid;
   gap: 1.5rem;
 }
 
-:global(.explainer__intro) {
+.explainer__intro {
 
   display: grid;
   gap: 0.75rem;
   max-width: 42rem;
 }
 
-:global(.explainer__eyebrow) {
+.explainer__eyebrow {
 
   color: var(--accent);
   font-size: 0.875rem;
@@ -21,24 +21,24 @@
   text-transform: uppercase;
 }
 
-:global(.explainer__title) {
+.explainer__title {
 
   font-size: clamp(1.75rem, 4vw, 2.5rem);
 }
 
-:global(.explainer__description) {
+.explainer__description {
 
   color: var(--muted-light);
   line-height: 1.6;
 }
 
-:global(.explainer__grid) {
+.explainer__grid {
 
   display: grid;
   gap: 1rem;
 }
 
-:global(.explainer-card) {
+.explainer-card {
 
   background:
     radial-gradient(
@@ -56,7 +56,7 @@
   padding: 1.25rem;
 }
 
-:global(.explainer-card__art) {
+.explainer-card__art {
 
   align-items: center;
   background: linear-gradient(
@@ -72,7 +72,7 @@
   position: relative;
 }
 
-:global(.explainer-card__art--stream) {
+.explainer-card__art--stream {
 
   background: linear-gradient(
     135deg,
@@ -81,7 +81,7 @@
   );
 }
 
-:global(.explainer-card__art--withdraw) {
+.explainer-card__art--withdraw {
 
   background: linear-gradient(
     135deg,
@@ -90,7 +90,7 @@
   );
 }
 
-:global(.explainer-card__step) {
+.explainer-card__step {
 
   align-items: center;
   background: rgba(10, 10, 15, 0.88);
@@ -105,7 +105,7 @@
   z-index: 1;
 }
 
-:global(.explainer-card__pulse) {
+.explainer-card__pulse {
 
   animation: live-accrual-tick 3s ease-in-out infinite;
   background: rgba(255, 255, 255, 0.08);
@@ -115,19 +115,19 @@
   width: 5rem;
 }
 
-:global(.explainer-card__content) {
+.explainer-card__content {
 
   display: grid;
   gap: 0.5rem;
 }
 
-:global(.explainer-card__content) p {
+.explainer-card__content p {
 
   color: var(--muted-light);
   line-height: 1.6;
 }
 
-:global(.explainer__cta-row) {
+.explainer__cta-row {
 
   display: flex;
   flex-wrap: wrap;
@@ -135,11 +135,11 @@
 }
 
 @media (min-width: 48rem) {
-:global(.explainer__grid) {
+.explainer__grid {
 
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
-:global(.light) :global(.explainer-card__step) {
+.light .explainer-card__step {
  background: rgba(255, 255, 255, 0.9); color: var(--foreground); }

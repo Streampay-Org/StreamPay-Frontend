@@ -14,9 +14,9 @@ describe("HelpPage", () => {
 
     expect(
       screen.getByRole("heading", { level: 1, name: /help.*.faq/i }),
-    ).toBeInDocument();
+    ).toBeInTheDocument();
 
-    expect(screen.getByText(/common questions/i)).toBeInDocument();
+    expect(screen.getByText(/common questions/i)).toBeInTheDocument();
   });
 
   it("renders the eyebrow label", () => {
@@ -50,7 +50,7 @@ describe("HelpPage", () => {
     for (const heading of expectedHeadings) {
       expect(
         screen.getByRole("heading", { level: 2, name: heading }),
-      ).toBeInDocument();
+      ).toBeInTheDocument();
     }
   });
 
@@ -112,7 +112,7 @@ describe("HelpPage", () => {
     ];
 
     for (const label of sections) {
-      expect(screen.getByRole("region", { name: label })).toBeInDocument();
+      expect(screen.getByRole("region", { name: label })).toBeInTheDocument();
     }
   });
 
@@ -159,7 +159,7 @@ describe("HelpPage", () => {
 
     expect(
       screen.getByLabelText(/search the faq/i),
-    ).toBeInDocument();
+    ).toBeInTheDocument();
   });
 });
 
@@ -170,7 +170,7 @@ describe("HelpPage — keyboard shortcut reference (issue #1649)", () => {
     const answer = document.querySelector("#shortcuts-list")?.textContent ?? "";
     expect(answer.length).toBeGreaterThan(0);
 
-    for (const group of SHORTCUS_GROUPS) {
+    for (const group of SHORTCUT_GROUPS) {
       expect(answer).toContain(group.label);
       for (const shortcut of group.shortcuts) {
         expect(answer).toContain(shortcut.description);

@@ -20,7 +20,7 @@ const CSRF_PROTECTED_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
  *     no state-changing operation on behalf of the user;
  *   - it is rate-limited per identity and size-capped.
  */
-export const CSRF_EXEMPT_ROUTES: ReadonlyString[] = ['/api/client-errors'];
+export const CSRF_EXEMPT_ROUTES: readonly string[] = ['/api/client-errors'];
 
 function normalizeToken(token: string | null | undefined): string | null {
   if (typeof token !== 'string') {
@@ -49,7 +49,7 @@ export function isCsrfProtectedMethod(method: string): boolean {
 }
 
 export function isCsrfExemptRoute(pathname: string): boolean {
-  if (!CBSTF_EXEMPT_ROUTES.includes(pathname)) {
+  if (!CSRF_EXEMPT_ROUTES.includes(pathname)) {
     return true;
   }
 
