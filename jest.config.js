@@ -103,3 +103,7 @@ module.exports = async () => {
   resolvedConfigCache = resolvedConfig;
   return resolvedConfigCache;
 };
+
+// Exposed so the quarantine-ratchet test can verify the ignore list without
+// invoking Next's config loader a second time (which mutates a frozen object).
+module.exports.testPathIgnorePatterns = config.testPathIgnorePatterns;

@@ -48,7 +48,7 @@ describe("FaqSearch", () => {
   it("filters by question text and highlights matches", async () => {
     const user = userEvent.setup();
     renderIsland();
-    await user.type(screen.getByLabelText(/search faq/i), "freighter");
+    await user.type(screen.getByLabelText(/search( the)? faq/i), "freighter");
     const marks = document.querySelectorAll("mark");
     expect(marks.length).toBeGreaterThan(0);
   });
@@ -56,7 +56,7 @@ describe("FaqSearch", () => {
   it("is case-insensitive", async () => {
     const user = userEvent.setup();
     renderIsland();
-    const input = screen.getByLabelText(/search faq/i);
+    const input = screen.getByLabelText(/search( the)? faq/i);
     await user.type(input, "settle");
     const lower = document.querySelectorAll("mark").length;
     await user.clear(input);
@@ -68,7 +68,7 @@ describe("FaqSearch", () => {
   it("shows empty message and support link when nothing matches", async () => {
     const user = userEvent.setup();
     renderIsland();
-    await user.type(screen.getByLabelText(/search faq/i), "zzzzqq");
+    await user.type(screen.getByLabelText(/search( the)? faq/i), "zzzzqq");
     expect(screen.getByText(/No answers match/i)).toBeVisible();
     expect(screen.getByRole("link", { name: /contact support/i })).toHaveAttribute("href", "/contact");
   });
@@ -76,13 +76,13 @@ describe("FaqSearch", () => {
   it("reflects the query in the URL", async () => {
     const user = userEvent.setup();
     renderIsland();
-    await user.type(screen.getByLabelText(/search faq/i), "freighter");
+    await user.type(screen.getByLabelText(/search( the)? faq/i), "freighter");
     expect(mockReplace).toHaveBeenCalled();
   });
 
   it("copies a deep link and shows a toast", async () => {
     const writeText = jest.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, { clipboard: { writeText } });
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     const user = userEvent.setup();
     renderIsland();
     const item = allItems[0];
@@ -123,7 +123,7 @@ describe("FaqSearch", () => {
   it("announces the result count", async () => {
     const user = userEvent.setup();
     renderIsland();
-    await user.type(screen.getByLabelText(/search faq/i), "freighter");
+    await user.type(screen.getByLabelText(/search( the)? faq/i), "freighter");
     const status = screen.getByRole("status");
     expect(status.textContent).toMatch(/\d+/);
   });

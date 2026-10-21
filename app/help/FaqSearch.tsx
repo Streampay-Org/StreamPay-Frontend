@@ -109,7 +109,7 @@ export default function FaqSearch({ sections, supportHref }: FaqSearchProps) {
   return (
     <div className="faq-search">
       <label htmlFor="faq-search-input" className="faq-search__label">
-        Search FAQ
+        Search the FAQ
       </label>
       <input
         id="faq-search-input"
@@ -131,26 +131,35 @@ export default function FaqSearch({ sections, supportHref }: FaqSearchProps) {
         </p>
       ) : (
         filtered.map((section) => (
-          <section key={section.id} id={section.id} aria-labelledby={`${section.id}-title`}>
-            <h2 id={`${section.id}-title`}>{section.title}</h2>
-            {section.items.map((item) => (
-              <article key={item.id} className="faq-search__item">
-                <h3 id={item.id} tabIndex={-1}>
-                  <Highlight text={item.question} query={query} />
-                </h3>
-                <p>
-                  <Highlight text={item.answer} query={query} />
-                </p>
-                <button
-                  type="button"
-                  className="button button--secondary"
-                  aria-label={`Copy link to ${item.question}`}
-                  onClick={() => void copyLink(item)}
-                >
-                  Copy link
-                </button>
-              </article>
-            ))}
+          <section
+            key={section.id}
+            id={section.id}
+            aria-labelledby={`${section.id}-heading`}
+          >
+            <h2 id={`${section.id}-heading`}>{section.title}</h2>
+            <dl className="faq-list">
+              {section.items.map((item) => (
+                <div key={item.id} id={item.id} className="faq-item">
+                  <dt
+                    id={`${item.id}-question`}
+                    className="faq-item__question"
+                  >
+                    <Highlight text={item.question} query={query} />
+                  </dt>
+                  <dd className="faq-item__answer">
+                    <Highlight text={item.answer} query={query} />
+                  </dd>
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    aria-label={`Copy link to ${item.question}`}
+                    onClick={() => void copyLink(item)}
+                  >
+                    Copy link
+                  </button>
+                </div>
+              ))}
+            </dl>
           </section>
         ))
       )}

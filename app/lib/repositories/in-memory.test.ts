@@ -65,7 +65,7 @@ describe("repository adapters", () => {
 
     resetDb();
 
-    expect(getStore().streamRepository.streams.size).toBe(3);
+    expect(getStore().streamRepository.streams.size).toBe(4);
     expect(getStore().streamRepository.streams.has("stream-extra")).toBe(false);
     expect(getStore().idempotencyStore.size).toBe(0);
     expect(getStore().exportRepository.jobs.size).toBe(0);
