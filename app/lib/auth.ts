@@ -246,7 +246,7 @@ export function signToken(
     {
       expiresIn: JWT_EXPIRES_IN as SignOptions["expiresIn"],
       algorithm: "HS256",
-      header: { kid: getCurrentKeyId() },
+      header: { alg: "HS256", kid: getCurrentKeyId() },
     },
   );
 }
