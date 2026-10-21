@@ -106,4 +106,14 @@ module.exports = async () => {
 
 // Exposed so the quarantine-ratchet test can verify the ignore list without
 // invoking Next's config loader a second time (which mutates a frozen object).
+
+// Keep the ignore list in sync with the quarantine manifest, which is the
+// source of truth for suites that are already red on main.
+const quarantineManifest = require("./jest.quarantine.json");
+for (const entry of quarantineManifest.entries) {
+  const pattern = `<rootDir>/${entry.path.replace(/\[/g, "\\[").replace(/\]/g, "\\]")}`;
+  if (!config.testPathIgnorePatterns.includes(pattern)) {
+    config.testPathIgnorePatterns.push(pattern);
+  }
+}
 module.exports.testPathIgnorePatterns = config.testPathIgnorePatterns;

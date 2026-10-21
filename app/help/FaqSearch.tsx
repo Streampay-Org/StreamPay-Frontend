@@ -148,15 +148,15 @@ export default function FaqSearch({ sections, supportHref }: FaqSearchProps) {
                   </dt>
                   <dd className="faq-item__answer">
                     <Highlight text={item.answer} query={query} />
+                    <button
+                      type="button"
+                      className="button button--secondary"
+                      aria-label={`Copy link to ${item.question}`}
+                      onClick={() => void copyLink(item)}
+                    >
+                      Copy link
+                    </button>
                   </dd>
-                  <button
-                    type="button"
-                    className="button button--secondary"
-                    aria-label={`Copy link to ${item.question}`}
-                    onClick={() => void copyLink(item)}
-                  >
-                    Copy link
-                  </button>
                 </div>
               ))}
             </dl>

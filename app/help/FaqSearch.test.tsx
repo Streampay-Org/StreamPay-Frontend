@@ -81,9 +81,11 @@ describe("FaqSearch", () => {
   });
 
   it("copies a deep link and shows a toast", async () => {
+    const user = userEvent.setup();
+    // user-event installs its own clipboard stub during setup, so replace it
+    // afterwards to observe the calls the component makes.
     const writeText = jest.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    const user = userEvent.setup();
     renderIsland();
     const item = allItems[0];
     const escaped = item.question.replace(/[.*+??^${}()|[\]\\\\]/g, "\\$&");
