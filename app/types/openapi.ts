@@ -42,6 +42,8 @@ export interface WithdrawalStatus {
  * The contract escrow is fully drained after cancellation (no dust).
  */
 export interface CancellationSplit {
+  /** Wallet address of the stream sender receiving the refund leg. */
+  senderAddress?: string;
   /** Raw units paid to the recipient (vested but not yet released). */
   recipientPayout: string;
   /** Raw units refunded to the sender (unvested remainder). */
@@ -62,6 +64,7 @@ export interface CancellationSplit {
 
 export interface Stream {
   id: string;
+  tenant?: string;
   recipient: string;
   rate: string;
   schedule: string;
@@ -96,9 +99,16 @@ export interface Stream {
   cancellation?: CancellationSplit;
   /**
    * Wallet address of the stream sender (payer). Required for the refund leg
-   * of cancel_stream. Stored at creation time.
+   * of cancel_stream. Stored at creation time. `null` for unclaimed streams.
    */
-  senderAddress?: string;
+  senderAddress?: string | null;
+  /**
+   * Stream ownership state:
+   * - "individual": Owned by a specific wallet sender (requires sender JWT auth to cancel).
+   * - "org": Managed by organization RBAC policy.
+   * - "unclaimed": Created unauthenticated or legacy backfill; cannot be cancelled until claimed.
+   */
+  ownership?: "individual" | "org" | "unclaimed";
   /**
    * Vested amount at the time of the last on-chain update (raw i128 units).
    * Tracks how much the recipient has earned so far.

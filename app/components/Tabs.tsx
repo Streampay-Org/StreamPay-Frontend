@@ -1,6 +1,6 @@
 'use client';
 
-import React, { ReactNode, useCallback, useState } from 'react';
+import React, { ReactNode, useCallback, useRef, useState } from 'react';
 
 export interface TabDefinition {
   id: string;
@@ -12,23 +12,58 @@ interface TabsProps {
   tabs: TabDefinition[];
   defaultTabId?: string;
   onChange?: (tabId: string) => void;
+  /**
+   * Optional guard run before a tab becomes active. Return `false` (or a
+   * promise that resolves `false`) to keep the current tab selected.
+   */
+  onBeforeChange?: (
+    nextTabId: string,
+    origin?: HTMLElement
+  ) => boolean | Promise<boolean>;
 }
 
 export const Tabs: React.FC<TabsProps> = ({
   tabs,
   defaultTabId,
   onChange,
+  onBeforeChange,
 }) => {
   const [activeTabId, setActiveTabId] = useState<string>(
     defaultTabId || tabs[0]?.id || ''
   );
+  const pendingChangeRef = useRef(false);
 
-  const handleTabClick = useCallback(
+  const commitTabChange = useCallback(
     (tabId: string) => {
       setActiveTabId(tabId);
       onChange?.(tabId);
     },
     [onChange]
+  );
+
+  const handleTabClick = useCallback(
+    (tabId: string, origin?: HTMLElement) => {
+      if (tabId === activeTabId || pendingChangeRef.current) return;
+
+      const guardResult = onBeforeChange?.(tabId, origin);
+      if (guardResult === undefined || guardResult === true) {
+        commitTabChange(tabId);
+        return;
+      }
+      if (guardResult === false) return;
+
+      pendingChangeRef.current = true;
+      Promise.resolve(guardResult).then(
+        (allowed) => {
+          pendingChangeRef.current = false;
+          if (allowed) commitTabChange(tabId);
+        },
+        () => {
+          pendingChangeRef.current = false;
+        }
+      );
+    },
+    [activeTabId, commitTabChange, onBeforeChange]
   );
 
   const handleKeyDown = useCallback(
@@ -50,7 +85,10 @@ export const Tabs: React.FC<TabsProps> = ({
       }
 
       if (nextIndex !== null) {
-        handleTabClick(tabs[nextIndex].id);
+        handleTabClick(
+          tabs[nextIndex].id,
+          e.currentTarget as HTMLElement
+        );
       }
     },
     [tabs, handleTabClick]
@@ -72,7 +110,7 @@ export const Tabs: React.FC<TabsProps> = ({
             className={`tabs__button ${
               activeTabId === tab.id ? 'tabs__button--active' : ''
             }`}
-            onClick={() => handleTabClick(tab.id)}
+            onClick={(event) => handleTabClick(tab.id, event.currentTarget)}
             onKeyDown={(e) => handleKeyDown(e, index)}
             type="button"
           >

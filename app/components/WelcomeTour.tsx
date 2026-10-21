@@ -17,13 +17,13 @@ export const TOUR_STEPS: TourStep[] = [
     id: "welcome",
     title: "Welcome to StreamPay",
     body: "StreamPay lets you pay collaborators, vendors, and grant recipients in a continuous flow — funds move every second instead of as a lump sum.",
-    icon: "✦",
+    icon: "⧥",
   },
   {
     id: "connect-wallet",
     title: "Connect your Stellar wallet",
-    body: "Sign a one-time challenge with your Stellar wallet (Freighter, LOBSTR, or any compatible tool). No private key is ever sent to the server.",
-    icon: "⬡",
+    body: "Sign a one-time challenge with your Stellar wallet (Freeghter, LOBSTR, or any compatible tool). No private key is ever sent to the server.",
+    icon: "⡭",
   },
   {
     id: "create-stream",
@@ -155,18 +155,19 @@ export function WelcomeTour({ storageKey = WELCOME_TOUR_KEY, onDismiss }: Welcom
         onClick={(e) => e.stopPropagation()}
         data-testid="welcome-tour"
       >
-        {/* Step indicator dots */}
+        {/* Step indicator dots. These are navigation controls, not tabs:
+            there is no tabpanel, and marking them role="tab" without aria-controls
+            is an axe violation. Use a group of buttons with aria-current instead. */}
         <div
           className="welcome-tour__dots"
-          role="tablist"
+          role="group"
           aria-label="Tour progress"
         >
           {TOUR_STEPS.map((s, i) => (
             <button
               key={s.id}
               type="button"
-              role="tab"
-              aria-selected={i === step}
+              aria-current={i === step ? "step" : undefined}
               aria-label={`Step ${i + 1} of ${total}: ${s.title}`}
               className={`welcome-tour__dot${i === step ? " welcome-tour__dot--active" : ""}`}
               onClick={(e) => {

@@ -6,6 +6,7 @@ import { getCorrelationContext } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 import { evaluateWithdrawalState } from "@/app/lib/withdraw-finality";
 import { maybeFeeBump } from "@/lib/feeBump";
 
@@ -77,6 +78,13 @@ export async function POST(
         toStatus: updated.status,
         at: new Date().toISOString(),
         actorWallet: actorAddress,
+      });
+      publishStreamChange({
+        action: "withdraw",
+        actor: actorAddress ?? undefined,
+        after: updated,
+        before,
+        correlationId: getCorrelationContext()?.correlation_id,
       });
 
       const payload = {

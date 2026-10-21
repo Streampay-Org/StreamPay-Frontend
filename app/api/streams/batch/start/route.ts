@@ -9,6 +9,7 @@ import {
 } from "@/app/lib/db";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 
 const MAX_BATCH_SIZE = 20;
 
@@ -109,6 +110,7 @@ export async function POST(request: NextRequest) {
     for (const id of toUpdate) {
       const stream = streamRepository.streams.get(id)!;
       const isResume = stream.status === "paused";
+      const before = structuredClone(stream);
       const updatedStream = {
         ...stream,
         nextAction: "pause",
@@ -117,6 +119,15 @@ export async function POST(request: NextRequest) {
         updatedAt: now,
       } as any;
       streamRepository.streams.set(id, updatedStream);
+
+      publishStreamChange({
+        action: "start",
+        actor: getHeader(request, "Actor-Wallet-Address") ?? undefined,
+        after: updatedStream,
+        before,
+        correlationId: getCorrelationContext()?.correlation_id,
+      });
+
       updated.push(updatedStream);
       logger.info(isResume ? "Stream resumed (batch)" : "Stream started (batch)", { streamId: id });
     }
