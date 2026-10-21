@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getStore } from "@/app/lib/db";
 import { getCorrelationContext } from "@/app/lib/logger";
 import { toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
+import { inferStreamChangeAction, publishStreamChange } from "@/app/lib/stream-publish";
+import type { Stream } from "@/app/types/openapi";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -121,6 +123,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     updatedAt: new Date().toISOString(),
   };
   streamRepository.streams.set(id, updated as any);
+
+  publishStreamChange({
+    action: inferStreamChangeAction(stream, updated as Stream),
+    actor: request.headers.get("Actor-Wallet-Address") ?? undefined,
+    after: updated as Stream,
+    before: stream,
+    correlationId: getCorrelationContext()?.correlation_id,
+  });
 
   const streamV2 = toV2Stream(dbStreamToV1(updated as any));
   return NextResponse.json({

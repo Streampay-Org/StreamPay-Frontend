@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { PushOptIn } from '../PushOptIn';
 import { NotificationGroup } from './NotificationGroup';
 import { SettingItem } from './SettingItem';
@@ -23,6 +23,12 @@ export interface NotificationPreferences {
   soundEnabled?: boolean;
 }
 
+export interface NotificationSettingsHandle {
+  /** Persists the current preferences. Resolves `true` when the save succeeds. */
+  save: () => Promise<boolean>;
+  isDirty: () => boolean;
+}
+
 export interface NotificationSettingsProps {
   initialPrefs?: Partial<NotificationPreferences>;
   initialQuietHours?: Partial<QuietHoursConfig>;
@@ -30,6 +36,8 @@ export interface NotificationSettingsProps {
   showSaveButton?: boolean;
   disabled?: boolean;
   readOnly?: boolean;
+  /** Notifies the parent when the form transitions between clean and dirty. */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 const COMMON_TIMEZONES = [
@@ -48,14 +56,21 @@ const COMMON_TIMEZONES = [
   'Africa/Lagos',
 ];
 
-export const NotificationSettings: React.FC<NotificationSettingsProps> = ({
-  initialPrefs,
-  initialQuietHours,
-  onSave,
-  showSaveButton = false,
-  disabled = false,
-  readOnly = false,
-}) => {
+export const NotificationSettings = forwardRef<
+  NotificationSettingsHandle,
+  NotificationSettingsProps
+>(function NotificationSettings(
+  {
+    initialPrefs,
+    initialQuietHours,
+    onSave,
+    showSaveButton = false,
+    disabled = false,
+    readOnly = false,
+    onDirtyChange,
+  },
+  ref
+) {
   const isInteractionDisabled = disabled || readOnly;
 
   const getSystemTimezone = (): string => {
@@ -97,6 +112,10 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({
     timezone?: string;
   }>({});
   const [isDirty, setIsDirty] = useState(false);
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   const handleToggle = (
     key: keyof Omit<typeof prefs, 'pushFallback' | 'soundEnabled'>,
@@ -150,12 +169,12 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({
     return Object.keys(errors).length === 0;
   };
 
-  const handleSave = async () => {
-    if (isInteractionDisabled || isSaving) return;
+  const handleSave = async (): Promise<boolean> => {
+    if (isInteractionDisabled || isSaving) return false;
 
     if (!validateForm()) {
       setError('Please resolve all validation errors before saving.');
-      return;
+      return false;
     }
 
     setIsSaving(true);
@@ -171,13 +190,20 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({
       }
       setIsDirty(false);
       setSuccessMessage('Preferences saved successfully.');
+      return true;
     } catch {
       // Preserve form values in state so user data is never lost
       setError('Failed to save preferences. Please check your connection and try again.');
+      return false;
     } finally {
       setIsSaving(false);
     }
   };
+
+  useImperativeHandle(ref, () => ({
+    save: handleSave,
+    isDirty: () => isDirty,
+  }));
 
   // Ensure user's current timezone option is present in the list
   const timezoneOptions = Array.from(new Set([...COMMON_TIMEZONES, quietHours.timezone])).filter(isValidIanaTimezone);
@@ -484,4 +510,6 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({
       )}
     </div>
   );
-};
+});
+
+NotificationSettings.displayName = 'NotificationSettings';

@@ -1,0 +1,172 @@
+/* Extracted from globals.css; selectors stay global to preserve markup and tests. */
+:global(.activity-feed-wrap) {
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  max-width: 48rem;
+  width: 100%;
+}
+
+:global(.activity-group) {
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+:global(.activity-group-title) {
+
+  color: var(--muted-light);
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+  letter-spacing: 0.1em;
+  padding-left: calc(
+    var(--space-6) + var(--space-4)
+  ); /* Align with content, skipping dot */
+  text-transform: uppercase;
+}
+
+:global(.activity-timeline) {
+
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+:global(.activity-item) {
+
+  display: flex;
+  gap: var(--space-4);
+  position: relative;
+}
+
+:global(.activity-marker) {
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: var(--space-6);
+  flex-shrink: 0;
+}
+
+:global(.activity-dot) {
+
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-full);
+  background: var(--border);
+  margin-top: 6px;
+  z-index: 2;
+}
+
+:global(.activity-line) {
+
+  width: 1px;
+  background: var(--border);
+  flex-grow: 1;
+  z-index: 1;
+}
+
+:global(.activity-item):last-child :global(.activity-line) {
+
+  display: none;
+}
+
+:global(.activity-content) {
+
+  flex-grow: 1;
+  padding-bottom: var(--space-8);
+}
+
+:global(.activity-card) {
+
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease;
+}
+
+:global(.activity-card):hover {
+
+  border-color: var(--accent);
+  transform: translateX(4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+:global(.activity-card) {
+
+    transition: none;
+  }
+}
+
+:global(.activity-info) {
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+:global(.activity-title) {
+
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+  color: var(--foreground);
+}
+
+:global(.activity-time) {
+
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+
+:global(.activity-dot--success) {
+
+  background: var(--success);
+  box-shadow: 0 0 12px var(--success);
+}
+
+:global(.activity-dot--info) {
+
+  background: var(--info);
+  box-shadow: 0 0 12px var(--info);
+}
+
+:global(.activity-dot--warning) {
+
+  background: var(--warning);
+  box-shadow: 0 0 12px var(--warning);
+}
+
+:global(.activity-dot--accent) {
+
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+}
+
+
+
+:global(.event-panel) {
+
+  --success: #22c55e;
+  --info: #0ea5e9;
+  --warning: #eab308;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+
+:global(.activity-card):global(.event-card) {
+
+  align-items: stretch;
+}

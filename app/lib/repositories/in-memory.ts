@@ -53,6 +53,7 @@ const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
     vestedAmount: "1800000000",
     releasedAmount: "1200000000",
     senderAddress: "GSENDER00000000000000000000000000000000000000000000",
+    ownership: "org",
   },
   {
     id: "stream-kemi",
@@ -71,6 +72,7 @@ const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
     vestedAmount: "0",
     releasedAmount: "0",
     senderAddress: "GSENDER00000000000000000000000000000000000000000000",
+    ownership: "individual",
   },
   {
     id: "stream-yusuf",
@@ -95,6 +97,24 @@ const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
     vestedAmount: "540000000",
     releasedAmount: "0",
     senderAddress: "GSENDER00000000000000000000000000000000000000000000",
+    ownership: "individual",
+  },
+  {
+    id: "stream-unclaimed",
+    recipient: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGYWDEAVQBMJ87WGNB55IAA",
+    rate: "10 XLM / day",
+    schedule: "Legacy unclaimed stream",
+    status: "active",
+    nextAction: "pause",
+    label: "Legacy Unclaimed Stream",
+    createdAt: demoDate("2026-04-12T08:00:00Z"),
+    updatedAt: demoDate("2026-04-20T10:00:00Z"),
+    token: "XLM",
+    totalAmount: "1000000000",
+    vestedAmount: "500000000",
+    releasedAmount: "0",
+    senderAddress: null,
+    ownership: "unclaimed",
   },
 ];
 

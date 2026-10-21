@@ -56,18 +56,42 @@ export function extractCorrelationContext(headers: Headers): CorrelationContext 
   const rawRequestId =
     headers.get("x-request-id") ||
     headers.get("request-id") ||
-    headers.get("x-correlation-id");
+    headers.get("correlation-id");
+  const requestId =
+    rawRequestId && isValidRequestId(rawRequestId)
+      ? rawRequestId
+      : generateRequestId();
 
-  let request_id: string;
-  let request_id_rejected = false;
+  const rawCorrelationId =
+    headers.get("x-correlation-id") || headers.get("correlation-id");
+  const correlationId =
+    rawCorrelationId && isValidRequestId(rawCorrelationId)
+      ? rawCorrelationId
+      : requestId;
 
-  if (rawRequestId && isValidRequestId(rawRequestId)) {
-    request_id = rawRequestId;
-  } else if (rawRequestId) {
-    request_id = generateRequestId();
-    request_id_rejected = true;
-  } else {
-    request_id = generateRequestId();
+  const context: CorrelationContext = {
+    request_id: requestId,
+    correlation_id: correlationId,
+  };
+
+  const traceparent = parseTraceparent(headers.get("traceparent"));
+  if (traceparent) context.traceparent = traceparent;
+
+  const streamId = headers.get("x-stream-id") || headers.get("stream-id");
+  if (streamId) context.stream_id = streamId;
+
+  const jobId = headers.get("x-job-id") || headers.get("job-id");
+  if (jobId) context.job_id = jobId;
+
+  const txHash = headers.get("x-stellar-tx-hash");
+  if (txHash) context.stellar_tx_hash = txHash;
+
+  const webhookId = headers.get("x-webhook-id");
+  if (webhookId) context.webhook_id = webhookId;
+
+  const retryCount = headers.get("x-retry-count");
+  if (retryCount && /^\d+$/.test(retryCount)) {
+    context.retry_count = Number(retryCount);
   }
 
   const correlation_id =

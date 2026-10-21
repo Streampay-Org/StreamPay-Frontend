@@ -119,6 +119,14 @@ export async function POST(request: NextRequest) {
       } as any;
       streamRepository.streams.set(id, updatedStream);
 
+      publishStreamChange({
+        action: "stop",
+        actor: actor ?? undefined,
+        after: updatedStream,
+        before,
+        correlationId: getCorrelationContext()?.correlation_id,
+      });
+
       recordPrivilegedStreamAuditEvent({
         action: "stream.stop.override",
         before: before as unknown as Record<string, unknown>,
