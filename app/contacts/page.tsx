@@ -1,10 +1,20 @@
 "use client";
 
 import React, { useCallback, useEffect, useId, useState } from "react";
+import { escapeCsv } from "../lib/exportCsv";
+import { isValidStellarPublicKey } from "../lib/stellar-address";
 import { CopyAddress } from "../components/CopyAddress";
 import { EmptyState } from "../components/EmptyState";
 import { Modal } from "../components/Modal";
 import { useToast } from "../hooks/useToast";
+import {
+  buildExportCsv,
+  buildExportJson,
+  classifyImport,
+  parseCsv,
+  type ClassifyResult,
+  type ImportRowStatus,
+} from "./importExport";
 import {
   FederationError,
   isFederationAddress,
@@ -53,15 +63,15 @@ function persistContacts(contacts: Contact[]): void {
   localStorage.setItem(CONTACTS_KEY, JSON.stringify(contacts));
 }
 
+// ─── Import / export constants ────────────────────────────────────────────────
+
+const MAX_IMPORT_BYTES = 1024 * 1024;
+const MAX_IMPORT_ROWS = 1000;
+
 // ─── Validation ───────────────────────────────────────────────────────────────
 
-// Stellar ED25519 public key: G + 55 base-32 chars (A–Z, 2–7)
-const STELLAR_ACCOUNT_RE = /^G[A-Z2-7]{55}$/;
-
 function isValidStellarAddress(value: string): boolean {
-  // Stellar addresses use base32 (RFC 4648) which is case-insensitive.
-  // Normalise to uppercase so the regex works for lowercase input.
-  return STELLAR_ACCOUNT_RE.test(value.toUpperCase());
+  return isValidStellarPublicKey(value);
 }
 
 // ─── ContactForm ──────────────────────────────────────────────────────────────
@@ -482,8 +492,22 @@ export default function ContactsPage() {
   });
 
   const applyUpdate = (next: Contact[]) => {
+    const previous = contacts;
     setContacts(next);
-    persistContacts(next);
+    try {
+      persistContacts(next);
+    } catch (err) {
+      setContacts(previous);
+      const isQuota =
+        err instanceof DOMException &&
+        (err.name === "QuotaExceededError" ||
+          err.name === "NS_ERROR_DOM_QUOTA_REACHED");
+      toast.error(
+        isQuota
+          ? "Storage is full. Your change was not saved."
+          : "Could not save contacts. Your change was not saved.",
+      );
+    }
   };
 
   const handleAdd = ({
@@ -599,6 +623,14 @@ export default function ContactsPage() {
               }}
             />
           </div>
+
+          <ExportMenu contacts={contacts} />
+          <ImportButton
+            contacts={contacts}
+            onApply={applyUpdate}
+            onError={(msg) => toast.error(msg)}
+            onSuccess={(msg) => toast.success(msg)}
+          />
 
           <button
             type="button"
@@ -733,5 +765,307 @@ export default function ContactsPage() {
         </div>
       </Modal>
     </main>
+  );
+}
+
+// ─── ExportMenu ───────────────────────────────────────────────────────────────
+
+function downloadFile(filename: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function ExportMenu({ contacts }: { contacts: Contact[] }) {
+  const [open, setOpen] = useState(false);
+  const menuId = useId();
+  const disabled = contacts.length === 0;
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        type="button"
+        className="button button--secondary"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={menuId}
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+      >
+        Export
+      </button>
+      {open && (
+        <div
+          id={menuId}
+          role="menu"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 0.25rem)",
+            right: 0,
+            background: "var(--panel)",
+            border: "1px solid var(--border)",
+            borderRadius: "0.5rem",
+            padding: "0.25rem",
+            zIndex: 20,
+            minWidth: "10rem",
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="button button--secondary"
+            style={{ width: "100%", justifyContent: "flex-start" }}
+            onClick={() => {
+              downloadFile(
+                "contacts.json",
+                buildExportJson(contacts),
+                "application/json",
+              );
+              setOpen(false);
+            }}
+          >
+            Export JSON
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="button button--secondary"
+            style={{ width: "100%", justifyContent: "flex-start" }}
+            onClick={() => {
+              downloadFile(
+                "contacts.csv",
+                buildExportCsv(contacts),
+                "text/csv",
+              );
+              setOpen(false);
+            }}
+          >
+            Export CSV
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ImportButton + Preview ───────────────────────────────────────────────────
+
+interface ImportButtonProps {
+  contacts: Contact[];
+  onApply: (next: Contact[]) => void;
+  onError: (msg: string) => void;
+  onSuccess: (msg: string) => void;
+}
+
+type ConflictChoice = "skip" | "overwrite" | "keep-both";
+
+function ImportButton({
+  contacts,
+  onApply,
+  onError,
+  onSuccess,
+}: ImportButtonProps) {
+  const inputId = useId();
+  const [preview, setPreview] = useState<ClassifyResult | null>(null);
+  const [conflictChoices, setConflictChoices] = useState<
+    Record<number, ConflictChoice>
+  >({});
+
+  const handleFile = async (file: File) => {
+    if (file.size > MAX_IMPORT_BYTES) {
+      onError("File is larger than 1 MB");
+      return;
+    }
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      onError("Could not read file");
+      return;
+    }
+    const result = classifyImport(text, file.name, contacts);
+    if (result.error) {
+      onError(result.error);
+      return;
+    }
+    if (result.rows.length === 0) {
+      onError("File contains no rows");
+      return;
+    }
+    const choices: Record<number, ConflictChoice> = {};
+    result.rows.forEach((r, i) => {
+      if (r.status === "conflict") choices[i] = "skip";
+    });
+    setConflictChoices(choices);
+    setPreview(result);
+  };
+
+  const commit = () => {
+    if (!preview) return;
+    const next = [...contacts];
+    preview.rows.forEach((row, i) => {
+      if (row.status === "invalid" || row.status === "duplicate") return;
+      if (row.status === "conflict") {
+        const choice = conflictChoices[i] ?? "skip";
+        if (choice === "skip") return;
+        if (choice === "overwrite") {
+          const idx = next.findIndex((c) => c.id === row.existingId);
+          if (idx >= 0) {
+            next[idx] = {
+              ...next[idx],
+              label: row.label,
+              memo: row.note || undefined,
+            };
+          }
+          return;
+        }
+      }
+      next.push({
+        id: crypto.randomUUID(),
+        label: row.label,
+        address: row.address,
+        federationAddress: row.federation || undefined,
+        memo: row.note || undefined,
+        createdAt: row.createdAt,
+      });
+    });
+    onApply(next);
+    const added = preview.rows.filter(
+      (r) => r.status === "new",
+    ).length;
+    setPreview(null);
+    onSuccess(`Imported ${added} contact${added !== 1 ? "s" : ""}`);
+  };
+
+  const counts = preview
+    ? preview.rows.reduce<Record<ImportRowStatus, number>>(
+        (acc, r) => {
+          acc[r.status] += 1;
+          return acc;
+        },
+        { new: 0, duplicate: 0, conflict: 0, invalid: 0 },
+      )
+    : null;
+
+  return (
+    <>
+      <label
+        htmlFor={inputId}
+        className="button button--secondary"
+        style={{ cursor: "pointer" }}
+      >
+        Import
+      </label>
+      <input
+        id={inputId}
+        type="file"
+        accept=".json,.csv,application/json,text/csv"
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          padding: 0,
+          margin: -1,
+          overflow: "hidden",
+          clip: "rect(0,0,0,0)",
+          whiteSpace: "nowrap",
+          border: 0,
+        }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) void handleFile(file);
+        }}
+      />
+
+      <Modal
+        isOpen={preview !== null}
+        onClose={() => setPreview(null)}
+        title="Import preview"
+      >
+        {preview && counts && (
+          <div>
+            <p
+              aria-live="polite"
+              style={{ fontSize: "0.85rem", color: "var(--muted-foreground)" }}
+            >
+              {counts.new} new · {counts.duplicate} duplicate ·{" "}
+              {counts.conflict} conflict · {counts.invalid} invalid
+            </p>
+            <div className="import-preview">
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    <th scope="col" style={{ textAlign: "left" }}>Label</th>
+                    <th scope="col" style={{ textAlign: "left" }}>Address</th>
+                    <th scope="col" style={{ textAlign: "left" }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.rows.map((row, i) => (
+                    <tr key={i}>
+                      <td>{row.label || "—"}</td>
+                      <td style={{ fontFamily: "monospace", wordBreak: "break-all" }}>
+                        {row.address || "—"}
+                      </td>
+                      <td>
+                        {row.status}
+                        {row.reason ? `: ${row.reason}` : ""}
+                        {row.needsResolution ? " (needs resolution)" : ""}
+                        {row.status === "conflict" && (
+                          <select
+                            aria-label={`Conflict resolution for ${row.label}`}
+                            value={conflictChoices[i] ?? "skip"}
+                            onChange={(e) =>
+                              setConflictChoices((prev) => ({
+                                ...prev,
+                                [i]: e.target.value as ConflictChoice,
+                              }))
+                            }
+                          >
+                            <option value="skip">Skip</option>
+                            <option value="overwrite">Overwrite</option>
+                            <option value="keep-both">Keep both</option>
+                          </select>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: "0.75rem",
+                justifyContent: "flex-end",
+                marginTop: "1rem",
+              }}
+            >
+              <button
+                type="button"
+                className="button button--secondary"
+                onClick={() => setPreview(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={commit}
+              >
+                Import
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+    </>
   );
 }

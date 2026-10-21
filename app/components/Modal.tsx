@@ -215,8 +215,8 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
         style={{
           width: "100%",
           maxWidth: "500px",
-          backgroundColor: "var(--card-surface)",
-          border: "1px solid var(--card-border)",
+          backgroundColor: "var(--panel-elevated)",
+          border: "1px solid var(--border)",
           borderRadius: "1rem",
           padding: "1.5rem",
           boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)",

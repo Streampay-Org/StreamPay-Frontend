@@ -1,4 +1,4 @@
-/**
+/*
  * OpenAPI examples coverage for GET/POST /api/auth/wallet (issue #1105).
  */
 import { readFileSync } from 'fs';
@@ -6,7 +6,7 @@ import { join } from 'path';
 import yaml from 'js-yaml';
 
 function loadOpenApiYaml(): any {
-  const raw = readFileSync(join(__dirname, '..', 'src', 'openapi.yaml'), 'utf8');
+  const raw = readFileSync(join(__dirname, '.', 'src', 'openapi.yaml'), 'utf8');
   return yaml.load(raw);
 }
 

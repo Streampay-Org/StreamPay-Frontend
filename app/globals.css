@@ -152,6 +152,11 @@
   --font-medium: 500;
   --font-semibold: 600;
   --font-bold: 700;
+
+  /* ── Typography & Motion ── */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --motion-easing: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-duration-medium: 200ms;
 }
 
 /* ── Light Theme ── */
@@ -276,6 +281,10 @@
   --identicon-6-fg: #b91c1c;
   --identicon-7-bg: #e0e7ff;
   --identicon-7-fg: #3730a3;
+
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --motion-easing: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-duration-medium: 200ms;
 }
 
 /* ── High Contrast Theme (WCAG AAA) ── */
@@ -357,6 +366,10 @@
   --stream-disabled-bg: #18181b;
   --stream-disabled-text: #52525b;
   --stream-disabled-border: #27272a;
+
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --motion-easing: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-duration-medium: 200ms;
 }
 
 .light.high-contrast {
@@ -2685,6 +2698,53 @@ a:hover {
   height: 6rem;
 }
 
+/* ─── /streams/[id] loading skeleton ───────────────────────────────────────── */
+
+.detail-loading {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.detail-loading__hero {
+  display: grid;
+}
+
+.detail-loading__section,
+.detail-loading__field-stack {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.detail-loading__grid {
+  margin-top: 1.5rem;
+}
+
+.detail-loading__field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.detail-loading__timeline {
+  display: grid;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.detail-loading__timeline-stage {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+}
+
+/* Reduced motion: honour the user's OS preference even though the Skeleton
+   component is rendered before any JS runs. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 .receipt-share-btn {
   align-items: center;
   background: transparent;
@@ -3293,6 +3353,49 @@ a:hover {
   color: var(--muted-light);
   font-size: var(--text-xs);
   margin-top: var(--space-3);
+}
+
+/**
+ * Inline outcome for stream lifecycle actions.
+ *
+ * Always rendered so the live region exists before its text changes; emptied
+ * of layout when there is nothing to announce. `overflow-wrap` keeps long
+ * stream IDs from overflowing the card at 320px.
+ */
+.detail-action-status {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  line-height: 1.4;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.detail-action-status:empty {
+  margin-top: 0;
+  padding: 0;
+  border-width: 0;
+}
+
+.detail-action-status:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.detail-action-status--success {
+  background: var(--system-success-bg);
+  border-color: var(--system-success-border);
+  color: var(--system-success-text);
+}
+
+.detail-action-status--error {
+  background: var(--system-error-bg);
+  border-color: var(--system-error-border);
+  color: var(--system-error-text);
 }
 
 .detail-incident-warning {
@@ -4984,6 +5087,10 @@ a:hover {
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
+  /* Keep the focus ring inside the scrollport without moving the controls. */
+  padding: 4px;
+  margin: -4px;
+  scroll-padding-inline: 4px;
 }
 
 .template-controls__categories::-webkit-scrollbar {
@@ -4994,7 +5101,7 @@ a:hover {
   background: none;
   border: 1px solid var(--border);
   border-radius: 999px;
-  color: var(--muted);
+  color: var(--muted-foreground);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -5022,9 +5129,25 @@ a:hover {
   color: var(--accent-on);
 }
 
+.template-controls__tab--active:hover {
+  color: var(--accent-on);
+}
+
+/* The light accent fill needs the darker token to meet AA text contrast. */
+.light .templates-page .page-hero__eyebrow {
+  color: var(--accent-hover);
+}
+
+.light .templates-page .template-controls__tab--active,
+.light .templates-page .button--primary {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
 .template-controls__tab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--background);
 }
 
 .inline-help__trigger:hover {
@@ -5350,8 +5473,13 @@ a:hover {
   padding: 0.5rem 1rem;
   width: 100%;
 }
-.template-controls__input::placeholder { color: var(--muted); }
+.template-controls__input::placeholder { color: var(--muted-foreground); }
 .template-controls__input:focus { border-color: var(--accent); outline: none; }
+.template-controls__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--background);
+}
 .template-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); }
 .template-card {
   background: var(--panel);
@@ -5382,7 +5510,7 @@ a:hover {
 .template-card__name { font-size: 1.125rem; line-height: 1.3; }
 .template-card__details { display: grid; gap: 0.75rem; grid-template-columns: 1fr 1fr; }
 .template-card__detail { display: grid; gap: 0.2rem; }
-.template-card__detail-label { color: var(--muted); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.template-card__detail-label { color: var(--muted-foreground); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
 .template-card__detail-value { font-weight: 600; margin: 0; }
 .template-card__memo { color: var(--muted-light); flex: 1; font-size: 0.875rem; line-height: 1.5; }
 .template-card__apply { align-self: stretch; margin-top: auto; }
@@ -5438,6 +5566,13 @@ a:hover {
 .docs__table-wrap { -webkit-overflow-scrolling: touch; overflow-x: auto; }
 .docs__table-wrap table { min-width: 40rem; }
 .docs td code { white-space: nowrap; }
+.docs__api-groups { display: grid; gap: 1.5rem; margin-bottom: 1rem; }
+.docs__api-group { display: grid; gap: 0.5rem; }
+.docs__api-group-header h3 { font-size: 1.125rem; margin: 0; }
+.docs__api-group-description { color: var(--muted-light); font-size: 0.875rem; margin: 0.25rem 0 0; }
+.docs__auth-badge { align-items: center; color: var(--foreground); display: inline-flex; font-size: 0.8125rem; font-weight: 600; gap: 0.375rem; white-space: nowrap; }
+.docs__auth-icon { color: var(--accent); flex-shrink: 0; }
+.docs__public-badge { color: var(--muted-light); font-size: 0.8125rem; white-space: nowrap; }
 
 /* Step indicator: connectors are horizontal-only; on phones the steps stack. */
 @media (max-width: 47.9375rem) { .step-indicator__connector { display: none; } }

@@ -5,6 +5,8 @@ import { withIdempotency, withdrawStore } from "@/app/lib/idempotency";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 import { evaluateWithdrawalState } from "@/app/lib/withdraw-finality";
 import { maybeFeeBump } from "@/lib/feeBump";
 
@@ -91,6 +93,22 @@ export async function POST(
       const updated = finalResult.stream;
       db.streams.set(id, updated);
 
+      appendStreamHistoryEvent({
+        streamId: id,
+        type: "withdrawn",
+        fromStatus: "ended",
+        toStatus: updated.status,
+        at: new Date().toISOString(),
+        actorWallet: actorAddress,
+      });
+      publishStreamChange({
+        action: "withdraw",
+        actor: actorAddress ?? undefined,
+        after: updated,
+        before,
+        correlationId: getCorrelationContext()?.correlation_id,
+      });
+
       const payload = {
         alert: finalResult.alert,
         data: updated,
@@ -119,5 +137,5 @@ export async function POST(
 
       return NextResponse.json(payload);
     });
-  });
+  }, { resourceId: id, actorId: actorAddress ?? undefined });
 }

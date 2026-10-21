@@ -237,7 +237,7 @@ function validateAllowedOrigins(rawValue: string | undefined, environment: strin
 /**
  * Validate Stellar network configuration
  */
-function validateStellarNetwork(network: StellarNetwork): StellarNetworkProfile {
+function validateStellarNetwork(network: string | undefined): StellarNetworkProfile {
   const supportedNetworks = getSupportedNetworks();
   
   if (!network) {
@@ -247,14 +247,15 @@ function validateStellarNetwork(network: StellarNetwork): StellarNetworkProfile 
     );
   }
   
-  if (!supportedNetworks.includes(network)) {
+  const selectedNetwork = supportedNetworks.find(candidate => candidate === network);
+  if (!selectedNetwork) {
     throw new ConfigValidationError(
       `Invalid STELLAR_NETWORK: ${network}. ` +
       `Supported networks: ${supportedNetworks.join(', ')}`
     );
   }
   
-  return getNetworkProfile(network);
+  return getNetworkProfile(selectedNetwork);
 }
 
 /**
@@ -292,7 +293,7 @@ function validateJwtSecret(secret: string | undefined): string {
 
 
 function validateInternalServiceAuth(
-  env: RequiredEnvVars & OptionalEnvVars
+  env: Record<string, string | undefined>
 ): ValidatedConfig["internalServiceAuth"] {
   const hasHmacConfig =
     typeof env.INTERNAL_SERVICE_HMAC_KEYS === "string" ||
@@ -417,7 +418,7 @@ function validateAnomalyThresholds(
  * @throws ConfigValidationError if configuration is invalid
  */
 export function validateConfig(): ValidatedConfig {
-  const env = process.env as unknown as RequiredEnvVars & OptionalEnvVars;
+  const env = process.env;
   
   // Validate network
   const networkProfile = validateStellarNetwork(env.STELLAR_NETWORK);

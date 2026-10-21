@@ -95,11 +95,11 @@ export const ROUTE_TIMEOUT_MS =
  * @param work        Async route body.  Receives an `AbortSignal`; wire it
  *                    into fetch/DB calls so they can cancel cooperatively.
  */
-export async function withTimeout(
+export async function withTimeout<T extends Response>(
   timeoutMs: number,
   request: { method?: string; url?: string; headers?: Headers },
-  work: (signal: AbortSignal) => Promise<NextResponse>,
-): Promise<NextResponse> {
+  work: (signal: AbortSignal) => Promise<T>,
+): Promise<T | NextResponse> {
   const startedAt = Date.now();
 
   try {
@@ -170,11 +170,11 @@ export async function withTimeout(
  *                  cancellation of fetches / DB queries.
  * @param timeoutMs Budget override; defaults to `ROUTE_TIMEOUT_MS`.
  */
-export async function withRouteTimeout(
+export async function withRouteTimeout<T extends Response>(
   request: Request,
-  work: (signal: AbortSignal) => Promise<NextResponse>,
+  work: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number = ROUTE_TIMEOUT_MS,
-): Promise<NextResponse> {
+): Promise<T | NextResponse> {
   return withTimeout(timeoutMs, request, work);
 }
 

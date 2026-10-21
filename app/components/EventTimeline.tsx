@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useMemo, useState } from "react";
 import { CopyAddress } from "./CopyAddress";
 import { Timestamp } from "./Timestamp";
 import { VirtualListItem } from "./VirtualListItem";
@@ -15,6 +15,7 @@ export type ContractEventType =
   | "started"
   | "paused"
   | "resumed"
+  | "stopped"
   | "withdrawn"
   | "settled"
   | "cancelled";
@@ -34,10 +35,10 @@ export type ContractEvent = {
   summary: string;
   /** ISO-8601 UTC timestamp the event was emitted. */
   timestamp: string;
-  /** Soroban transaction hash that emitted the event. */
-  txHash: string;
-  /** Ledger sequence number the event was included in. */
-  ledger: number;
+  /** Soroban transaction hash that emitted the event (optional until indexer is wired). */
+  txHash?: string;
+  /** Ledger sequence number the event was included in (optional until indexer is wired). */
+  ledger?: number;
   /** Optional value label for fund-moving events (e.g. "120 XLM"). */
   amount?: string;
 };
@@ -55,6 +56,7 @@ const EVENT_META: Record<
   started: { label: "Started", status: "success" },
   resumed: { label: "Resumed", status: "success" },
   paused: { label: "Paused", status: "warning" },
+  stopped: { label: "Stopped", status: "warning" },
   cancelled: { label: "Cancelled", status: "warning" },
   withdrawn: { label: "Withdrawn", status: "info" },
   settled: { label: "Settled", status: "info" },
@@ -66,6 +68,7 @@ const TYPE_ORDER: ContractEventType[] = [
   "started",
   "paused",
   "resumed",
+  "stopped",
   "withdrawn",
   "settled",
   "cancelled",
@@ -75,6 +78,12 @@ type FilterValue = "all" | ContractEventType;
 
 interface EventTimelineProps {
   events: ContractEvent[];
+  /** If true, a "Load more" button is shown below the list. */
+  hasMore?: boolean;
+  /** Called when the user clicks "Load more". */
+  onLoadMore?: () => void;
+  /** When true, the "Load more" button shows a loading indicator. */
+  loadingMore?: boolean;
 }
 
 /**
@@ -90,18 +99,29 @@ interface EventTimelineProps {
  * - Result count changes are announced via `role="status"` / `aria-live`.
  * - Each event exposes a descriptive `aria-label` summarising type + time.
  */
-export function EventTimeline({ events }: EventTimelineProps) {
+export function EventTimeline({ events, hasMore, onLoadMore, loadingMore }: EventTimelineProps) {
   const [activeFilter, setActiveFilter] = useState<FilterValue>("all");
 
-  // Newest first; defensive copy so we never mutate the caller's array.
-  // Ledger sequence is the canonical ordering for on-chain events. Relying on
-  // raw timestamps can reorder events when node/device clocks are skewed, so
-  // compare by ledger first and only fall back to timestamp for same-ledger
-  // events. A final id tie-break keeps duplicate timestamp cases deterministic.
+  // Track list length so we can move focus to the first newly-appended item
+  // after "Load more" (WCAG 2.1 AA — keyboard users must not lose context).
+  const prevLengthRef = useRef(events.length);
+  const firstNewItemRef = useRef<HTMLLIElement>(null);
+
+  useEffect(() => {
+    if (events.length > prevLengthRef.current && firstNewItemRef.current) {
+      firstNewItemRef.current.focus();
+    }
+    prevLengthRef.current = events.length;
+  }, [events.length]);
+
+  // Newest first. When ledger is available use it as primary key (canonical for
+  // on-chain events). Fall back to timestamp string, then id tie-break.
   const sortedEvents = useMemo(
     () =>
       [...events].sort((a, b) => {
-        if (a.ledger !== b.ledger) return b.ledger - a.ledger;
+        if (a.ledger !== undefined && b.ledger !== undefined && a.ledger !== b.ledger) {
+          return b.ledger - a.ledger;
+        }
         if (a.timestamp !== b.timestamp) {
           return b.timestamp.localeCompare(a.timestamp);
         }
@@ -172,58 +192,91 @@ export function EventTimeline({ events }: EventTimelineProps) {
       </p>
 
       {visibleEvents.length === 0 ? (
-        <p className="event-panel__empty">
-          No contract events match this filter yet.
-        </p>
+        sortedEvents.length === 0 ? (
+          /* Empty state — no events at all yet */
+          <p className="event-panel__empty" data-testid="events-empty-state">
+            No events yet.
+          </p>
+        ) : (
+          /* Filter empty state — events exist but none match the filter */
+          <p className="event-panel__empty">
+            No contract events match this filter yet.
+          </p>
+        )
       ) : (
-        <ul className="activity-timeline">
-          {visibleEvents.map((event) => {
-            const meta = EVENT_META[event.type];
-            return (
-              <VirtualListItem
-                key={event.id}
-                className="activity-item"
-                aria-label={`${meta.label} event`}
-                defaultHeight={120}
-              >
-                <div className="activity-marker">
-                  <div className={`activity-dot activity-dot--${meta.status}`} />
-                  <div className="activity-line" />
-                </div>
-                <div className="activity-content">
-                  <div className="activity-card event-card">
-                    <div className="activity-info">
-                      <div className="event-card__row">
-                        <span className="event-type-tag">{meta.label}</span>
-                        {event.amount && (
-                          <span className="event-amount">{event.amount}</span>
+        <>
+          <ul className="activity-timeline">
+            {visibleEvents.map((event, index) => {
+              const meta = EVENT_META[event.type];
+              // The first item that's new after "Load more" gets focused.
+              const isFirstNew = index === prevLengthRef.current;
+              return (
+                <VirtualListItem
+                  key={event.id}
+                  className="activity-item"
+                  aria-label={`${meta.label} event`}
+                  defaultHeight={120}
+                  ref={isFirstNew ? firstNewItemRef : undefined}
+                  tabIndex={isFirstNew ? -1 : undefined}
+                >
+                  <div className="activity-marker">
+                    <div className={`activity-dot activity-dot--${meta.status}`} />
+                    <div className="activity-line" />
+                  </div>
+                  <div className="activity-content">
+                    <div className="activity-card event-card">
+                      <div className="activity-info">
+                        <div className="event-card__row">
+                          <span className="event-type-tag">{meta.label}</span>
+                          {event.amount && (
+                            <span className="event-amount">{event.amount}</span>
+                          )}
+                        </div>
+                        <span className="activity-title">{event.summary}</span>
+                        <Timestamp className="activity-time" iso={event.timestamp} />
+                        {(event.txHash || event.ledger !== undefined) && (
+                          <dl className="event-meta">
+                            {event.txHash && (
+                              <div className="event-meta__item">
+                                <dt>Tx</dt>
+                                <dd>
+                                  <CopyAddress value={event.txHash} truncateChars={6} />
+                                </dd>
+                              </div>
+                            )}
+                            {event.ledger !== undefined && (
+                              <div className="event-meta__item">
+                                <dt>Ledger</dt>
+                                <dd>
+                                  <code className="receipt-mono">
+                                    {event.ledger.toLocaleString("en-US")}
+                                  </code>
+                                </dd>
+                              </div>
+                            )}
+                          </dl>
                         )}
                       </div>
-                      <span className="activity-title">{event.summary}</span>
-                      <Timestamp className="activity-time" iso={event.timestamp} />
-                      <dl className="event-meta">
-                        <div className="event-meta__item">
-                          <dt>Tx</dt>
-                          <dd>
-                            <CopyAddress value={event.txHash} truncateChars={6} />
-                          </dd>
-                        </div>
-                        <div className="event-meta__item">
-                          <dt>Ledger</dt>
-                          <dd>
-                            <code className="receipt-mono">
-                              {event.ledger.toLocaleString("en-US")}
-                            </code>
-                          </dd>
-                        </div>
-                      </dl>
                     </div>
-                  </div>
                 </div>
               </VirtualListItem>
             );
           })}
-        </ul>
+          </ul>
+          {hasMore && onLoadMore && (
+            <div className="event-panel__load-more">
+              <button
+                type="button"
+                className="event-load-more-btn"
+                onClick={onLoadMore}
+                disabled={loadingMore}
+                aria-busy={loadingMore}
+              >
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </section>
   );

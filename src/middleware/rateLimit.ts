@@ -44,7 +44,7 @@ export async function applyRateLimit(
 
   if (!result.allowed) {
     recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
-    return rateLimitResponse(result.retryAfter!) as unknown as NextResponse;
+    return rateLimitResponse(result.retryAfter!);
   }
 
   recordRequest(url.pathname);
@@ -63,7 +63,7 @@ export async function streamsRateLimit(
 
   if (!result.allowed) {
     recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
-    return { allowed: false, response: rateLimitResponse(result.retryAfter!) as unknown as NextResponse };
+    return { allowed: false, response: rateLimitResponse(result.retryAfter!) };
   }
 
   recordRequest(url.pathname);

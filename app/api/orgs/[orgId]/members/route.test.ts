@@ -5,6 +5,32 @@ import { NextRequest } from "next/server";
 const OWNER_WALLET = "GOWNER7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW";
 const EXISTING_ORG_ID = "org-acme";
 const MISSING_ORG_ID = "org-does-not-exist";
+const encoder = new TextEncoder();
+
+function streamFromChunks(chunks: Array<string | Uint8Array>): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(
+          typeof chunk === "string" ? encoder.encode(chunk) : chunk,
+        );
+      }
+      controller.close();
+    },
+  });
+}
+
+function makeChunkedPostRequest(body: ReadableStream<Uint8Array> | null): Request {
+  return {
+    url: `http://localhost/api/orgs/${EXISTING_ORG_ID}/members`,
+    method: "POST",
+    headers: new Headers({
+      "Actor-Wallet-Address": OWNER_WALLET,
+      "Content-Type": "application/json",
+    }),
+    body,
+  } as unknown as Request;
+}
 
 describe("Org Members API", () => {
   describe("GET /api/orgs/:orgId/members", () => {
@@ -103,6 +129,42 @@ describe("Org Members API", () => {
       expect(res.status).toBe(403);
       const body = await res.json();
       expect(body.error.code).toBe("FORBIDDEN");
+    });
+
+    it("accepts a chunked body with no Content-Length", async () => {
+      const walletAddress = "GCHUNK7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNR";
+      const req = makeChunkedPostRequest(
+        streamFromChunks([
+          JSON.stringify({ walletAddress }),
+          ',"role":"viewer"}',
+        ]),
+      );
+      const res = await POST(req, { params: Promise.resolve({ orgId: EXISTING_ORG_ID }) });
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.data.walletAddress).toBe(walletAddress);
+    });
+
+    it("returns 413 for a chunked body over the limit", async () => {
+      const req = makeChunkedPostRequest(
+        streamFromChunks([new Uint8Array(300 * 1024)]),
+      );
+      const res = await POST(req, { params: Promise.resolve({ orgId: EXISTING_ORG_ID }) });
+
+      expect(res.status).toBe(413);
+      const body = await res.json();
+      expect(body.error.code).toBe("REQUEST_TOO_LARGE");
+      expect(body.error.request_id).toBeDefined();
+    });
+
+    it("returns 400 EMPTY_BODY for an empty body", async () => {
+      const req = makeChunkedPostRequest(streamFromChunks([]));
+      const res = await POST(req, { params: Promise.resolve({ orgId: EXISTING_ORG_ID }) });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("EMPTY_BODY");
     });
   });
 });
