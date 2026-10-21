@@ -1,3 +1,4 @@
+// Pause route: records `pausedAt`; resume (in /start) accumulates `totalPausedMs`.
 /**
  * POST /api/streams/:id/pause
  *
@@ -14,6 +15,17 @@
  * | `nextAction`| `"stop"`                                   |
  * | `pausedAt`  | ISO-8601 UTC timestamp of this request.    |
  * | `updatedAt` | ISO-8601 UTC timestamp of this request.    |
+ *
+ * ## Timing fields (contract parity)
+ * The stream record carries `startTime`, `endTime` and `totalPausedMs`
+ * (all raw millisecond numbers) which mirror the Soroban contract's
+ * `start`, `end` and `total_paused_duration` storage fields. `pausedAt`
+ * maps to `paused_at`. Together these drive `vestedAmount` in
+ * `app/lib/escrow-state.ts` with bigint-only arithmetic.
+ *
+ * `pausedAt` is the wall-clock instant accrual freezes. The matching
+ * `totalPausedMs` accumulator lives on the stream record and is updated by
+ * the /start (resume) route, mirroring `resume` in `src/lib.rs`.
  *
  * `pausedAt` maps to the Soroban contract's `paused_at` storage field on
  * the stream escrow account (GrantFox campaign, issue #pause-entrypoint).
@@ -58,6 +70,7 @@ import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 
 function createErrorResponse(code: string, message: string, status: number) {
   const context = getCorrelationContext();
@@ -176,6 +189,15 @@ export async function POST(
        * pausedAt: ISO-8601 UTC timestamp recorded the moment this stream
        * enters paused status. Maps to the Soroban contract's `paused_at`
        * storage field. Cleared by the /start endpoint on resume.
+       *
+       * Note: `totalPausedMs` is NOT modified here. It is accumulated on
+       * resume (`now − pausedAt`) so that `vestedAmount` can subtract the
+       * total paused duration exactly as `release::vested_amount` does.
+       *
+       * `startTime` and `endTime` are likewise untouched: the pause only
+       * freezes accrual at `pausedAt`; the resume route extends `endTime`
+       * by the paused interval and adds it to `totalPausedMs` so that
+       * `elapsed = effective_now − start − totalPausedMs` stays exact.
        */
       pausedAt: now,
       nextAction: "stop" as const,
@@ -192,6 +214,13 @@ export async function POST(
       toStatus: "paused",
       at: now,
       actorWallet: actorAddress,
+    });
+    publishStreamChange({
+      action: "pause",
+      actor: actorAddress ?? undefined,
+      after: updated,
+      before,
+      correlationId: getCorrelationContext()?.correlation_id,
     });
 
     recordPrivilegedStreamAuditEvent({

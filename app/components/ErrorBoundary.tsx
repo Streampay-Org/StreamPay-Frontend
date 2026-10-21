@@ -2,6 +2,7 @@
 
 import { Component, ReactNode } from "react";
 import { PageError } from "./PageError";
+import { reportClientError } from "@/lib/reportClientError";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -26,7 +27,7 @@ interface ErrorBoundaryState {
  * React Error Boundary component that catches JavaScript errors in child component tree.
  *
  * Catches errors during rendering, in lifecycle methods, and in constructors of the whole tree below them.
- * Provides a fallback UI and retry functionality. Logs errors for telemetry/reporting.
+ * Provides a fallback UI and retry functionality. Reports errors for telemetry/reporting.
  *
  * @example
  * ```tsx
@@ -55,6 +56,20 @@ export class ErrorBoundary extends Component<
   componentDidCatch(error: Error, errorInfo: { componentStack: string }): void {
     // Log error for telemetry/reporting
     console.error("ErrorBoundary caught an error:", error, errorInfo);
+
+    // Report to the client error ingestion endpoint.
+    // Never throws and never blocks rendering.
+    try {
+      reportClientError({
+        digest: (error as { digest?: string })?.digest,
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+        kind: "boundary",
+      });
+    } catch {
+      // Swallow reporter failures -- reporting must never break the boundary.
+    }
 
     // Call custom error handler if provided
     this.props.onError?.(error, errorInfo);
