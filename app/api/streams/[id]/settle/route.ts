@@ -5,6 +5,7 @@ import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 import { getStellarSettlementClient } from "@/app/lib/stellar";
 import { addToOutbox } from "@/app/lib/webhook-outbox";
 import { toWebhookEvent, buildStreamWebhookPayload } from "@/app/lib/stream-webhook-events";
@@ -124,6 +125,14 @@ export async function POST(
             }),
           });
         }
+
+        publishStreamChange({
+          action: "settle",
+          actor: actorAddress ?? undefined,
+          after: updatedStream,
+          before,
+          correlationId: getCorrelationContext()?.correlation_id,
+        });
 
         const payload = { data: { ...updatedStream, settlement } };
 
