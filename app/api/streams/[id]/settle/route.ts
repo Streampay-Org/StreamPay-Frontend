@@ -5,6 +5,7 @@ import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 import { getStellarSettlementClient } from "@/app/lib/stellar";
 
 type Context = { params: Promise<{ id: string }> };
@@ -100,6 +101,14 @@ export async function POST(
           request,
           streamId: id,
           targetAccount: updatedStream.recipient,
+        });
+
+        publishStreamChange({
+          action: "settle",
+          actor: actorAddress ?? undefined,
+          after: updatedStream,
+          before,
+          correlationId: getCorrelationContext()?.correlation_id,
         });
 
         const payload = { data: { ...updatedStream, settlement } };

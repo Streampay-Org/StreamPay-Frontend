@@ -49,6 +49,7 @@ import {
 } from "@/app/lib/multi-recipient";
 import type { Stream } from "@/app/types/openapi";
 import { withRouteTimeout } from "@/src/middleware/timeout";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
 
 /** Idempotency scope, kept distinct from single-recipient stream creation. */
 const IDEMPOTENCY_SCOPE = "v2.streams.multi";
@@ -97,6 +98,8 @@ interface MultiRecipientStreamResponse {
   end_at: string;
   created_at: string;
   settlement: null;
+  senderAddress?: string | null;
+  ownership?: "individual" | "org" | "unclaimed";
   recipients: MultiRecipientLegSummary[];
   links: { self: string; collection: string };
 }
@@ -227,6 +230,9 @@ async function handleMultiRecipientPost(request: Request) {
   const groupId = `stream-multi-${crypto.randomUUID().slice(0, 8)}`;
   const now = new Date().toISOString();
   const { streamRepository } = getStore();
+  const authenticatedActor = tryAuthenticateRequest(request);
+  const senderAddress = authenticatedActor?.walletAddress ?? null;
+  const ownership: "individual" | "unclaimed" = authenticatedActor ? "individual" : "unclaimed";
 
   // ── 7. Persist every leg ───────────────────────────────────────────────────
   const recipients: MultiRecipientLegSummary[] = allocations.map((allocation, index) => {
@@ -244,6 +250,8 @@ async function handleMultiRecipientPost(request: Request) {
       updatedAt: now,
       token: asset,
       totalAmount: amountText,
+      senderAddress,
+      ownership,
       multiGroupId: groupId,
       multiName: name,
       multiRank: index + 1,
@@ -277,6 +285,8 @@ async function handleMultiRecipientPost(request: Request) {
     end_at: endAt,
     created_at: now,
     settlement: null,
+    senderAddress,
+    ownership,
     recipients,
     links: { self: "/api/v2/streams/multi", collection: "/api/v2/streams" },
   };

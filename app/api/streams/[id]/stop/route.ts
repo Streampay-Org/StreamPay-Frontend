@@ -11,6 +11,7 @@ import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -110,6 +111,13 @@ export async function POST(
       toStatus: "ended",
       at: now,
       actorWallet: actorAddress,
+    });
+    publishStreamChange({
+      action: "stop",
+      actor: actorAddress ?? undefined,
+      after: updatedStream,
+      before,
+      correlationId: getCorrelationContext()?.correlation_id,
     });
 
     recordPrivilegedStreamAuditEvent({

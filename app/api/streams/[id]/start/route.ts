@@ -10,6 +10,7 @@ import {
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -117,6 +118,13 @@ export async function POST(
       toStatus: "active",
       at: updatedStream.updatedAt,
       actorWallet: actorAddress,
+    });
+    publishStreamChange({
+      action: "start",
+      actor: actorAddress ?? undefined,
+      after: updatedStream,
+      before: stream,
+      correlationId: getCorrelationContext()?.correlation_id,
     });
 
     const payload = { data: updatedStream };
