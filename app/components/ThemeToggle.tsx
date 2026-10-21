@@ -102,6 +102,7 @@ export function ThemeToggle() {
       <label className="theme-toggle__label theme-toggle__label--hc">
         <input
           type="checkbox"
+          aria-label="High contrast mode"
           checked={highContrast}
           onChange={handleHighContrastToggle}
           className="theme-toggle__input"

@@ -347,7 +347,7 @@ describe("ContactsPage — add contact modal", () => {
       /stellar address or federation address/i,
     );
     // Use a valid 56-char Stellar address (G + 55 chars from A-Z,2-7)
-    const validAddress = `G${'A'.repeat(55)}`;
+    const validAddress = "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZK7GQ";
     fireEvent.change(addressInput, {
       target: { value: validAddress },
     });

@@ -223,8 +223,6 @@ export default function HelpPage() {
         </div>
       </header>
 
-      <FaqSearch sections={FAQ_SECTIONS} />
-
       <div className="help-layout">
         {/* Quick-jump nav */}
         <nav aria-label="FAQ sections" className="help-nav">
@@ -239,32 +237,9 @@ export default function HelpPage() {
           </ul>
         </nav>
 
-        {/* FAQ content */}
+        {/* FAQ content (client island renders the sections + search) */}
         <div className="help-content">
-          {FAQ_SECTIONS.map((section) => (
-            <section
-              key={section.id}
-              id={section.id}
-              aria-labelledby={`${section.id}-heading`}
-              className="help-section"
-            >
-              <h2
-                id={`${section.id}-heading`}
-                className="help-section__title"
-              >
-                {section.title}
-              </h2>
-
-              <dl className="faq-list">
-                {section.items.map((item) => (
-                  <div key={item.id} id={item.id} className="faq-item">
-                    <dt id={`${item.id}-question`} className="faq-item__question" tabIndex={-1}>{item.question}</dt>
-                    <dd className="faq-item__answer">{item.answer}</dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-          ))}
+          <FaqSearch sections={FAQ_SECTIONS} />
         </div>
       </div>
     </main>

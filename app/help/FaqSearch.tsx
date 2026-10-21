@@ -89,7 +89,7 @@ export default function FaqSearch({ sections, supportHref }: FaqSearchProps) {
     const reduceMotion = window.matchMedia?.(
       "(prefers-reduced-motion: reduce)",
     )?.matches;
-    target.scrollIntoView({
+    target.scrollIntoView?.({ 
       behavior: reduceMotion ? "auto" : "smooth",
       block: "start",
     });
@@ -131,7 +131,7 @@ export default function FaqSearch({ sections, supportHref }: FaqSearchProps) {
         </p>
       ) : (
         filtered.map((section) => (
-          <section key={section.id} aria-labelledby={`${section.id}-title`}>
+          <section key={section.id} id={section.id} aria-labelledby={`${section.id}-title`}>
             <h2 id={`${section.id}-title`}>{section.title}</h2>
             {section.items.map((item) => (
               <article key={item.id} className="faq-search__item">

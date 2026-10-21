@@ -82,7 +82,13 @@ const config = {
   ],
 };
 
+let resolvedConfigCache;
+
 module.exports = async () => {
+  // Next's `loadConfig` mutates an internal frozen config on a second call, so
+  // memoise the resolved config. Jest calls this once at startup; tests such
+  // as the quarantine ratchet then re-use the same object.
+  if (resolvedConfigCache) return resolvedConfigCache;
   const makeConfig = createJestConfig(config);
   const resolvedConfig = await makeConfig();
   resolvedConfig.moduleNameMapper = {
@@ -94,5 +100,6 @@ module.exports = async () => {
     "^next/navigation$": "<rootDir>/__mocks__/next/navigation.js",
     "^next/router$": "<rootDir>/__mocks__/next/router.js",
   };
-  return resolvedConfig;
+  resolvedConfigCache = resolvedConfig;
+  return resolvedConfigCache;
 };

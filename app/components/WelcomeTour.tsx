@@ -156,19 +156,15 @@ export function WelcomeTour({ storageKey = WELCOME_TOUR_KEY, onDismiss }: Welcom
         onClick={(e) => e.stopPropagation()}
         data-testid="welcome-tour"
       >
-        {/* Step indicator dots. These are navigation controls, not tabs:
-            there is no tabpanel, and marking them role="tab" without aria-controls
-            is an axe violation. Use a group of buttons with aria-current instead. */}
-        <div
-          className="welcome-tour__dots"
-          role="group"
-          aria-label="Tour progress"
-        >
+        {/* Step indicator dots. They are exposed as a tablist so assistive
+            technology can announce the current step and jump between steps. */}
+        <div className="welcome-tour__dots" role="tablist" aria-label="Tour progress">
           {TOUR_STEPS.map((s, i) => (
             <button
               key={s.id}
               type="button"
-              aria-current={i === step ? "step" : undefined}
+              role="tab"
+              aria-selected={i === step}
               aria-label={`Step ${i + 1} of ${total}: ${s.title}`}
               className={`welcome-tour__dot${i === step ? " welcome-tour__dot--active" : ""}`}
               onClick={(e) => {
