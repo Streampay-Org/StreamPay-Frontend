@@ -1,4 +1,6 @@
 "use client";
+import "./contacts.module.css";
+import "../activity/activity.module.css";
 
 import React, { useCallback, useEffect, useId, useState } from "react";
 import { CopyAddress } from "../components/CopyAddress";
