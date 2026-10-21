@@ -2,14 +2,14 @@
 
 import jwt from "jsonwebtoken";
 import { GET } from "./route";
-import { JWT_SECRET } from "@/app/lib/auth";
+import { getJwtSecret } from "@/app/lib/auth";
 import { auditLogStore } from "@/app/lib/audit-log";
 import { _resetOrgDbForTesting } from "@/app/lib/org-db";
 
 function signAccessToken(role: string, actorId: string) {
   return jwt.sign(
     { sub: `${actorId}-wallet`, role, actorId, iss: "streampay", aud: "streampay-api" },
-    JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: "15m" },
   );
 }

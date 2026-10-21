@@ -10,6 +10,8 @@ import {
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { addToOutbox } from "@/app/lib/webhook-outbox";
+import { toWebhookEvent } from "@/app/lib/webhook-events";
 import { publishStreamChange } from "@/app/lib/stream-publish";
 
 type Context = { params: Promise<{ id: string }> };
@@ -126,6 +128,32 @@ export async function POST(
       before: stream,
       correlationId: getCorrelationContext()?.correlation_id,
     });
+
+    if (updatedStream.webhook_url) {
+      const action = isResume ? "resume" : "start";
+      const event = toWebhookEvent(stream, updatedStream, action);
+      if (event) {
+        addToOutbox({
+          id: `evt_${id}_${action}_${updatedStream.updatedAt}`,
+          streamId: id,
+          url: updatedStream.webhook_url,
+          event,
+          data: {
+            stream_id: id,
+            status: updatedStream.status,
+            previous_status: stream.status,
+            action,
+            occurred_at: updatedStream.updatedAt,
+            token: updatedStream.token,
+            amount: String(updatedStream.amount ?? ""),
+            rate: String(updatedStream.rate ?? ""),
+            deposited: String(updatedStream.deposited ?? ""),
+            withdrawn: String(updatedStream.withdrawn ?? ""),
+          },
+          createdAt: updatedStream.updatedAt,
+        });
+      }
+    }
 
     const payload = { data: updatedStream };
     if (token) {

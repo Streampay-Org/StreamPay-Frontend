@@ -70,6 +70,8 @@ import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { addToOutbox } from "@/app/lib/webhook-outbox";
+import { toWebhookEvent } from "@/app/lib/webhook-events";
 import { publishStreamChange } from "@/app/lib/stream-publish";
 
 function createErrorResponse(code: string, message: string, status: number) {
@@ -222,6 +224,23 @@ export async function POST(
       before,
       correlationId: getCorrelationContext()?.correlation_id,
     });
+
+    // ── Webhook enqueue (post-commit) ─────────────────────────────────────
+    // Enqueue only after the store write has committed. The deterministic
+    // event id makes retries of the same commit idempotent.
+    if (updated.webhook_url) {
+      const event = toWebhookEvent(before, updated, "pause");
+      if (event) {
+        addToOutbox({
+          eventId: `evt_${id}_pause_${updated.updatedAt}`,
+          streamId: id,
+          url: updated.webhook_url,
+          type: event.type,
+          data: event.data,
+          createdAt: now,
+        });
+      }
+    }
 
     recordPrivilegedStreamAuditEvent({
       action: "stream.pause",
