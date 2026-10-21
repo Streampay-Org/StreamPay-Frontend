@@ -1,6 +1,6 @@
 "use client";
 
-import {
+import { useContext,
   createContext,
   useCallback,
   useEffect,
@@ -260,4 +260,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <ToastViewport visible={visible} onDismiss={dismiss} />
     </ToastContext.Provider>
   );
+}
+
+/**
+ * Access the toast queue. Returns no-op fallbacks during SSR or when the
+ * component is rendered outside a `ToastProvider`, so a missing provider can
+ * never crash a page.
+ */
+export function useToast() {
+  const context = useContext(ToastContext);
+  const toast = context?.toast ?? (() => "");
+  return {
+    toast,
+    dismiss: context?.dismiss ?? (() => {}),
+    dismissAll: context?.dismissAll ?? (() => {}),
+    showToast: toast,
+  };
 }

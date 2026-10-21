@@ -43,7 +43,7 @@ export function enqueueStreamLifecycleWebhook(
   const event = toWebhookEvent(
     input.before as never,
     after as never,
-    input.action,
+    input.action as never,
   );
   if (!event) return;
 

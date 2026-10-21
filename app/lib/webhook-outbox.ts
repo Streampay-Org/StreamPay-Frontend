@@ -365,3 +365,26 @@ export const webhookOutboxStore = new WebhookOutboxStore();
  */
 export const InMemoryOutboxStore = WebhookOutboxStore;
 export type InMemoryOutboxStore = WebhookOutboxStore;
+
+/**
+ * Standalone helper for callers that import `addToOutbox` directly.
+ *
+ * Accepts either `(endpoint, event)` or the flat stream-lifecycle input.
+ */
+export function addToOutbox(
+  endpoint: WebhookEndpoint,
+  event: WebhookEvent,
+): WebhookOutboxEntry;
+export function addToOutbox(input: OutboxEnqueueInput): WebhookOutboxEntry;
+export function addToOutbox(
+  endpointOrInput: WebhookEndpoint | OutboxEnqueueInput,
+  event?: WebhookEvent,
+): WebhookOutboxEntry {
+  if (event) {
+    return webhookOutboxStore.addToOutbox(
+      endpointOrInput as WebhookEndpoint,
+      event,
+    );
+  }
+  return webhookOutboxStore.addToOutbox(endpointOrInput as OutboxEnqueueInput);
+}
