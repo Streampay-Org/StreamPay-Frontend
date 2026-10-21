@@ -1,4 +1,3 @@
-:global {
 /* Extracted from globals.css; selectors stay global to preserve markup and tests. */
 .onboarding-banner {
 
@@ -35,4 +34,3 @@
 
 .onboarding-banner__dismiss:hover {
  border-color: var(--accent); }
-}

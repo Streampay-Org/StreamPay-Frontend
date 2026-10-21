@@ -1,4 +1,3 @@
-:global {
 /* Extracted from globals.css; selectors stay global to preserve markup and tests. */
 .explainer {
 
@@ -144,4 +143,3 @@
 
 .light .explainer-card__step {
  background: rgba(255, 255, 255, 0.9); color: var(--foreground); }
-}

@@ -1,4 +1,4 @@
-import "./help.module.css";
+import "./help.css";
 
 /**
  * Help & FAQ page for StreamPay.

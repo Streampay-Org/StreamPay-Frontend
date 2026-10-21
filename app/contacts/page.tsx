@@ -1,6 +1,6 @@
 "use client";
-import "./contacts.module.css";
-import "../activity/activity.module.css";
+import "./contacts.css";
+import "../activity/activity.css";
 
 import React, { useCallback, useEffect, useId, useState } from "react";
 import { escapeCsv } from "../lib/exportCsv";

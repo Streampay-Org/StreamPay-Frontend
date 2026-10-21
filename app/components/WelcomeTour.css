@@ -1,4 +1,3 @@
-:global {
 /* Extracted from globals.css; selectors stay global to preserve markup and tests. */
 .welcome-tour-overlay {
 
@@ -226,5 +225,4 @@
 
     justify-content: flex-end;
   }
-}
 }

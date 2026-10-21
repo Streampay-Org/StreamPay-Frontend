@@ -1,4 +1,3 @@
-:global {
 /* Extracted from globals.css; selectors stay global to preserve markup and tests. */
 .help-layout {
 
@@ -85,4 +84,3 @@
 .light .help-nav__link:hover,
 .light .help-nav__link:focus-visible {
  background-color: var(--panel); color: var(--foreground); }
-}

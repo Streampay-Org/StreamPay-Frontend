@@ -1,4 +1,3 @@
-:global {
 /* Extracted from globals.css; selectors stay global to preserve markup and tests. */
 .docs {
  max-width: 900px; margin: 0 auto; padding: 3rem 1.5rem 6rem; }
@@ -47,4 +46,3 @@
 
 .docs td code {
  white-space: nowrap; }
-}

@@ -1,5 +1,5 @@
 "use client";
-import "./WelcomeTour.module.css";
+import "./WelcomeTour.css";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 

@@ -1,4 +1,3 @@
-:global {
 /* Extracted from globals.css; selectors stay global to preserve markup and tests. */
 .push-optin {
 
@@ -97,4 +96,3 @@
 
 .light .push-optin--warning {
  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), var(--panel)); }
-}

@@ -1,5 +1,5 @@
 "use client";
-import "../activity/activity.module.css";
+import "../activity/activity.css";
 
 import { useEffect, useRef, useMemo, useState } from "react";
 import { CopyAddress } from "./CopyAddress";
