@@ -1,3 +1,4 @@
+import * as fc from "fast-check";
 import {
   isValidIanaTimezone,
   isValidTimeFormat,
@@ -662,9 +663,6 @@ describe("issue-1692: analytic DST-safe quiet-hours end", () => {
   // Scenario 7: Property test — isQuietHoursActive(end) === false and
   //              isQuietHoursActive(end - 1 min) === true
   describe("Scenario 7 – property test (random configs)", () => {
-    // Use fast-check for property-based testing
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const fc = require("fast-check");
 
     it("end is exactly the boundary: active before, inactive at end", () => {
       const timezones = ["UTC", "America/New_York", "Europe/London", "Asia/Tokyo"];
