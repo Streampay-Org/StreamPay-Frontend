@@ -90,6 +90,27 @@ export interface WebhookOutboxEntry {
   lastError?: string;
 };
 
+export interface OutboxEnqueueInput {
+  id?: string;
+  eventId?: string;
+  endpointId?: string;
+  streamId?: string;
+  url?: string;
+  maxRetries?: number;
+  eventType?: string;
+  type?: string;
+  event?: {
+    eventType?: string;
+    type?: string;
+    streamId?: string;
+    data?: Record<string, unknown>;
+  };
+  data?: Record<string, unknown>;
+  payload?: Record<string, unknown>;
+  createdAt?: string;
+  timestamp?: string;
+}
+
 // ── Outbox Store ─────────────────────────────────────────────────────────────────
 
 /**
@@ -105,17 +126,50 @@ export class WebhookOutboxStore {
    * Add a new event to the outbox (atomic operation with the transaction
    * that generated the event.
    */
+  addToOutbox(endpoint: WebhookEndpoint, event: WebhookEvent): WebhookOutboxEntry;
+  addToOutbox(input: OutboxEnqueueInput): WebhookOutboxEntry;
   addToOutbox(
-    endpoint: WebhookEndpoint,
-    event: WebhookEvent,
+    endpointOrInput: WebhookEndpoint | OutboxEnqueueInput,
+    event?: WebhookEvent,
   ): WebhookOutboxEntry {
+    let endpoint: WebhookEndpoint;
+    let resolvedEvent: WebhookEvent;
+
+    if (event) {
+      endpoint = endpointOrInput as WebhookEndpoint;
+      resolvedEvent = event;
+    } else {
+      const input = endpointOrInput as OutboxEnqueueInput;
+      const nested = input.event ?? {};
+      const streamId = input.streamId ?? nested.streamId ?? "";
+      endpoint = {
+        id: input.endpointId ?? input.id ?? `stream:${streamId}`,
+        url: input.url ?? "",
+        maxRetries: input.maxRetries ?? 3,
+      };
+      resolvedEvent = {
+        id: input.eventId ?? input.id ?? `evt_${crypto.randomUUID()}`,
+        eventType: String(
+          input.eventType ??
+            input.type ??
+            nested.eventType ??
+            nested.type ??
+            "stream.unknown",
+        ),
+        streamId: String(streamId),
+        data: input.data ?? input.payload ?? nested.data ?? {},
+        timestamp:
+          input.createdAt ?? input.timestamp ?? new Date().toISOString(),
+      };
+    }
+
     const id = `outbox-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
 
     const entry: WebhookOutboxEntry = {
       id,
       endpoint,
-      event,
+      event: resolvedEvent,
       status: "pending",
       createdAt: now,
       updatedAt: now,
@@ -128,8 +182,8 @@ export class WebhookOutboxStore {
     logger.info("Webhook event added to outbox", {
       outbox_id: id,
       endpoint_id: endpoint.id,
-      event_id: event.id,
-      event_type: event.eventType,
+      event_id: resolvedEvent.id,
+      event_type: resolvedEvent.eventType,
       correlation_id: context?.correlation_id,
     });
 
