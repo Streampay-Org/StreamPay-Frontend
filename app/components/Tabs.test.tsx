@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { Tabs, TabDefinition } from './Tabs';
 
 describe('Tabs Component', () => {
@@ -225,6 +225,106 @@ describe('Tabs Component', () => {
       const tab1 = screen.getByRole('tab', { name: 'Tab 1' });
       fireEvent.keyDown(tab1, { key: 'Enter' });
 
+      expect(screen.getByText('Content 1')).toBeInTheDocument();
+    });
+  });
+
+  describe('Navigation Guard', () => {
+    it('keeps the current tab when onBeforeChange returns false', () => {
+      const onBeforeChange = jest.fn().mockReturnValue(false);
+      const onChange = jest.fn();
+
+      render(
+        <Tabs
+          tabs={mockTabs}
+          onBeforeChange={onBeforeChange}
+          onChange={onChange}
+        />
+      );
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Tab 2' }));
+
+      expect(onBeforeChange).toHaveBeenCalledWith(
+        'tab2',
+        expect.any(HTMLElement)
+      );
+      expect(screen.getByText('Content 1')).toBeInTheDocument();
+      expect(screen.queryByText('Content 2')).not.toBeInTheDocument();
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('waits for an asynchronous guard before switching tabs', async () => {
+      let resolveGuard!: (allowed: boolean) => void;
+      const onBeforeChange = jest.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveGuard = resolve;
+          })
+      );
+      const onChange = jest.fn();
+
+      render(
+        <Tabs
+          tabs={mockTabs}
+          onBeforeChange={onBeforeChange}
+          onChange={onChange}
+        />
+      );
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Tab 2' }));
+
+      expect(screen.getByText('Content 1')).toBeInTheDocument();
+      expect(onChange).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveGuard(true);
+      });
+
+      expect(await screen.findByText('Content 2')).toBeInTheDocument();
+      expect(onChange).toHaveBeenCalledWith('tab2');
+    });
+
+    it('stays on the current tab when the asynchronous guard resolves false', async () => {
+      let resolveGuard!: (allowed: boolean) => void;
+      const onBeforeChange = jest.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveGuard = resolve;
+          })
+      );
+      const onChange = jest.fn();
+
+      render(
+        <Tabs
+          tabs={mockTabs}
+          onBeforeChange={onBeforeChange}
+          onChange={onChange}
+        />
+      );
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Tab 3' }));
+
+      await act(async () => {
+        resolveGuard(false);
+      });
+
+      expect(screen.getByText('Content 1')).toBeInTheDocument();
+      expect(screen.queryByText('Content 3')).not.toBeInTheDocument();
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('runs the guard before keyboard tab navigation', () => {
+      const onBeforeChange = jest.fn().mockReturnValue(false);
+      render(<Tabs tabs={mockTabs} onBeforeChange={onBeforeChange} />);
+
+      fireEvent.keyDown(screen.getByRole('tab', { name: 'Tab 1' }), {
+        key: 'ArrowRight',
+      });
+
+      expect(onBeforeChange).toHaveBeenCalledWith(
+        'tab2',
+        expect.any(HTMLElement)
+      );
       expect(screen.getByText('Content 1')).toBeInTheDocument();
     });
   });

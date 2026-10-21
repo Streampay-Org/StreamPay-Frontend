@@ -4,6 +4,18 @@ import { logger } from "@/app/lib/logger";
 import { webhookPayloadSchema } from "@/src/validators/webhooks";
 import { withRouteTimeout } from "@/src/middleware/timeout";
 import { applyRateLimit } from "@/src/middleware/rateLimit";
+import {
+  buildLimitsConfig,
+  createBodySizeTooLargeResponse,
+  extractPathname,
+  getBodySizeLimit,
+} from "@/lib/bodySize";
+import {
+  BodyTooLargeError,
+  InvalidJsonError,
+  readJsonBody,
+} from "@/lib/readJsonBody";
+import { resolveRequestId } from "@/lib/requestId";
 
 // Prometheus metrics endpoint
 async function handleWebhooksGet(request: Request) {
@@ -44,19 +56,36 @@ async function handleWebhooksPost(req: NextRequest) {
     let body: unknown;
 
     try {
-      body = await req.json();
+      const limits = buildLimitsConfig();
+      const maxBytes =
+        getBodySizeLimit(extractPathname(req), limits) ?? limits.webhook;
+      body = await readJsonBody(req, { maxBytes });
     } catch (error) {
-      status = 400;
-      logger.info("Rejected webhook request with invalid JSON", { error });
-      return NextResponse.json(
-        {
-          error: {
-            code: "INVALID_INPUT",
-            message: "Request body must be valid JSON.",
+      if (error instanceof BodyTooLargeError) {
+        status = 413;
+        return createBodySizeTooLargeResponse(
+          error.receivedBytes,
+          error.maxBytes,
+          resolveRequestId(req.headers),
+        );
+      }
+      if (error instanceof InvalidJsonError) {
+        status = 400;
+        logger.info("Rejected webhook request with invalid JSON", { error });
+        return NextResponse.json(
+          {
+            error: {
+              code: error.code === "EMPTY_BODY" ? "EMPTY_BODY" : "INVALID_INPUT",
+              message:
+                error.code === "EMPTY_BODY"
+                  ? "Request body is required."
+                  : "Request body must be valid JSON.",
+            },
           },
-        },
-        { status },
-      );
+          { status },
+        );
+      }
+      throw error;
     }
 
     const parsed = webhookPayloadSchema.safeParse(body);

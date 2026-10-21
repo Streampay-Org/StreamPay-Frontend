@@ -78,11 +78,16 @@ export class InMemoryRateLimitStore implements RateLimitStore {
     }
   }
 
-  destroy(): void {
+  /** Stop periodic cleanup without discarding the active rate-limit buckets. */
+  stopCleanup(): void {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
     }
+  }
+
+  destroy(): void {
+    this.stopCleanup();
     this.buckets.clear();
   }
 }
@@ -94,7 +99,6 @@ export function getRateLimitStore(): RateLimitStore {
     globalStore = new InMemoryRateLimitStore();
     if (process.env.NODE_ENV === "test") {
       // Disable periodic cleanup during tests to avoid timeouts
-      // @ts-ignore – accessing private member via any
       disableCleanupForTests();
     }
   }
@@ -111,9 +115,8 @@ export function resetRateLimitStore(): void {
 
 /** Disable the cleanup interval for test environments */
 export function disableCleanupForTests(): void {
-  if (globalStore && (globalStore as any).cleanupInterval) {
-    clearInterval((globalStore as any).cleanupInterval);
-    (globalStore as any).cleanupInterval = null;
+  if (globalStore instanceof InMemoryRateLimitStore) {
+    globalStore.stopCleanup();
   }
 }
 

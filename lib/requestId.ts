@@ -12,11 +12,10 @@ export function generateRequestId(): string {
   return `req_${crypto.randomUUID()}`;
 }
 
-/** Validates a request ID string for length and character safety. */
+/** Validates a request ID: max 128 chars, allowlist [A-Za-z0-9._:-] only. */
 export function isValidRequestId(id: string): boolean {
   if (!id || id.length === 0 || id.length > 128) return false;
-  // Must be printable ASCII, no whitespace or control characters
-  return /^[\x20-\x7E]+$/.test(id) && !/\s/.test(id);
+  return /^[A-Za-z0-9._:-]+$/.test(id);
 }
 
 /** Resolves a request ID from incoming headers or generates a fresh one. */

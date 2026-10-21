@@ -37,6 +37,11 @@ export interface ActivityTimelineEntry {
   id: string;
   type: string;
   streamId?: string;
+  /**
+   * Wallet that produced a non-stream event (for example `wallet.connected`).
+   * Stream events derive their owner from the associated stream record.
+   */
+  actorAddress?: string;
   timestamp: string;
   description: string;
   projectedAt: string;
@@ -47,6 +52,12 @@ export interface ActivityTimelineQuery {
   limit: number;
   streamId?: string;
   type?: string;
+  /**
+   * Additional request-scoped filter. Applied before `total`, cursor slicing
+   * and `hasNext` are computed so pagination metadata reflects the visible
+   * (scoped) set only.
+   */
+  predicate?: (entry: ActivityTimelineEntry) => boolean;
 }
 
 export interface ActivityTimelineQueryResult {
@@ -81,7 +92,7 @@ class InMemoryActivityTimelineStore implements ActivityTimelineStore {
   }
 
   query(params: ActivityTimelineQuery): ActivityTimelineQueryResult {
-    const { cursor, limit, streamId, type } = params;
+    const { cursor, limit, streamId, type, predicate } = params;
     let filtered = this.entries;
 
     if (streamId) {
@@ -89,6 +100,9 @@ class InMemoryActivityTimelineStore implements ActivityTimelineStore {
     }
     if (type) {
       filtered = filtered.filter((e) => e.type === type);
+    }
+    if (predicate) {
+      filtered = filtered.filter(predicate);
     }
 
     const totalFiltered = filtered.length;
@@ -194,6 +208,7 @@ export function activityEventToTimelineEntry(
     id: event.id,
     type: event.type,
     streamId: event.streamId,
+    actorAddress: event.actorAddress,
     timestamp: event.timestamp,
     description: event.description,
     projectedAt: projectedAt ?? new Date().toISOString(),

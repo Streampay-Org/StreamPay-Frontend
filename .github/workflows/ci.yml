@@ -14,6 +14,30 @@ env:
   CI: true
 
 jobs:
+  typecheck:
+    name: Strict core typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Restore incremental typecheck cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/typecheck-core.tsbuildinfo
+          key: types-core-${{ runner.os }}-node20-${{ hashFiles('package-lock.json', 'tsconfig*.json') }}-${{ github.sha }}
+          restore-keys: |
+            types-core-${{ runner.os }}-node20-${{ hashFiles('package-lock.json', 'tsconfig*.json') }}-
+      - name: Test typecheck report
+        run: node --test scripts/typecheck-report.test.mjs
+      - name: Check strict core (blocking)
+        run: npm run typecheck:core
+
   build-test:
     runs-on: ubuntu-latest
     steps:
@@ -47,6 +71,11 @@ jobs:
           fi
           
           echo "✅ CI environment validation passed - testnet only"
+
+      - name: Report full-project type debt (informational)
+        if: always()
+        continue-on-error: true
+        run: node scripts/typecheck-report.mjs
 
       - name: Build
         run: npm run build

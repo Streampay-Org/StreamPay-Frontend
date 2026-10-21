@@ -1,12 +1,15 @@
 import { GET } from "./route";
+import { POST as pausePOST } from "@/app/api/streams/[id]/pause/route";
 import { db, resetDb, getStore } from "@/app/lib/db";
 import { eventBus } from "@/app/lib/event-bus";
+import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
 import jwt from "jsonwebtoken";
 import { getJwtSecret } from "@/app/lib/auth";
 
 describe("GET /api/streams/:id/events (SSE)", () => {
   beforeEach(() => {
     resetDb();
+    resetRateLimitStore();
     jest.clearAllMocks();
   });
 
@@ -26,7 +29,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
 
   it("returns 401 if no authorization header is provided", async () => {
     const req = new Request("http://localhost/api/streams/stream-123/events", {
-      headers: { "x-tenant-id": "tenant-1" },
+      headers: { "x-tenant-id": "default" },
     }) as any;
     
     const res = await GET(req, { params: Promise.resolve({ id: "stream-123" }) });
@@ -41,7 +44,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const req = new Request("http://localhost/api/streams/stream-123/events", {
       headers: { 
         "authorization": "InvalidFormat",
-        "x-tenant-id": "tenant-1",
+        "x-tenant-id": "default",
       },
     }) as any;
     
@@ -54,7 +57,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const req = new Request("http://localhost/api/streams/stream-123/events", {
       headers: { 
         "authorization": "Bearer invalid-token",
-        "x-tenant-id": "tenant-1",
+        "x-tenant-id": "default",
       },
     }) as any;
     
@@ -67,7 +70,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const req = new Request("http://localhost/api/streams/ /events", {
       headers: { 
         "authorization": `Bearer ${token}`,
-        "x-tenant-id": "tenant-1",
+        "x-tenant-id": "default",
       },
     }) as any;
     
@@ -78,35 +81,29 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     expect(body.error.code).toBe("VALIDATION_ERROR");
   });
 
-  it("returns 400 if tenant ID header is missing", async () => {
+  it("defaults to the default tenant if the tenant ID header is missing", async () => {
     const token = createAuthToken("GD7H...3J4K");
-    const req = new Request("http://localhost/api/streams/stream-123/events", {
-      headers: { 
-        "authorization": `Bearer ${token}`,
-      },
+    const req = new Request("http://localhost/api/streams/stream-ada/events", {
+      headers: { authorization: `Bearer ${token}` },
     }) as any;
     
-    const res = await GET(req, { params: Promise.resolve({ id: "stream-123" }) });
-    expect(res.status).toBe(400);
-    
-    const body = await res.json();
-    expect(body.error.code).toBe("MISSING_TENANT");
+    const res = await GET(req, { params: Promise.resolve({ id: "stream-ada" }) });
+    expect(res.status).toBe(200);
+    await res.body?.cancel();
   });
 
-  it("returns 400 if tenant ID header is empty", async () => {
+  it("defaults to the default tenant if the tenant ID header is empty", async () => {
     const token = createAuthToken("GD7H...3J4K");
-    const req = new Request("http://localhost/api/streams/stream-123/events", {
+    const req = new Request("http://localhost/api/streams/stream-ada/events", {
       headers: { 
         "authorization": `Bearer ${token}`,
         "x-tenant-id": "   ",
       },
     }) as any;
     
-    const res = await GET(req, { params: Promise.resolve({ id: "stream-123" }) });
-    expect(res.status).toBe(400);
-    
-    const body = await res.json();
-    expect(body.error.code).toBe("MISSING_TENANT");
+    const res = await GET(req, { params: Promise.resolve({ id: "stream-ada" }) });
+    expect(res.status).toBe(200);
+    await res.body?.cancel();
   });
 
   it("returns 404 if stream does not exist", async () => {
@@ -114,7 +111,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const req = new Request("http://localhost/api/streams/nonexistent/events", {
       headers: { 
         "authorization": `Bearer ${token}`,
-        "x-tenant-id": "tenant-1",
+        "x-tenant-id": "default",
       },
     }) as any;
     
@@ -144,7 +141,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const req = new Request("http://localhost/api/streams/stream-ada/events", {
       headers: { 
         "authorization": `Bearer ${token}`,
-        "x-tenant-id": "tenant-1",
+        "x-tenant-id": "default",
       },
     }) as any;
     
@@ -175,7 +172,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const req = new Request("http://localhost/api/streams/stream-ada/events", {
       headers: { 
         "authorization": `Bearer ${token}`,
-        "x-tenant-id": "tenant-1",
+        "x-tenant-id": "default",
       },
     }) as any;
     
@@ -210,7 +207,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const req = new Request("http://localhost/api/streams/stream-ada/events", {
       headers: {
         authorization: `Bearer ${token}`,
-        "x-tenant-id": "tenant-1",
+        "x-tenant-id": "default",
       },
     }) as any;
 
@@ -250,7 +247,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const req = new Request("http://localhost/api/streams/stream-ada/events", {
       headers: {
         authorization: `Bearer ${token}`,
-        "x-tenant-id": "tenant-1",
+        "x-tenant-id": "default",
       },
     }) as any;
 
@@ -262,6 +259,63 @@ describe("GET /api/streams/:id/events (SSE)", () => {
 
     expect(eventBus.listenerCount("stream:updated:stream-ada")).toBe(0);
     expect(eventBus.listenerCount("settle:finished:stream-ada")).toBe(0);
+  });
+
+  it("delivers a stream:updated frame after a lifecycle route commits", async () => {
+    const walletAddress = "GD7H...3J4K";
+    const token = createAuthToken(walletAddress);
+    const req = new Request("http://localhost/api/streams/stream-ada/events", {
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-tenant-id": "tenant-1",
+      },
+    }) as any;
+
+    const sseRes = await GET(req, { params: Promise.resolve({ id: "stream-ada" }) });
+    expect(sseRes.status).toBe(200);
+    const reader = sseRes.body!.getReader();
+
+    const pauseRes = await pausePOST(
+      new Request("http://localhost/api/streams/stream-ada/pause", { method: "POST" }),
+      { params: Promise.resolve({ id: "stream-ada" }) },
+    );
+    expect(pauseRes.status).toBe(200);
+
+    const { done, value } = await reader.read();
+    expect(done).toBe(false);
+    const chunk = new TextDecoder().decode(value);
+    expect(chunk).toContain("event: stream:updated");
+    expect(chunk).toContain('"status":"paused"');
+    expect(chunk).not.toContain("fixture-user-1@example.test");
+    expect(chunk).not.toContain("Design Retainer Q2");
+
+    await reader.cancel();
+  });
+
+  it("returns listenerCount to baseline after 200 connect/abort cycles", async () => {
+    const walletAddress = "GD7H...3J4K";
+    const token = createAuthToken(walletAddress);
+    const updatedKey = "stream:updated:stream-ada";
+    const settledKey = "settle:finished:stream-ada";
+    const updatedBaseline = eventBus.listenerCount(updatedKey);
+    const settledBaseline = eventBus.listenerCount(settledKey);
+
+    for (let i = 0; i < 200; i++) {
+      const req = new Request("http://localhost/api/streams/stream-ada/events", {
+        headers: {
+          authorization: `Bearer ${token}`,
+          "x-tenant-id": "tenant-1",
+        },
+      }) as any;
+
+      const res = await GET(req, { params: Promise.resolve({ id: "stream-ada" }) });
+      expect(res.status).toBe(200);
+      await res.body!.cancel();
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(eventBus.listenerCount(updatedKey)).toBe(updatedBaseline);
+    expect(eventBus.listenerCount(settledKey)).toBe(settledBaseline);
   });
 
   it("returns 200 and establishes SSE for admin user (any stream)", async () => {
@@ -283,7 +337,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const req = new Request("http://localhost/api/streams/stream-ada/events", {
       headers: { 
         "authorization": `Bearer ${token}`,
-        "x-tenant-id": "tenant-1",
+        "x-tenant-id": "default",
       },
     }) as any;
     
@@ -315,7 +369,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const req = new Request("http://localhost/api/streams/stream-ada/events", {
       headers: { 
         "authorization": `Bearer ${token}`,
-        "x-tenant-id": "tenant-1",
+        "x-tenant-id": "default",
         "x-correlation-id": correlationId,
       },
     }) as any;
@@ -327,7 +381,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
 
   it("includes request_id in error responses", async () => {
     const req = new Request("http://localhost/api/streams/stream-123/events", {
-      headers: { "x-tenant-id": "tenant-1" },
+      headers: { "x-tenant-id": "default" },
     }) as any;
     
     const res = await GET(req, { params: Promise.resolve({ id: "stream-123" }) });
@@ -349,7 +403,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const req = new Request("http://localhost/api/streams/stream-123/events", {
       headers: { 
         "authorization": `Bearer ${token}`,
-        "x-tenant-id": "tenant-1",
+        "x-tenant-id": "default",
       },
     }) as any;
     
@@ -371,7 +425,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const req = new Request("http://localhost/api/streams/stream-123/events", {
       headers: { 
         "authorization": `Bearer ${token}`,
-        "x-tenant-id": "tenant-1",
+        "x-tenant-id": "default",
       },
     }) as any;
     
@@ -393,7 +447,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const req = new Request("http://localhost/api/streams/stream-123/events", {
       headers: { 
         "authorization": `Bearer ${token}`,
-        "x-tenant-id": "tenant-1",
+        "x-tenant-id": "default",
       },
     }) as any;
     

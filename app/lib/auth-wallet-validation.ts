@@ -11,11 +11,16 @@ import { z } from "zod";
 import { isValidStellarPublicKey } from "@/app/lib/wallet-link";
 import type { ValidationError } from "@/app/lib/stream-validation";
 
-/** Challenges are issued by GET /api/auth/wallet in exactly this shape. */
-export const CHALLENGE_PATTERN = /^streampay_auth_\d+_[a-z0-9]+$/;
+/**
+ * Challenges are issued by GET /api/auth/wallet in exactly this shape:
+ * `streampay-auth:v1:<nonce>|<origin>|<expires_at>` — a base64url CSPRNG
+ * nonce (43+ chars), the server origin, and the ISO-8601 expiry.
+ */
+export const CHALLENGE_PATTERN =
+  /^streampay-auth:v1:[A-Za-z0-9_-]{43,}\|[^|]{1,200}\|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 
 /** Upper bounds so oversized payloads never reach signature verification. */
-export const MAX_CHALLENGE_LENGTH = 128;
+export const MAX_CHALLENGE_LENGTH = 256;
 export const MAX_SIGNATURE_LENGTH = 1024;
 
 /** Checksum-validated strkey, not just the G... shape. */

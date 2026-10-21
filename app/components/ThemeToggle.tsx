@@ -30,7 +30,7 @@ export function ThemeToggle() {
     if (mode === 'system') {
       const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
       
-      const handleChange = (e: MediaQueryListEvent) => {
+      const handleChange = (e) => {
         document.documentElement.classList.remove('dark', 'light');
         document.documentElement.classList.add(e.matches ? 'dark' : 'light');
       };
@@ -63,47 +63,48 @@ export function ThemeToggle() {
   };
 
   return (
-    <div className="theme-toggle" role="radiogroup" aria-label="Theme selection">
-      <label className="theme-toggle__label">
-        <input 
-          type="radio" 
-          name="theme" 
-          value="light" 
-          checked={mode === 'light'} 
-          onChange={() => handleChange('light')}
-          className="theme-toggle__input"
-        />
-        <span>Light</span>
-      </label>
-      <label className="theme-toggle__label">
-        <input 
-          type="radio" 
-          name="theme" 
-          value="dark" 
-          checked={mode === 'dark'} 
-          onChange={() => handleChange('dark')}
-          className="theme-toggle__input"
-        />
-        <span>Dark</span>
-      </label>
-      <label className="theme-toggle__label">
-        <input 
-          type="radio" 
-          name="theme" 
-          value="system" 
-          checked={mode === 'system'} 
-          onChange={() => handleChange('system')}
-          className="theme-toggle__input"
-        />
-        <span>System</span>
-      </label>
+    <div className="theme-toggle">
+      <div className="theme-toggle__group" role="radiogroup" aria-label="Theme selection">
+        <label className="theme-toggle__label">
+          <input 
+            type="radio" 
+            name="theme" 
+            value="light" 
+            checked={mode === 'light'} 
+            onChange={() => handleChange('light')}
+            className="theme-toggle__input"
+          />
+          <span>Light</span>
+        </label>
+        <label className="theme-toggle__label">
+          <input 
+            type="radio" 
+            name="theme" 
+            value="dark" 
+            checked={mode === 'dark'} 
+            onChange={() => handleChange('dark')}
+            className="theme-toggle__input"
+          />
+          <span>Dark</span>
+        </label>
+        <label className="theme-toggle__label">
+          <input 
+            type="radio" 
+            name="theme" 
+            value="system" 
+            checked={mode === 'system'} 
+            onChange={() => handleChange('system')}
+            className="theme-toggle__input"
+          />
+          <span>System</span>
+        </label>
+      </div>
       <label className="theme-toggle__label theme-toggle__label--hc">
         <input
           type="checkbox"
           checked={highContrast}
           onChange={handleHighContrastToggle}
           className="theme-toggle__input"
-          aria-label="High contrast mode"
         />
         <span>High Contrast</span>
       </label>

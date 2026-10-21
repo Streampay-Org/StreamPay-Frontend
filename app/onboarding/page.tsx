@@ -1,4 +1,5 @@
 import { Explainer } from "../components/Explainer";
+import { OnboardingChecklist } from "./OnboardingChecklist";
 
 export default function OnboardingPage() {
   return (
@@ -12,6 +13,8 @@ export default function OnboardingPage() {
           </p>
         </div>
       </header>
+
+      <OnboardingChecklist />
 
       <Explainer />
     </main>
