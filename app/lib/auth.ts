@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import jwt from "jsonwebtoken";
+import jwt, { type SignOptions } from "jsonwebtoken";
 import { NextResponse } from "next/server";
 import type { AuditActorRole } from "@/app/types/audit";
 
@@ -244,7 +244,7 @@ export function signToken(
     { sub: walletAddress, iss: JWT_ISSUER, aud: JWT_AUDIENCE, ...extra },
     currentSecret,
     {
-      expiresIn: JWT_EXPIRES_IN,
+      expiresIn: JWT_EXPIRES_IN as SignOptions["expiresIn"],
       algorithm: "HS256",
       header: { kid: getCurrentKeyId() },
     },

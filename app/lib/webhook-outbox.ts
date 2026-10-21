@@ -4,7 +4,10 @@ import {
   WebhookEndpoint,
   WebhookEvent,
 } from "./webhook-delivery";
-import type { Stream } from "./stream-store";
+import type { Stream as ApiStream } from "@/app/types/openapi";
+
+/** The outbox only needs the stream id and its delivery URL. */
+type Stream = ApiStream & { webhook_url?: string | null };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -152,12 +155,14 @@ export class WebhookOutboxStore {
     const endpoint: WebhookEndpoint = {
       id: `stream:${stream.id}`,
       url: stream.webhook_url,
+      maxRetries: 3,
     };
     const event: WebhookEvent = {
       id: eventId,
       eventType,
+      streamId: stream.id,
       data: payload,
-      createdAt: updatedAt,
+      timestamp: updatedAt,
     };
     return this.addToOutbox(endpoint, event);
   }
