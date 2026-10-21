@@ -1,5 +1,5 @@
 .skeleton {
-  background-color: var(--color-surface-dim, #e0e0e0);
+  background-color: var(--skeleton-base);
   border-radius: 0.25rem;
   animation: pulse 1.5s ease-in-out infinite;
   display: inline-block;

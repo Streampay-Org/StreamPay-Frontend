@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/app/lib/db";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
+import { authorizeStreamSubscriber, DEFAULT_STREAM_TENANT } from "@/app/lib/stream-subscriber-auth";
 import { eventBus } from "@/app/lib/event-bus";
 import { logger } from "@/app/lib/logger";
 import {
@@ -21,8 +22,10 @@ import {
  * 
  * Security:
  * - JWT Authentication required.
- * - Users can only subscribe to streams they own (recipient or matching email).
- * - 403 returned on unauthorized access or ID guessing.
+ * - Subscribers must be the recipient, sender, an owning-org member, an
+ *   administrator, or have a matching non-empty email.
+ * - A tenant mismatch returns 404 to avoid exposing stream existence.
+ * - x-tenant-id is optional and defaults to "default".
  */
 export async function GET(request: NextRequest) {
   // 1. Authenticate Request
@@ -44,22 +47,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: { code: "NOT_FOUND", message: "Stream not found" } }, { status: 404 });
   }
 
-  // 3. Authorization Check
-  // In this mock, we check if the user's wallet address matches the stream's recipient 
-  // or if the user's email (if we had it) matches.
-  // For the purpose of this task, we'll fetch the user to check their email too.
-  const user = db.users.get(actor.walletAddress);
-  const isOwner = 
-    stream.recipient === actor.walletAddress || 
-    (user && stream.email === user.email) ||
-    actor.role === "admin"; // Admins can see everything
+  const tenant = request.headers.get("x-tenant-id")?.trim() || DEFAULT_STREAM_TENANT;
+  const authorization = authorizeStreamSubscriber(actor, stream, tenant);
 
-  if (!isOwner) {
+  if (!authorization.ok) {
+    const notFound = authorization.status === 404;
     logger.warn("Unauthorized stream event subscription attempt", {
       actorId: actor.actorId,
       streamId,
+      tenant,
+      status: authorization.status,
     });
-    return NextResponse.json({ error: { code: "FORBIDDEN", message: "You do not have permission to subscribe to this stream" } }, { status: 403 });
+    return NextResponse.json(
+      { error: { code: notFound ? "NOT_FOUND" : "FORBIDDEN", message: notFound ? "Stream not found" : "You do not have permission to subscribe to this stream" } },
+      { status: authorization.status },
+    );
   }
 
   // 4. Establish SSE Connection

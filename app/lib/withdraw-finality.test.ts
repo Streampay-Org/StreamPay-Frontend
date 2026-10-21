@@ -40,6 +40,7 @@ describe("evaluateWithdrawalState", () => {
     const result = await evaluateWithdrawalState(
       stream,
       new Date("2026-04-28T08:00:30.000Z"),
+      // The fixture supplies only the response fields read by finality polling and receives URL strings.
       fetcher as unknown as FetchLike,
     );
 
@@ -80,6 +81,7 @@ describe("evaluateWithdrawalState", () => {
     const result = await evaluateWithdrawalState(
       stream,
       new Date("2026-04-28T08:00:45.000Z"),
+      // The fixture supplies only the response fields read by finality polling and receives URL strings.
       fetcher as unknown as FetchLike,
     );
 

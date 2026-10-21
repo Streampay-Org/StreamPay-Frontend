@@ -12,10 +12,16 @@
  * The stream escrow is fully drained — no dust remains after cancellation.
  *
  * ## Authorization
- * Either the stream sender (identified by `Actor-Wallet-Address` header
- * matching `stream.senderAddress`) OR a member with the "canceller" role in
- * the stream's org policy may cancel. This mirrors the Soroban contract's
- * `require_auth` on the caller.
+ * Three ownership states:
+ *   - Org-owned: Authorized via org policy (RBAC helper requires "canceller" role).
+ *   - Individually owned: Requires verified JWT wallet authentication matching
+ *     `stream.senderAddress`. Unauthenticated or non-matching callers receive
+ *     403 SENDER_AUTH_REQUIRED.
+ *   - Unclaimed: Streams without a recorded senderAddress receive 403 SENDER_UNKNOWN
+ *     and cannot be cancelled until claimed.
+ *
+ * ## Refund Target
+ * Escrow refunds are sent strictly to `stream.senderAddress` (recorded at creation time).
  *
  * ## Terminal-state guard
  * Cancelling an already Cancelled / Ended / Withdrawn stream is rejected with
@@ -35,8 +41,12 @@ import {
   withLock,
 } from "@/app/lib/db";
 import { getCorrelationContext } from "@/app/lib/logger";
-import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
+import { checkStreamOrgPolicy, resolveActorAddress } from "@/app/lib/org-policy";
+import { orgDb } from "@/app/lib/org-db";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
@@ -44,6 +54,8 @@ import {
   computeCancellationSplit,
   buildCancellationRecord,
 } from "@/app/lib/cancel-stream";
+import { addToOutbox } from "@/app/lib/webhook-outbox";
+import { toWebhookEvent } from "@/app/lib/stream-webhook-events";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -149,19 +161,30 @@ export async function POST(
     }
 
     // ── Authorization ─────────────────────────────────────────────────────────
-    // Allow: stream sender OR org canceller role.
-    // The sender check uses the Actor-Wallet-Address header against
-    // stream.senderAddress (set at creation time).
-    const isSender = actorAddress && stream.senderAddress
-      ? actorAddress === stream.senderAddress
-      : false;
+    // Three ownership states:
+    // 1. Org-owned: org policy via RBAC helper (canceller role required)
+    // 2. Unclaimed (no recorded sender): 403 SENDER_UNKNOWN (never cancellable)
+    // 3. Individually owned: verified JWT actor must equal stream.senderAddress (otherwise 403 SENDER_AUTH_REQUIRED)
 
-    if (!isSender) {
-      // Fall through to org-policy check.
-      const policyResult = actorAddress
-        ? checkStreamOrgPolicy(id, actorAddress, "stop") // "stop" covers canceller role
-        : null;
+    const isOrgOwned = orgDb.streamOwnership.has(id) || stream.ownership === "org";
 
+    if (isOrgOwned) {
+      if (!stream.senderAddress) {
+        return createErrorResponse(
+          "SENDER_UNKNOWN",
+          "Stream has no recorded sender and cannot be cancelled",
+          403,
+        );
+      }
+      const actor = resolveActorAddress(request);
+      if (!actor) {
+        return createErrorResponse(
+          "ACTOR_REQUIRED",
+          "A verified actor identity is required for this action.",
+          403,
+        );
+      }
+      const policyResult = checkStreamOrgPolicy(id, actor, "stop");
       if (policyResult) {
         if (!policyResult.allowed) {
           return createErrorResponse(policyResult.code, policyResult.message, policyResult.httpStatus);
@@ -173,12 +196,22 @@ export async function POST(
             409,
           );
         }
-      } else if (!actorAddress) {
-        // No actor header and stream is not org-owned — reject unauthenticated cancel.
+      }
+    } else {
+      if (stream.ownership === "unclaimed" || !stream.senderAddress) {
         return createErrorResponse(
-          "UNAUTHORIZED",
-          "Actor-Wallet-Address header is required to cancel a stream.",
-          401,
+          "SENDER_UNKNOWN",
+          "Stream is unclaimed and cannot be cancelled",
+          403,
+        );
+      }
+
+      const jwtActor = tryAuthenticateRequest(request);
+      if (!jwtActor || jwtActor.walletAddress !== stream.senderAddress) {
+        return createErrorResponse(
+          "SENDER_AUTH_REQUIRED",
+          "Only the stream sender can cancel this stream",
+          403,
         );
       }
     }
@@ -193,7 +226,7 @@ export async function POST(
       releasedAmount:   escrow.releasedAmount,
       vestedAmount:     escrow.vestedAmount,
       token,
-      senderAddress:    stream.senderAddress ?? actorAddress ?? "unknown",
+      senderAddress:    stream.senderAddress!,
       recipientAddress: stream.recipient,
     });
 
@@ -213,19 +246,22 @@ export async function POST(
       : undefined;
 
     // ── Build cancellation record ─────────────────────────────────────────────
-    const cancellation = buildCancellationRecord(
-      {
-        totalAmount:      escrow.totalAmount,
-        releasedAmount:   escrow.releasedAmount,
-        vestedAmount:     escrow.vestedAmount,
-        token,
-        senderAddress:    stream.senderAddress ?? actorAddress ?? "unknown",
-        recipientAddress: stream.recipient,
-      },
-      split,
-      recipientTxHash,
-      senderTxHash,
-    );
+    const cancellation = {
+      ...buildCancellationRecord(
+        {
+          totalAmount:      escrow.totalAmount,
+          releasedAmount:   escrow.releasedAmount,
+          vestedAmount:     escrow.vestedAmount,
+          token,
+          senderAddress:    stream.senderAddress!,
+          recipientAddress: stream.recipient,
+        },
+        split,
+        recipientTxHash,
+        senderTxHash,
+      ),
+      senderAddress: stream.senderAddress!,
+    };
 
     // ── Persist updated stream ────────────────────────────────────────────────
     const before = structuredClone(stream);
@@ -241,6 +277,53 @@ export async function POST(
       cancellation,
     };
     db.streams.set(id, updatedStream);
+
+    const authenticatedActor = tryAuthenticateRequest(request);
+    const actorWallet = authenticatedActor?.walletAddress ?? (isOrgOwned ? resolveActorAddress(request) : null);
+
+    appendStreamHistoryEvent({
+      streamId: id,
+      type: "cancelled",
+      fromStatus: stream.status,
+      toStatus: "cancelled",
+      at: now,
+      actorWallet: actorWallet ?? undefined,
+    });
+    publishStreamChange({
+      action: "cancel",
+      actor: actorAddress ?? undefined,
+      after: updatedStream,
+      before,
+      correlationId: getCorrelationContext()?.correlation_id,
+    });
+
+    // ── Enqueue lifecycle webhook (post-commit) ───────────────────────────────
+    // Only enqueue after the store write has committed. A failed cancel returns
+    // above and never reaches this point, so nothing is enqueued on failure.
+    if (updatedStream.webhook_url) {
+      const event = toWebhookEvent(before, updatedStream, "cancel");
+      if (event) {
+        addToOutbox({
+          eventId: `evt_${id}_cancel_${now}`,
+          eventType: event,
+          streamId: id,
+          url: updatedStream.webhook_url,
+          data: {
+            stream_id: id,
+            status: updatedStream.status,
+            previous_status: before.status,
+            action: "cancel",
+            occurred_at: now,
+            token,
+            total_amount: escrow.totalAmount.toString(),
+            released_amount: updatedStream.releasedAmount,
+            vested_amount: updatedStream.vestedAmount,
+            recipient_payout: split.recipientPayout.toString(),
+            sender_refund: split.senderRefund.toString(),
+          },
+        });
+      }
+    }
 
     // ── Audit log ─────────────────────────────────────────────────────────────
     recordPrivilegedStreamAuditEvent({

@@ -10,6 +10,9 @@ import {
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { enqueueStreamLifecycleWebhook } from "@/app/lib/stream-webhook-lifecycle";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -93,13 +96,30 @@ export async function POST(
     }
 
     const before = structuredClone(stream);
+    const now = new Date().toISOString();
     const updatedStream = {
       ...stream,
       nextAction: "withdraw" as const,
       status: "ended" as const,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
     };
     db.streams.set(id, updatedStream);
+
+    appendStreamHistoryEvent({
+      streamId: id,
+      type: "stopped",
+      fromStatus: stream.status,
+      toStatus: "ended",
+      at: now,
+      actorWallet: actorAddress,
+    });
+    publishStreamChange({
+      action: "stop",
+      actor: actorAddress ?? undefined,
+      after: updatedStream,
+      before,
+      correlationId: getCorrelationContext()?.correlation_id,
+    });
 
     recordPrivilegedStreamAuditEvent({
       action: "stream.stop.override",
@@ -109,6 +129,12 @@ export async function POST(
       request,
       streamId: id,
       targetAccount: updatedStream.recipient,
+    });
+
+    enqueueStreamLifecycleWebhook({
+      action: "stop",
+      after: updatedStream as unknown as Record<string, unknown>,
+      before: before as unknown as Record<string, unknown>,
     });
 
     const payload = { data: updatedStream };

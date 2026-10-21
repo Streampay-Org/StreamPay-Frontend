@@ -11,9 +11,10 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: 'standalone',
-  // Main currently carries accumulated route/type debt that blocks `next build`.
-  // Unit tests remain the correctness gate; keep CI build green while that debt
-  // is paid down incrementally.
+  // CI blocks regressions with typecheck:core (tsconfig.strict-core.json).
+  // scripts/typecheck-report.mjs reports remaining full-project debt.
+  // Remove ignoreBuildErrors once the stream workstream and the full
+  // `npm run typecheck` (including generated Next types) are error-free.
   typescript: {
     ignoreBuildErrors: true,
   },

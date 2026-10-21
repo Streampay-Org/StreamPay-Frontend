@@ -4,7 +4,11 @@ import { withIdempotency, settleStore } from "@/app/lib/idempotency";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 import { getStellarSettlementClient } from "@/app/lib/stellar";
+import { addToOutbox } from "@/app/lib/webhook-outbox";
+import { toWebhookEvent, buildStreamWebhookPayload } from "@/app/lib/stream-webhook-events";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -24,8 +28,10 @@ function getHeader(request: Request, name: string): string | null {
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
-) {
+)
+{
   const { id } = await params;
+  const actorAddress = getHeader(request, "Actor-Wallet-Address");
   // IDEMPOTENCY: Settle is non-idempotent by nature — this wrapper ensures retries return the original response without re-executing the settlement
   return withIdempotency(request, "settle", settleStore, async () => {
     return withLock(id, async () => {
@@ -34,7 +40,6 @@ export async function POST(
         return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
       }
 
-      const actorAddress = getHeader(request, "Actor-Wallet-Address");
       const policyResult = actorAddress
         ? checkStreamOrgPolicy(id, actorAddress, "settle")
         : null;
@@ -79,6 +84,16 @@ export async function POST(
 
         db.streams.set(id, updatedStream);
 
+        appendStreamHistoryEvent({
+          streamId: id,
+          type: "settled",
+          fromStatus: stream.status,
+          toStatus: "ended",
+          at: updatedStream.updatedAt,
+          actorWallet: getHeader(request, "Actor-Wallet-Address"),
+          txHash: settlement.txHash,
+        });
+
         recordPrivilegedStreamAuditEvent({
           action: "stream.settle",
           after: updatedStream as any,
@@ -89,6 +104,34 @@ export async function POST(
           request,
           streamId: id,
           targetAccount: updatedStream.recipient,
+        });
+
+        // Enqueue lifecycle webhook after commit, only if the stream has a webhook URL.
+        // Deterministic event id prevents double-enqueue on retries of the same commit.
+        if (updatedStream.webhook_url) {
+          const eventType = toWebhookEvent(before as any, updatedStream as any, "settle");
+          addToOutbox({
+            eventId: `evt_${id}_settle_${updatedStream.updatedAt}`,
+            eventType,
+            streamId: id,
+            url: updatedStream.webhook_url,
+            payload: buildStreamWebhookPayload({
+              eventType,
+              streamId: id,
+              action: "settle",
+              before: before as any,
+              after: updatedStream as any,
+              occurredAt: updatedStream.updatedAt,
+            }),
+          });
+        }
+
+        publishStreamChange({
+          action: "settle",
+          actor: actorAddress ?? undefined,
+          after: updatedStream,
+          before,
+          correlationId: getCorrelationContext()?.correlation_id,
         });
 
         const payload = { data: { ...updatedStream, settlement } };
@@ -104,5 +147,5 @@ export async function POST(
         return errorResponse("SETTLEMENT_FAILED", "Failed to settle stream on Stellar/Soroban", 502);
       }
     });
-  });
+  }, { resourceId: id, actorId: actorAddress ?? undefined });
 }

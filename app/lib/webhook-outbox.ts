@@ -4,8 +4,67 @@ import {
   WebhookEndpoint,
   WebhookEvent,
 } from "./webhook-delivery";
+import type { Stream } from "./stream-store";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Lifecycle actions that can produce a stream webhook event.
+ */
+export type StreamLifecycleAction =
+  | "create"
+  | "pause"
+  | "resume"
+  | "stop"
+  | "settle"
+  | "cancel"
+  | "withdraw";
+
+/**
+ * Allowed stream lifecycle webhook event types.
+ */
+export const STREAM_LIFECYCLE_EVENT_TYPES = [
+  "stream.created",
+  "stream.paused",
+  "stream.resumed",
+  "stream.stopped",
+  "stream.settled",
+  "stream.cancelled",
+  "stream.withdrawn",
+] as const;
+
+export type StreamLifecycleEventType =
+  (typeof STREAM_LIFECYCLE_EVENT_TYPES)[number];
+
+/**
+ * Map a stream transition (before/after/action) to a lifecycle webhook event
+ * type. Returns `null` when the transition does not produce an event.
+ */
+export function toWebhookEvent(
+  before: Pick<Stream, "status"> | null,
+  after: Pick<Stream, "status">,
+  action: StreamLifecycleAction,
+): StreamLifecycleEventType | null {
+  if (action === "create") return "stream.created";
+
+  const previous = before?.status;
+  const next = after.status;
+
+  if (action === "pause" && previous === "active" && next === "paused") {
+    return "stream.paused";
+  }
+  if (action === "resume" && previous === "paused" && next === "active") {
+    return "stream.resumed";
+  }
+  if (action === "stop" && next === "ended") return "stream.stopped";
+  if (action === "settle" && next === "ended") return "stream.settled";
+  if (action === "cancel" && next === "cancelled") return "stream.cancelled";
+  if (action === "withdraw" && next === "withdrawn") {
+    return "stream.withdrawn";
+  }
+
+  return null;
+}
 
 export interface WebhookOutboxEntry {
   /** Unique outbox entry ID */
@@ -75,10 +134,56 @@ export class WebhookOutboxStore {
   }
 
   /**
+   * Enqueue a stream lifecycle webhook for the given stream, if the stream has
+   * a `webhook_url` configured. Uses a deterministic event id so retries of the
+   * same committed transition cannot double-enqueue.
+   *
+   * Must be called only after the stream write has committed.
+   */
+  enqueueStreamLifecycleEvent(
+    stream: Stream,
+    eventType: StreamLifecycleEventType,
+    payload: Record<string, unknown>,
+    updatedAt: string,
+  ): WebhookOutboxEntry | null {
+    if (!stream.webhook_url) return null;
+
+    const eventId = `evt_${stream.id}_${eventType}_${updatedAt}`;
+    const endpoint: WebhookEndpoint = {
+      id: `stream:${stream.id}`,
+      url: stream.webhook_url,
+    };
+    const event: WebhookEvent = {
+      id: eventId,
+      eventType,
+      data: payload,
+      createdAt: updatedAt,
+    };
+    return this.addToOutbox(endpoint, event);
+  }
+
+  /**
    * Get a single outbox entry by ID
    */
   getOutboxEntry(id: string): WebhookOutboxEntry | undefined {
     return this.entries.get(id);
+  }
+
+  /**
+   * Find an outbox entry by its event id (used for idempotent enqueue checks).
+   */
+  getOutboxEntryByEventId(eventId: string): WebhookOutboxEntry | undefined {
+    for (const entry of this.entries.values()) {
+      if (entry.event.id === eventId) return entry;
+    }
+    return undefined;
+  }
+
+  /**
+   * Whether an outbox entry with the given event id already exists.
+   */
+  hasEventId(eventId: string): boolean {
+    return this.getOutboxEntryByEventId(eventId) !== undefined;
   }
 
   /**
@@ -129,6 +234,31 @@ export class WebhookOutboxStore {
   }
 
   /**
+   * Idempotently enqueue a stream lifecycle event. If an entry with the same
+   * deterministic event id already exists, returns the existing entry instead
+   * of creating a duplicate.
+   */
+  enqueueStreamLifecycleEventIdempotent(
+    stream: Stream,
+    eventType: StreamLifecycleEventType,
+    payload: Record<string, unknown>,
+    updatedAt: string,
+  ): WebhookOutboxEntry | null {
+    if (!stream.webhook_url) return null;
+
+    const eventId = `evt_${stream.id}_${eventType}_${updatedAt}`;
+    const existing = this.getOutboxEntryByEventId(eventId);
+    if (existing) return existing;
+
+    return this.enqueueStreamLifecycleEvent(
+      stream,
+      eventType,
+      payload,
+      updatedAt,
+    );
+  }
+
+  /**
    * Delete an outbox entry (for testing/cleanup)
    */
   deleteOutboxEntry(id: string): boolean {
@@ -140,6 +270,14 @@ export class WebhookOutboxStore {
    */
   clear(): void {
     this.entries.clear();
+  }
+
+  /**
+   * Clear all outbox entries (alias retained for the legacy `lib/outbox.ts`
+   * surface so existing callers keep working).
+   */
+  clearAll(): void {
+    this.clear();
   }
 
   /**
@@ -159,3 +297,12 @@ export class WebhookOutboxStore {
 }
 
 export const webhookOutboxStore = new WebhookOutboxStore();
+
+/**
+ * Legacy alias kept so `lib/outbox.ts` can re-export a single outbox store
+ * without introducing a second implementation.
+ *
+ * @deprecated Use `webhookOutboxStore` instead.
+ */
+export const InMemoryOutboxStore = WebhookOutboxStore;
+export type InMemoryOutboxStore = WebhookOutboxStore;

@@ -82,7 +82,7 @@ describe('publicKeyToJwk', () => {
 
   it('does not include any private key components', () => {
     const kp = generateKeyPair();
-    const jwk = publicKeyToJwk(kp.publicKeyPem, kp.kid) as unknown as Record<string, unknown>;
+    const jwk = publicKeyToJwk(kp.publicKeyPem, kp.kid);
 
     for (const privateField of ['d', 'p', 'q', 'dp', 'dq', 'qi']) {
       expect(jwk).not.toHaveProperty(privateField);
@@ -103,7 +103,7 @@ describe('publicKeyToJwk', () => {
       namedCurve: 'P-256',
       publicKeyEncoding: { type: 'spki', format: 'pem' },
       privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-    }) as unknown as { publicKey: string; privateKey: string };
+    });
     expect(() => publicKeyToJwk(publicKey, 'ec-kid')).toThrow(/RSA modulus\/exponent/);
   });
 
@@ -164,7 +164,7 @@ describe('getAllKeys', () => {
   it('returns a snapshot — mutations to the result do not affect the store', () => {
     initializeKeyStore();
     const snapshot = getAllKeys();
-    (snapshot[0] as unknown as Record<string, unknown>).status = 'retiring';
+    snapshot[0].status = 'retiring';
     expect(getActiveKey()!.status).toBe('active'); // store unchanged
   });
 });
