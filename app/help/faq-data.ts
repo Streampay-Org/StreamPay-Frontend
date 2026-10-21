@@ -1,3 +1,23 @@
+import { SHORTCUT_GROUPS, formatShortcutKeys, getShortcut } from "@/lib/shortcuts";
+
+/** Keys for a single shortcut id, e.g. "⌘/Ctrl + K". */
+function keysFor(id: string): string {
+  return formatShortcutKeys(getShortcut(id).keys);
+}
+
+/**
+ * The full reference, generated from the registry so the FAQ can never fall
+ * behind the `?` overlay or the in-form hints.
+ */
+function fullShortcutReference(): string {
+  return SHORTCUT_GROUPS.map((group) => {
+    const entries = group.shortcuts
+      .map((shortcut) => `${formatShortcutKeys(shortcut.keys)} ${shortcut.description}`)
+      .join("; ");
+    return `${group.label} — ${entries}.`;
+  }).join(" ");
+}
+
 export type FaqItem = {
   id: string;
   question: string;
