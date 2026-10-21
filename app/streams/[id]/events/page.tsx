@@ -51,9 +51,10 @@ export default async function StreamEventsPage({ params }: Props) {
       return null;
     }
 
-    // Extract display label; the Stream type uses `recipient` as a display name.
+    // Extract the display label. `label` is the human-readable stream name;
+    // `recipient` holds the wallet address and is only used as a fallback.
     const s = rawStream as Record<string, unknown>;
-    streamLabel = String(s.recipient ?? s.label ?? "Payment Stream");
+    streamLabel = String(s.label ?? s.recipient ?? "Payment Stream");
 
     const { data, meta } = store.streamHistory.query({ streamId: id, limit: 20 });
     initialEvents = data.map(toContractEvent);

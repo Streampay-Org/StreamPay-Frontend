@@ -29,13 +29,17 @@ function makeRequest(
   const text = shouldThrow ? "{" : (JSON.stringify(body) ?? "");
   return {
     body: streamFromChunks([text]),
+    headers: new Headers(),
   } as unknown as import("next/server").NextRequest;
 }
 
 function makeStreamRequest(
   body: ReadableStream<Uint8Array> | null,
 ): import("next/server").NextRequest {
-  return { body } as unknown as import("next/server").NextRequest;
+  return {
+    body,
+    headers: new Headers(),
+  } as unknown as import("next/server").NextRequest;
 }
 
 describe("POST /api/webhooks", () => {

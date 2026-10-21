@@ -353,3 +353,48 @@ export function buildCsvExport(contacts: ContactRow[]): string {
   );
   return [header, ...lines].join("\r\n");
 }
+
+// ------------------------------------------------------------------------------
+// Import/export compatibility layer used by app/contacts/page.tsx
+// ------------------------------------------------------------------------------
+
+export type ImportRowStatus = Classification;
+
+export interface ImportRow extends ContactRow {
+  status: ImportRowStatus;
+  existingId?: string;
+  reason?: string;
+}
+
+export interface ClassifyResult {
+  rows: ImportRow[];
+  error?: string;
+}
+
+/**
+ * Parse an uploaded `.json`/`.csv` file and classify every row against the
+ * existing address book. Keeps the flat shape the contacts page renders.
+ */
+export function classifyImport(
+  text: string,
+  filename: string,
+  existing: ExistingContact[],
+): ClassifyResult {
+  const isJson = filename.toLowerCase().endsWith(".json");
+  const parsed = isJson ? parseJsonImport(text) : parseCsvImport(text);
+  if (!parsed.ok || !parsed.rows) {
+    return { rows: [], error: parsed.error ?? "Could not read the file." };
+  }
+
+  return {
+    rows: classifyRows(parsed.rows, existing).map((entry) => ({
+      ...entry.row,
+      status: entry.classification,
+      existingId: entry.existingId,
+      reason: entry.reason,
+    })),
+  };
+}
+
+export const buildExportJson = buildJsonExport;
+export const buildExportCsv = buildCsvExport;
