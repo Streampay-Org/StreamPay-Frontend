@@ -108,7 +108,16 @@ streampay_metrics_up 1
 
 ### Labels
 
-- `route`: The API route path (e.g., `/api/streams`, `/api/streams/123`)
+- `route`: The API route **template** (e.g., `/api/streams`, `/api/streams/:id`)
+  - Id-like path segments (stream ids, org ids, UUIDs, numeric ids, ...) collapse
+    to `:id`, so a route never produces a new time series per resource.
+  - A route that does not match a known template is reported as `other`.
+  - At most 200 route labels are kept; new routes beyond that budget are folded
+    into `other`.
+  - Client identities in the throttle log are redacted: IPv4 addresses are
+    truncated to their `/24` network, IPv6 addresses to their `/48` network,
+    wallet addresses to their first and last four characters, and API keys to a
+    salted hash.
 - `limit_type`: The type of rate limit that was applied (e.g., `org`, `rate`)
 - `status`: HTTP status code (export/webhook endpoint metrics)
 - `method`: HTTP method (`GET` / `POST`) for export endpoint metrics
