@@ -18,7 +18,7 @@ import { logAccessEvent } from "@/src/middleware/accessLog";
 import { streamsRateLimit } from "@/src/middleware/rateLimit";
 import { checkTokenAllowed, normaliseToken } from "@/app/lib/token-allowlist";
 import {
-  validateCreateStreamBody,
+  parseCreateStreamBody,
   validateListStreamsQuery,
 } from "@/app/lib/stream-validation";
 import type { Stream } from "@/app/types/openapi";
@@ -213,18 +213,18 @@ async function handleStreamsPost(request: Request) {
     }
 
     // ── Schema validation (shared) ────────────────────────────────────────
-    const validationErrors = validateCreateStreamBody(body);
-    if (validationErrors.length > 0) {
+    const parseResult = parseCreateStreamBody(body);
+    if (!parseResult.success) {
       status = 422;
       logger.warn("Stream creation validation failed", {
-        errors: validationErrors,
+        errors: parseResult.errors,
       });
       return NextResponse.json(
         {
           error: {
             code: "VALIDATION_ERROR",
             message: "One or more fields are invalid.",
-            details: validationErrors,
+            details: parseResult.errors,
             request_id: getCorrelationContext()?.request_id,
           },
         },
@@ -232,16 +232,7 @@ async function handleStreamsPost(request: Request) {
       );
     }
 
-    const { rate, recipient, schedule, token: rawToken } = body as {
-      rate?: string;
-      recipient?: string;
-      schedule?: string;
-      token?: string;
-    };
-
-    const rateValue = rate ?? "";
-    const recipientValue = recipient ?? "";
-    const scheduleValue = schedule ?? "";
+    const { rate: rateValue, recipient: recipientValue, schedule: scheduleValue, token: rawToken } = parseResult.data;
     const tokenStr = rawToken?.trim() || "XLM";
     let normalisedToken: string;
     try {

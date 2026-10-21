@@ -42,7 +42,7 @@ import { NextResponse } from "next/server";
 import { getStore } from "@/app/lib/db";
 import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
-import { validateCreateStreamBody } from "@/app/lib/stream-validation";
+import { parseCreateStreamBody, NormalisedCreateStreamInput } from "@/app/lib/stream-validation";
 import { checkTokenAllowed, normaliseToken } from "@/app/lib/token-allowlist";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 
@@ -145,7 +145,7 @@ function normaliseRow(
 async function validateRow(
   row: Record<string, string>,
   index: number,
-): Promise<RowError[]> {
+): Promise<{ errors: RowError[]; parsed?: NormalisedCreateStreamInput }> {
   const errors: RowError[] = [];
 
   if (!row.recipient) {
@@ -172,19 +172,20 @@ async function validateRow(
     });
   }
 
-  if (errors.length > 0) return errors;
+  if (errors.length > 0) return { errors };
 
   // Use the shared stream validation for deeper checks
-  const fieldErrors = validateCreateStreamBody(row as unknown as Record<string, unknown>);
-  for (const fe of fieldErrors) {
-    errors.push({
-      field: fe.field,
-      code: fe.code,
-      message: fe.message,
-    });
+  const parseResult = parseCreateStreamBody(row as unknown as Record<string, unknown>);
+  if (!parseResult.success) {
+    for (const fe of parseResult.errors) {
+      errors.push({
+        field: fe.field,
+        code: fe.code,
+        message: fe.message,
+      });
+    }
+    return { errors };
   }
-
-  if (errors.length > 0) return errors;
 
   // Token allowlist check
   const tokenStr = row.token?.trim() || "XLM";
@@ -198,7 +199,7 @@ async function validateRow(
       code: "INVALID_TOKEN",
       message: `Invalid token format: ${msg}`,
     });
-    return errors;
+    return { errors };
   }
 
   const allowlistResult = await checkTokenAllowed(normalisedToken);
@@ -208,9 +209,10 @@ async function validateRow(
       code: "TOKEN_NOT_ALLOWED",
       message: allowlistResult.reason,
     });
+    return { errors };
   }
 
-  return errors;
+  return { errors: [], parsed: parseResult.data };
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────────
@@ -285,9 +287,9 @@ export async function POST(request: Request) {
 
   for (let i = 0; i < rows.length; i++) {
     const row = normaliseRow(rows[i]);
-    const rowErrors = await validateRow(row, i);
+    const { errors: rowErrors, parsed } = await validateRow(row, i);
 
-    if (rowErrors.length > 0) {
+    if (rowErrors.length > 0 || !parsed) {
       results.push({ row: i + 1, status: "error", errors: rowErrors });
       failed++;
       continue;
@@ -312,9 +314,9 @@ export async function POST(request: Request) {
         createdAt: now,
         id,
         nextAction: "start" as const,
-        rate: row.rate,
-        recipient: row.recipient,
-        schedule: row.schedule,
+        rate: parsed.rate,
+        recipient: parsed.recipient,
+        schedule: parsed.schedule,
         status: "draft" as const,
         updatedAt: now,
         token: normalisedToken,
