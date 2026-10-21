@@ -1,3 +1,4 @@
+import { recordEviction } from "./rate-limit-metrics";
 export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
@@ -17,11 +18,22 @@ interface Bucket {
 export class InMemoryRateLimitStore implements RateLimitStore {
   private buckets = new Map<string, Bucket>();
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
+  private readonly maxTokensPerBucket: number;
+  private readonly maxBuckets: number;
 
-  constructor(private readonly maxTokensPerBucket = 1000) {
+  constructor(
+    maxTokensPerBucket = 1000,
+    options?: { maxBuckets?: number }
+  ) {
+    this.maxTokensPerBucket = maxTokensPerBucket;
+    this.maxBuckets = options?.maxBuckets ?? 50_000;
     if (process.env.NODE_ENV !== "test" && typeof setInterval !== "undefined") {
       this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
     }
+  }
+
+  getBucketCount(): number {
+    return this.buckets.size;
   }
 
   async check(identifier: string, limit: number, windowMs: number): Promise<RateLimitResult> {
@@ -29,6 +41,13 @@ export class InMemoryRateLimitStore implements RateLimitStore {
     const bucket = this.buckets.get(identifier);
 
     if (!bucket) {
+      if (this.buckets.size >= this.maxBuckets) {
+        const oldestKey = this.buckets.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.buckets.delete(oldestKey);
+          recordEviction();
+        }
+      }
       const newBucket: Bucket = {
         tokens: limit - 1,
         lastRefill: now,
@@ -40,6 +59,9 @@ export class InMemoryRateLimitStore implements RateLimitStore {
         resetAt: Math.floor((now + windowMs) / 1000),
       };
     }
+
+    this.buckets.delete(identifier);
+    this.buckets.set(identifier, bucket);
 
     const elapsed = now - bucket.lastRefill;
     const refillRate = limit / windowMs;

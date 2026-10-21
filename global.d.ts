@@ -19,6 +19,10 @@ declare namespace NodeJS {
     ALLOWED_ORIGINS?: string;
     /** Node runtime mode ('development' | 'production' | 'test'). */
     NODE_ENV?: string;
+    /** Upstream reverse proxy configuration for client IP extraction. */
+    TRUST_PROXY?: string;
+    /** Comma-separated list of SHA-256 hashes of valid API keys. */
+    STREAMPAY_API_KEYS?: string;
 
     // -------------------------------------------------------------------------
     // 2. Application & Service Metadata

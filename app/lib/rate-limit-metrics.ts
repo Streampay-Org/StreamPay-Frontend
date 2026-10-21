@@ -10,6 +10,15 @@ const throttledCounters = new Map<string, number>();
 const totalCounters = new Map<string, number>();
 const recentThrottles: ThrottleEvent[] = [];
 const MAX_RECENT_THROTTLES = 100;
+let evictionsCount = 0;
+
+export function recordEviction(): void {
+  evictionsCount += 1;
+}
+
+export function getEvictionsCount(): number {
+  return evictionsCount;
+}
 
 export function recordThrottle(
   route: string,
@@ -52,11 +61,13 @@ export function getMetrics(): {
   throttled: Record<string, number>;
   total: Record<string, number>;
   recentThrottles: ThrottleEvent[];
+  evictions: number;
 } {
   return {
     throttled: Object.fromEntries(throttledCounters),
     total: Object.fromEntries(totalCounters),
     recentThrottles: [...recentThrottles],
+    evictions: evictionsCount,
   };
 }
 
@@ -64,4 +75,5 @@ export function resetMetrics(): void {
   throttledCounters.clear();
   totalCounters.clear();
   recentThrottles.length = 0;
+  evictionsCount = 0;
 }
