@@ -5,6 +5,18 @@
  */
 
 import { NextResponse } from "next/server";
+import {
+  buildLimitsConfig,
+  createBodySizeTooLargeResponse,
+  extractPathname,
+  getBodySizeLimit,
+} from "@/lib/bodySize";
+import {
+  BodyTooLargeError,
+  InvalidJsonError,
+  readJsonBody,
+} from "@/lib/readJsonBody";
+import { resolveRequestId } from "@/lib/requestId";
 
 interface StreamTemplate {
   id: string;
@@ -39,9 +51,28 @@ export async function GET() {
 export async function POST(request: Request) {
   let body: Partial<StreamTemplate>;
   try {
-    body = await request.json();
-  } catch {
-    return createErrorResponse("INVALID_JSON", "Request body must be valid JSON", 400);
+    const limits = buildLimitsConfig();
+    const maxBytes =
+      getBodySizeLimit(extractPathname(request), limits) ?? limits.default;
+    body = await readJsonBody<Partial<StreamTemplate>>(request, { maxBytes });
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) {
+      return createBodySizeTooLargeResponse(
+        error.receivedBytes,
+        error.maxBytes,
+        resolveRequestId(request.headers),
+      );
+    }
+    if (error instanceof InvalidJsonError) {
+      return createErrorResponse(
+        error.code,
+        error.code === "EMPTY_BODY"
+          ? "Request body is required"
+          : "Request body must be valid JSON",
+        400,
+      );
+    }
+    throw error;
   }
 
   if (!body.name || typeof body.name !== "string" || body.name.trim().length === 0) {

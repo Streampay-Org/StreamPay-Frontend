@@ -45,7 +45,7 @@ export function GasOnRecipientToggle({
         padding: '1rem',
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius-md)',
-        background: enabled ? 'var(--panel-accent, var(--panel))' : 'var(--panel)',
+        background: enabled ? 'var(--panel)' : 'var(--panel)',
         transition: 'background 200ms',
       }}
     >
@@ -98,7 +98,7 @@ export function GasOnRecipientToggle({
           borderRadius: 'var(--radius-sm, 6px)',
           background: enabled
             ? 'rgba(251, 191, 36, 0.12)'   /* amber-tinted warning */
-            : 'var(--surface, rgba(255,255,255,0.04))',
+            : 'var(--surface-raised)',
           border: `1px solid ${enabled ? 'rgba(251, 191, 36, 0.3)' : 'var(--border)'}`,
           fontSize: 'var(--text-xs, 0.75rem)',
           color: enabled ? '#fbbf24' : 'var(--muted-light)',

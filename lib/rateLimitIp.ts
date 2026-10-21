@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRateLimitStore, RateLimitStore } from "@/app/lib/rate-limit-store";
 import { recordThrottle, recordRequest } from "@/app/lib/rate-limit-metrics";
+import { generateRequestId } from "@/lib/requestId";
 
 /**
  * Wallet auth IP rate limits (independent of the general API rate limiter).
@@ -30,7 +31,7 @@ export function resolveCorrelationId(req: NextRequest): string {
   if (forwarded && forwarded.trim().length > 0) {
     return forwarded.trim();
   }
-  return `req_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 10)}`;
+  return generateRequestId();
 }
 
 /**

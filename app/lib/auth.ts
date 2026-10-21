@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { NextResponse } from "next/server";
+import { resolveRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
 import type { AuditActorRole } from "@/app/types/audit";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -189,10 +190,19 @@ interface TokenClaims {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function createErrorResponse(code: string, message: string, status: number) {
+function createErrorResponse(
+  request: Request,
+  code: string,
+  message: string,
+  status: number,
+) {
+  const requestId = resolveRequestId(request.headers);
   return NextResponse.json(
-    { error: { code, message, request_id: "mock-request-id" } },
-    { status },
+    { error: { code, message, request_id: requestId } },
+    {
+      status,
+      headers: { [REQUEST_ID_HEADER]: requestId },
+    },
   );
 }
 
@@ -233,7 +243,7 @@ export function signToken(
     {
       expiresIn: JWT_EXPIRES_IN,
       algorithm: "HS256",
-      header: { kid: getCurrentKeyId() },
+      header: { alg: "HS256", kid: getCurrentKeyId() },
     },
   );
 }
@@ -293,6 +303,7 @@ export function requireAuditLogAccess(
   const actor = tryAuthenticateRequest(request);
   if (!actor) {
     return createErrorResponse(
+      request,
       "UNAUTHORIZED",
       "Missing or invalid authorization header",
       401,
@@ -303,6 +314,7 @@ export function requireAuditLogAccess(
     access === "export" ? AUDIT_LOG_EXPORT_ROLES : AUDIT_LOG_READ_ROLES;
   if (!allowedRoles.has(actor.role)) {
     return createErrorResponse(
+      request,
       "FORBIDDEN",
       "You do not have permission to access audit logs",
       403,

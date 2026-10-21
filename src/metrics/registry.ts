@@ -22,6 +22,23 @@ export const webhookDuration = new Histogram({
   registers: [registry],
 });
 
+// ── /api/exports metrics ────────────────────────────────────────────────────
+
+export const exportCounter = new Counter({
+  name: 'export_requests_total',
+  help: 'Total number of /api/exports requests',
+  labelNames: ['status', 'method'],
+  registers: [registry],
+});
+
+export const exportDuration = new Histogram({
+  name: 'export_request_duration_seconds',
+  help: 'Histogram of /api/exports request processing duration in seconds',
+  labelNames: ['status', 'method'],
+  buckets: [0.1, 0.5, 1, 2, 5, 15],
+  registers: [registry],
+});
+
 export const reconciliationCounter = new Counter({
   name: 'api_reconciliation_requests_total',
   help: 'Total number of /api/reconciliation requests received',

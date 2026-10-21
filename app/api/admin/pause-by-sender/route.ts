@@ -22,6 +22,7 @@ import { requireAdmin } from "@/app/lib/admin-guard";
 import { db } from "@/app/lib/db";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { getCorrelationContext, logger, withCorrelationContext } from "@/app/lib/logger";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 import crypto from "crypto";
 import type { Stream } from "@/app/types/openapi";
 
@@ -113,6 +114,14 @@ export async function POST(request: Request): Promise<NextResponse> {
       };
 
       db.streams.set(stream.id, updated);
+
+      publishStreamChange({
+        action: "pause",
+        actor: request.headers.get("Actor-Wallet-Address") ?? undefined,
+        after: updated,
+        before,
+        correlationId: correlation_id,
+      });
 
       recordPrivilegedStreamAuditEvent({
         action: "admin.pause-by-sender",

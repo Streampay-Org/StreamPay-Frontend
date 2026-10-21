@@ -185,7 +185,7 @@ export const createStreamSchema = z
  * valid (though the caller still needs to handle token allowlisting etc.).
  */
 export function validateCreateStreamBody(
-  body: Record<string, unknown>,
+  body: unknown,
 ): ValidationError[] {
   const result = createStreamSchema.safeParse(body);
   return result.success ? [] : zodIssuesToErrors(result.error);

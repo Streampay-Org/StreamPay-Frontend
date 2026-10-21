@@ -2,7 +2,14 @@ import { redactDiagnosticBody } from "./redact";
 import { SdkErrorCode } from "./types";
 
 export { SdkErrorCode } from "./types";
-export type StreamStatus = "draft" | "active" | "paused" | "ended";
+export type StreamStatus =
+  | "draft"
+  | "active"
+  | "paused"
+  | "ended"
+  | "withdrawn"
+  | "cancelled"
+  | (string & {});
 
 export interface StreamPayStream {
   id: string;
@@ -53,6 +60,16 @@ export interface StreamPayPage<T> {
   meta?: Record<string, unknown>;
 }
 
+export interface StreamPayStreamList {
+  streams: StreamPayStream[];
+  meta: {
+    hasNext: boolean;
+    nextCursor: string | null;
+    total: number;
+  };
+  links: Record<string, string>;
+}
+
 export interface StreamPayItem<T> {
   data: T;
   links?: Record<string, string>;
@@ -83,6 +100,7 @@ export interface StreamPayClientOptions {
   fetchFn?: FetchLike;
   eventSourceFactory?: EventSourceFactory;
   requestIdFactory?: () => string;
+  onDiagnostic?: (message: string) => void;
   streamEventsPath?: string;
 }
 
@@ -118,6 +136,26 @@ interface ActiveSharedConnection {
   url: string;
   source: EventSourceLike;
   subscribers: Set<StreamEventHandlers>;
+}
+
+let hasWarnedAboutStreamListData = false;
+
+function addDeprecatedStreamListDataGetter(
+  page: StreamPayStreamList,
+  onDiagnostic: (message: string) => void,
+): StreamPayStreamList {
+  Object.defineProperty(page, "data", {
+    get() {
+      if (!hasWarnedAboutStreamListData) {
+        hasWarnedAboutStreamListData = true;
+        onDiagnostic(
+          "[StreamPay SDK] listStreams().data is deprecated; use .streams instead.",
+        );
+      }
+      return page.streams;
+    },
+  });
+  return page;
 }
 
 export class StreamPaySdkError extends Error {
@@ -210,6 +248,7 @@ export class StreamPayClient {
   private readonly eventSourceFactory?: EventSourceFactory;
   private readonly fetchFn: FetchLike;
   private readonly requestIdFactory: () => string;
+  private readonly onDiagnostic: (message: string) => void;
   private readonly streamEventsPath: string;
   private readonly token?: string;
   private readonly activeConnections = new Map<
@@ -226,25 +265,36 @@ export class StreamPayClient {
     this.eventSourceFactory = options.eventSourceFactory;
     this.fetchFn = options.fetchFn ?? fetch.bind(globalThis);
     this.requestIdFactory = options.requestIdFactory ?? defaultRequestId;
+    this.onDiagnostic =
+      options.onDiagnostic ?? ((message) => console.warn(message));
     this.streamEventsPath = options.streamEventsPath ?? "/api/streams/events";
     this.token = options.token;
   }
 
   async listStreams(
     query: StreamListQuery = {},
-  ): Promise<StreamPayPage<StreamPayStream>> {
-    return this.request("GET", "/api/v2/streams", { query });
+  ): Promise<StreamPayStreamList> {
+    const page = await this.request<StreamPayStreamList>(
+      "GET",
+      "/api/v2/streams",
+      { query },
+    );
+    return addDeprecatedStreamListDataGetter(page, this.onDiagnostic);
   }
 
-  async getStream(id: string): Promise<StreamPayItem<StreamPayStream>> {
+  async getStream(id: string): Promise<StreamPayStream> {
     this.assertId(id, "stream id");
-    return this.request("GET", `/api/v2/streams/${encodeURIComponent(id)}`);
+    const response = await this.request<StreamPayItem<StreamPayStream>>(
+      "GET",
+      `/api/v2/streams/${encodeURIComponent(id)}`,
+    );
+    return response.data;
   }
 
   async createStream(
     input: CreateStreamInput,
     options: RequestOptions = {},
-  ): Promise<StreamPayItem<StreamPayStream>> {
+  ): Promise<StreamPayStream> {
     if (
       !input.recipient.trim() ||
       !input.rate.trim() ||
@@ -344,7 +394,7 @@ export class StreamPayClient {
         } catch (err) {
           for (const sub of subscribers) {
             try {
-              sub.onError?.(event as unknown as Event);
+              sub.onError?.(event);
             } catch {
               // ignore secondary error
             }
@@ -371,7 +421,7 @@ export class StreamPayClient {
         } catch (err) {
           for (const sub of subscribers) {
             try {
-              sub.onError?.(event as unknown as Event);
+              sub.onError?.(event);
             } catch {
               // ignore secondary error
             }

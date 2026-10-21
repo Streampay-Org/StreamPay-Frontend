@@ -147,4 +147,29 @@ describe('NotificationSettings', () => {
       })
     );
   });
+
+  it('reports dirty state changes to the parent and clears it after save', async () => {
+    const onDirtyChange = jest.fn();
+    const onSave = jest.fn().mockResolvedValue(undefined);
+
+    render(
+      <NotificationSettings
+        showSaveButton
+        onSave={onSave}
+        onDirtyChange={onDirtyChange}
+      />
+    );
+
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+
+    fireEvent.click(screen.getByLabelText('Play notification sounds'));
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    });
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+  });
 });

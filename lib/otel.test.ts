@@ -30,12 +30,14 @@ jest.mock('../app/lib/logger', () => {
 import * as LoggerMock from '../app/lib/logger';
 
 // Typed accessors into the internal mock state
+// The Jest logger factory adds these test-only state accessors, absent from the production module type.
 const _store  = (LoggerMock as unknown as { __store: Record<string, unknown> }).__store;
+// The Jest logger factory adds these test-only state accessors, absent from the production module type.
 const _getStore = (LoggerMock as unknown as { __getStore: jest.Mock }).__getStore;
 
 // ── Mock fetch ────────────────────────────────────────────────────────────────
 const mockFetch = jest.fn().mockResolvedValue({ ok: true } as Response);
-global.fetch = mockFetch as unknown as typeof fetch;
+global.fetch = mockFetch;
 
 // ── Import under test ─────────────────────────────────────────────────────────
 import {
@@ -71,7 +73,7 @@ function makeCtx(overrides: Partial<TraceContext> = {}): TraceContext {
 
 function freshTracer(): [Tracer, SpanRecord[]] {
   const records: SpanRecord[] = [];
-  return [new Tracer(r => records.push(r)), records];
+  return [new Tracer(r => { records.push(r); }), records];
 }
 
 // ── randomHex ─────────────────────────────────────────────────────────────────

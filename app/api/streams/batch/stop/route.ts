@@ -10,6 +10,7 @@ import {
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 
 const MAX_BATCH_SIZE = 20;
 
@@ -106,6 +107,14 @@ export async function POST(request: NextRequest) {
         updatedAt: now,
       } as any;
       streamRepository.streams.set(id, updatedStream);
+
+      publishStreamChange({
+        action: "stop",
+        actor: actor ?? undefined,
+        after: updatedStream,
+        before,
+        correlationId: getCorrelationContext()?.correlation_id,
+      });
 
       recordPrivilegedStreamAuditEvent({
         action: "stream.stop.override",

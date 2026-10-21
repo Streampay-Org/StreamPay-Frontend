@@ -9,6 +9,7 @@ import type {
 } from "@/app/lib/db";
 import type { ActivityEvent, ExportJob, Stream, User } from "@/app/types/openapi";
 import type { ActivityTimelineStore } from "@/app/lib/repositories/activity-timeline";
+import type { StreamHistoryStore } from "@/app/lib/repositories/stream-history";
 
 export interface SqlExecutor {
   query<TResult = unknown>(
@@ -275,12 +276,19 @@ class UnsupportedActivityTimelineStore implements ActivityTimelineStore {
   reset(): void { throw unsupported("activity_timeline", "reset"); }
 }
 
+class UnsupportedStreamHistoryStore implements StreamHistoryStore {
+  append(): void { throw unsupported("stream_history", "append"); }
+  query(): any { throw unsupported("stream_history", "query"); }
+  reset(): void { throw unsupported("stream_history", "reset"); }
+}
+
 export function createPostgresPersistenceStore(
   config: PostgresStoreConfig,
 ): PersistenceStore {
   return {
     kind: "postgres",
     activityTimeline: new UnsupportedActivityTimelineStore(),
+    streamHistory: new UnsupportedStreamHistoryStore(),
     streamRepository: new PostgresStreamRepository(config.executor),
     idempotencyStore: new PostgresIdempotencyStore(config.executor),
     exportRepository: new PostgresExportRepository(config.executor),

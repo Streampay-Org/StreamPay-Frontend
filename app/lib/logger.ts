@@ -1,3 +1,8 @@
+import {
+  generateRequestId,
+  isValidRequestId,
+  REQUEST_ID_HEADER,
+} from "@/lib/requestId";
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { isSecret, redactSecrets } from './config';
 
@@ -37,24 +42,6 @@ function parseTraceparent(traceparent: string | null): string | undefined {
   return traceparent;
 }
 
-// Extract correlation context from headers
-export function extractCorrelationContext(headers: Headers): CorrelationContext {
-  const correlationIdHeader = headers.get('x-correlation-id') || headers.get('correlation-id');
-  const requestId = headers.get('x-request-id') || headers.get('request-id') || correlationIdHeader || generateUUID();
-  const correlationId = correlationIdHeader || requestId;
-  const traceparent = parseTraceparent(headers.get('traceparent'));
-  const streamId = headers.get('x-stream-id') || headers.get('stream-id') || undefined;
-  const jobId = headers.get('x-job-id') || headers.get('job-id') || undefined;
-
-  return {
-    request_id: requestId,
-    correlation_id: correlationId,
-    traceparent,
-    stream_id: streamId,
-    job_id: jobId,
-  };
-}
-
 // Get current correlation context
 export function getCorrelationContext(): CorrelationContext | undefined {
   return correlationContext.getStore();
@@ -69,6 +56,53 @@ export function withCorrelationContext<T>(
 }
 
 // Set correlation context without callback (for sync operations)
+export function extractCorrelationContext(headers: Headers): CorrelationContext {
+  const rawRequestId =
+    headers.get("x-request-id") ||
+    headers.get("request-id") ||
+    headers.get("correlation-id");
+  const requestId =
+    rawRequestId && isValidRequestId(rawRequestId)
+      ? rawRequestId
+      : generateRequestId();
+
+  const rawCorrelationId =
+    headers.get("x-correlation-id") || headers.get("correlation-id");
+  const correlationId =
+    rawCorrelationId && isValidRequestId(rawCorrelationId)
+      ? rawCorrelationId
+      : requestId;
+
+  const context: CorrelationContext = {
+    request_id: requestId,
+    correlation_id: correlationId,
+  };
+
+  const traceparent = parseTraceparent(headers.get("traceparent"));
+  if (traceparent) context.traceparent = traceparent;
+
+  const streamId = headers.get("x-stream-id") || headers.get("stream-id");
+  if (streamId) context.stream_id = streamId;
+
+  const jobId = headers.get("x-job-id") || headers.get("job-id");
+  if (jobId) context.job_id = jobId;
+
+  const txHash = headers.get("x-stellar-tx-hash");
+  if (txHash) context.stellar_tx_hash = txHash;
+
+  const webhookId = headers.get("x-webhook-id");
+  if (webhookId) context.webhook_id = webhookId;
+
+  const retryCount = headers.get("x-retry-count");
+  if (retryCount && /^\d+$/.test(retryCount)) {
+    context.retry_count = Number(retryCount);
+  }
+
+  const queueName = headers.get("x-queue-name");
+  if (queueName) context.queue_name = queueName;
+
+  return context;
+}
 export function setCorrelationContext(context: CorrelationContext): void {
   correlationContext.enterWith(context);
 }
