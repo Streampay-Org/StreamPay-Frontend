@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { safeJson } from "@/lib/safe-json";
+import { getCorrelationContext } from "@/app/lib/logger";
+import { generateRequestId } from "@/lib/requestId";
 
 /**
  * Canonical error envelope used by every API route.
@@ -56,18 +57,37 @@ export const ErrorCode = {
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
 
 /**
- * Reads the `x-request-id` header forwarded by the gateway/load-balancer,
- * or generates a lightweight fallback so every response always carries one.
+ * Optional overrides for the generated error envelope.
  */
-async function resolveRequestId(): Promise<string> {
-  try {
-    const hdrs = await headers();
-    const forwarded = hdrs.get("x-request-id");
-    if (forwarded) return forwarded;
-  } catch {
-    // headers() throws outside a request context (e.g. unit tests)
+export interface ErrorResponseOptions {
+  /** Explicit request id to stamp on the envelope. */
+  requestId?: string;
+}
+
+/**
+ * Resolves the request id for an error envelope **synchronously**.
+ *
+ * `headers()` returns a Promise in Next.js 15, so it can never be inspected
+ * synchronously; the previous implementation called it from a synchronous code
+ * path, which threw and was swallowed by the fallback catch. That assigned a
+ * random id to every error envelope and lost the correlation context.
+ *
+ * Precedence:
+ *   1. an explicit `options.requestId`;
+ *   2. the request id of the active correlation context;
+ *   3. a freshly generated id.
+ */
+function resolveRequestId(options?: ErrorResponseOptions): string {
+  if (options?.requestId && options.requestId.length > 0) {
+    return options.requestId;
   }
-  return `req_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 10)}`;
+
+  const correlationRequestId = getCorrelationContext()?.request_id;
+  if (correlationRequestId && correlationRequestId.length > 0) {
+    return correlationRequestId;
+  }
+
+  return generateRequestId();
 }
 
 /**
@@ -78,13 +98,14 @@ async function resolveRequestId(): Promise<string> {
  * @param status  - HTTP status code (default 500)
  * @param context - Optional structured context to preserve (will be serialized safely)
  */
-export async function errorResponse(
+export function errorResponse(
   code: string,
   message: string,
   status = 500,
   context?: Record<string, unknown>,
-): Promise<NextResponse<ErrorEnvelope>> {
-  const request_id = await resolveRequestId();
+  options?: ErrorResponseOptions,
+): NextResponse<ErrorEnvelope> {
+  const request_id = resolveRequestId(options);
   const error : ErrorEnvelope["error"] = {
     code,
     message,
