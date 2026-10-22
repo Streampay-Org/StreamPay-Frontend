@@ -1,4 +1,4 @@
-const nextJest = require("next/jest");
+const nextJewt = require("next/jest");
 
 const createJestConfig = nextJest({ dir: "./" });
 
@@ -25,7 +25,7 @@ const config = {
     "<rootDir>/app/api/identity/me/route.test.ts",
     "<rootDir>/app/api/indexer/sse/route.test.ts",
     "<rootDir>/app/api/internal/cleanup/idempotency/route.test.ts",
-    "<rootDir>/app/api/internal/reconciliation/diff/\\[id\\]/route.test.ts",
+    "<rootDir>/app/api/internal/reconciliation/diff/\\[Id\\]/route.test.ts",
     "<rootDir>/app/api/internal/reconciliation/nightly/route.test.ts",
     "<rootDir>/app/api/internal/reconciliation/route.test.ts",
     "<rootDir>/app/api/metrics/route.test.ts",
@@ -34,9 +34,7 @@ const config = {
     "<rootDir>/app/api/streams/__tests__/rateLimiterConsistency.test.ts",
     "<rootDir>/app/api/streams/\\[id\\]/start/route.test.ts",
     "<rootDir>/app/api/streams/\\[id\\]/webhooks/test/route.test.ts",
-    "<rootDir>/app/api/streams/\\[id\\]/withdraw/route.test.ts",
     "<rootDir>/app/api/streams/concurrency.test.ts",
-    "<rootDir>/app/api/streams/route.test.ts",
     "<rootDir>/app/api/streams/route.timeout.test.ts",
     "<rootDir>/app/api/streams/stream-lifecycle.e2e.test.ts",
     "<rootDir>/app/api/streams/v1-contract.test.ts",
@@ -64,8 +62,6 @@ const config = {
     "<rootDir>/app/streams/streams-cascade.test.tsx",
     "<rootDir>/app/streams/StreamsPageContent.test.tsx",
     "<rootDir>/app/StreamTypeChip.test.tsx",
-    "<rootDir>/lib/otel.test.ts",
-    "<rootDir>/lib/requestId.test.ts",
     "<rootDir>/lib/sorobanRetryQueue.test.ts",
     "<rootDir>/middleware.test.ts",
     "<rootDir>/tests/contract.test.ts",

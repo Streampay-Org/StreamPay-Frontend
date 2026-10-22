@@ -201,6 +201,14 @@ class InMemoryKeyValueStore<K, V> implements KeyValueStore<K, V> {
     return this.backing.get(key);
   }
 
+  insert(key: K, value: V): boolean {
+    if (this.backing.has(key)) {
+      return false;
+    }
+    this.backing.set(key, value);
+    return true;
+  }
+
   has(key: K): boolean {
     return this.backing.has(key);
   }

@@ -371,7 +371,9 @@
               "draft",
               "active",
               "paused",
-              "ended"
+              "ended",
+              "withdrawn",
+              "cancelled"
             ],
             "description": "Current lifecycle state of the stream."
           },
@@ -380,7 +382,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Actions the authenticated user may perform on this stream. Replaces v1 `actions`.",
+            "description": "Legal actions for the stream's current status, derived from the lifecycle state-machine table (status-changing actions only). Replaces v1 `actions`.",
             "example": [
               "pause",
               "stop"
@@ -397,11 +399,16 @@
               {
                 "type": "object",
                 "required": [
+                  "tx_hash",
                   "settled_at",
                   "amount",
                   "currency"
                 ],
                 "properties": {
+                  "tx_hash": {
+                    "type": "string",
+                    "example": "c3f8a12e4b76"
+                  },
                   "settled_at": {
                     "type": "string",
                     "format": "date-time",
@@ -409,7 +416,8 @@
                   },
                   "amount": {
                     "type": "string",
-                    "example": "360 XLM"
+                    "description": "Raw-unit amount string (releasedAmount or totalAmount).",
+                    "example": "3600000000"
                   },
                   "currency": {
                     "type": "string",
@@ -3206,6 +3214,236 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/streams/{id}/withdraw": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Client-generated key (UUID recommended) to make the request idempotent.",
+          "schema": {
+            "type": "string",
+            "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "withdrawStream",
+        "summary": "Withdraw vested funds from a payment stream",
+        "description": "Releases vested-but-unreleased funds to the stream recipient. The caller must be authenticated as the stream recipient, or be an org member with `withdraw` permission. Amounts are raw i128 units (stroops for XLM); omit `amount` to withdraw the full withdrawable balance. Auth is checked before stream state, and stream state before the amount.",
+        "tags": [
+          "Streams v1"
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "string",
+                    "pattern": "^\\d+$",
+                    "description": "Optional raw i128 units as a decimal string. Maximum 2^127-1. Omit to withdraw the full withdrawable balance. Decimals, signs and symbols are rejected.",
+                    "example": "10000000"
+                  }
+                }
+              },
+              "examples": {
+                "full-withdrawal": {
+                  "summary": "Omit amount to withdraw everything available",
+                  "value": {}
+                },
+                "partial-withdrawal": {
+                  "summary": "Withdraw an exact raw-unit amount",
+                  "value": {
+                    "amount": "5000000"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Withdrawal computed and the stream's releasedAmount persisted alongside its finality state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/StreamV1"
+                    },
+                    "withdrawal": {
+                      "type": "object",
+                      "description": "Current withdrawal finality state."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No verified caller identity (Bearer JWT or Actor-Wallet-Address fallback).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "A verified caller identity is required to withdraw from a stream.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is neither the stream recipient nor an org member permitted to withdraw.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "not-recipient": {
+                    "value": {
+                      "error": {
+                        "code": "RECIPIENT_AUTH_REQUIRED",
+                        "message": "Only the stream recipient or an authorized org member may withdraw.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "role-insufficient": {
+                    "value": {
+                      "error": {
+                        "code": "ROLE_INSUFFICIENT",
+                        "message": "Role 'pauser' is not permitted to perform 'withdraw'.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stream not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "STREAM_NOT_FOUND",
+                    "message": "Stream 'stream-abc12345' not found",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stream state or balance conflict: `INVALID_STREAM_STATE`, `NO_WITHDRAWABLE_BALANCE`, or `APPROVAL_REQUIRED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "invalid-state": {
+                    "value": {
+                      "error": {
+                        "code": "INVALID_STREAM_STATE",
+                        "message": "Only ended streams can be withdrawn from",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "no-balance": {
+                    "value": {
+                      "error": {
+                        "code": "NO_WITHDRAWABLE_BALANCE",
+                        "message": "No vested funds are available for withdrawal at this time.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid amount or escrow state: `VALIDATION_ERROR`, `ZERO_AMOUNT`, `OVER_WITHDRAW`, or `INVALID_ESCROW_STATE`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "validation-error": {
+                    "value": {
+                      "error": {
+                        "code": "VALIDATION_ERROR",
+                        "message": "amount must be a non-negative raw i128 integer string.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "over-withdraw": {
+                    "value": {
+                      "error": {
+                        "code": "OVER_WITHDRAW",
+                        "message": "Requested amount exceeds withdrawable balance.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many requests. Retry after 30 seconds.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
           }
         }
       }
