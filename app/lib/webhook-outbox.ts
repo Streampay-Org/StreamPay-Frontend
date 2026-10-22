@@ -298,6 +298,77 @@ export class WebhookOutboxStore {
 
 export const webhookOutboxStore = new WebhookOutboxStore();
 
+export interface AddToOutboxParams {
+  eventId: string;
+  eventType?: string | null;
+  streamId: string;
+  url: string;
+  data?: Record<string, unknown>;
+  payload?: Record<string, unknown>;
+}
+
+export function addToOutbox(params: AddToOutboxParams): WebhookOutboxEntry {
+  const endpoint: WebhookEndpoint = {
+    id: `stream:${params.streamId}`,
+    url: params.url,
+  };
+  const event: WebhookEvent = {
+    id: params.eventId,
+    eventType: (params.eventType ?? "stream.updated") as any,
+    data: params.payload ?? params.data ?? {},
+    createdAt: new Date().toISOString(),
+  };
+  return webhookOutboxStore.addToOutbox(endpoint, event);
+}
+
+export function buildStreamWebhookPayload(params: {
+  eventType?: string | null;
+  streamId: string;
+  action: string;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+  occurredAt?: string;
+}): Record<string, unknown> {
+  return {
+    event_type: params.eventType,
+    stream_id: params.streamId,
+    action: params.action,
+    before: params.before,
+    after: params.after,
+    occurred_at: params.occurredAt ?? new Date().toISOString(),
+  };
+}
+
+export function enqueueStreamLifecycleWebhook(params: {
+  action: StreamLifecycleAction;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+}): void {
+  const stream = params.after as unknown as Stream;
+  if (!stream || !stream.webhook_url) return;
+  const event = toWebhookEvent(
+    params.before as unknown as Pick<Stream, "status"> | null,
+    stream,
+    params.action,
+  );
+  if (!event) return;
+  const now = new Date().toISOString();
+  addToOutbox({
+    eventId: `evt_${stream.id}_${params.action}_${now}`,
+    eventType: event,
+    streamId: stream.id,
+    url: stream.webhook_url,
+    data: buildStreamWebhookPayload({
+      eventType: event,
+      streamId: stream.id,
+      action: params.action,
+      before: params.before,
+      after: params.after,
+      occurredAt: now,
+    }),
+  });
+}
+
 /**
  * Legacy alias kept so `lib/outbox.ts` can re-export a single outbox store
  * without introducing a second implementation.
