@@ -66,12 +66,30 @@ function makeGetRequest(params: Record<string, string> = {}, headers: Record<str
   } as unknown as import('next/server').NextRequest;
 }
 
+function streamFromText(text: string): ReadableStream<Uint8Array> {
+  const encoded = new TextEncoder().encode(text);
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (encoded.byteLength > 0) controller.enqueue(encoded);
+      controller.close();
+    },
+  });
+}
+
 function makePostRequest(
   body: unknown,
   csrfCookie?: string,
   csrfHeader?: string,
 ) {
+  const text =
+    body === 'THROW'
+      ? '{'
+      : typeof body === 'string'
+        ? body
+        : (JSON.stringify(body) ?? '');
+
   return {
+    body: streamFromText(text),
     json: async () => {
       if (body === 'THROW') throw new Error('parse error');
       return body;
