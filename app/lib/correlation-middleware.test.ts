@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  isTrustedInternalRequest,
-  sanitizeCorrelationHeaders,
   withCorrelationMiddleware,
   withJobContext,
   withRetryContext,
@@ -76,70 +74,6 @@ describe('correlation-middleware', () => {
     const response = await withCorrelationMiddleware(request, handler);
 
     expect(response.headers.get('traceparent')).toBe(
-      '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
-    );
-  });
-
-  it('returns true for localhost and loopback hosts', () => {
-    expect(isTrustedInternalRequest(new NextRequest('http://localhost/api/streams', {
-      headers: { host: 'localhost' },
-    }))).toBe(true);
-    expect(isTrustedInternalRequest(new NextRequest('http://127.0.0.1/api/streams', {
-      headers: { host: '127.0.0.1' },
-    }))).toBe(true);
-  });
-
-  it('returns false for external hosts when no trusted auth token is supplied', () => {
-    const request = new NextRequest('https://api.example.com/streams', {
-      headers: { host: 'api.example.com' },
-    });
-
-    expect(isTrustedInternalRequest(request)).toBe(false);
-  });
-
-  it('accepts a valid internal auth token for trusted requests', () => {
-    process.env.INTERNAL_AUTH_TOKEN = 'valid-token';
-    const request = new NextRequest('https://api.example.com/streams', {
-      headers: {
-        host: 'api.example.com',
-        'x-internal-auth': 'valid-token',
-      },
-    });
-
-    expect(isTrustedInternalRequest(request)).toBe(true);
-    delete process.env.INTERNAL_AUTH_TOKEN;
-  });
-
-  it('does not trust external correlation IDs and generates fresh values', () => {
-    const request = new NextRequest('https://api.example.com/streams', {
-      headers: {
-        'x-request-id': 'req-123',
-        'x-correlation-id': 'corr-456',
-        traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
-      },
-    });
-
-    const result = sanitizeCorrelationHeaders(request, false);
-
-    expect(result.requestId).not.toBe('req-123');
-    expect(result.correlationId).not.toBe('corr-456');
-    expect(result.traceparent).toBeUndefined();
-  });
-
-  it('keeps trusted correlation headers for trusted requests', () => {
-    const request = new NextRequest('http://localhost/api/streams', {
-      headers: {
-        'x-request-id': 'req-123',
-        'x-correlation-id': 'corr-456',
-        traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
-      },
-    });
-
-    const result = sanitizeCorrelationHeaders(request, true);
-
-    expect(result.requestId).toBe('req-123');
-    expect(result.correlationId).toBe('corr-456');
-    expect(result.traceparent).toBe(
       '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
     );
   });

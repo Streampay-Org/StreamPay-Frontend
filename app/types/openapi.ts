@@ -92,6 +92,9 @@ export interface Stream {
    * Required for the cancel-stream refund preview split.
    */
   totalAmount?: string;
+  /** ISO-8601 bounds of linear vesting, when a vesting window is configured. */
+  startTime?: string;
+  endTime?: string;
   /**
    * Present only on cancelled streams. Contains the full refund-split
    * breakdown so callers can verify the escrow-conservation invariant.
@@ -132,6 +135,8 @@ export interface Stream {
    * stream escrow account (GrantFox campaign, issue #pause-entrypoint).
    */
   pausedAt?: string;
+  /** Completed pause time in milliseconds, excluded from linear vesting. */
+  pausedDurationMs?: number;
 }
 
 export interface User {

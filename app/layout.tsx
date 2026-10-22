@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ToastProvider } from "./components/ToastProvider";
 import { CommandPaletteWrapper } from "./components/CommandPaletteWrapper";
@@ -7,11 +7,19 @@ import { SplashScreenWrapper } from "./components/SplashScreenWrapper";
 import { AppBottomNav } from "./components/AppBottomNav";
 import { SiteHeader } from "./components/SiteHeader";
 import { ClientErrorReporter } from "./components/ClientErrorReporter";
+import { ThemeController } from "./components/ThemeController";
 import { getThemeScript } from "./utils/theme-noflash";
 
 export const metadata: Metadata = {
   title: "StreamPay - Payment Streaming",
   description: "Real-time payment streaming on Stellar",
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0f" },
+  ],
 };
 
 export default function RootLayout({
@@ -28,6 +36,7 @@ export default function RootLayout({
         />
       </head>
       <body>
+        <ThemeController />
         <ClientErrorReporter />
         <ToastProvider>
           <SplashScreenWrapper />

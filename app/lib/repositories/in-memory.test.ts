@@ -103,6 +103,19 @@ describe("repository adapters", () => {
     expect(store.exportRepository.processing.get("TEST_PROC")).toBe(testPromise);
   });
 
+  it("inserts a key only when it does not already exist", () => {
+    const store = createInMemoryPersistenceStore();
+    setStore(store);
+
+    const stream = { id: "stream-unique", status: "draft" } as any;
+    expect(store.streamRepository.streams.insert("stream-unique", stream)).toBe(true);
+    expect(store.streamRepository.streams.get("stream-unique")).toBe(stream);
+
+    const duplicate = { id: "stream-unique", status: "active" } as any;
+    expect(store.streamRepository.streams.insert("stream-unique", duplicate)).toBe(false);
+    expect(store.streamRepository.streams.get("stream-unique")?.status).toBe("draft");
+  });
+
   it("serializes concurrent work for the same lock key", async () => {
     const store = createInMemoryPersistenceStore();
     const gate = deferred();

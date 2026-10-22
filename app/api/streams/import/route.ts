@@ -39,7 +39,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { getStore } from "@/app/lib/db";
+import { getStore, newStreamId } from "@/app/lib/db";
 import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { validateCreateStreamBody } from "@/app/lib/stream-validation";
@@ -298,7 +298,6 @@ export async function POST(request: Request) {
     if (dryRun) {
       results.push({ row: i + 1, status: "valid" });
     } else {
-      const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
       const now = new Date().toISOString();
       const tokenStr = row.token?.trim() || "XLM";
       let normalisedToken: string;

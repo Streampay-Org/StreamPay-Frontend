@@ -2,7 +2,7 @@
   "name": "streampay-frontend",
   "version": "0.1.0",
   "private": true,
-  "description": "StreamPay Dashboard â€” Stellar wallet integration and stream management",
+  "description": "StreamPay Dashboard \u00e2\u20ac\u201d Stellar wallet integration and stream management",
   "scripts": {
     "typecheck:core": "tsc -p tsconfig.strict-core.json --noEmit",
     "typecheck": "tsc --noEmit",

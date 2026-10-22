@@ -5,6 +5,8 @@
 @import "./styles/typography.css";
 
 :root {
+  color-scheme: dark;
+
   /* Aliases referenced by some components but never defined. */
   --text: var(--foreground);
   --card-bg: var(--panel);
@@ -161,6 +163,7 @@
 
 /* ── Light Theme ── */
 .light {
+  color-scheme: light;
   --background: #ffffff;
   --foreground: #111827;
   --accent: #16a34a;

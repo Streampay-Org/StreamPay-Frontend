@@ -70,6 +70,23 @@ export async function POST(
       return createErrorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
     }
 
+    // Allow both draft→active (initial start) and paused→active (resume).
+    // Any other status is an illegal transition.
+    if (stream.status !== "draft" && stream.status !== "paused") {
+      return createErrorResponse(
+        "INVALID_STREAM_STATE",
+        `Cannot start a stream in '${stream.status}' status. Stream must be draft or paused.`,
+        409,
+      );
+    }
+
+    const isResume = stream.status === "paused";
+    const resumedAt = new Date();
+    const pauseStarted = stream.pausedAt ? Date.parse(stream.pausedAt) : NaN;
+    const completedPause = isResume && Number.isFinite(pauseStarted)
+      ? Math.max(0, resumedAt.getTime() - pauseStarted)
+      : 0;
+
     const actorAddress = getHeader(request, "Actor-Wallet-Address");
     // Use "start" for initial activation; "resume" maps to "start" in the org policy
     const orgAction = "start" as const;
@@ -89,14 +106,18 @@ export async function POST(
       }
     }
 
-    const execResult = await executeStreamAction(id, "start", {
-      actor: actorAddress,
-      request,
-    });
-
-    if (!execResult.ok) {
-      return createErrorResponse(execResult.code, execResult.error, execResult.status);
-    }
+    const updatedStream = {
+      ...stream,
+      nextAction: "pause" as const,
+      // Clear pausedAt when resuming — the field only tracks when the stream
+      // entered paused state and is meaningless once it is active again.
+      // Cleared here to prevent stale timestamps appearing in API responses.
+      pausedAt: undefined as string | undefined,
+      pausedDurationMs: (stream.pausedDurationMs ?? 0) + completedPause,
+      status: "active" as const,
+      updatedAt: resumedAt.toISOString(),
+    };
+    db.streams.set(id, updatedStream);
 
     appendStreamHistoryEvent({
       streamId: id,
