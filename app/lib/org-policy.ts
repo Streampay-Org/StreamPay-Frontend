@@ -322,7 +322,7 @@ export function initiateApproval(
 
 export type CastApprovalResult =
   | { ok: true; approval: PendingApproval; thresholdMet: boolean }
-  | { ok: false; error: string; httpStatus: 400 | 403 | 404 | 409 };
+  | { ok: false; error: string; code?: string; httpStatus: 400 | 403 | 404 | 409 | 410 };
 
 /**
  * Adds `voterWalletAddress`'s approval to an existing PendingApproval.
@@ -343,6 +343,15 @@ export function castApproval(
     return { ok: false, error: `Approval '${approvalId}' not found.`, httpStatus: 404 };
   }
 
+  if (approval.status === "executed") {
+    return {
+      ok: false,
+      code: "APPROVAL_ALREADY_EXECUTED",
+      error: `Approval '${approvalId}' has already been executed.`,
+      httpStatus: 409,
+    };
+  }
+
   if (approval.status !== "pending") {
     return {
       ok: false,
@@ -357,8 +366,9 @@ export function castApproval(
     orgDb.approvals.set(approvalId, expired);
     return {
       ok: false,
+      code: "APPROVAL_EXPIRED",
       error: `Approval '${approvalId}' has expired.`,
-      httpStatus: 409,
+      httpStatus: 410,
     };
   }
 

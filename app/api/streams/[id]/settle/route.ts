@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db, withLock } from "@/app/lib/db";
 import { withIdempotency, settleStore } from "@/app/lib/idempotency";
-import { getCorrelationContext, logger } from "@/app/lib/logger";
+import { getCorrelationContext } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
@@ -56,33 +56,10 @@ export async function POST(
         }
       }
 
-      if (stream.status !== "active" && stream.status !== "paused") {
-        return errorResponse("INVALID_STREAM_STATE", "Only active or paused streams can be settled", 409);
-      }
-
-      const before = structuredClone(stream);
-      const txHash = `fake-tx-${crypto.randomUUID().slice(0, 8)}`;
-      const now = new Date().toISOString();
-      const updatedStream = {
-        ...stream,
-        nextAction: "withdraw" as const,
-        settlementTxHash: txHash,
-        status: "ended" as const,
-        updatedAt: now,
-        withdrawal: {
-          attempts: 0,
-          lastCheckedAt: now,
-          requestedAt: now,
-          settlementTxHash: txHash,
-          state: "pending" as const,
-        },
-      };
-      db.streams.set(id, updatedStream);
-
-      try {
-        const settlement = await getStellarSettlementClient().settleStream({ streamId: id });
-
-        db.streams.set(id, updatedStream);
+      const execResult = await executeStreamAction(id, "settle", {
+        actor: actorAddress,
+        request,
+      });
 
         appendStreamHistoryEvent({
           streamId: id,
@@ -146,6 +123,8 @@ export async function POST(
       } catch {
         return errorResponse("SETTLEMENT_FAILED", "Failed to settle stream on Stellar/Soroban", 502);
       }
+
+      return NextResponse.json({ data: execResult.data });
     });
   }, { resourceId: id, actorId: actorAddress ?? undefined });
 }

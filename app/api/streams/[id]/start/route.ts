@@ -7,7 +7,7 @@ import {
   setIdempotency,
   withLock,
 } from "@/app/lib/db";
-import { getCorrelationContext, logger } from "@/app/lib/logger";
+import { getCorrelationContext } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 import { addToOutbox } from "@/app/lib/webhook-outbox";
@@ -165,12 +165,6 @@ export async function POST(
     if (token) {
       setIdempotency(db.idempotency, token, fingerprint, 200, payload);
     }
-
-    logger.info(isResume ? "Stream resumed successfully" : "Stream started successfully", {
-      streamId: id,
-      action: isResume ? "resume" : "start",
-      status: "success",
-    });
 
     return NextResponse.json(payload);
   });

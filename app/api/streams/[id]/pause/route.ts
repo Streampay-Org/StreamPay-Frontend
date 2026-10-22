@@ -247,22 +247,17 @@ export async function POST(
       after: updated as any,
       before: before as any,
       request: req,
-      streamId: id,
-      targetAccount: updated.recipient,
     });
 
-    const responseBody = { data: updated };
+    if (!execResult.ok) {
+      return createErrorResponse(execResult.code, execResult.error, execResult.status);
+    }
+
+    const responseBody = { data: execResult.data };
 
     if (token) {
       setIdempotency(db.idempotency, token, fingerprint, 200, responseBody);
     }
-
-    logger.info("Stream paused successfully", {
-      action: "pause",
-      pausedAt: now,
-      status: "success",
-      streamId: id,
-    });
 
     return NextResponse.json(responseBody);
   });

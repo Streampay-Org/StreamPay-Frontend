@@ -384,7 +384,7 @@ describe("castApproval", () => {
     const result = castApproval(expiredId, SETTLER_ADDR, twoStepOrg, "settle");
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.httpStatus).toBe(409);
+    if (!result.ok) expect(result.httpStatus).toBe(410);
     // Also verify the store was updated to "expired"
     expect(orgDb.approvals.get(expiredId)?.status).toBe("expired");
   });

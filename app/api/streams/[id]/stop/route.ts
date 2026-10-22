@@ -7,7 +7,7 @@ import {
   setIdempotency,
   withLock,
 } from "@/app/lib/db";
-import { getCorrelationContext, logger } from "@/app/lib/logger";
+import { getCorrelationContext } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
@@ -127,8 +127,6 @@ export async function POST(
       before: before as unknown as Record<string, unknown>,
       metadata: { resultingStatus: updatedStream.status },
       request,
-      streamId: id,
-      targetAccount: updatedStream.recipient,
     });
 
     enqueueStreamLifecycleWebhook({
@@ -141,12 +139,6 @@ export async function POST(
     if (token) {
       setIdempotency(db.idempotency, token, fingerprint, 200, payload);
     }
-
-    logger.info("Stream stopped successfully", {
-      streamId: id,
-      action: "stop",
-      status: "success",
-    });
 
     return NextResponse.json(payload);
   });
