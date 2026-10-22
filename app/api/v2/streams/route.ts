@@ -23,7 +23,7 @@ import { db, idempotencyToken, getStore } from "@/app/lib/db";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { getClientIdentity } from "@/app/lib/rate-limit";
 import { checkOrgDailyQuota, orgQuotaResponse } from "@/app/lib/org-quota";
-import { toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
+import { toV2Stream, dbStreamToV1, ProjectionError } from "@/app/lib/api-version";
 import { validateListStreamsQuery } from "@/app/lib/stream-validation";
 import {
   decodeStreamCursor,
@@ -118,8 +118,18 @@ async function handleV2StreamsGet(request: Request) {
       ? encodeStreamCursor(page[page.length - 1])
       : null;
 
+  let projected;
+  try {
+    projected = page.map((stream) => toV2Stream(dbStreamToV1(stream)));
+  } catch (err) {
+    if (err instanceof ProjectionError) {
+      return errorResponse("PROJECTION_ERROR", err.message, 500);
+    }
+    throw err;
+  }
+
   return NextResponse.json({
-    streams: page.map((stream) => toV2Stream(dbStreamToV1(stream))),
+    streams: projected,
     meta: { hasNext, nextCursor, total: streamRepository.streams.size },
     links: { self: `/api/v2/streams?limit=${limit}` },
   });
@@ -207,7 +217,9 @@ async function handleV2StreamsPost(request: Request) {
     ownership,
   };
 
-  db.streams.set(id, newStream);
+  if (!newStream) {
+    return errorResponse("ID_GENERATION_FAILED", "Failed to generate unique stream identifier", 500);
+  }
 
   const stream = toV2Stream(dbStreamToV1(newStream));
   const payload = stream;

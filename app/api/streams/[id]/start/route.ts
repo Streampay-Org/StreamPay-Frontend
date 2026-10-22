@@ -81,6 +81,11 @@ export async function POST(
     }
 
     const isResume = stream.status === "paused";
+    const resumedAt = new Date();
+    const pauseStarted = stream.pausedAt ? Date.parse(stream.pausedAt) : NaN;
+    const completedPause = isResume && Number.isFinite(pauseStarted)
+      ? Math.max(0, resumedAt.getTime() - pauseStarted)
+      : 0;
 
     const actorAddress = getHeader(request, "Actor-Wallet-Address");
     // Use "start" for initial activation; "resume" maps to "start" in the org policy
@@ -108,8 +113,9 @@ export async function POST(
       // entered paused state and is meaningless once it is active again.
       // Cleared here to prevent stale timestamps appearing in API responses.
       pausedAt: undefined as string | undefined,
+      pausedDurationMs: (stream.pausedDurationMs ?? 0) + completedPause,
       status: "active" as const,
-      updatedAt: new Date().toISOString(),
+      updatedAt: resumedAt.toISOString(),
     };
     db.streams.set(id, updatedStream);
 

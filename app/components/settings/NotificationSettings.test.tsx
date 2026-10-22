@@ -172,4 +172,37 @@ describe('NotificationSettings', () => {
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
   });
+
+  // Scenario 8: warning shown when startTime === endTime (issue #1692)
+  it('shows always-on warning when startTime equals endTime and is announced accessibly', async () => {
+    render(
+      <NotificationSettings
+        initialQuietHours={{
+          enabled: true,
+          startTime: '22:00',
+          endTime: '22:00',
+        }}
+      />
+    );
+
+    const warning = await screen.findByTestId('quiet-hours-always-on-warning');
+    expect(warning).toBeInTheDocument();
+    expect(warning).toHaveAttribute('role', 'status');
+    expect(warning).toHaveAttribute('aria-live', 'polite');
+    expect(warning.textContent).toMatch(/all day/i);
+  });
+
+  it('does not show always-on warning when startTime differs from endTime', () => {
+    render(
+      <NotificationSettings
+        initialQuietHours={{
+          enabled: true,
+          startTime: '22:00',
+          endTime: '08:00',
+        }}
+      />
+    );
+
+    expect(screen.queryByTestId('quiet-hours-always-on-warning')).not.toBeInTheDocument();
+  });
 });

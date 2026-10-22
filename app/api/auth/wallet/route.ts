@@ -4,6 +4,7 @@ import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
 import { validateCsrfToken } from "@/app/lib/auth";
 import { checkIpRateLimit, walletIpRateLimitResponse as rateLimitResponse } from "@/src/middleware/rateLimit";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
+import { withRouteSpan } from "@/lib/routeSpan";
 import { logAccessEvent } from "@/src/middleware/accessLog";
 import {
   withTimeout,
@@ -305,7 +306,7 @@ function recordWalletMetrics(
  * `wallet_auth_request_duration_seconds` observation, both labelled with
  * `method="GET"`, `operation="challenge"`, and the final HTTP `status`.
  */
-export async function GET(req: NextRequest) {
+async function handleWalletChallengeGet(req: NextRequest) {
   const startedAt = Date.now();
   const startedAtHr = process.hrtime();
   let response: NextResponse | undefined;
@@ -434,7 +435,7 @@ export async function GET(req: NextRequest) {
  * one `wallet_auth_request_duration_seconds` observation, labelled with
  * `method="POST"`, `operation="verify"`, and the final HTTP `status`.
  */
-export async function POST(req: NextRequest) {
+async function handleWalletVerifyPost(req: NextRequest) {
   const startedAt = Date.now();
   const startedAtHr = process.hrtime();
   let response: NextResponse | undefined;
@@ -583,4 +584,14 @@ export async function POST(req: NextRequest) {
       startedAtHr,
     );
   }
+}
+
+// ── Route instrumentation ────────────────────────────────────────────────────
+
+export async function GET(req: NextRequest) {
+  return withRouteSpan("/api/auth/wallet", () => handleWalletChallengeGet(req));
+}
+
+export async function POST(req: NextRequest) {
+  return withRouteSpan("/api/auth/wallet", () => handleWalletVerifyPost(req));
 }

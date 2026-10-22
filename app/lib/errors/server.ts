@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { safeJson } from "@/lib/safe-json";
+import { getCorrelationContext } from "@/app/lib/logger";
+import { generateRequestId } from "@/lib/requestId";
 
 /**
  * Canonical error envelope used by every API route.
@@ -55,19 +56,26 @@ export const ErrorCode = {
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
 
+export interface ErrorResponseOptions {
+  requestId?: string;
+  context?: Record<string, unknown>;
+}
+
 /**
- * Reads the `x-request-id` header forwarded by the gateway/load-balancer,
- * or generates a lightweight fallback so every response always carries one.
+ * Resolves request ID from:
+ * 1. an explicit requestId option
+ * 2. getCorrelationContext()?.request_id
+ * 3. generateRequestId() fallback
  */
-async function resolveRequestId(): Promise<string> {
-  try {
-    const hdrs = await headers();
-    const forwarded = hdrs.get("x-request-id");
-    if (forwarded) return forwarded;
-  } catch {
-    // headers() throws outside a request context (e.g. unit tests)
+function resolveRequestId(options?: ErrorResponseOptions): string {
+  if (options?.requestId) {
+    return options.requestId;
   }
-  return `req_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 10)}`;
+  const correlationContext = getCorrelationContext();
+  if (correlationContext?.request_id) {
+    return correlationContext.request_id;
+  }
+  return generateRequestId();
 }
 
 /**
@@ -77,19 +85,22 @@ async function resolveRequestId(): Promise<string> {
  * @param message - Human-readable description safe to expose to clients
  * @param status  - HTTP status code (default 500)
  * @param context - Optional structured context to preserve (will be serialized safely)
+ * @param options - Optional configuration options including explicit requestId
  */
-export async function errorResponse(
+export function errorResponse(
   code: string,
   message: string,
   status = 500,
   context?: Record<string, unknown>,
-): Promise<NextResponse<ErrorEnvelope>> {
-  const request_id = await resolveRequestId();
-  const error : ErrorEnvelope["error"] = {
+  options?: ErrorResponseOptions,
+): NextResponse<ErrorEnvelope> {
+  const request_id = resolveRequestId(options);
+  const details = options?.context ?? context;
+  const error: ErrorEnvelope["error"] = {
     code,
     message,
     request_id,
-    ...(context ? { details: context } : {}),
+    ...(details ? { details } : {}),
   };
 
   return new NextResponse<ErrorEnvelope>(

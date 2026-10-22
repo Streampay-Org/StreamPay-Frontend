@@ -142,6 +142,8 @@ declare namespace NodeJS {
     MAX_STREAM_BODY_BYTES?: string;
     /** Maximum request body size cap in bytes for webhook routes (/api/webhooks*). */
     MAX_WEBHOOK_BODY_BYTES?: string;
+    /** Per-request timeout in milliseconds for /api/webhooks* routes. */
+    WEBHOOK_TIMEOUT_MS?: string;
     /** General fallback per-request timeout in milliseconds for API routes. */
     ROUTE_TIMEOUT_MS?: string;
     /** Per-request timeout in milliseconds for /api/v2/streams* routes. */

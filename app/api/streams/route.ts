@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 import {
   checkIdempotency,
@@ -6,6 +7,7 @@ import {
   getStore,
   idempotencyToken,
   setIdempotency,
+  withLock,
 } from "@/app/lib/db";
 import {
   decodeStreamCursor,
@@ -46,6 +48,53 @@ function getRequestUrl(request: Request, fallbackPath: string): URL {
 
 function getHeader(request: Request, name: string): string | null {
   return request.headers?.get?.(name) ?? null;
+}
+
+type AccessLogContext = {
+  method: "GET" | "POST";
+  path: string;
+  status: number;
+  durationMs: number;
+  errorCode?: string;
+};
+
+function emitAccessEvent(context: AccessLogContext) {
+  try {
+    logAccessEvent(context);
+  } catch (error) {
+    logger.warn("Failed to emit access log event", { error });
+  }
+}
+
+function durationMsFrom(start: [number, number]): number {
+  const [seconds, nanoseconds] = process.hrtime(start);
+  return seconds * 1000 + nanoseconds / 1_000_000;
+}
+
+function isTimeoutResponse(response: Response): boolean {
+  return response.status === 504;
+}
+
+function wrapWithTimeout(
+  request: Request,
+  method: "GET" | "POST",
+  path: string,
+  handler: (request: Request) => Promise<Response>,
+): Promise<Response> {
+  const start = process.hrtime();
+  return withRouteTimeout(request, async () => {
+    const response = await handler(request);
+    if (isTimeoutResponse(response)) {
+      emitAccessEvent({
+        method,
+        path,
+        status: response.status,
+        durationMs: durationMsFrom(start),
+        errorCode: "GATEWAY_TIMEOUT",
+      });
+    }
+    return response;
+  });
 }
 
 async function handleStreamsGet(request: Request) {
@@ -165,11 +214,18 @@ async function handleStreamsGet(request: Request) {
     return createErrorResponse("INTERNAL_ERROR", "Internal Server Error", 500);
   } finally {
     observeStreamsRequest("GET", status, start);
+    emitAccessEvent({
+      method: "GET",
+      path: "/api/streams",
+      status,
+      durationMs: durationMsFrom(start),
+      ...(status >= 400 ? { errorCode: statusToErrorCode(status) } : {}),
+    });
   }
 }
 
 export async function GET(request: Request) {
-  return withRouteTimeout(request, () => handleStreamsGet(request));
+  return wrapWithTimeout(request, "GET", "/api/streams", handleStreamsGet);
 }
 
 async function handleStreamsPost(request: Request) {
@@ -232,11 +288,14 @@ async function handleStreamsPost(request: Request) {
       );
     }
 
-    const { rate, recipient, schedule, token: rawToken } = body as {
+    const { rate, recipient, schedule, token: rawToken, totalAmount, startTime, endTime } = body as {
       rate?: string;
       recipient?: string;
       schedule?: string;
       token?: string;
+      totalAmount?: string;
+      startTime?: string;
+      endTime?: string;
     };
 
     const rateValue = rate ?? "";
@@ -275,6 +334,8 @@ async function handleStreamsPost(request: Request) {
       status: "draft",
       updatedAt: now,
       token: normalisedToken,
+      ...(totalAmount === undefined ? {} : { totalAmount, releasedAmount: "0", vestedAmount: "0" }),
+      ...(startTime === undefined ? {} : { startTime, endTime }),
       senderAddress,
       ownership,
     };
@@ -303,9 +364,16 @@ async function handleStreamsPost(request: Request) {
     return createErrorResponse("INTERNAL_ERROR", "Internal Server Error", 500);
   } finally {
     observeStreamsRequest("POST", status, start);
+    emitAccessEvent({
+      method: "POST",
+      path: "/api/streams",
+      status,
+      durationMs: durationMsFrom(start),
+      ...(status >= 400 ? { errorCode: statusToErrorCode(status) } : {}),
+    });
   }
 }
 
 export async function POST(request: Request) {
-  return withRouteTimeout(request, () => handleStreamsPost(request));
+  return wrapWithTimeout(request, "POST", "/api/streams", handleStreamsPost);
 }
