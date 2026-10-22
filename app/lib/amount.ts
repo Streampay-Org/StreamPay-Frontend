@@ -176,6 +176,66 @@ export function deriveEscrowTotal(
   return Amount.fromStroops(stroops, rate.amount.asset);
 }
 
+/**
+ * Parse a plain decimal amount string into an exact `bigint` stroop amount.
+ *
+ * This is the shared, precision-safe entry point for UI code that needs to
+ * reason about amounts without going through an `Amount` instance (which is
+ * asset-scoped). No `Number` arithmetic is used, so values above 2^53 stroops
+ * keep their exact value.
+ *
+ * Rejects negative values, more than 7 decimal places and anything above
+ * Stellar's int64 stroop maximum.
+ */
+export function parseStroops(input: string): ValidationResult<bigint> {
+  const normalized = normalizeInput(input);
+
+  if (normalized.length === 0) {
+    return validationError(400, "INVALID_AMOUNT_FORMAT", "Amount must be a plain decimal value.");
+  }
+
+  if (normalized.startsWith("-")) {
+    return validationError(422, "NEGATIVE_AMOUNT", "Amount must be zero or greater.");
+  }
+
+  if (!AMOUNT_PATTERN.test(normalized)) {
+    return validationError(400, "INVALID_AMOUNT_FORMAT", "Amount must be a plain decimal value.");
+  }
+
+  const [wholePart, fractionPart = ""] = normalized.split(".");
+
+  if (fractionPart.length > 7) {
+    return validationError(
+      422,
+      "DECIMAL_PRECISION_EXCEEDED",
+      "Amount supports at most 7 decimal places.",
+    );
+  }
+
+  const whole = BigInt(wholePart);
+  const paddedFraction = `${fractionPart}0000000`.slice(0, 7);
+  const fraction = BigInt(paddedFraction);
+
+  const stroops = whole * STROOPS_SCALE + fraction;
+
+  if (stroops > STELLAR_MAX_I64) {
+    return validationError(422, "AMOUNT_OVERFLOW", "Amount exceeds the Stellar maximum.");
+  }
+
+  return { ok: true, value: stroops };
+}
+
+/**
+ * Format an exact stroop amount as a plain decimal string (no trailing zeros).
+ *
+ * @example
+ *   formatStroops(98_500_000n) // "98.5"
+ *   formatStroops(50_000_000n) // "50"
+ */
+export function formatStroops(stroops: bigint): string {
+  return normalizeDecimalString(stroops);
+}
+
 export function parseDurationSeconds(input: string): ValidationResult<bigint> {
   const normalized = normalizeInput(input);
 

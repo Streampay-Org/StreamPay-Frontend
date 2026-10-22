@@ -1,4 +1,4 @@
-import type { Stream } from "@/lib/types";
+import type { Stream } from "@/app/types/openapi";
 
 /**
  * Result of a vesting computation.

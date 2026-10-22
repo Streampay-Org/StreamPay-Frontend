@@ -5,7 +5,9 @@ import {
   createRate,
   deriveEscrowTotal,
   formatRate,
+  formatStroops,
   parseDurationSeconds,
+  parseStroops,
 } from "./amount";
 
 describe("Amount.parse", () => {
@@ -299,6 +301,77 @@ describe("Fuzz-style bounded checks", () => {
         expect(["SUB_OPERATION_PRECISION", "AMOUNT_OVERFLOW", "INVALID_DURATION"]).toContain(total.error.code);
         expect([400, 422]).toContain(total.error.httpStatus);
       }
+    }
+  });
+});
+
+describe("parseStroops", () => {
+  it.each([
+    ["0", 0n],
+    ["1", STROOPS_SCALE],
+    ["1.0", STROOPS_SCALE],
+    ["1.0000001", STROOPS_SCALE + 1n],
+    ["0.0000001", 1n],
+    ["98.5", 985_000_000n],
+    ["  25.5  ", 255_000_000n],
+    ["922337203685.4775807", STELLAR_MAX_I64],
+  ])("parses %s exactly", (input, expected) => {
+    const result = parseStroops(input);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(expected);
+    }
+  });
+
+  it("keeps precision above 2^53 stroops", () => {
+    const result = parseStroops("900719925.4740993");
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // 2^53 + 1 stroops: a `Number` round-trip would lose the last digit.
+      expect(result.value).toBe(9_007_199_254_740_993n);
+      expect(result.value > BigInt(Number.MAX_SAFE_INTEGER)).toBe(true);
+    }
+  });
+
+  it.each([
+    ["", "INVALID_AMOUNT_FORMAT"],
+    ["abc", "INVALID_AMOUNT_FORMAT"],
+    ["1e3", "INVALID_AMOUNT_FORMAT"],
+    ["-1", "NEGATIVE_AMOUNT"],
+    ["1.12345678", "DECIMAL_PRECISION_EXCEEDED"],
+    ["922337203685.4775808", "AMOUNT_OVERFLOW"],
+    ["1000000000000", "AMOUNT_OVERFLOW"],
+  ])("rejects %s", (input, code) => {
+    const result = parseStroops(input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe(code);
+    }
+  });
+});
+
+describe("formatStroops", () => {
+  it.each([
+    [0n, "0"],
+    [50_000_000n, "5"],
+    [98_500_000n, "9.85"],
+    [985_000_000n, "98.5"],
+    [1n, "0.0000001"],
+    [STELLAR_MAX_I64, "922337203685.4775807"],
+  ])("formats %s", (stroops, expected) => {
+    expect(formatStroops(stroops)).toBe(expected);
+  });
+
+  it("round-trips through parseStroops", () => {
+    const stroops = 123_456_789n;
+    const parsed = parseStroops(formatStroops(stroops));
+
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value).toBe(stroops);
     }
   });
 });

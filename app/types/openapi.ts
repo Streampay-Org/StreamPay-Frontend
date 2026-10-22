@@ -15,23 +15,6 @@ export interface WithdrawalStatus {
   failureCode?: string;
 }
 
-export type * from "./openapi.generated";
-
-export type StreamStatus = "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
-export type StreamAction = "start" | "pause" | "stop" | "settle" | "withdraw" | "cancel";
-export type WithdrawalState = "pending" | "succeeded" | "failed";
-
-export interface WithdrawalStatus {
-  state: WithdrawalState;
-  requestedAt: string;
-  lastCheckedAt: string;
-  attempts: number;
-  settlementTxHash?: string;
-  confirmedTxHash?: string;
-  horizonCursor?: string;
-  failureCode?: string;
-}
-
 /**
  * Describes the refund split produced by cancel_stream.
  *
@@ -78,7 +61,6 @@ export interface Stream {
   updatedAt: string;
   startTime?: string;
   endTime?: string;
-  totalAmount?: string;
   settlementTxHash?: string;
   withdrawal?: WithdrawalStatus;
   /**
@@ -132,6 +114,19 @@ export interface Stream {
    * stream escrow account (GrantFox campaign, issue #pause-entrypoint).
    */
   pausedAt?: string;
+  /**
+   * Total stream duration in milliseconds. Used by the escrow vesting
+   * computation to derive the vested amount.
+   */
+  total?: string;
+  /**
+   * Total time the stream spent paused, in milliseconds.
+   */
+  totalPausedMs?: number;
+  /**
+   * Webhook endpoint (HTTPS) notified on stream lifecycle transitions.
+   */
+  webhook_url?: string;
 }
 
 export interface User {

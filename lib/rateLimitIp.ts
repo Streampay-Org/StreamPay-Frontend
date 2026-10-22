@@ -26,13 +26,14 @@ export interface WalletRateLimitResult {
  * Prefers gateway-forwarded headers; falls back to a generated id.
  */
 export function resolveCorrelationId(req: NextRequest): string {
-  return resolveRequestId(req.headers);
-}
-    req.headers.get("x-request-id") ?? req.headers.get("x-correlation-id");
+  const forwarded =
+    req.headers.get(REQUEST_ID_HEADER) ?? req.headers.get("x-correlation-id");
+
   if (forwarded && forwarded.trim().length > 0) {
     return forwarded.trim();
   }
-  return `req_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 10)}`;
+
+  return resolveRequestId(req.headers);
 }
 
 /**

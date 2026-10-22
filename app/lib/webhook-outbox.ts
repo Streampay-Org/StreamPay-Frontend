@@ -4,7 +4,7 @@ import {
   WebhookEndpoint,
   WebhookEvent,
 } from "./webhook-delivery";
-import type { Stream } from "./stream-store";
+import type { Stream } from "@/app/types/openapi";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -152,12 +152,14 @@ export class WebhookOutboxStore {
     const endpoint: WebhookEndpoint = {
       id: `stream:${stream.id}`,
       url: stream.webhook_url,
+      maxRetries: 10,
     };
     const event: WebhookEvent = {
       id: eventId,
       eventType,
+      streamId: stream.id,
       data: payload,
-      createdAt: updatedAt,
+      timestamp: updatedAt,
     };
     return this.addToOutbox(endpoint, event);
   }
