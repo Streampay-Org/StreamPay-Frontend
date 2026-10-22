@@ -1,5 +1,4 @@
 "use client";
-import "./WelcomeTour.module.css";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useFocusTrap } from "@/app/hooks/useFocusTrap";

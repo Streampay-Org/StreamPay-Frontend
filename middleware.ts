@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { validateConfig } from './app/lib/config/index';
 import {
   buildAllowedOriginSet,
-  isOriginAllowed,
-  DEFAULT_CORS_HEADERS,
-  DEFAULT_CORS_METHODS,
-  DEFAULT_CORS_MAX_AGE_SECONDS,
+  buildCorsDecision,
+  buildCorsHeaders,
+  mergeVaryHeader,
+  DEFAULT_CORS_EXPOSE_HEADERS,
 } from './app/lib/cors';
 import {
   REQUEST_FINGERPRINT_HEADER,
@@ -54,16 +54,6 @@ function resolveMiddlewareConfig(): MiddlewareConfig {
     chaosConfig: getChaosConfig(),
     getCanaryPercentage,
   };
-}
-
-function buildCorsHeaders(origin: string) {
-  const headers = new Headers();
-  headers.set('Access-Control-Allow-Origin', origin);
-  headers.set('Access-Control-Allow-Methods', DEFAULT_CORS_METHODS);
-  headers.set('Access-Control-Allow-Headers', DEFAULT_CORS_HEADERS);
-  headers.set('Access-Control-Max-Age', String(DEFAULT_CORS_MAX_AGE_SECONDS));
-  headers.set('Vary', 'Origin');
-  return headers;
 }
 
 function getCanaryPercentage(): number {

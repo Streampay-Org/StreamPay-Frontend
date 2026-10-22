@@ -1,11 +1,11 @@
 /* Extracted from globals.css; selectors stay global to preserve markup and tests. */
-:global(.template-controls) {
+.template-controls {
 
   display: grid;
   gap: 1rem;
 }
 
-:global(.template-controls__categories) {
+.template-controls__categories {
 
   display: flex;
   gap: 0.5rem;
@@ -14,12 +14,12 @@
   -webkit-overflow-scrolling: touch;
 }
 
-:global(.template-controls__categories)::-webkit-scrollbar {
+.template-controls__categories::-webkit-scrollbar {
 
   display: none;
 }
 
-:global(.template-controls__tab) {
+.template-controls__tab {
 
   background: none;
   border: 1px solid var(--border);
@@ -41,30 +41,30 @@
     background-color 160ms ease;
 }
 
-:global(.template-controls__tab):hover {
+.template-controls__tab:hover {
 
   border-color: var(--accent);
   color: var(--foreground);
 }
 
-:global(.template-controls__tab--active) {
+.template-controls__tab--active {
 
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-on);
 }
 
-:global(.template-controls__tab):focus-visible {
+.template-controls__tab:focus-visible {
 
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 
-:global(.template-controls__search) {
+.template-controls__search {
  display: block; max-width: 24rem; width: 100%; }
 
-:global(.template-controls__input) {
+.template-controls__input {
 
   background: var(--panel);
   border: 1px solid var(--border);
@@ -77,16 +77,16 @@
   width: 100%;
 }
 
-:global(.template-controls__input)::placeholder {
+.template-controls__input::placeholder {
  color: var(--muted); }
 
-:global(.template-controls__input):focus {
+.template-controls__input:focus {
  border-color: var(--accent); outline: none; }
 
-:global(.template-grid) {
+.template-grid {
  display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); }
 
-:global(.template-card) {
+.template-card {
 
   background: var(--panel);
   border: 1px solid var(--border);
@@ -98,13 +98,13 @@
   transition: border-color 160ms ease;
 }
 
-:global(.template-card):hover {
+.template-card:hover {
  border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
 
-:global(.template-card__header) {
+.template-card__header {
  display: flex; justify-content: space-between; }
 
-:global(.template-card__category) {
+.template-card__category {
 
   background: var(--panel-elevated);
   border: 1px solid var(--border);
@@ -117,32 +117,32 @@
   text-transform: uppercase;
 }
 
-:global(.template-card__category--savings) {
+.template-card__category--savings {
  background: var(--system-success-bg); border-color: var(--system-success-border); color: var(--system-success-text); }
 
-:global(.template-card__category--income) {
+.template-card__category--income {
  background: var(--system-info-bg); border-color: var(--system-info-border); color: var(--system-info-text); }
 
-:global(.template-card__category--bills) {
+.template-card__category--bills {
  background: var(--system-warning-bg); border-color: var(--system-warning-border); color: var(--system-warning-text); }
 
-:global(.template-card__name) {
+.template-card__name {
  font-size: 1.125rem; line-height: 1.3; }
 
-:global(.template-card__details) {
+.template-card__details {
  display: grid; gap: 0.75rem; grid-template-columns: 1fr 1fr; }
 
-:global(.template-card__detail) {
+.template-card__detail {
  display: grid; gap: 0.2rem; }
 
-:global(.template-card__detail-label) {
+.template-card__detail-label {
  color: var(--muted); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
 
-:global(.template-card__detail-value) {
+.template-card__detail-value {
  font-weight: 600; margin: 0; }
 
-:global(.template-card__memo) {
+.template-card__memo {
  color: var(--muted-light); flex: 1; font-size: 0.875rem; line-height: 1.5; }
 
-:global(.template-card__apply) {
+.template-card__apply {
  align-self: stretch; margin-top: auto; }

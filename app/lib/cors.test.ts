@@ -1,6 +1,14 @@
 /** @jest-environment node */
 
-import { buildAllowedOriginSet, isOriginAllowed, parseAllowedOrigins, normalizeOrigin, WILDCARD_ORIGIN } from './cors';
+import {
+  buildAllowedOriginSet,
+  isOriginAllowed,
+  parseAllowedOrigins,
+  normalizeOrigin,
+  WILDCARD_ORIGIN,
+  mergeVaryHeader,
+  buildCorsDecision,
+} from './cors';
 
 describe('CORS helpers', () => {
   describe('parseAllowedOrigins', () => {
@@ -59,6 +67,119 @@ describe('CORS helpers', () => {
     it('rejects invalid origin header', () => {
       const allowed = ['https://allowed.example.com'];
       expect(isOriginAllowed('not a url', allowed)).toBe(false);
+      expect(isOriginAllowed('null', allowed)).toBe(false);
+    });
+  });
+
+  describe('mergeVaryHeader', () => {
+    it('sets Vary when not present', () => {
+      const headers = new Headers();
+      mergeVaryHeader(headers, 'Origin');
+      expect(headers.get('Vary')).toBe('Origin');
+    });
+
+    it('appends to existing Vary header', () => {
+      const headers = new Headers();
+      headers.set('Vary', 'Accept-Encoding');
+      mergeVaryHeader(headers, 'Origin');
+      expect(headers.get('Vary')).toBe('Accept-Encoding, Origin');
+    });
+
+    it('does not duplicate existing Vary value (case-insensitive)', () => {
+      const headers = new Headers();
+      headers.set('Vary', 'origin');
+      mergeVaryHeader(headers, 'Origin');
+      expect(headers.get('Vary')).toBe('origin');
+    });
+  });
+
+  describe('buildCorsDecision', () => {
+    const allowed = ['https://allowed.example.com'];
+
+    it('returns none when Origin is missing', () => {
+      const decision = buildCorsDecision({ headers: {} }, allowed);
+      expect(decision).toEqual({ kind: 'none' });
+    });
+
+    it('returns null-origin when Origin is "null"', () => {
+      const decision = buildCorsDecision({ headers: { origin: 'null' } }, allowed);
+      expect(decision).toEqual({ kind: 'null-origin', origin: 'null' });
+    });
+
+    it('returns same-origin when origin matches request origin', () => {
+      const decision = buildCorsDecision(
+        {
+          headers: { origin: 'https://app.example' },
+          nextUrl: { origin: 'https://app.example' },
+        },
+        allowed
+      );
+      expect(decision).toEqual({ kind: 'same-origin', origin: 'https://app.example' });
+    });
+
+    it('normalizes uppercase host and default ports for same-origin comparison', () => {
+      const decision = buildCorsDecision(
+        {
+          headers: { origin: 'https://APP.example:443' },
+          nextUrl: { origin: 'https://app.example' },
+        },
+        allowed
+      );
+      expect(decision).toEqual({ kind: 'same-origin', origin: 'https://app.example' });
+    });
+
+    it('returns allowed for listed cross-origin', () => {
+      const decision = buildCorsDecision(
+        {
+          headers: { origin: 'https://allowed.example.com' },
+          nextUrl: { origin: 'https://app.example' },
+        },
+        allowed
+      );
+      expect(decision).toEqual({ kind: 'allowed', origin: 'https://allowed.example.com' });
+    });
+
+    it('returns denied for unlisted cross-origin', () => {
+      const decision = buildCorsDecision(
+        {
+          headers: { origin: 'https://unlisted.example.com' },
+          nextUrl: { origin: 'https://app.example' },
+        },
+        allowed
+      );
+      expect(decision).toEqual({ kind: 'denied', origin: 'https://unlisted.example.com' });
+    });
+
+    it('does not trust spoofed x-forwarded-host when trustProxy is unset / false', () => {
+      const decision = buildCorsDecision(
+        {
+          headers: {
+            origin: 'https://spoofed.example.com',
+            'x-forwarded-host': 'spoofed.example.com',
+            'x-forwarded-proto': 'https',
+          },
+          nextUrl: { origin: 'http://localhost:3000' },
+        },
+        allowed,
+        { trustProxy: false }
+      );
+      expect(decision).toEqual({ kind: 'denied', origin: 'https://spoofed.example.com' });
+    });
+
+    it('trusts x-forwarded-host when trustProxy is true', () => {
+      const decision = buildCorsDecision(
+        {
+          headers: {
+            origin: 'https://app.example',
+            'x-forwarded-host': 'app.example',
+            'x-forwarded-proto': 'https',
+          },
+          nextUrl: { origin: 'http://internal.service:3000' },
+        },
+        allowed,
+        { trustProxy: true }
+      );
+      expect(decision).toEqual({ kind: 'same-origin', origin: 'https://app.example' });
     });
   });
 });
