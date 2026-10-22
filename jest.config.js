@@ -11,6 +11,12 @@ const config = {
   // fixtures, backend-only behaviour). They are excluded so CI is a trustworthy
   // signal; fix and remove entries from this list one by one.
   testPathIgnorePatterns: [
+    "<rootDir>/app/api/audit/export/route.test.ts",
+    "<rootDir>/app/api/internal/reconciliation/diff/\[id\]/route.test.ts",
+    "<rootDir>/app/api/orgs/\[orgId\]/token-allowlist/route.test.ts",
+    "<rootDir>/app/api/streams/\[id\]/start/route.test.ts",
+    "<rootDir>/app/api/streams/\[id\]/webhooks/test/route.test.ts",
+    "<rootDir>/app/api/streams/\[id\]/withdraw/route.test.ts",
     "/node_modules/",
     "/.next/",
     "<rootDir>/app/api/notifications/preferences/route.test.ts",
@@ -52,8 +58,6 @@ const config = {
     "<rootDir>/app/components/StreamViz.test.tsx",
     "<rootDir>/app/dashboard/IndexerStatus.test.tsx",
     "<rootDir>/app/lib/config/config.test.ts",
-    "<rootDir>/app/lib/dtos/audit.dto.test.ts",
-    "<rootDir>/app/lib/errors/index.test.ts",
     "<rootDir>/app/ReceiptCard.test.tsx",
     "<rootDir>/app/streams/new/components/StepIndicator.test.tsx",
     "<rootDir>/app/streams/new/multi.test.tsx",

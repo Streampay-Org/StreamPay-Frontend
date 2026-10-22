@@ -68,6 +68,8 @@ describe("Audit DTOs", () => {
         chainIntact: true,
         retentionDays: 365,
         total: 0,
+        hasNext: false,
+        nextCursor: null,
       },
     };
 
