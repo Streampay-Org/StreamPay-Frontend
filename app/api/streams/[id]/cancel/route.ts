@@ -54,6 +54,8 @@ import {
   computeCancellationSplit,
   buildCancellationRecord,
 } from "@/app/lib/cancel-stream";
+import { addToOutbox } from "@/app/lib/webhook-outbox";
+import { toWebhookEvent } from "@/app/lib/stream-webhook-events";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -294,6 +296,34 @@ export async function POST(
       before,
       correlationId: getCorrelationContext()?.correlation_id,
     });
+
+    // ── Enqueue lifecycle webhook (post-commit) ───────────────────────────────
+    // Only enqueue after the store write has committed. A failed cancel returns
+    // above and never reaches this point, so nothing is enqueued on failure.
+    if (updatedStream.webhook_url) {
+      const event = toWebhookEvent(before, updatedStream, "cancel");
+      if (event) {
+        addToOutbox({
+          eventId: `evt_${id}_cancel_${now}`,
+          eventType: event,
+          streamId: id,
+          url: updatedStream.webhook_url,
+          data: {
+            stream_id: id,
+            status: updatedStream.status,
+            previous_status: before.status,
+            action: "cancel",
+            occurred_at: now,
+            token,
+            total_amount: escrow.totalAmount.toString(),
+            released_amount: updatedStream.releasedAmount,
+            vested_amount: updatedStream.vestedAmount,
+            recipient_payout: split.recipientPayout.toString(),
+            sender_refund: split.senderRefund.toString(),
+          },
+        });
+      }
+    }
 
     // ── Audit log ─────────────────────────────────────────────────────────────
     recordPrivilegedStreamAuditEvent({

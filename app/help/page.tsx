@@ -1,3 +1,4 @@
+import "./help.module.css";
 
 /**
  * Help & FAQ page for StreamPay.
@@ -269,5 +270,3 @@ export default function HelpPage() {
     </main>
   );
 }
-
-
