@@ -6,6 +6,7 @@ import { ShortcutsOverlayWrapper } from "./components/ShortcutsOverlayWrapper";
 import { SplashScreenWrapper } from "./components/SplashScreenWrapper";
 import { AppBottomNav } from "./components/AppBottomNav";
 import { SiteHeader } from "./components/SiteHeader";
+import { ClientErrorReporter } from "./components/ClientErrorReporter";
 import { getThemeScript } from "./utils/theme-noflash";
 
 export const metadata: Metadata = {
@@ -27,6 +28,7 @@ export default function RootLayout({
         />
       </head>
       <body>
+        <ClientErrorReporter />
         <ToastProvider>
           <SplashScreenWrapper />
           <CommandPaletteWrapper />

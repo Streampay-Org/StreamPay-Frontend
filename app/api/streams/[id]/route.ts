@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { db } from "@/app/lib/db";
-import { computeETag, ifNoneMatchMatches } from "@/app/lib/etag";
+import { computeTag, ifNoneMatchMatches } from "@/app/lib/etag";
 import { getCorrelationContext } from "@/app/lib/logger";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { streamCache } from "@/app/lib/cache";
+import { inferStreamChangeAction, publishStreamChange } from "@/app/lib/stream-publish";
+import type { Stream } from "@/app/types/openapi";
 
 /**
  * Resolve the active Stellar network identifier for cache scoping.
@@ -30,7 +32,7 @@ type Context = { params: Promise<{ id: string }> };
  *       since the body is tenant-scoped.
  *     • `max-age=0, must-revalidate` — forces intermediaries to revalidate via
  *       ETag on every request instead of trusting the freshness lifetime.
- * - `X-Cache`: HIT/MISS observability for the in-memory stream cache.
+ * - `X-Cache`: HIT/MISM observability for the in-memory stream cache.
  */
 const CACHE_CONTROL_PRIVATE_REVALIDATE = "private, max-age=0, must-revalidate";
 
@@ -134,7 +136,7 @@ export async function GET(
 export async function POST(
   request: Request,
   { params }: Context
-) {
+){
   const { id } = await params;
   const rateLimited = await enforceRateLimit(request, "POST", `/api/streams/${id}`);
   if (rateLimited) {
@@ -165,6 +167,14 @@ export async function POST(
   };
 
   db.streams.set(id, updatedStream);
+
+  publishStreamChange({
+    action: inferStreamChangeAction(stream, updatedStream as Stream),
+    actor: request.headers.get("Actor-Wallet-Address") ?? undefined,
+    after: updatedStream as Stream,
+    before: stream,
+    correlationId: getCorrelationContext()?.correlation_id,
+  });
 
   // Invalidate the network-scoped cache entry BEFORE returning so the next
   // GET rebuilds from the persistence store with a fresh ETag. This also
