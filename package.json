@@ -6,9 +6,9 @@
   "scripts": {
     "typecheck:core": "tsc -p tsconfig.strict-core.json --noEmit",
     "typecheck": "tsc --noEmit",
-    "dev": "node api.js && node scripts/run-from-realpath.mjs next dev",
-    "build": "node api.js && node scripts/run-from-realpath.mjs next build",
-    "start": "node api.js && node scripts/run-from-realpath.mjs next start",
+    "dev": "node scripts/run-from-realpath.mjs next dev",
+    "build": "node scripts/run-from-realpath.mjs next build",
+    "start": "node scripts/run-from-realpath.mjs next start",
     "lint": "node scripts/run-from-realpath.mjs eslint .",
     "test": "node scripts/run-from-realpath.mjs jest",
     "test:quarantine": "node scripts/run-quarantine.mjs",
