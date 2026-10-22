@@ -10,6 +10,8 @@ import { isSecret, redactSecrets } from './config';
 export interface CorrelationContext {
   request_id: string;
   correlation_id: string;
+  trace_id?: string;
+  span_id?: string;
   traceparent?: string;
   stream_id?: string;
   job_id?: string;
@@ -122,6 +124,8 @@ export interface LogEntry {
   webhook_id?: string;
   retry_count?: number;
   queue_name?: string;
+  trace_id?: string;
+  span_id?: string;
   traceparent?: string;
   [key: string]: unknown;
 }
@@ -158,6 +162,8 @@ function log(level: 'info' | 'warn' | 'error' | 'debug', message: string, meta: 
   if (context) {
     logEntry.request_id = context.request_id;
     logEntry.correlation_id = context.correlation_id;
+    if (context.trace_id) logEntry.trace_id = context.trace_id;
+    if (context.span_id) logEntry.span_id = context.span_id;
     if (context.traceparent) logEntry.traceparent = context.traceparent;
     if (context.stream_id) logEntry.stream_id = context.stream_id;
     if (context.job_id) logEntry.job_id = context.job_id;

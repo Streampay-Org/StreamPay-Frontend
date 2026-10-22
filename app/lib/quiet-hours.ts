@@ -235,13 +235,19 @@ export function getZonedTimeComponents(
     Sat: 6,
   };
 
-  const hour = parseInt(map.hour, 10) % 24; // Handle 24:00 normalization if returned by Intl
+  const rawHour = parseInt(map.hour, 10);
+  // Some ICU builds return "24" for midnight of the next day. When that happens,
+  // the hour wraps to 0 and the day must advance by 1.
+  const hour = rawHour % 24;
+  const dayRollover = rawHour === 24 ? 1 : 0;
   const minute = parseInt(map.minute, 10);
   const second = parseInt(map.second, 10);
-  const day = parseInt(map.day, 10);
+  const day = parseInt(map.day, 10) + dayRollover;
   const month = parseInt(map.month, 10);
   const year = parseInt(map.year, 10);
-  const dayOfWeek = weekdayMap[map.weekday] ?? 0;
+  const dayOfWeek = dayRollover === 1
+    ? (weekdayMap[map.weekday] !== undefined ? (weekdayMap[map.weekday]! + 1) % 7 : 1)
+    : weekdayMap[map.weekday] ?? 0;
 
   return { year, month, day, hour, minute, second, dayOfWeek };
 }
@@ -300,13 +306,146 @@ export function isQuietHoursActive(
 
 export interface SuppressionDecision {
   suppress: boolean;
-  reason?: "QUIET_HOURS_ACTIVE" | "CRITICAL_ALERT_BYPASS" | "NOT_IN_QUIET_HOURS" | "DISABLED";
+  reason?: "QUIET_HOURS_ACTIVE" | "CRITICAL_ALERT_BYPASS" | "NOT_IN_QUIET_HOURS" | "DISABLED" | "QUIET_HOURS_ALWAYS_ON";
   scheduledFor?: Date;
 }
 
 /**
- * Computes the next instant (in UTC) when the active quiet hours window ends.
- * If not currently in quiet hours or disabled, returns null.
+ * Resolves a zoned wall-clock time (y, m, d, h, min) to a UTC Date using at most
+ * 3 Intl.DateTimeFormat#formatToParts calls.
+ *
+ * Algorithm:
+ *  1. Estimate UTC offset from a nearby Date in the same timezone.
+ *  2. Produce a first-pass UTC candidate.
+ *  3. Verify the candidate by formatting it and comparing to the target wall-clock.
+ *  4. If there's a discrepancy (e.g. spring-forward gap) shift by the difference.
+ *
+ * DST policy:
+ *  - Spring forward (nonexistent time): if the requested wall-clock time falls in the
+ *    gap (e.g. 02:30 when clocks spring from 02:00 to 03:00), the result is clamped
+ *    forward to the first valid instant after the gap.
+ *  - Fall back (ambiguous time): the later (standard-time) instance is returned, so
+ *    the user always gets the full quiet period on fall-back nights.
+ *
+ * @param year    Full 4-digit year
+ * @param month   1-based month (1 = January)
+ * @param day     Day of month
+ * @param hour    Hour 0-23
+ * @param minute  Minute 0-59
+ * @param tz      IANA timezone string
+ * @returns UTC Date for the specified wall-clock instant
+ */
+export function zonedWallTimeToUtc(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  tz: string,
+): Date {
+  // Step 1: rough UTC estimate using a nearby reference point
+  // Build a UTC Date at the rough equivalent and read the offset
+  const roughUtcMs =
+    Date.UTC(year, month - 1, day, hour, minute, 0);
+  const rough = new Date(roughUtcMs);
+
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour12: false,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+  });
+
+  // Intl call #1: get the zoned components of the rough estimate
+  const parts1 = dtf.formatToParts(rough);
+  const map1: Record<string, string> = {};
+  for (const p of parts1) map1[p.type] = p.value;
+
+  const zonedH1 = parseInt(map1.hour, 10) % 24;
+  const zonedM1 = parseInt(map1.minute, 10);
+  const zonedD1 = parseInt(map1.day, 10);
+  const zonedMo1 = parseInt(map1.month, 10);
+
+  // Compute wall-clock delta in minutes
+  // Target wall-clock in minutes-since-epoch-day
+  const targetWallMs = Date.UTC(year, month - 1, day, hour, minute, 0);
+  // Observed zoned wall-clock in ms (same date unless month/day differ)
+  const observedWallMs = Date.UTC(
+    year,
+    zonedMo1 - 1,
+    zonedD1,
+    zonedH1,
+    zonedM1,
+    0,
+  );
+  // Observed UTC offset in ms
+  const offsetMs = roughUtcMs - observedWallMs;
+
+  // Step 2: first-pass UTC candidate
+  const candidate1 = new Date(targetWallMs + offsetMs);
+
+  // Step 3: verify by formatting the candidate (Intl call #2)
+  const parts2 = dtf.formatToParts(candidate1);
+  const map2: Record<string, string> = {};
+  for (const p of parts2) map2[p.type] = p.value;
+
+  const verH = parseInt(map2.hour, 10) % 24;
+  const verM = parseInt(map2.minute, 10);
+  const verD = parseInt(map2.day, 10);
+  const verMo = parseInt(map2.month, 10);
+  const verY = parseInt(map2.year, 10);
+
+  const verWallMs = Date.UTC(verY, verMo - 1, verD, verH, verM, 0);
+  const discrepancyMs = targetWallMs - verWallMs;
+
+  if (discrepancyMs === 0) {
+    return candidate1;
+  }
+
+  // Step 4: correct for the discrepancy (handles DST gaps / overlaps)
+  const candidate2 = new Date(candidate1.getTime() + discrepancyMs);
+
+  // Intl call #3: verify the corrected candidate
+  const parts3 = dtf.formatToParts(candidate2);
+  const map3: Record<string, string> = {};
+  for (const p of parts3) map3[p.type] = p.value;
+
+  const verH3 = parseInt(map3.hour, 10) % 24;
+  const verM3 = parseInt(map3.minute, 10);
+  const verD3 = parseInt(map3.day, 10);
+  const verMo3 = parseInt(map3.month, 10);
+  const verY3 = parseInt(map3.year, 10);
+
+  const verWallMs3 = Date.UTC(verY3, verMo3 - 1, verD3, verH3, verM3, 0);
+  const finalDiscrepancy = targetWallMs - verWallMs3;
+
+  if (finalDiscrepancy === 0) {
+    return candidate2;
+  }
+
+  // Still a discrepancy: this means the wall-clock time doesn't exist in this timezone
+  // (spring-forward gap). Clamp forward to the first valid instant after the gap.
+  // Move forward by the gap size (typically 60 minutes).
+  return new Date(candidate2.getTime() + finalDiscrepancy);
+}
+
+/**
+ * Computes the next instant (in UTC) when the active quiet hours window ends,
+ * using an analytic calculation instead of a minute-by-minute loop.
+ *
+ * Returns null in two cases:
+ *  1. Not currently in quiet hours or disabled.
+ *  2. "Always on" — all 7 days are active with startTime === endTime (24-hour window
+ *     that never ends within any reachable day). The reason QUIET_HOURS_ALWAYS_ON is
+ *     returned by shouldSuppressNotification in this case.
+ *
+ * At most 10 Intl.DateTimeFormat#formatToParts calls are made per invocation
+ * (1 for getZonedTimeComponents + up to 3×3 = 9 for zonedWallTimeToUtc across
+ * at most 3 candidate days).
  */
 export function getNextQuietHoursEnd(
   config: QuietHoursConfig | undefined | null,
@@ -321,20 +460,46 @@ export function getNextQuietHoursEnd(
   }
 
   const timezone = isValidIanaTimezone(config.timezone) ? config.timezone : "UTC";
-  
-  // Step forward up to 48 hours to find the exact transition where isQuietHoursActive becomes false
-  const testDate = new Date(fromDate.getTime());
-  const maxSearchTime = fromDate.getTime() + 48 * 60 * 60 * 1000;
-  
-  while (testDate.getTime() < maxSearchTime && isQuietHoursActive(config, testDate)) {
-    testDate.setTime(testDate.getTime() + 60 * 1000); // 1-minute increment
+  const startMin = parseTimeToMinutes(config.startTime);
+  const endMin = parseTimeToMinutes(config.endTime);
+  const daysOfWeek = config.daysOfWeek ?? [0, 1, 2, 3, 4, 5, 6];
+  const activeDaysSet = new Set(daysOfWeek);
+
+  // Always-on: startTime === endTime means 24-hour quiet on configured days.
+  // If all 7 days are active, the window never ends → return null (caller uses QUIET_HOURS_ALWAYS_ON).
+  if (startMin === endMin) {
+    if (activeDaysSet.size === 7) {
+      return null;
+    }
+    // Partial days: the window ends when we reach the first non-active day at 00:00 local.
+    // Find the next non-active day.
+    const { year, month, day, dayOfWeek } = getZonedTimeComponents(fromDate, timezone);
+    for (let offset = 1; offset <= 7; offset++) {
+      const candidateDow = (dayOfWeek + offset) % 7;
+      if (!activeDaysSet.has(candidateDow)) {
+        // The end is midnight (00:00) on the first non-active day
+        const endDay = day + offset;
+        return zonedWallTimeToUtc(year, month, endDay, 0, 0, timezone);
+      }
+    }
+    return null;
   }
 
-  // Reset seconds & milliseconds to clean 00 boundary
-  const zoned = getZonedTimeComponents(testDate, timezone);
-  const cleanEnd = new Date(testDate.getTime() - (zoned.second * 1000) - testDate.getUTCMilliseconds());
-  
-  return cleanEnd;
+  // Analytic calculation for normal windows.
+  // The end time is endMin on either today (same-day window) or tomorrow (overnight window).
+  const { year, month, day } = getZonedTimeComponents(fromDate, timezone);
+
+  const endH = Math.floor(endMin / 60);
+  const endM = endMin % 60;
+
+  if (startMin < endMin) {
+    // Same-day window: end is endMin today
+    return zonedWallTimeToUtc(year, month, day, endH, endM, timezone);
+  }
+
+  // Overnight window (startMin > endMin, e.g. 22:00 → 08:00):
+  // End is endMin tomorrow
+  return zonedWallTimeToUtc(year, month, day + 1, endH, endM, timezone);
 }
 
 /**
@@ -360,10 +525,16 @@ export function shouldSuppressNotification(
     return { suppress: false, reason: "NOT_IN_QUIET_HOURS" };
   }
 
-  const scheduledFor = getNextQuietHoursEnd(config, atDate) ?? undefined;
+  const endDate = getNextQuietHoursEnd(config, atDate);
+
+  // Always-on: startTime === endTime on all 7 days — window never ends
+  if (endDate === null) {
+    return { suppress: true, reason: "QUIET_HOURS_ALWAYS_ON" };
+  }
+
   return {
     suppress: true,
     reason: "QUIET_HOURS_ACTIVE",
-    scheduledFor,
+    scheduledFor: endDate,
   };
 }
