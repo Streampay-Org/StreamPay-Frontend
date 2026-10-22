@@ -1,14 +1,10 @@
-/** @jest-environment node */
-import { headers } from "next/headers";
+/**
+ * @jest-environment node
+ */
 import { errorResponse, ErrorCode, type ErrorEnvelope } from "./server";
+import { withCorrelationContext } from "@/app/lib/logger";
 
-jest.mock("next/headers", () => ({ headers: jest.fn() }));
-const mockHeaders = jest.mocked(headers);
-beforeEach(() => {
-  mockHeaders.mockReset();
-  mockHeaders.mockResolvedValue(new Headers());
-});
-async function parseBody(res: Awaited<ReturnType<typeof errorResponse>>): Promise<ErrorEnvelope> {
+function parseBody(res: Awaited<ReturnType<typeof errorResponse>>): Promise<ErrorEnvelope> {
   return res.json();
 }
 
@@ -43,16 +39,43 @@ describe("errorResponse()", () => {
     expect(body.error.code).toBe("CUSTOM_CODE");
   });
 
-  it("always includes a request_id even when headers() throws", async () => {
-    mockHeaders.mockRejectedValue(new Error("Not in request context"));
+  it("always includes a request_id outside a request context", async () => {
     const body = await parseBody(await errorResponse(ErrorCode.INTERNAL_SERVER_ERROR, "Oops."));
     expect(typeof body.error.request_id).toBe("string");
     expect(body.error.request_id.length).toBeGreaterThan(0);
   });
 
-  it("uses x-request-id header when present", async () => {
-    mockHeaders.mockResolvedValue(new Headers({ "x-request-id": "req_abc123" }));
-    const body = await parseBody(await errorResponse(ErrorCode.NOT_FOUND, "Not found.", 404));
-    expect(body.error.request_id).toBe("req_abc123");
+  it("uses the correlation context request id when present", async () => {
+    const body = await withCorrelationContext(
+      {
+        request_id: "req_ctx_123",
+        correlation_id: "req_ctx_123",
+      },
+      async () => parseBody(await errorResponse(ErrorCode.NOT_FOUND, "Not found.", 404)),
+    );
+
+    expect(body.error.request_id).toBe("req_ctx_123");
+  });
+
+  it("prefers an explicit request id over the correlation context", async () => {
+    const body = await withCorrelationContext(
+      {
+        request_id: "req_ctx_123",
+        correlation_id: "req_ctx_123",
+      },
+      async () =>
+        parseBody(
+          await errorResponse(ErrorCode.NOT_FOUND, "Not found.", 404, undefined, {
+            requestId: "req_explicit",
+          }),
+        ),
+    );
+
+    expect(body.error.request_id).toBe("req_explicit");
+  });
+
+  it("falls back to a generated request id with the req_ prefix", async () => {
+    const body = await parseBody(await errorResponse(ErrorCode.INTERNAL_SERVER_ERROR, "Oops."));
+    expect(body.error.request_id).toMatch(/^req_/);
   });
 });
