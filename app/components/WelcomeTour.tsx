@@ -1,4 +1,5 @@
-"tuse client";
+"use client";
+import "./WelcomeTour.module.css";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useFocusTrap } from "@/app/hooks/useFocusTrap";
@@ -166,9 +167,12 @@ export function WelcomeTour({
         onClick={(e) => e.stopPropagation()}
         data-testid="welcome-tour"
       >
-        {/* Step indicator dots */}
+        {/* Step indicator dots. These are navigation controls, not tabs:
+            there is no tabpanel, and marking them role="tab" without aria-controls
+            is an axe violation. Use a group of buttons with aria-current instead. */}
         <div
           className="welcome-tour__dots"
+          role="group"
           aria-label="Tour progress"
         >
           {TOUR_STEPS.map((s, i) => (

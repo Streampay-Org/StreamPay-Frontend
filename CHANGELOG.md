@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Security
+- **Wallet challenges are now unguessable and no longer enumerable** (#1669):
+  `GET /api/auth/wallet` issues challenges with `crypto.randomBytes(32)` (a
+  CSPRNG) using the shape `streampay-auth:v1:<nonce>|<origin>|<expires_at>`, and
+  the server origin and expiry are part of the signed message. The paginated
+  listing mode was removed — `cursor`/`limit` now return `400 UNSUPPORTED_QUERY`
+  instead of leaking live challenges for every address to unauthenticated
+  callers. The in-process store is a `Map` with TTL pruning on every write, a
+  per-address cap of 5 (oldest evicted), and a global cap of
+  `WALLET_CHALLENGE_MAX` (default 10 000). Conditional `If-None-Match`/`304`
+  handling was removed for challenge issuance: the endpoint always returns `200`
+  with `Cache-Control: no-store`.
+
 ### Changed
 - **Partner SDK v2 response migration**: `listStreams()` now returns
   `streams`, `meta`, and `links`; its deprecated runtime-only `data` getter

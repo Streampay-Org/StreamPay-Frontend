@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, getStore } from "@/app/lib/db";
-import { tryAuthenticateRequest, JWT_SECRET } from "@/app/lib/auth";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { eventBus } from "@/app/lib/event-bus";
 import { logger, getCorrelationContext, extractCorrelationContext, setCorrelationContext, withStreamContext } from "@/app/lib/logger";
 import {

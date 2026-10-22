@@ -209,7 +209,7 @@ describe("checkIpRateLimit", () => {
     expect(walletLog).toBeDefined();
     expect(walletLog.request_id).toBe("req_throttle_test");
     expect(walletLog.limitType).toBe("login");
-    expect(walletLog.identityDisplay).toBe("9.9.9.9");
+    expect(walletLog.identityDisplay).toBe("9.9.9.0/24");
 
     store.destroy();
   });
