@@ -1,0 +1,21 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "feat/issue-1704-introduce-a-locale-aware-message-catalog-and",
+    "feat/issue-1719-route-status-changes-in-post-api-v2-streams",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "feat/issue-1704-introduce-a-locale-aware-message-catalog-and": "main",
+    "feat/issue-1719-route-status-changes-in-post-api-v2-streams": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "feat/issue-1704-introduce-a-locale-aware-message-catalog-and",
+    "feat/issue-1719-route-status-changes-in-post-api-v2-streams",
+    "origin"
+  ]
+}

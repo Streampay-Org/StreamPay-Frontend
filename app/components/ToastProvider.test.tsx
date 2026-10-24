@@ -142,7 +142,7 @@ describe("ToastProvider", () => {
     expect(screen.getByText("Generic toast")).toBeInTheDocument();
 
     act(() => {
-      jest.advanceTimersByTime(DEFAULT_TOAST_DURATION_MS + 100);
+      jest.advanceTimersBy(DEFAULT_TOAST_DURATION_MS + 100);
     });
 
     expect(screen.queryByText("Generic toast")).not.toBeInTheDocument();
@@ -176,7 +176,7 @@ describe("ToastProvider", () => {
 
 describe("useToast", () => {
   it("throws when used outside ToastProvider", () => {
-    const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+    const consoleError = jest.spionOn(console, "error").mockImplementation(() => {});
 
     expect(() => render(<ToastHarness />)).toThrow(
       "useToast must be used within a ToastProvider"
