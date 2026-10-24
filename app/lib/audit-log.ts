@@ -90,6 +90,16 @@ function redactTargetAccount(account: string | undefined): string | null {
 export class AppendOnlyAuditLogStore {
   private readonly entries: AuditEntry[] = [];
   private readonly archivedEntries: AuditEntry[] = [];
+  private purgeCheckpoints: Array<{
+    checkpointId: string;
+    anchorHash: string;
+    cutoffTimestamp: string;
+    purgedEntries: number;
+    purgedIds: string[];
+    purgedIdsHash: string;
+    prevCheckpointId: string | null;
+    createdAt: string;
+  }> = [];
   private readonly deepArchivedEntries: DeepArchiveEntry[] = [];
 
   append(input: AuditEntryInput): AuditEntry {
@@ -317,6 +327,15 @@ export class AppendOnlyAuditLogStore {
       });
 
       if (entry.prevHash !== previousHash) {
+        // A purge/deep-archive checkpoint (#1676) makes the hash break at the
+        // trimmed boundary legitimate: the anchor hash authenticates the gap.
+        if (
+          entry.prevHash !== null &&
+          this.purgeCheckpoints.some((c) => c.anchorHash === entry.prevHash)
+        ) {
+          previousHash = entry.entryHash;
+          continue;
+        }
         return false;
       }
 
@@ -349,8 +368,29 @@ export class AppendOnlyAuditLogStore {
     const retained = this.entries.filter((entry) => Date.parse(entry.timestamp) >= cutoffMs);
 
     if (execute && purged.length > 0) {
-      const rebased = this.rebaseChain(retained);
-      this.entries.splice(0, this.entries.length, ...rebased);
+      // Keyed checkpoint (#1676): the retained entries keep their ORIGINAL
+      // hashes; the gap left by the purge is anchored by a checkpoint keyed to
+      // the last purged entry, so the purged prefix remains verifiable and the
+      // post-purge chain integrity check can authenticate the boundary.
+      const lastPurged = purged[purged.length - 1];
+      const purgedIdsHash = hashValue(purged.map((entry) => entry.id));
+      const prevCheckpoint = this.purgeCheckpoints[this.purgeCheckpoints.length - 1];
+      this.purgeCheckpoints.push({
+        checkpointId: hashValue({
+          cutoff: cutoffMs,
+          purgedIdsHash,
+          anchorHash: lastPurged.entryHash,
+          prevCheckpointId: prevCheckpoint?.checkpointId ?? null,
+        }),
+        anchorHash: lastPurged.entryHash,
+        cutoffTimestamp: new Date(cutoffMs).toISOString(),
+        purgedEntries: purged.length,
+        purgedIds: purged.map((entry) => entry.id),
+        purgedIdsHash,
+        prevCheckpointId: prevCheckpoint?.checkpointId ?? null,
+        createdAt: new Date().toISOString(),
+      });
+      this.entries.splice(0, this.entries.length, ...retained);
     }
 
     return {
@@ -404,17 +444,38 @@ export class AppendOnlyAuditLogStore {
       };
     }
 
-    const rebased = this.rebaseChain([...remainingArchived, ...remainingEntries]);
+    // Keyed checkpoint anchors the archive boundary (#1676): both sides keep
+    // their original hashes instead of being rebased, so the prefix+purgable
+    // boundary stays verifiable via the checkpoint chain.
+    if (toArchive.length > 0) {
+      const lastArchived = toArchive[toArchive.length - 1];
+      const prevCheckpoint = this.purgeCheckpoints[this.purgeCheckpoints.length - 1];
+      this.purgeCheckpoints.push({
+        checkpointId: hashValue({
+          cutoff: cutoffMs,
+          purgedIdsHash: hashValue(toArchive.map((entry) => entry.id)),
+          anchorHash: lastArchived.entryHash,
+          prevCheckpointId: prevCheckpoint?.checkpointId ?? null,
+        }),
+        anchorHash: lastArchived.entryHash,
+        cutoffTimestamp: new Date(cutoffMs).toISOString(),
+        purgedEntries: toArchive.length,
+        purgedIds: toArchive.map((entry) => entry.id),
+        purgedIdsHash: hashValue(toArchive.map((entry) => entry.id)),
+        prevCheckpointId: prevCheckpoint?.checkpointId ?? null,
+        createdAt: new Date().toISOString(),
+      });
+    }
 
     this.archivedEntries.splice(
       0,
       this.archivedEntries.length,
-      ...rebased.slice(0, remainingArchived.length),
+      ...remainingArchived,
     );
     this.entries.splice(
       0,
       this.entries.length,
-      ...rebased.slice(remainingArchived.length),
+      ...remainingEntries,
     );
 
     this.deepArchivedEntries.push(
