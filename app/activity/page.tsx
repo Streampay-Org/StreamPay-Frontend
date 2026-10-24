@@ -123,7 +123,6 @@ export default function ActivityPage() {
       <section
         aria-busy={pageState === "loading"}
         aria-labelledby="activity-overview-title"
-        aria-live="polite"
         className="stream-layout"
       >
         <div className="section-heading">
