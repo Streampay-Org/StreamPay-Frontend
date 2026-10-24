@@ -2,7 +2,7 @@
 
 import { render, screen } from '@testing-library/react';
 import { NetworkBadge, AssetLabel } from './NetworkBadge';
-import { getConfig, resetConfigCache } from '../lib/config';
+import { getConfig } from '../lib/config';
 
 // Mock the config module
 jest.mock('../lib/config', () => ({

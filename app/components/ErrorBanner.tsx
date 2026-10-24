@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { StreamPayError } from "@/app/lib/errors/types";
 import { isRetryableError } from "@/app/lib/errors/codes";
 import { formatErrorForDisplay } from "@/app/lib/errors/handler";

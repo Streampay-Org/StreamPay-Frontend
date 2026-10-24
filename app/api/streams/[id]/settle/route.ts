@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { db, withLock } from "@/app/lib/db";
 import { withIdempotency, settleStore } from "@/app/lib/idempotency";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
-import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
+import { nextActionFor, transition } from "@/app/lib/state-machine";
+import { enforceStreamRbac, resolveActorAddress } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 import { publishStreamChange } from "@/app/lib/stream-publish";
@@ -12,37 +13,47 @@ import { runWithTimeout } from "@/app/lib/with-timeout";
 
 type Context = { params: Promise<{ id: string }> };
 
-function createErrorResponse(code: string, message: string, status: number, extra: Record<string, unknown> = {}) {
+function createErrorResponse(code: string, message: string, status: number, legacyCode?: string) {
   const context = getCorrelationContext();
   return NextResponse.json(
-    {
-      error: {
-        code,
-        message,
-        request_id: context?.request_id,
-        ...extra,
-      },
-    },
-    { status }
+    { error: { code, ...(legacyCode ? { legacy_code: legacyCode } : {}), message, request_id: context?.request_id } },
+    { status },
   );
 }
 
-function errorResponse(code: string, message: string, status: number, extra: Record<string, unknown> = {}) {
-  return createErrorResponse(code, message, status, extra);
+function errorResponse(code: string, message: string, status: number, legacyCode?: string) {
+  return createErrorResponse(code, message, status, legacyCode);
 }
 
 function getHeader(request: Request, name: string): string | null {
   return request.headers?.get?.(name) ?? null;
 }
 
-const SETTLEMENT_TIMEOUT_MS = Number(process.env.SETTLEMENT_TIMEOUT_MS) || 15_000;
-
+/**
+ * POST /api/streams/:id/settle
+ *
+ * Settles an active or paused stream.
+ *
+ * Actor resolution order:
+ * 1. Verified JWT `sub` claim (Bearer token).
+ * 2. `Actor-Wallet-Address` header (fallback only when STREAMPAY_ALLOW_ACTOR_HEADER=true).
+ * If both are present and differ, returns 403 ACTOR_MISMATCH.
+ *
+ * RBAC ordering:
+ * Runs after 404 stream existence check and before state transition validation
+ * and chain call, inside the stream lock.
+ */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const actorAddress = getHeader(request, "Actor-Wallet-Address");
+  let actorAddress: string | null = null;
+  try {
+    actorAddress = resolveActorAddress(request);
+  } catch {
+    actorAddress = getHeader(request, "Actor-Wallet-Address");
+  }
   // IDEMPOTENCY: Settle is non-idempotent by nature — this wrapper ensures retries return the original response without re-executing the settlement
   return withIdempotency(request, "settle", settleStore, async () => {
     return withLock(id, async () => {
@@ -51,24 +62,17 @@ export async function POST(
         return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
       }
 
-      const policyResult = actorAddress
-        ? checkStreamOrgPolicy(id, actorAddress, "settle")
-        : null;
-      if (policyResult) {
-        if (!policyResult.allowed) {
-          return errorResponse(policyResult.code, policyResult.message, policyResult.httpStatus);
-        }
-        if (policyResult.requiresApproval) {
-          return errorResponse(
-            "APPROVAL_REQUIRED",
-            "This action requires multi-sig approval. Please initiate an approval request.",
-            409
-          );
-        }
+      // RBAC: evaluated inside the lock, immediately after 404 and before state guard or chain call.
+      const rbacError = enforceStreamRbac(request, id, "settle");
+      if (rbacError) return rbacError;
+
+      const result = transition(stream.status, "settle");
+      if (!result.ok) {
+        return errorResponse(result.code, result.error, 409, "INVALID_STREAM_STATE");
       }
 
-      if (stream.status !== "active" && stream.status !== "paused") {
-        return errorResponse("INVALID_STREAM_STATE", "Only active or paused streams can be settled", 409);
+      if (result.nextStatus === stream.status) {
+        return NextResponse.json({ data: stream });
       }
 
       const before = structuredClone(stream);
@@ -95,10 +99,9 @@ export async function POST(
       const now = new Date().toISOString();
       const updatedStream = {
         ...stream,
-        nextAction: "withdraw" as const,
-        settlementTxHash: settlement.txHash,
-        status: "ended" as const,
-        settledAt: settlement.settledAt,
+        nextAction: nextActionFor(result.nextStatus),
+        settlementTxHash: txHash,
+        status: result.nextStatus,
         updatedAt: now,
         withdrawal: {
           attempts: 0,
@@ -108,6 +111,22 @@ export async function POST(
           state: "pending" as const,
         },
       };
+      db.streams.set(id, updatedStream);
+
+      try {
+        const settlement = await getStellarSettlementClient().settleStream({ streamId: id });
+
+        db.streams.set(id, updatedStream);
+
+        appendStreamHistoryEvent({
+          streamId: id,
+          type: "settled",
+          fromStatus: stream.status,
+          toStatus: "ended",
+          at: updatedStream.updatedAt,
+          actorWallet: actorAddress ?? undefined,
+          txHash: settlement.txHash,
+        });
 
       db.streams.set(id, updatedStream);
 

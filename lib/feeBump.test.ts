@@ -26,7 +26,6 @@ import {
   maybeFeeBump,
   resolveFeeBumpConfig,
   buildFeeBumpEnvelope,
-  type FeeBumpResult,
 } from "./feeBump";
 import type { Stream, WithdrawalStatus } from "@/app/types/openapi";
 

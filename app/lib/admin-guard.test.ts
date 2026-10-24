@@ -84,7 +84,6 @@ describe("resolveCallerAddress", () => {
 
   it("returns null for JWT with tampered payload (alg=none bypass attempt)", () => {
     // Craft a token with alg=none — should be rejected
-    const [header64] = jwt.sign({ sub: ADMIN }, getJwtSecret(), { algorithm: "HS256" }).split(".");
     const fakeHeader = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
     const payload    = Buffer.from(JSON.stringify({ sub: ADMIN, iss: JWT_ISSUER, aud: JWT_AUDIENCE })).toString("base64url");
     const noneToken  = `${fakeHeader}.${payload}.`;

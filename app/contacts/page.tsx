@@ -1,9 +1,6 @@
 "use client";
-import "./contacts.module.css";
-import "../activity/activity.module.css";
 
-import React, { useCallback, useEffect, useId, useState } from "react";
-import { escapeCsv } from "../lib/exportCsv";
+import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 import { isValidStellarPublicKey } from "../lib/stellar-address";
 import { CopyAddress } from "../components/CopyAddress";
 import { EmptyState } from "../components/EmptyState";
@@ -13,7 +10,6 @@ import {
   buildExportCsv,
   buildExportJson,
   classifyImport,
-  parseCsv,
   type ClassifyResult,
   type ImportRowStatus,
 } from "./importExport";
@@ -68,7 +64,6 @@ function persistContacts(contacts: Contact[]): void {
 // ─── Import / export constants ────────────────────────────────────────────────
 
 const MAX_IMPORT_BYTES = 1024 * 1024;
-const MAX_IMPORT_ROWS = 1000;
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
@@ -116,9 +111,11 @@ async function normaliseAddressInput(
     }
   }
 
-  if (isValidStellarAddress(trimmed)) {
-    // Normalise to uppercase so stored addresses are canonical.
-    return { resolved: trimmed.toUpperCase() };
+  // Strkeys are case-insensitive base32; validate and store the canonical
+  // uppercase form so a lowercase paste is accepted and normalised.
+  const upper = trimmed.toUpperCase();
+  if (isValidStellarAddress(upper)) {
+    return { resolved: upper };
   }
 
   return { error: INVALID_ADDRESS_MESSAGE };

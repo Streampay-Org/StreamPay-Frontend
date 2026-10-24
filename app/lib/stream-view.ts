@@ -1,18 +1,8 @@
 import type { Stream } from "@/app/types/openapi";
 import { getStore } from "./db";
+import { DEFAULT_STREAM_TENANT_ID, TENANT_COOKIE_NAME } from "./stream-tenant";
 
-/**
- * Default tenant for streams and viewers that carry no explicit tenant.
- *
- * Matches the value the dashboard's own client-side fetches use
- * (`app/activity/page.tsx`). Seeded demo streams and streams created through
- * `POST /api/streams` are stored without a `tenant` field and therefore belong
- * to this tenant.
- */
-export const DEFAULT_STREAM_TENANT_ID = "default-tenant";
-
-/** Cookie the browser may carry to scope page renders to a tenant. */
-export const TENANT_COOKIE_NAME = "sp_tenant_id";
+export { DEFAULT_STREAM_TENANT_ID, TENANT_COOKIE_NAME };
 
 /** Header the dashboard's API layer already allow-lists for carrying the caller's actor identity. */
 export const ACTOR_HEADER_NAME = "x-streampay-actor-id";

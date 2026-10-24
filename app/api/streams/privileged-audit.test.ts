@@ -5,13 +5,24 @@ import { POST as stopStream } from "./[id]/stop/route";
 import { POST as withdrawFromStream } from "./[id]/withdraw/route";
 import { auditLogStore, resetAuditLogStore } from "@/app/lib/audit-log";
 import { resetDb } from "@/app/lib/db";
+import { orgDb, _resetOrgDbForTesting } from "@/app/lib/org-db";
 
-function buildRequest(requestId: string, actorId: string, role: string) {
+const SETTLER_ADDR = "GSETTLER5IVFB7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GS";
+/** Recipient of the seeded `stream-yusuf`; withdrawals require the recipient (#1789). */
+const YUSUF_RECIPIENT = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGYWDEAVQBMJ87WGNB55IAA";
+
+function buildRequest(
+  requestId: string,
+  actorId: string,
+  role: string,
+  wallet: string = SETTLER_ADDR,
+) {
   return new Request(`http://localhost/${requestId}`, {
     headers: {
       "x-request-id": requestId,
       "x-streampay-actor-id": actorId,
       "x-streampay-actor-role": role,
+      "Actor-Wallet-Address": wallet,
       "idempotency-key": `idempotency-${requestId}`,
     },
     method: "POST",
@@ -21,7 +32,10 @@ function buildRequest(requestId: string, actorId: string, role: string) {
 describe("privileged stream audit hooks", () => {
   beforeEach(() => {
     resetDb();
+    _resetOrgDbForTesting();
     resetAuditLogStore();
+    const acme = orgDb.orgs.get("org-acme");
+    if (acme) acme.policy.requireApprovals = 1;
   });
 
   it("records stop, settle, and withdraw actions in the append-only audit log", async () => {
@@ -35,7 +49,7 @@ describe("privileged stream audit hooks", () => {
     });
     expect(settleResponse.status).toBe(200);
 
-    const withdrawResponse = await withdrawFromStream(buildRequest("req-withdraw-1", "finance-operator-8", "finance") as any, {
+    const withdrawResponse = await withdrawFromStream(buildRequest("req-withdraw-1", "finance-operator-8", "finance", YUSUF_RECIPIENT) as any, {
       params: Promise.resolve({ id: "stream-yusuf" }),
     });
     expect(withdrawResponse.status).toBe(200);

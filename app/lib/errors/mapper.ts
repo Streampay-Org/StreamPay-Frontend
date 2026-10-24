@@ -14,7 +14,6 @@ import type {
   ErrorCode,
 } from './types';
 import {
-  ERROR_REGISTRY,
   HORIZON_ERROR_MAPPING,
   BACKEND_ERROR_CODE_MAPPING,
   SOROBAN_ERROR_MAPPING,
@@ -25,7 +24,6 @@ import {
 /**
  * Detect if we're in a browser environment
  */
-const isBrowser = typeof window !== 'undefined';
 
 /**
  * Get current environment

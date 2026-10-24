@@ -3,6 +3,15 @@
 @import "./styles/icons.css";
 @import "./styles/patterns.css" layer(patterns);
 @import "./styles/typography.css";
+@import "./activity/activity.css";
+@import "./components/Explainer.css";
+@import "./components/OnboardingManager.css";
+@import "./components/PushOptIn.css";
+@import "./components/WelcomeTour.css";
+@import "./contacts/contacts.css";
+@import "./docs/docs.css";
+@import "./help/help.css";
+@import "./templates/templates.css";
 
 :root {
   color-scheme: dark;
@@ -1301,7 +1310,7 @@ a:hover {
 }
 
 .csf-skeleton__field {
-  /* Skelton items within a field group */
+  /* Skeleton items within a field group */
 }
 
 .csf-skeleton__field .skeleton--label {

@@ -4,25 +4,31 @@ import { POST } from "./route";
 import { db, resetDb } from "@/app/lib/db";
 import { eventBus } from "@/app/lib/event-bus";
 import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
+import { orgDb } from "@/app/lib/org-db";
 
 describe("POST /api/streams/batch/stop", () => {
   beforeEach(() => {
     resetDb();
     resetRateLimitStore();
+    db.streams.set("stream-indiv-1", {
+      ...db.streams.get("stream-kemi")!,
+      id: "stream-indiv-1",
+      status: "active",
+    });
   });
 
   it("stops multiple active streams successfully", async () => {
     const req = new Request("http://localhost/api/streams/batch/stop", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(["stream-ada"]),
+      body: JSON.stringify(["stream-indiv-1"]),
     });
 
     const res = await POST(req as any);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data).toHaveLength(1);
-    expect(db.streams.get("stream-ada")?.status).toBe("ended");
+    expect(db.streams.get("stream-indiv-1")?.status).toBe("ended");
   });
 
   it("is atomic: rejects entire batch if one id is invalid state", async () => {
@@ -30,7 +36,7 @@ describe("POST /api/streams/batch/stop", () => {
     const req = new Request("http://localhost/api/streams/batch/stop", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(["stream-ada", "stream-yusuf"]),
+      body: JSON.stringify(["stream-indiv-1", "stream-yusuf"]),
     });
 
     const res = await POST(req as any);
@@ -38,10 +44,14 @@ describe("POST /api/streams/batch/stop", () => {
     const body = await res.json();
     expect(body.error.code).toBe("VALIDATION_ERROR");
     // Ensure no streams were changed
-    expect(db.streams.get("stream-ada")?.status).toBe("active");
+    expect(db.streams.get("stream-indiv-1")?.status).toBe("active");
   });
 
   it("publishes a redacted update for each stopped stream", async () => {
+    // Single-approval org policy so the owner can stop directly.
+    const acme = orgDb.orgs.get("org-acme");
+    const previousApprovals = acme?.policy.requireApprovals;
+    if (acme) acme.policy.requireApprovals = 1;
     const events: any[] = [];
     const listener = (data: any) => events.push(data);
     eventBus.on("stream:updated:stream-ada", listener);
@@ -49,7 +59,11 @@ describe("POST /api/streams/batch/stop", () => {
     try {
       const req = new Request("http://localhost/api/streams/batch/stop", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // stream-ada is org-owned; stopping it needs an org owner identity (#1806).
+          "Actor-Wallet-Address": "GOWNER7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW",
+        },
         body: JSON.stringify(["stream-ada"]),
       });
 
@@ -62,18 +76,19 @@ describe("POST /api/streams/batch/stop", () => {
       expect(events[0]).not.toHaveProperty("memo");
       expect(events[0]).not.toHaveProperty("partnerId");
     } finally {
+      if (acme && previousApprovals !== undefined) acme.policy.requireApprovals = previousApprovals;
       eventBus.off("stream:updated:stream-ada", listener);
     }
   });
 
   it("replays cached response for same idempotency key and body", async () => {
     const headers = { "Content-Type": "application/json", "Idempotency-Key": "batch-stop-1" };
-    const req1 = new Request("http://localhost/api/streams/batch/stop", { method: "POST", headers, body: JSON.stringify(["stream-ada"]) });
+    const req1 = new Request("http://localhost/api/streams/batch/stop", { method: "POST", headers, body: JSON.stringify(["stream-indiv-1"]) });
     const res1 = await POST(req1 as any);
     expect(res1.status).toBe(200);
     const data1 = await res1.json();
 
-    const req2 = new Request("http://localhost/api/streams/batch/stop", { method: "POST", headers, body: JSON.stringify(["stream-ada"]) });
+    const req2 = new Request("http://localhost/api/streams/batch/stop", { method: "POST", headers, body: JSON.stringify(["stream-indiv-1"]) });
     const res2 = await POST(req2 as any);
     expect(res2.status).toBe(200);
     const data2 = await res2.json();
