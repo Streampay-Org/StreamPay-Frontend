@@ -28,9 +28,12 @@ const TOML_WITHOUT_FEDERATION = `
 NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015"
 `;
 
+const VALID_ACCOUNT_ID =
+  "GCLH2SNM5MTV4TGNNOADLYOZJYIFBXTIDVSNW4XP3LEI2UQV2MZ46OD7";
+
 const FEDERATION_RECORD = {
   stellar_address: "alice*example.com",
-  account_id: "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZK7G",
+  account_id: VALID_ACCOUNT_ID,
 };
 
 function okToml(body = TOML_WITH_FEDERATION) {
@@ -235,6 +238,127 @@ describe("resolveFederationAddress", () => {
     await expect(
       resolveFederationAddress("alice*example.com"),
     ).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+  });
+
+  it("resolves and returns memo_type and memo when present", async () => {
+    mockFetch
+      .mockResolvedValueOnce(okToml())
+      .mockResolvedValueOnce(
+        okJson({
+          stellar_address: "alice*example.com",
+          account_id: VALID_ACCOUNT_ID,
+          memo_type: "id",
+          memo: "12345",
+        }),
+      );
+
+    const result = await resolveFederationAddress("alice*example.com");
+    expect(result.account_id).toBe(VALID_ACCOUNT_ID);
+    expect(result.memo_type).toBe("id");
+    expect(result.memo).toBe("12345");
+  });
+
+  it("throws INVALID_RESPONSE when federation returns an account_id with a bad checksum", async () => {
+    mockFetch
+      .mockResolvedValueOnce(okToml())
+      .mockResolvedValueOnce(
+        okJson({
+          stellar_address: "alice*example.com",
+          // Bad checksum (last characters altered)
+          account_id: "GCLH2SNM5MTV4TGNNOADLYOZJYIFBXTIDVSNW4XP3LEI2UQV2MZ46ZZZ",
+        }),
+      );
+
+    await expect(
+      resolveFederationAddress("alice*example.com"),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
+  it("throws INVALID_RESPONSE when memo_type is 'text' with more than 28 bytes", async () => {
+    mockFetch
+      .mockResolvedValueOnce(okToml())
+      .mockResolvedValueOnce(
+        okJson({
+          stellar_address: "alice*example.com",
+          account_id: VALID_ACCOUNT_ID,
+          memo_type: "text",
+          memo: "This text memo is definitely more than 28 bytes long!",
+        }),
+      );
+
+    await expect(
+      resolveFederationAddress("alice*example.com"),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
+  it("throws INVALID_RESPONSE when stellar_address does not match the query", async () => {
+    mockFetch
+      .mockResolvedValueOnce(okToml())
+      .mockResolvedValueOnce(
+        okJson({
+          stellar_address: "mallory*attacker.com",
+          account_id: VALID_ACCOUNT_ID,
+        }),
+      );
+
+    await expect(
+      resolveFederationAddress("alice*example.com"),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
+  it("does not cache invalid responses and fetches again on retry", async () => {
+    mockFetch
+      .mockResolvedValueOnce(okToml())
+      .mockResolvedValueOnce(
+        okJson({
+          stellar_address: "alice*example.com",
+          account_id: "BAD_ACCOUNT_ID",
+        }),
+      )
+      .mockResolvedValueOnce(okToml())
+      .mockResolvedValueOnce(okJson(FEDERATION_RECORD));
+
+    await expect(
+      resolveFederationAddress("alice*example.com"),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+
+    // Retry should fetch again because the error was not cached
+    const retryResult = await resolveFederationAddress("alice*example.com");
+    expect(retryResult.account_id).toBe(VALID_ACCOUNT_ID);
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("accepts valid hash memo (64 hex characters or 32-byte base64) and rejects invalid hash", async () => {
+    const validHexHash = "a".repeat(64);
+    mockFetch
+      .mockResolvedValueOnce(okToml())
+      .mockResolvedValueOnce(
+        okJson({
+          stellar_address: "alice*example.com",
+          account_id: VALID_ACCOUNT_ID,
+          memo_type: "hash",
+          memo: validHexHash,
+        }),
+      );
+
+    const res = await resolveFederationAddress("alice*example.com");
+    expect(res.memo).toBe(validHexHash);
+
+    // Invalid hash
+    mockFetch
+      .mockResolvedValueOnce(okToml())
+      .mockResolvedValueOnce(
+        okJson({
+          stellar_address: "alice*example.com",
+          account_id: VALID_ACCOUNT_ID,
+          memo_type: "hash",
+          memo: "invalid-hash-string",
+        }),
+      );
+
+    await expect(
+      resolveFederationAddress("alice*example.com", { bypassCache: true }),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 });
 

@@ -21,6 +21,11 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export interface RequiredMemo {
+  type: "text" | "id" | "hash";
+  value: string;
+}
+
 export interface Contact {
   id: string;
   label: string;
@@ -29,7 +34,20 @@ export interface Contact {
   /** Original federation address when the user entered one (user*domain.com) */
   federationAddress?: string;
   memo?: string;
+  requiredMemo?: RequiredMemo;
   createdAt: string;
+}
+
+export interface ContactPaymentTarget {
+  address: string;
+  memo?: RequiredMemo;
+}
+
+export function getContactPaymentTarget(contact: Contact): ContactPaymentTarget {
+  return {
+    address: contact.address,
+    ...(contact.requiredMemo ? { memo: contact.requiredMemo } : {}),
+  };
 }
 
 // ─── localStorage persistence ─────────────────────────────────────────────────
@@ -40,9 +58,9 @@ const CONTACTS_KEY = "streampay_contacts";
 // Once the visitor saves, edits or deletes a contact their own list is persisted.
 // Not applied under Jest so the empty-state behaviour stays testable.
 const DEMO_CONTACTS: Contact[] = [
-  { id: "demo-ada", label: "Ada Creative Studio", address: "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZK7GQ", memo: "Design retainer, paid monthly", createdAt: "2026-04-01T09:00:00.000Z" },
-  { id: "demo-kemi", label: "Kemi Onboarding Support", address: "GBVZZ5QKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2ZQK", memo: "Weekly onboarding help", createdAt: "2026-04-10T11:00:00.000Z" },
-  { id: "demo-yusuf", label: "Yusuf QA Partnership", address: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGYWDEAVQBMJ7WGNB55IAAQ", federationAddress: "yusuf*qa.example.com", createdAt: "2026-04-15T08:00:00.000Z" },
+  { id: "demo-ada", label: "Ada Creative Studio", address: "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZLPXE", memo: "Design retainer, paid monthly", createdAt: "2026-04-01T09:00:00.000Z" },
+  { id: "demo-kemi", label: "Kemi Onboarding Support", address: "GBVZZ5QKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2GQI", memo: "Weekly onboarding help", createdAt: "2026-04-10T11:00:00.000Z" },
+  { id: "demo-yusuf", label: "Yusuf QA Partnership", address: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGYWDEAVQBMJ7WGNB55IVJV", federationAddress: "yusuf*qa.example.com", createdAt: "2026-04-15T08:00:00.000Z" },
 ];
 
 function loadContacts(): Contact[] {
@@ -77,8 +95,10 @@ const MEMO_MAX_LENGTH = 256;
 const INVALID_ADDRESS_MESSAGE =
   "Enter a valid Stellar address (G…) or federation address (user*domain.com)";
 
+const STELLAR_ACCOUNT_RE = /^G[A-Z2-7]{55}$/;
+
 type NormaliseResult =
-  | { resolved: string; federation?: string }
+  | { resolved: string; federation?: string; requiredMemo?: RequiredMemo }
   | { error: string };
 
 /**
@@ -100,7 +120,18 @@ async function normaliseAddressInput(
   if (isFederationAddress(trimmed)) {
     try {
       const record = await resolveFederationAddress(trimmed);
-      return { resolved: record.account_id, federation: trimmed };
+      const requiredMemo: RequiredMemo | undefined =
+        record.memo_type && record.memo
+          ? {
+              type: record.memo_type,
+              value: record.memo,
+            }
+          : undefined;
+      return {
+        resolved: record.account_id,
+        federation: trimmed,
+        requiredMemo,
+      };
     } catch (err) {
       return {
         error:
@@ -114,7 +145,10 @@ async function normaliseAddressInput(
   // Strkeys are case-insensitive base32; validate and store the canonical
   // uppercase form so a lowercase paste is accepted and normalised.
   const upper = trimmed.toUpperCase();
-  if (isValidStellarAddress(upper)) {
+  if (STELLAR_ACCOUNT_RE.test(upper)) {
+    if (!isValidStellarAddress(upper)) {
+      return { error: "Invalid Stellar address" };
+    }
     return { resolved: upper };
   }
 
@@ -127,11 +161,13 @@ interface FormValues {
   label: string;
   address: string;
   memo: string;
+  requiredMemo?: RequiredMemo;
 }
 
 interface FormSubmitResult extends FormValues {
   resolvedAddress: string;
   federationAddress?: string;
+  requiredMemo?: RequiredMemo;
 }
 
 interface ContactFormProps {
@@ -160,6 +196,9 @@ function ContactForm({
   const [label, setLabel] = useState(initial?.label ?? "");
   const [address, setAddress] = useState(initial?.address ?? "");
   const [memo, setMemo] = useState(initial?.memo ?? "");
+  const [requiredMemo, setRequiredMemo] = useState<RequiredMemo | undefined>(
+    initial?.requiredMemo,
+  );
 
   const [resolving, setResolving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -176,11 +215,13 @@ function ContactForm({
   const labelId = useId();
   const addressId = useId();
   const memoId = useId();
+  const requiredMemoId = useId();
   const summaryId = useId();
 
   const labelRef = useRef<HTMLInputElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
   const memoRef = useRef<HTMLInputElement>(null);
+  const requiredMemoRef = useRef<HTMLInputElement>(null);
 
   /** One controller per resolution so stale results are discarded. */
   const resolutionRef = useRef<AbortController | null>(null);
@@ -226,13 +267,19 @@ function ContactForm({
         if ("resolved" in result) {
           setResolvedAddress(result.resolved);
           setFederationAddress(result.federation);
+          setRequiredMemo(result.requiredMemo);
           setResolveError("");
           setErrors((prev) => ({ ...prev, address: undefined }));
         } else {
           setResolvedAddress("");
           setFederationAddress(undefined);
-          // Only surface resolver failures on blur; format errors wait for submit.
-          setResolveError(isFederation ? result.error : "");
+          setRequiredMemo(undefined);
+          // Surface resolver failures and invalid checksum errors immediately
+          setResolveError(
+            isFederation || result.error === "Invalid Stellar address"
+              ? result.error
+              : "",
+          );
         }
         return result;
       })();
@@ -268,12 +315,14 @@ function ContactForm({
       // resolution that is still in flight, or run the same step now.
       let finalAddress = resolvedAddress;
       let finalFederation = federationAddress;
+      let finalRequiredMemo = requiredMemo;
       if (!finalAddress) {
         const result = await (pendingRef.current ?? runNormalise(address));
         if (result === null) return; // superseded by a newer edit
         if ("resolved" in result) {
           finalAddress = result.resolved;
           finalFederation = result.federation;
+          finalRequiredMemo = result.requiredMemo;
         } else {
           next.address = result.error;
         }
@@ -299,6 +348,7 @@ function ContactForm({
         memo: memo.trim(),
         resolvedAddress: finalAddress,
         federationAddress: finalFederation,
+        requiredMemo: finalRequiredMemo,
       });
     } finally {
       submittingRef.current = false;
@@ -443,6 +493,7 @@ function ContactForm({
                 setAddress(e.target.value);
                 setResolvedAddress("");
                 setFederationAddress(undefined);
+                setRequiredMemo(undefined);
                 setResolveError("");
               }}
               onBlur={handleAddressBlur}
@@ -502,6 +553,58 @@ function ContactForm({
             </p>
           )}
         </div>
+
+        {/* Required memo from federation */}
+        {requiredMemo && (
+          <div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "0.5rem",
+                marginBottom: "0.5rem",
+                flexWrap: "wrap",
+              }}
+            >
+              <label htmlFor={requiredMemoId} style={labelStyle}>
+                Required memo
+              </label>
+              <span
+                role="status"
+                aria-label={`Required by ${federationAddress || address}`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  fontSize: "0.75rem",
+                  fontWeight: 600,
+                  padding: "0.2rem 0.6rem",
+                  borderRadius: "9999px",
+                  background: "var(--muted)",
+                  color: "var(--foreground)",
+                }}
+              >
+                Required by {federationAddress || address}
+              </span>
+            </div>
+            <input
+              ref={requiredMemoRef}
+              id={requiredMemoId}
+              type="text"
+              value={requiredMemo.value}
+              readOnly
+              aria-readonly="true"
+              style={{
+                ...fieldStyle,
+                backgroundColor: "rgba(125, 125, 125, 0.08)",
+                cursor: "not-allowed",
+              }}
+            />
+            <p style={hintStyle}>
+              Memo type: {requiredMemo.type} · Cannot be edited or cleared
+            </p>
+          </div>
+        )}
 
         {/* Memo */}
         <div>
@@ -606,6 +709,24 @@ function ContactRow({ contact, onEdit, onDelete }: ContactRowProps) {
           <CopyAddress value={contact.address} truncateChars={8} />
         </div>
 
+        {contact.requiredMemo && (
+          <div style={{ marginTop: "0.375rem" }}>
+            <span
+              style={{
+                display: "inline-block",
+                fontSize: "0.75rem",
+                fontWeight: 600,
+                padding: "0.15rem 0.5rem",
+                borderRadius: "9999px",
+                background: "var(--muted)",
+                color: "var(--foreground)",
+              }}
+            >
+              Required memo ({contact.requiredMemo.type}): {contact.requiredMemo.value}
+            </span>
+          </div>
+        )}
+
         {contact.memo && (
           <p
             style={{
@@ -692,6 +813,7 @@ export default function ContactsPage() {
     memo,
     resolvedAddress,
     federationAddress,
+    requiredMemo,
   }: FormSubmitResult) => {
     const contact: Contact = {
       id: crypto.randomUUID(),
@@ -699,6 +821,7 @@ export default function ContactsPage() {
       address: resolvedAddress,
       federationAddress,
       memo: memo || undefined,
+      requiredMemo,
       createdAt: new Date().toISOString(),
     };
     applyUpdate([...contacts, contact]);
@@ -711,6 +834,7 @@ export default function ContactsPage() {
     memo,
     resolvedAddress,
     federationAddress,
+    requiredMemo,
   }: FormSubmitResult) => {
     if (!editTarget) return;
     applyUpdate(
@@ -722,6 +846,7 @@ export default function ContactsPage() {
               address: resolvedAddress,
               federationAddress,
               memo: memo || undefined,
+              requiredMemo,
             }
           : c,
       ),
@@ -904,6 +1029,7 @@ export default function ContactsPage() {
               label: editTarget.label,
               address: editTarget.federationAddress ?? editTarget.address,
               memo: editTarget.memo ?? "",
+              requiredMemo: editTarget.requiredMemo,
             }}
             onSubmit={handleEdit}
             onCancel={() => setEditTarget(null)}
