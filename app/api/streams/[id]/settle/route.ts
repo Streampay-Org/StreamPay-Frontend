@@ -76,8 +76,18 @@ export async function POST(
       }
 
       const before = structuredClone(stream);
-      const txHash = `fake-tx-${crypto.randomUUID().slice(0, 8)}`;
       const now = new Date().toISOString();
+
+      // Settle on-chain FIRST (#1722): the stream is only mutated after the
+      // settlement receipt returns, so a chain failure leaves the stream
+      // untouched and the stored settlementTxHash is the real transaction.
+      let settlement: Awaited<ReturnType<ReturnType<typeof getStellarSettlementClient>["settleStream"]>>;
+      try {
+        settlement = await getStellarSettlementClient().settleStream({ streamId: id });
+      } catch {
+        return errorResponse("SETTLEMENT_FAILED", "Failed to settle stream on Stellar/Soroban", 502);
+      }
+      const txHash = settlement.txHash;
       const updatedStream = {
         ...stream,
         nextAction: nextActionFor(result.nextStatus),
@@ -95,9 +105,6 @@ export async function POST(
       db.streams.set(id, updatedStream);
 
       try {
-        const settlement = await getStellarSettlementClient().settleStream({ streamId: id });
-
-        db.streams.set(id, updatedStream);
 
         appendStreamHistoryEvent({
           streamId: id,
