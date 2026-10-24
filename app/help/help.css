@@ -1,0 +1,86 @@
+/* Extracted from globals.css; selectors stay global to preserve markup and tests. */
+.help-layout {
+
+  display: grid;
+  gap: 2.5rem;
+}
+
+@media (min-width: 768px) {
+.help-layout {
+
+    align-items: start;
+    gap: 3rem;
+    grid-template-columns: 14rem 1fr;
+  }
+}
+
+
+
+.help-nav {
+
+  position: sticky;
+  top: 1.5rem;
+}
+
+.help-nav__list {
+
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.help-nav__item {
+
+  display: contents;
+}
+
+.help-nav__link {
+
+  border-radius: 0.375rem;
+  color: var(--muted-light);
+  display: block;
+  font-size: 0.875rem;
+  padding: 0.375rem 0.75rem;
+  text-decoration: none;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.help-nav__link:hover,
+.help-nav__link:focus-visible {
+
+  background-color: var(--surface-raised, rgba(255, 255, 255, 0.06));
+  color: var(--text, #f0f0f0);
+  outline: none;
+}
+
+
+
+.help-content {
+
+  display: grid;
+  gap: 3.5rem;
+}
+
+.help-section {
+
+  display: grid;
+  gap: 1.5rem;
+}
+
+.help-section__title {
+
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  font-size: 1.25rem;
+  font-weight: 700;
+  padding-bottom: 0.75rem;
+  scroll-margin-top: 2rem;
+}
+
+.light .help-nav__link:hover,
+.light .help-nav__link:focus-visible {
+ background-color: var(--panel); color: var(--foreground); }

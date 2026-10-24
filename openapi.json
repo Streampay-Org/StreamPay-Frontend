@@ -59,6 +59,17 @@
             "type": "string",
             "pattern": "^\\d+(\\.\\d{7})?$",
             "description": "Amount owed to this leg, as a fixed 7-decimal string. The legs sum exactly to total_amount."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn"
+            ],
+            "description": "Current lifecycle status of this stream leg."
           }
         }
       },
@@ -105,9 +116,14 @@
           "status": {
             "type": "string",
             "enum": [
-              "draft"
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn",
+              "mixed"
             ],
-            "description": "Every leg is created in `draft`; drive them with the start/pause/stop/settle endpoints."
+            "description": "Common leg status, or `mixed` when legs differ."
           },
           "total_amount": {
             "type": "string",
@@ -371,7 +387,9 @@
               "draft",
               "active",
               "paused",
-              "ended"
+              "ended",
+              "withdrawn",
+              "cancelled"
             ],
             "description": "Current lifecycle state of the stream."
           },
@@ -380,7 +398,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Actions the authenticated user may perform on this stream. Replaces v1 `actions`.",
+            "description": "Legal actions for the stream's current status, derived from the lifecycle state-machine table (status-changing actions only). Replaces v1 `actions`.",
             "example": [
               "pause",
               "stop"
@@ -397,11 +415,16 @@
               {
                 "type": "object",
                 "required": [
+                  "tx_hash",
                   "settled_at",
                   "amount",
                   "currency"
                 ],
                 "properties": {
+                  "tx_hash": {
+                    "type": "string",
+                    "example": "c3f8a12e4b76"
+                  },
                   "settled_at": {
                     "type": "string",
                     "format": "date-time",
@@ -409,7 +432,8 @@
                   },
                   "amount": {
                     "type": "string",
-                    "example": "360 XLM"
+                    "description": "Raw-unit amount string (releasedAmount or totalAmount).",
+                    "example": "3600000000"
                   },
                   "currency": {
                     "type": "string",
@@ -467,19 +491,28 @@
         "type": "object",
         "required": [
           "token",
+          "token_type",
           "expires_at"
         ],
         "properties": {
           "token": {
             "type": "string",
-            "description": "Opaque bearer token. Pass as `Authorization: Bearer <token>`.",
-            "example": "tok_R0FCQzEyMzQ1Njc4OTA"
+            "description": "Signed JWT for the authenticated wallet address. Pass as `Authorization: Bearer <token>`.",
+            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJHQ0xIMlNOTTVNVFY0VEdOTk9BRExZT1pKWUlGQlhUSURWU05XNFhQM0xFSTJVUVYyTVo0Nk9ENyIsImlzcyI6InN0cmVhbXBheSIsImF1ZCI6InN0cmVhbXBheS1hcGkiLCJpYXQiOjE3MjE4MDAwMDAsImV4cCI6MTcyMTgwMDkwMH0.sample_signature"
+          },
+          "token_type": {
+            "type": "string",
+            "enum": [
+              "Bearer"
+            ],
+            "example": "Bearer",
+            "description": "Token type, always `Bearer`."
           },
           "expires_at": {
             "type": "string",
             "format": "date-time",
-            "description": "Token expiry (24 hours from issuance).",
-            "example": "2024-01-16T10:00:00.000Z"
+            "description": "Token expiry matching the JWT exp claim (15 minutes from issuance).",
+            "example": "2024-01-15T10:15:00.000Z"
           }
         }
       },
@@ -882,6 +915,58 @@
             }
           }
         }
+      },
+      "StreamTemplate": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "asset",
+          "amountPerInterval",
+          "intervalSeconds",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique template identifier (tpl_<uuid>).",
+            "example": "tpl_9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+          },
+          "name": {
+            "type": "string",
+            "description": "Template name.",
+            "example": "Monthly Design Retainer"
+          },
+          "asset": {
+            "type": "string",
+            "description": "Asset code (e.g. XLM, USDC).",
+            "example": "XLM"
+          },
+          "amountPerInterval": {
+            "type": "string",
+            "pattern": "^\\d{1,12}(\\.\\d{1,7})?$",
+            "description": "Payment amount per interval as a decimal string with at most 7 decimals.",
+            "example": "120.5"
+          },
+          "intervalSeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 31536000,
+            "description": "Payout interval in seconds (60 to 31,536,000).",
+            "example": 2592000
+          },
+          "memo": {
+            "type": "string",
+            "description": "Optional memo or description for the template.",
+            "example": "Recurring freelance payment"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when the template was created.",
+            "example": "2026-01-15T00:00:00.000Z"
+          }
+        }
       }
     },
     "responses": {
@@ -970,6 +1055,23 @@
           }
         }
       },
+      "413": {
+        "description": "Payload too large — request body exceeds size limit.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
+            "example": {
+              "error": {
+                "code": "REQUEST_TOO_LARGE",
+                "message": "Request body exceeds maximum allowed size.",
+                "request_id": "req_01HZ9ABCDEF"
+              }
+            }
+          }
+        }
+      },
       "422": {
         "description": "Unprocessable entity — request body failed schema validation.",
         "content": {
@@ -1007,6 +1109,122 @@
     }
   },
   "paths": {
+    "/api/streams/template": {
+      "get": {
+        "operationId": "listStreamTemplates",
+        "summary": "List all stream templates",
+        "description": "Returns every stream template held in memory on the current instance.",
+        "tags": [
+          "Streams"
+        ],
+        "responses": {
+          "200": {
+            "description": "List of stream templates.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "templates"
+                  ],
+                  "properties": {
+                    "templates": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StreamTemplate"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createStreamTemplate",
+        "summary": "Create a new stream template",
+        "description": "Creates a reusable stream preset with decimal string amounts and collision-free UUID ids.",
+        "tags": [
+          "Streams"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "asset",
+                  "amountPerInterval",
+                  "intervalSeconds"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Non-empty template name.",
+                    "example": "Monthly Design Retainer"
+                  },
+                  "asset": {
+                    "type": "string",
+                    "description": "Asset symbol (e.g. XLM, USDC).",
+                    "example": "XLM"
+                  },
+                  "amountPerInterval": {
+                    "type": "string",
+                    "pattern": "^\\d{1,12}(\\.\\d{1,7})?$",
+                    "description": "Amount per interval as a decimal string (numeric values accepted if lossless).",
+                    "example": "120.5"
+                  },
+                  "intervalSeconds": {
+                    "type": "integer",
+                    "minimum": 60,
+                    "maximum": 31536000,
+                    "description": "Interval in seconds between payouts (60 to 31536000).",
+                    "example": 2592000
+                  },
+                  "memo": {
+                    "type": "string",
+                    "description": "Optional memo string.",
+                    "example": "Recurring freelance payment"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stream template created successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "template"
+                  ],
+                  "properties": {
+                    "template": {
+                      "$ref": "#/components/schemas/StreamTemplate"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          }
+        }
+      }
+    },
     "/api/activity": {
       "get": {
         "operationId": "listActivity",
@@ -1360,7 +1578,62 @@
             "$ref": "#/components/responses/400"
           },
           "401": {
-            "$ref": "#/components/responses/401"
+            "description": "Authentication failed — invalid signature, unknown challenge, expired challenge, or address mismatch.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "signatureVerificationFailed": {
+                    "summary": "Signature verification failed",
+                    "value": {
+                      "error": {
+                        "code": "UNAUTHORIZED",
+                        "message": "Signature verification failed.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "challengeUnknown": {
+                    "summary": "Unknown or already consumed challenge",
+                    "value": {
+                      "error": {
+                        "code": "CHALLENGE_UNKNOWN",
+                        "message": "Challenge not found or already consumed.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "challengeExpired": {
+                    "summary": "Expired challenge",
+                    "value": {
+                      "error": {
+                        "code": "CHALLENGE_EXPIRED",
+                        "message": "Challenge has expired.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "challengeAddressMismatch": {
+                    "summary": "Address mismatch",
+                    "value": {
+                      "error": {
+                        "code": "CHALLENGE_ADDRESS_MISMATCH",
+                        "message": "Challenge was not issued for this address.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
           },
           "429": {
             "description": "IP rate limit exceeded for wallet login (5 req/min per IP).",
@@ -1403,7 +1676,7 @@
       "get": {
         "operationId": "listStreams",
         "summary": "List payment streams (v1, deprecated)",
-        "description": "Returns a cursor-paginated list of streams owned by the authenticated identity. **Deprecated** — use `GET /api/v2/streams` instead.",
+        "description": "Returns a cursor-paginated list of streams scoped to the caller's tenant (`x-tenant-id`, defaulting to `default-tenant`) and ownership (sender, recipient, owning organisation member, or admin). Unauthenticated requests are restricted to the resolved tenant and omit PII fields (`email`, `label`, `memo`, `partnerId`). `meta.total` reflects the filtered count. **Deprecated** — use `GET /api/v2/streams` instead.",
         "deprecated": true,
         "tags": [
           "Streams v1"
@@ -1797,6 +2070,515 @@
           },
           "500": {
             "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/streams/preview": {
+      "post": {
+        "operationId": "previewStream",
+        "summary": "Preview stream creation without side effects",
+        "description": "Runs the same recipient, rate, schedule, token normalization, and token allowlist checks as POST /api/streams. Does not write to stream, idempotency, or quota stores. Cost estimation is null with a reason when the normalized asset is unsupported.",
+        "security": [],
+        "tags": [
+          "Streams v1"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "recipient",
+                  "rate",
+                  "schedule"
+                ],
+                "properties": {
+                  "recipient": {
+                    "type": "string",
+                    "description": "Stellar public key."
+                  },
+                  "rate": {
+                    "type": "string",
+                    "description": "Positive decimal stream rate."
+                  },
+                  "schedule": {
+                    "type": "string",
+                    "enum": [
+                      "second",
+                      "minute",
+                      "hour",
+                      "day",
+                      "week",
+                      "month",
+                      "year"
+                    ]
+                  },
+                  "token": {
+                    "type": "string",
+                    "description": "Optional XLM or CODE:ISSUER token."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Valid dry-run stream preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "valid",
+                        "estimated_events",
+                        "cost_estimate",
+                        "preview_stream"
+                      ],
+                      "properties": {
+                        "valid": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "estimated_events": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "type",
+                              "description"
+                            ],
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "cost_estimate": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "description": "Null when the normalized token is unsupported by the cost estimator."
+                        },
+                        "cost_estimate_reason": {
+                          "type": "string"
+                        },
+                        "preview_stream": {
+                          "type": "object"
+                        }
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": [
+                        "dry_run",
+                        "request_id"
+                      ],
+                      "properties": {
+                        "dry_run": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation or token allowlist failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "valid"
+                      ],
+                      "properties": {
+                        "valid": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "validation_errors": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "cost_estimate": {
+                          "type": [
+                            "object",
+                            "null"
+                          ]
+                        },
+                        "preview_stream": {
+                          "type": [
+                            "object",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    "error": {
+                      "$ref": "#/components/schemas/ErrorEnvelope/properties/error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Write-tier rate limit exceeded."
+          }
+        }
+      }
+    },
+    "/api/streams/dryrun": {
+      "post": {
+        "operationId": "dryrunStreamDeprecated",
+        "summary": "Deprecated legacy stream dry-run alias",
+        "description": "Deprecated alias for POST /api/streams/preview. Legacy amountPerInterval is mapped to rate, asset to token, and intervalSeconds must exactly match a supported schedule duration.",
+        "deprecated": true,
+        "security": [],
+        "tags": [
+          "Streams v1"
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "recipient",
+                  "asset",
+                  "amountPerInterval",
+                  "intervalSeconds"
+                ],
+                "properties": {
+                  "recipient": {
+                    "type": "string"
+                  },
+                  "sender": {
+                    "type": "string",
+                    "description": "Accepted for legacy compatibility and ignored by preview."
+                  },
+                  "asset": {
+                    "type": "string"
+                  },
+                  "amountPerInterval": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "intervalSeconds": {
+                    "type": "integer",
+                    "description": "Must exactly match a supported schedule duration: 1, 60, 3600, 86400, 604800, 2592000, or 31536000."
+                  },
+                  "durationSeconds": {
+                    "type": "integer"
+                  },
+                  "memo": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preview response. Deprecation and Sunset headers are included.",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "example": "@1792368000"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Tue, 19 Oct 2027 00:00:00 GMT"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The same response shape as POST /api/streams/preview."
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid stream body or unsupported interval.",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Tue, 19 Oct 2027 00:00:00 GMT"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Write-tier rate limit exceeded."
+          }
+        }
+      }
+    },
+    "/api/streams/import": {
+      "post": {
+        "operationId": "importStreams",
+        "summary": "Bulk-import payment streams from CSV or JSON rows",
+        "description": "Validates and bulk-imports up to 500 payment streams with partial-import semantics (207 Multi-Status).\n\nWhen `dryRun=false` (the default), the `Idempotency-Key` header is required. Requests are fingerprinted by their canonical row list: replaying the same key and rows returns the original 207 response; reusing a key with different rows returns 409 `IDEMPOTENCY_CONFLICT`; a concurrent replay while the first request is in flight returns 409 `IDEMPOTENCY_IN_FLIGHT`.\n\nEach row is identified by an optional `external_id` column/field or a SHA-256 hash of the normalised `(recipient, rate, schedule, token, memo)` tuple. Duplicate rows within the same batch or previously imported by the same caller are reported with `status: \"duplicate\"` and the existing `streamId`.",
+        "tags": [
+          "Streams v1"
+        ],
+        "parameters": [
+          {
+            "name": "dryRun",
+            "in": "query",
+            "required": false,
+            "description": "When `true`, validates rows without persisting streams or touching the idempotency store.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required when `dryRun=false`. Client-generated idempotency key for safe retries.",
+            "schema": {
+              "type": "string",
+              "example": "import-batch-2026-10-20-01"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "text/csv": {
+              "schema": {
+                "type": "string",
+                "description": "CSV payload with headers `recipient,rate,schedule,token,memo,external_id`."
+              }
+            },
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "csv"
+                    ],
+                    "properties": {
+                      "csv": {
+                        "type": "string",
+                        "description": "Raw CSV string with header row."
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "rows"
+                    ],
+                    "properties": {
+                      "rows": {
+                        "type": "array",
+                        "maxItems": 500,
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "recipient",
+                            "schedule"
+                          ],
+                          "properties": {
+                            "recipient": {
+                              "type": "string"
+                            },
+                            "rate": {
+                              "type": "string"
+                            },
+                            "amount": {
+                              "type": "string"
+                            },
+                            "schedule": {
+                              "type": "string"
+                            },
+                            "token": {
+                              "type": "string"
+                            },
+                            "asset": {
+                              "type": "string"
+                            },
+                            "memo": {
+                              "type": "string"
+                            },
+                            "external_id": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "207": {
+            "description": "Multi-Status per-row import summary and results.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "summary",
+                    "results"
+                  ],
+                  "properties": {
+                    "summary": {
+                      "type": "object",
+                      "required": [
+                        "total",
+                        "valid",
+                        "failed"
+                      ],
+                      "properties": {
+                        "total": {
+                          "type": "integer"
+                        },
+                        "valid": {
+                          "type": "integer"
+                        },
+                        "failed": {
+                          "type": "integer"
+                        },
+                        "imported": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "row",
+                          "status"
+                        ],
+                        "properties": {
+                          "row": {
+                            "type": "integer"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "imported",
+                              "duplicate",
+                              "valid",
+                              "error"
+                            ]
+                          },
+                          "streamId": {
+                            "type": "string"
+                          },
+                          "errors": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "field",
+                                "code",
+                                "message"
+                              ],
+                              "properties": {
+                                "field": {
+                                  "type": "string"
+                                },
+                                "code": {
+                                  "type": "string"
+                                },
+                                "message": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "409": {
+            "description": "Idempotency conflict (`IDEMPOTENCY_CONFLICT`) or in-flight request with the same key (`IDEMPOTENCY_IN_FLIGHT`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway timeout when persistence exceeds the route deadline.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -3210,11 +3992,241 @@
         }
       }
     },
+    "/api/streams/{id}/withdraw": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Client-generated key (UUID recommended) to make the request idempotent.",
+          "schema": {
+            "type": "string",
+            "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "withdrawStream",
+        "summary": "Withdraw vested funds from a payment stream",
+        "description": "Releases vested-but-unreleased funds to the stream recipient. The caller must be authenticated as the stream recipient, or be an org member with `withdraw` permission. Amounts are raw i128 units (stroops for XLM); omit `amount` to withdraw the full withdrawable balance. Auth is checked before stream state, and stream state before the amount.",
+        "tags": [
+          "Streams v1"
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "string",
+                    "pattern": "^\\d+$",
+                    "description": "Optional raw i128 units as a decimal string. Maximum 2^127-1. Omit to withdraw the full withdrawable balance. Decimals, signs and symbols are rejected.",
+                    "example": "10000000"
+                  }
+                }
+              },
+              "examples": {
+                "full-withdrawal": {
+                  "summary": "Omit amount to withdraw everything available",
+                  "value": {}
+                },
+                "partial-withdrawal": {
+                  "summary": "Withdraw an exact raw-unit amount",
+                  "value": {
+                    "amount": "5000000"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Withdrawal computed and the stream's releasedAmount persisted alongside its finality state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/StreamV1"
+                    },
+                    "withdrawal": {
+                      "type": "object",
+                      "description": "Current withdrawal finality state."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No verified caller identity (Bearer JWT or Actor-Wallet-Address fallback).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "A verified caller identity is required to withdraw from a stream.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is neither the stream recipient nor an org member permitted to withdraw.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "not-recipient": {
+                    "value": {
+                      "error": {
+                        "code": "RECIPIENT_AUTH_REQUIRED",
+                        "message": "Only the stream recipient or an authorized org member may withdraw.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "role-insufficient": {
+                    "value": {
+                      "error": {
+                        "code": "ROLE_INSUFFICIENT",
+                        "message": "Role 'pauser' is not permitted to perform 'withdraw'.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stream not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "STREAM_NOT_FOUND",
+                    "message": "Stream 'stream-abc12345' not found",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stream state or balance conflict: `INVALID_STREAM_STATE`, `NO_WITHDRAWABLE_BALANCE`, or `APPROVAL_REQUIRED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "invalid-state": {
+                    "value": {
+                      "error": {
+                        "code": "INVALID_STREAM_STATE",
+                        "message": "Only ended streams can be withdrawn from",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "no-balance": {
+                    "value": {
+                      "error": {
+                        "code": "NO_WITHDRAWABLE_BALANCE",
+                        "message": "No vested funds are available for withdrawal at this time.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid amount or escrow state: `VALIDATION_ERROR`, `ZERO_AMOUNT`, `OVER_WITHDRAW`, or `INVALID_ESCROW_STATE`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "validation-error": {
+                    "value": {
+                      "error": {
+                        "code": "VALIDATION_ERROR",
+                        "message": "amount must be a non-negative raw i128 integer string.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "over-withdraw": {
+                    "value": {
+                      "error": {
+                        "code": "OVER_WITHDRAW",
+                        "message": "Requested amount exceeds withdrawable balance.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many requests. Retry after 30 seconds.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
     "/api/v2/streams": {
       "get": {
         "operationId": "listStreamsV2",
         "summary": "List payment streams (v2)",
-        "description": "Returns all streams owned by the authenticated user in the v2 shape (`allowed_actions`, `created_at`, `settlement`).",
+        "description": "Returns all streams owned by the authenticated user within the caller's tenant (`x-tenant-id`, defaulting to `default-tenant`) in the v2 shape (`allowed_actions`, `created_at`, `settlement`). Visibility includes streams where the caller is the sender, recipient, a member of the owning organisation, or an admin (falling back to tenant-scoped visibility when no verified actor claim is present). `meta.total` reflects the filtered stream count.",
         "tags": [
           "Streams"
         ],

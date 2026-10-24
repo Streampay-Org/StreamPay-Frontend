@@ -1,10 +1,10 @@
 import crypto from "crypto";
-import { logger, withWebhookContext, getCorrelationContext } from "./logger";
+import { logger, getCorrelationContext } from "./logger";
 import {
   WebhookEndpoint,
   WebhookEvent,
 } from "./webhook-delivery";
-import type { Stream } from "./stream-store";
+import type { Stream } from "@/app/types/openapi";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -152,12 +152,14 @@ export class WebhookOutboxStore {
     const endpoint: WebhookEndpoint = {
       id: `stream:${stream.id}`,
       url: stream.webhook_url,
+      maxRetries: 10,
     };
     const event: WebhookEvent = {
       id: eventId,
       eventType,
+      streamId: stream.id,
       data: payload,
-      createdAt: updatedAt,
+      timestamp: updatedAt,
     };
     return this.addToOutbox(endpoint, event);
   }
@@ -297,6 +299,79 @@ export class WebhookOutboxStore {
 }
 
 export const webhookOutboxStore = new WebhookOutboxStore();
+
+export interface AddToOutboxParams {
+  eventId: string;
+  eventType?: string | null;
+  streamId: string;
+  url: string;
+  data?: Record<string, unknown>;
+  payload?: Record<string, unknown>;
+}
+
+export function addToOutbox(params: AddToOutboxParams): WebhookOutboxEntry {
+  const endpoint: WebhookEndpoint = {
+    id: `stream:${params.streamId}`,
+    url: params.url,
+    maxRetries: 10,
+  };
+  const event: WebhookEvent = {
+    id: params.eventId,
+    eventType: params.eventType ?? "stream.updated",
+    streamId: params.streamId,
+    data: params.payload ?? params.data ?? {},
+    timestamp: new Date().toISOString(),
+  };
+  return webhookOutboxStore.addToOutbox(endpoint, event);
+}
+
+export function buildStreamWebhookPayload(params: {
+  eventType?: string | null;
+  streamId: string;
+  action: string;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+  occurredAt?: string;
+}): Record<string, unknown> {
+  return {
+    event_type: params.eventType,
+    stream_id: params.streamId,
+    action: params.action,
+    before: params.before,
+    after: params.after,
+    occurred_at: params.occurredAt ?? new Date().toISOString(),
+  };
+}
+
+export function enqueueStreamLifecycleWebhook(params: {
+  action: StreamLifecycleAction;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+}): void {
+  const stream = params.after as unknown as Stream;
+  if (!stream || !stream.webhook_url) return;
+  const event = toWebhookEvent(
+    params.before as unknown as Pick<Stream, "status"> | null,
+    stream,
+    params.action,
+  );
+  if (!event) return;
+  const now = new Date().toISOString();
+  addToOutbox({
+    eventId: `evt_${stream.id}_${params.action}_${now}`,
+    eventType: event,
+    streamId: stream.id,
+    url: stream.webhook_url,
+    data: buildStreamWebhookPayload({
+      eventType: event,
+      streamId: stream.id,
+      action: params.action,
+      before: params.before,
+      after: params.after,
+      occurredAt: now,
+    }),
+  });
+}
 
 /**
  * Legacy alias kept so `lib/outbox.ts` can re-export a single outbox store

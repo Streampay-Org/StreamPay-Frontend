@@ -1,0 +1,48 @@
+/* Extracted from globals.css; selectors stay global to preserve markup and tests. */
+.docs {
+ max-width: 900px; margin: 0 auto; padding: 3rem 1.5rem 6rem; }
+
+.docs h1 {
+ font-size: clamp(2rem, 5vw, 3rem); letter-spacing: -0.02em; margin: 0.25rem 0 0.75rem; }
+
+.docs h2 {
+ margin: 2.5rem 0 0.75rem; font-size: 1.4rem; scroll-margin-top: 5rem; }
+
+.docs p,
+.docs li {
+ color: var(--muted-light); line-height: 1.7; }
+
+.docs code {
+ background: rgba(127, 127, 127, 0.16); padding: 0.1rem 0.4rem; border-radius: 6px; font-size: 0.85em; }
+
+.docs pre {
+ background: rgba(127, 127, 127, 0.12); border: 1px solid rgba(127,127,127,0.2); padding: 1rem; border-radius: 12px; overflow-x: auto; }
+
+.docs pre code {
+ background: none; padding: 0; }
+
+.docs table {
+ width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+
+.docs th,
+.docs td {
+ text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(127,127,127,0.2); vertical-align: top; color: var(--muted-light); }
+
+.docs th {
+ color: inherit; }
+
+.docs__toc {
+ display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0 0; padding: 0; list-style: none; }
+
+.docs__toc a {
+ padding: 0.3rem 0.75rem; border-radius: 999px; border: 1px solid rgba(127,127,127,0.3); color: inherit; text-decoration: none; font-size: 0.85rem; }
+
+
+.docs__table-wrap {
+ -webkit-overflow-scrolling: touch; overflow-x: auto; }
+
+.docs__table-wrap table {
+ min-width: 40rem; }
+
+.docs td code {
+ white-space: nowrap; }

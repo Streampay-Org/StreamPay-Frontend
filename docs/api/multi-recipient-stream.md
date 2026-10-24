@@ -29,6 +29,10 @@ POST /api/v2/streams/multi
 | Implemented by | `app/api/v2/streams/multi/route.ts` |
 | Shared rules | `app/lib/multi-recipient.ts` (imported by the route *and* the wizard) |
 
+The `links.self` value points to the created group resource:
+`/api/v2/streams/multi/{groupId}`. Use that resource to read the current
+fan-out manifest or perform an atomic lifecycle action.
+
 ## Request
 
 ```json
@@ -150,22 +154,52 @@ disagree. Omit the field and the server simply derives it for you.
       "stream_id": "stream-1c4b90ae",
       "address": "GDSBCG3OKHCMMWS5EBH2X7XOYTJRWXN2YYQPCNS5OFBU4IDO4X7OFSQA",
       "percentage": "50.0000",
-      "amount": "5000.0000000"
+      "amount": "5000.0000000",
+      "status": "draft"
     },
     {
       "rank": 2,
       "stream_id": "stream-77de12b0",
       "address": "ada@example.com",
       "percentage": "50.0000",
-      "amount": "5000.0000000"
+      "amount": "5000.0000000",
+      "status": "draft"
     }
   ],
   "links": {
-    "self": "/api/v2/streams/multi",
+    "self": "/api/v2/streams/multi/stream-multi-8f3c1a90",
     "collection": "/api/v2/streams"
   }
 }
 ```
+
+## Read and manage a fan-out
+
+`GET /api/v2/streams/multi/{groupId}` returns the same manifest shape as
+creation, using each stored leg's current status. The aggregate `status` is
+the common status when all legs match, or `mixed` when they differ. The
+endpoint requires bearer authorization and returns `404` when the group is
+missing or not visible to the caller.
+
+The following bearer-authenticated endpoints perform an all-or-nothing
+lifecycle action:
+
+| Endpoint | Effect |
+|----------|--------|
+| `POST /api/v2/streams/multi/{groupId}/start` | Starts or resumes every eligible leg |
+| `POST /api/v2/streams/multi/{groupId}/pause` | Pauses every eligible active leg |
+| `POST /api/v2/streams/multi/{groupId}/stop` | Stops every eligible draft, active, or paused leg |
+
+Every leg is locked in sorted stream-ID order, using the same locks as
+single-leg actions. The server validates all transitions before writing any
+leg; if one transition is illegal, the request returns `422` with per-leg
+details and leaves every leg unchanged. Successful actions update leg
+timestamps, `nextAction`, pause timestamps, history, and audit records just as
+single-leg actions do. `Idempotency-Key` is scoped per group and action, and a
+replay returns the original response without recording another action.
+
+Group settlement, withdrawal, and cancellation are not supported: those
+money-moving operations remain per-leg actions.
 
 Notes on the shape:
 

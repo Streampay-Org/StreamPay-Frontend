@@ -6,6 +6,7 @@ import { render, fireEvent } from "@testing-library/react";
 const { screen } = require("@testing-library/react") as any;
 import { CancelStreamModal } from "./CancelStreamModal";
 import type { CancelInput } from "../lib/cancel-stream";
+import type { Stream } from "../types/openapi";
 
 const ONE_TOKEN = 10_000_000n; // 1.0 in stroops
 
@@ -36,6 +37,23 @@ const fullyVestedSplit: CancelInput = {
   recipientAddress: "GRECIPIENT",
 };
 
+function streamFrom(input: CancelInput, status: Stream["status"]): Stream {
+  return {
+    id: "stream-preview",
+    recipient: input.recipientAddress,
+    senderAddress: input.senderAddress,
+    rate: "1",
+    schedule: "day",
+    status,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    token: input.token,
+    totalAmount: input.totalAmount.toString(),
+    releasedAmount: input.releasedAmount.toString(),
+    vestedAmount: input.vestedAmount.toString(),
+  };
+}
+
 describe("CancelStreamModal", () => {
   it("previews the exact refund split before confirming", () => {
     render(
@@ -43,8 +61,7 @@ describe("CancelStreamModal", () => {
         isOpen
         onClose={jest.fn()}
         onConfirm={jest.fn()}
-        stream={{ status: "active" }}
-        split={split}
+        stream={streamFrom(split, "active")}
         tokenLabel="XLM"
       />,
     );
@@ -59,8 +76,7 @@ describe("CancelStreamModal", () => {
         isOpen
         onClose={jest.fn()}
         onConfirm={jest.fn()}
-        stream={{ status: "active" }}
-        split={partialReleaseSplit}
+        stream={streamFrom(partialReleaseSplit, "active")}
         tokenLabel="XLM"
       />,
     );
@@ -77,8 +93,7 @@ describe("CancelStreamModal", () => {
         isOpen
         onClose={jest.fn()}
         onConfirm={jest.fn()}
-        stream={{ status: "active" }}
-        split={fullyVestedSplit}
+        stream={streamFrom(fullyVestedSplit, "active")}
         tokenLabel="XLM"
       />,
     );
@@ -96,8 +111,7 @@ describe("CancelStreamModal", () => {
         isOpen
         onClose={jest.fn()}
         onConfirm={onConfirm}
-        stream={{ status: "active" }}
-        split={split}
+        stream={streamFrom(split, "active")}
       />,
     );
 
@@ -111,8 +125,7 @@ describe("CancelStreamModal", () => {
         isOpen
         onClose={jest.fn()}
         onConfirm={jest.fn()}
-        stream={{ status: "cancelled" }}
-        split={split}
+        stream={streamFrom(split, "cancelled")}
       />,
     );
 
@@ -128,8 +141,7 @@ describe("CancelStreamModal", () => {
         isOpen
         onClose={jest.fn()}
         onConfirm={jest.fn()}
-        stream={{ status: "ended" }}
-        split={split}
+        stream={streamFrom(split, "ended")}
       />,
     );
 
@@ -145,8 +157,7 @@ describe("CancelStreamModal", () => {
         isOpen
         onClose={jest.fn()}
         onConfirm={jest.fn()}
-        stream={{ status: "withdrawn" }}
-        split={split}
+        stream={streamFrom(split, "withdrawn")}
       />,
     );
 
@@ -162,8 +173,7 @@ describe("CancelStreamModal", () => {
         isOpen
         onClose={jest.fn()}
         onConfirm={jest.fn()}
-        stream={{ status: "draft" }}
-        split={split}
+        stream={streamFrom(split, "draft")}
       />,
     );
 
@@ -180,8 +190,7 @@ describe("CancelStreamModal", () => {
         isOpen
         onClose={onClose}
         onConfirm={jest.fn()}
-        stream={{ status: "active" }}
-        split={split}
+        stream={streamFrom(split, "active")}
       />,
     );
 
@@ -195,8 +204,7 @@ describe("CancelStreamModal", () => {
         isOpen
         onClose={jest.fn()}
         onConfirm={jest.fn()}
-        stream={{ status: "active" }}
-        split={split}
+        stream={streamFrom(split, "active")}
       />,
     );
 
@@ -211,8 +219,7 @@ describe("CancelStreamModal", () => {
         isOpen
         onClose={jest.fn()}
         onConfirm={jest.fn()}
-        stream={{ status: "active" }}
-        split={split}
+        stream={streamFrom(split, "active")}
       />,
     );
 
@@ -227,8 +234,7 @@ describe("CancelStreamModal", () => {
         isOpen
         onClose={jest.fn()}
         onConfirm={jest.fn()}
-        stream={{ status: "active" }}
-        split={split}
+        stream={streamFrom(split, "active")}
         tokenLabel="USDC"
       />,
     );
@@ -244,8 +250,7 @@ describe("CancelStreamModal", () => {
         isOpen
         onClose={jest.fn()}
         onConfirm={onConfirm}
-        stream={{ status: "active" }}
-        split={split}
+        stream={streamFrom(split, "active")}
       />,
     );
 
@@ -259,8 +264,7 @@ describe("CancelStreamModal", () => {
         isOpen
         onClose={jest.fn()}
         onConfirm={jest.fn()}
-        stream={{ status: "active" }}
-        split={split}
+        stream={streamFrom(split, "active")}
       />,
     );
 

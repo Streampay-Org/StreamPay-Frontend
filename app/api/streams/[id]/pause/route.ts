@@ -12,7 +12,7 @@
  * | Field       | Value                                      |
  * |-------------|--------------------------------------------|
  * | `status`    | `"paused"`                                 |
- * | `nextAction`| `"stop"`                                   |
+ * | `nextAction`| `"start"`                                  |
  * | `pausedAt`  | ISO-8601 UTC timestamp of this request.    |
  * | `updatedAt` | ISO-8601 UTC timestamp of this request.    |
  *
@@ -49,7 +49,8 @@
  * | Status | Code                    | Reason                                   |
  * |--------|-------------------------|------------------------------------------|
  * | 404    | `STREAM_NOT_FOUND`      | Stream does not exist.                   |
- * | 409    | `INVALID_STREAM_STATE`  | Stream is not `active`.                  |
+ * | 409    | `ILLEGAL_TRANSITION`     | Pause is not allowed in the current state. |
+ * |        | `legacy_code`            | `INVALID_STREAM_STATE` for compatibility. |
  * | 403    | `NOT_ORG_MEMBER`        | Actor is not in the owning org.          |
  * | 403    | `ROLE_INSUFFICIENT`     | Actor's role cannot pause.               |
  * | 409    | `APPROVAL_REQUIRED`     | Org policy requires multi-sig approval.  |
@@ -67,17 +68,18 @@ import {
 } from "@/app/lib/db";
 import { streamsRateLimit } from "@/src/middleware/rateLimit";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
-import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
+import { nextActionFor, transition } from "@/app/lib/state-machine";
+import { enforceStreamRbac, resolveActorAddress } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 import { addToOutbox } from "@/app/lib/webhook-outbox";
 import { toWebhookEvent } from "@/app/lib/webhook-events";
 import { publishStreamChange } from "@/app/lib/stream-publish";
 
-function createErrorResponse(code: string, message: string, status: number) {
+function createErrorResponse(code: string, message: string, status: number, legacyCode?: string) {
   const context = getCorrelationContext();
   return NextResponse.json(
-    { error: { code, message, request_id: context?.request_id } },
+    { error: { code, ...(legacyCode ? { legacy_code: legacyCode } : {}), message, request_id: context?.request_id } },
     { status },
   );
 }
@@ -86,6 +88,20 @@ function getHeader(req: Request, name: string): string | null {
   return req.headers?.get?.(name) ?? null;
 }
 
+/**
+ * POST /api/streams/:id/pause
+ *
+ * Pauses an active stream.
+ *
+ * Actor resolution order:
+ * 1. Verified JWT `sub` claim (Bearer token).
+ * 2. `Actor-Wallet-Address` header (fallback only when STREAMPAY_ALLOW_ACTOR_HEADER=true).
+ * If both are present and differ, returns 403 ACTOR_MISMATCH.
+ *
+ * RBAC ordering:
+ * Runs after 404 stream existence check and before state transition validation,
+ * inside the stream lock.
+ */
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -151,34 +167,22 @@ export async function POST(
     }
 
     // ── Org RBAC ──────────────────────────────────────────────────────────
-    const actorAddress = getHeader(req, "Actor-Wallet-Address");
-    const policyResult = actorAddress
-      ? checkStreamOrgPolicy(id, actorAddress, "pause")
-      : null;
-    if (policyResult) {
-      if (!policyResult.allowed) {
-        return createErrorResponse(
-          policyResult.code,
-          policyResult.message,
-          policyResult.httpStatus,
-        );
-      }
-      if (policyResult.requiresApproval) {
-        return createErrorResponse(
-          "APPROVAL_REQUIRED",
-          "This action requires multi-sig approval. Please initiate an approval request.",
-          409,
-        );
-      }
-    }
+    const rbacError = enforceStreamRbac(req, id, "pause");
+    if (rbacError) return rbacError;
 
     // ── State guard ───────────────────────────────────────────────────────
-    if (stream.status !== "active") {
+    const result = transition(stream.status, "pause");
+    if (!result.ok) {
       return createErrorResponse(
-        "INVALID_STREAM_STATE",
-        `Cannot pause a stream in '${stream.status}' status. Stream must be active.`,
+        result.code,
+        result.error,
         409,
+        "INVALID_STREAM_STATE",
       );
+    }
+
+    if (result.nextStatus === stream.status) {
+      return NextResponse.json({ data: stream });
     }
 
     // ── Mutation ──────────────────────────────────────────────────────────
@@ -202,12 +206,19 @@ export async function POST(
        * `elapsed = effective_now − start − totalPausedMs` stays exact.
        */
       pausedAt: now,
-      nextAction: "stop" as const,
-      status: "paused" as const,
+      nextAction: nextActionFor(result.nextStatus),
+      status: result.nextStatus,
       updatedAt: now,
     };
 
     db.streams.set(id, updated);
+
+    let actorAddress: string | null = null;
+    try {
+      actorAddress = resolveActorAddress(req);
+    } catch {
+      actorAddress = getHeader(req, "Actor-Wallet-Address");
+    }
 
     appendStreamHistoryEvent({
       streamId: id,
@@ -215,7 +226,7 @@ export async function POST(
       fromStatus: "active",
       toStatus: "paused",
       at: now,
-      actorWallet: actorAddress,
+      actorWallet: actorAddress ?? undefined,
     });
     publishStreamChange({
       action: "pause",

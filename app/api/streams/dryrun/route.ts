@@ -1,101 +1,94 @@
 /**
- * POST /api/streams/dryrun
- *
- * Preflight validation for stream creation — runs all validation
- * checks without writing anything. Returns what would happen if
- * the stream were created for real.
+ * Deprecated compatibility alias for POST /api/streams/preview.
  */
 
 import { NextResponse } from "next/server";
+import { getCorrelationContext } from "@/app/lib/logger";
+import { checkStreamPreviewRateLimit } from "@/app/lib/stream-preview-rate-limit";
+import { createStreamPreviewResponse } from "@/app/lib/stream-preview";
 
-interface DryRunRequest {
-  recipient: string;
-  sender: string;
-  asset: string;
-  amountPerInterval: number;
-  intervalSeconds: number;
-  durationSeconds?: number;
-  memo?: string;
+const SCHEDULE_BY_SECONDS: Record<number, string> = {
+  1: "second",
+  60: "minute",
+  3_600: "hour",
+  86_400: "day",
+  604_800: "week",
+  2_592_000: "month",
+  31_536_000: "year",
+};
+
+const DEPRECATION_HEADERS = {
+  Deprecation: "@1792368000",
+  Sunset: "Tue, 19 Oct 2027 00:00:00 GMT",
+};
+
+function deprecatedResponse(response: NextResponse): NextResponse {
+  for (const [name, value] of Object.entries(DEPRECATION_HEADERS)) {
+    response.headers.set(name, value);
+  }
+  return response;
 }
 
-interface ValidationIssue {
-  field: string;
-  message: string;
-}
-
-function validate(body: Partial<DryRunRequest>): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-
-  if (!body.recipient?.trim()) {
-    issues.push({ field: "recipient", message: "recipient is required" });
-  }
-  if (!body.sender?.trim()) {
-    issues.push({ field: "sender", message: "sender is required" });
-  }
-  if (!body.asset?.trim()) {
-    issues.push({ field: "asset", message: "asset is required" });
-  }
-  if (!body.amountPerInterval || Number(body.amountPerInterval) <= 0) {
-    issues.push({ field: "amountPerInterval", message: "must be a positive number" });
-  }
-  if (!body.intervalSeconds || Number(body.intervalSeconds) < 60) {
-    issues.push({ field: "intervalSeconds", message: "must be at least 60 seconds" });
-  }
-  if (body.durationSeconds !== undefined && Number(body.durationSeconds) <= 0) {
-    issues.push({ field: "durationSeconds", message: "must be a positive number if provided" });
-  }
-  if (body.memo && body.memo.length > 256) {
-    issues.push({ field: "memo", message: "memo must be 256 characters or fewer" });
-  }
-
-  return issues;
-}
-
-export async function POST(request: Request) {
-  let body: Partial<DryRunRequest>;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      { status: 400 },
-    );
-  }
-
-  const issues = validate(body);
-
-  if (issues.length > 0) {
-    return NextResponse.json(
-      { valid: false, issues },
-      { status: 422 },
-    );
-  }
-
-  const amountPerInterval = Number(body.amountPerInterval);
-  const intervalSeconds = Number(body.intervalSeconds);
-  const durationSeconds = body.durationSeconds ? Number(body.durationSeconds) : null;
-
-  const estimatedPayments = durationSeconds
-    ? Math.floor(durationSeconds / intervalSeconds)
-    : null;
-
-  const totalEstimatedAmount = estimatedPayments !== null
-    ? estimatedPayments * amountPerInterval
-    : null;
-
-  return NextResponse.json({
-    valid: true,
-    issues: [],
-    preview: {
-      recipient: body.recipient,
-      sender: body.sender,
-      asset: body.asset,
-      amountPerInterval,
-      intervalSeconds,
-      durationSeconds,
-      estimatedPayments,
-      totalEstimatedAmount,
-      memo: body.memo ?? null,
+function unsupportedIntervalResponse(): NextResponse {
+  const requestId = getCorrelationContext()?.request_id;
+  return NextResponse.json(
+    {
+      data: {
+        valid: false,
+        estimated_events: [],
+        cost_estimate: null,
+        preview_stream: null,
+      },
+      error: {
+        code: "UNSUPPORTED_INTERVAL",
+        message: "intervalSeconds must exactly match a supported stream schedule.",
+        request_id: requestId,
+      },
     },
-  });
+    { status: 422, headers: DEPRECATION_HEADERS },
+  );
+}
+
+export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await checkStreamPreviewRateLimit(request);
+  if (limited) return deprecatedResponse(limited);
+
+  let parsed: unknown;
+  try {
+    parsed = await request.json();
+  } catch {
+    return deprecatedResponse(
+      NextResponse.json(
+        {
+          error: {
+            code: "INVALID_REQUEST",
+            message: "Request body must be valid JSON",
+            request_id: getCorrelationContext()?.request_id,
+          },
+        },
+        { status: 400 },
+      ),
+    );
+  }
+
+  const body = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : {};
+  const intervalSeconds = body.intervalSeconds;
+  const schedule = typeof intervalSeconds === "number"
+    ? SCHEDULE_BY_SECONDS[intervalSeconds]
+    : undefined;
+
+  if (!schedule) return unsupportedIntervalResponse();
+
+  const rate = body.amountPerInterval;
+  const token = body.asset;
+  return deprecatedResponse(
+    await createStreamPreviewResponse({
+      recipient: body.recipient,
+      rate: typeof rate === "string" || typeof rate === "number" ? String(rate) : rate,
+      schedule,
+      token,
+    }),
+  );
 }

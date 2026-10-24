@@ -9,7 +9,7 @@ import type {
   StreamRepository,
 } from "@/app/lib/db";
 import type { ActivityEvent, ExportJob, Stream, User } from "@/app/types/openapi";
-import { createActivityTimelineStore, type ActivityTimelineStore, activityEventToTimelineEntry } from "@/app/lib/repositories/activity-timeline";
+import { createActivityTimelineStore, activityEventToTimelineEntry } from "@/app/lib/repositories/activity-timeline";
 import { createStreamHistoryStore } from "@/app/lib/repositories/stream-history";
 
 // Keep seeded demo timestamps recent (no-op under Jest).
@@ -175,7 +175,14 @@ function createActivityMap(): Map<string, ActivityEvent> {
 }
 
 class InMemoryKeyValueStore<K, V> implements KeyValueStore<K, V> {
-  constructor(private readonly backing: Map<K, V>) {}
+  constructor(
+    private readonly backing: Map<K, V>,
+    private readonly hooks?: {
+      onClear?: () => void;
+      onDelete?: (key: K, value: V) => void;
+      onSet?: (key: K, value: V, previous: V | undefined) => void;
+    },
+  ) {}
 
   get size(): number {
     return this.backing.size;
@@ -183,10 +190,14 @@ class InMemoryKeyValueStore<K, V> implements KeyValueStore<K, V> {
 
   clear(): void {
     this.backing.clear();
+    this.hooks?.onClear?.();
   }
 
   delete(key: K): boolean {
-    return this.backing.delete(key);
+    const value = this.backing.get(key);
+    const deleted = this.backing.delete(key);
+    if (deleted && value !== undefined) this.hooks?.onDelete?.(key, value);
+    return deleted;
   }
 
   entries(): IterableIterator<[K, V]> {
@@ -201,12 +212,22 @@ class InMemoryKeyValueStore<K, V> implements KeyValueStore<K, V> {
     return this.backing.get(key);
   }
 
+  insert(key: K, value: V): boolean {
+    if (this.backing.has(key)) {
+      return false;
+    }
+    this.backing.set(key, value);
+    return true;
+  }
+
   has(key: K): boolean {
     return this.backing.has(key);
   }
 
   set(key: K, value: V): void {
+    const previous = this.backing.get(key);
     this.backing.set(key, value);
+    this.hooks?.onSet?.(key, value, previous);
   }
 
   values(): IterableIterator<V> {
@@ -242,17 +263,258 @@ class InMemoryAppendOnlyStore<T> implements AppendOnlyStore<T> {
   }
 }
 
-class InMemoryStreamRepository implements StreamRepository {
+import { DEFAULT_STREAM_TENANT_ID } from "@/app/lib/stream-tenant";
+import { resolveStreamTenant, visibleTo } from "@/app/lib/stream-visibility";
+
+export { visibleTo, resolveStreamTenant };
+
+function extractParticipants(stream: Stream): string[] {
+  const wallets = new Set<string>();
+  const sender = stream.senderAddress?.trim();
+  const recipient = stream.recipient?.trim();
+  if (sender && sender.length > 0) {
+    wallets.add(sender);
+  }
+  if (recipient && recipient.length > 0) {
+    wallets.add(recipient);
+  }
+  return Array.from(wallets);
+}
+
+/**
+ * Key-value store for `Stream` records that maintains secondary in-memory
+ * indexes by tenant (`byTenant`) and by participant wallet (`byParticipant`).
+ *
+ * All mutations (`set`, `delete`, `clear`) atomically update both indexes,
+ * including updates that change `tenantId`/`tenant`, `senderAddress`, or
+ * `recipient` on an existing stream ID.
+ */
+export class IndexedStreamStore implements KeyValueStore<string, Stream> {
+  private readonly backing = new Map<string, Stream>();
+  private readonly tenantIndex = new Map<string, Set<string>>();
+  private readonly participantIndex = new Map<string, Set<string>>();
+  private readonly multiGroupIndex = new Map<string, Set<string>>();
+
+  constructor(initialEntries?: Iterable<[string, Stream]>) {
+    if (initialEntries) {
+      for (const [id, stream] of initialEntries) {
+        this.set(id, stream);
+      }
+    }
+  }
+
+  get size(): number {
+    return this.backing.size;
+  }
+
+  /** Read-only view of the tenant -> stream IDs secondary index. */
+  get byTenant(): ReadonlyMap<string, ReadonlySet<string>> {
+    return this.tenantIndex;
+  }
+
+  /** Read-only view of the participant wallet -> stream IDs secondary index. */
+  get byParticipant(): ReadonlyMap<string, ReadonlySet<string>> {
+    return this.participantIndex;
+  }
+
+  clear(): void {
+    this.backing.clear();
+    this.tenantIndex.clear();
+    this.participantIndex.clear();
+    this.multiGroupIndex.clear();
+  }
+
+  /** Stream IDs belonging to a multi-recipient group (secondary index). */
+  getMultiGroupStreamIds(groupId: string): string[] {
+    return [...(this.multiGroupIndex.get(groupId) ?? [])];
+  }
+
+  delete(id: string): boolean {
+    const existing = this.backing.get(id);
+    if (!existing) {
+      return false;
+    }
+    this.unindexStream(id, existing);
+    return this.backing.delete(id);
+  }
+
+  entries(): IterableIterator<[string, Stream]> {
+    return this.backing.entries();
+  }
+
+  forEach(callbackfn: (value: Stream, key: string) => void): void {
+    this.backing.forEach((value, key) => callbackfn(value, key));
+  }
+
+  get(id: string): Stream | undefined {
+    return this.backing.get(id);
+  }
+
+  has(id: string): boolean {
+    return this.backing.has(id);
+  }
+
+  set(id: string, value: Stream): void {
+    const existing = this.backing.get(id);
+    if (existing) {
+      this.unindexStream(id, existing);
+    }
+    this.backing.set(id, value);
+    this.indexStream(id, value);
+  }
+
+  /** Create-only write: returns `false` (and leaves state untouched) if `id` exists. */
+  insert(id: string, value: Stream): boolean {
+    if (this.backing.has(id)) {
+      return false;
+    }
+    this.backing.set(id, value);
+    this.indexStream(id, value);
+    return true;
+  }
+
+  values(): IterableIterator<Stream> {
+    return this.backing.values();
+  }
+
+  /**
+   * Returns all streams belonging to `tenant` in `O(streams in tenant)` time.
+   */
+  listByTenant(tenant?: string | null): Stream[] {
+    const normalizedTenant =
+      tenant && tenant.trim().length > 0 ? tenant.trim() : DEFAULT_STREAM_TENANT_ID;
+    const ids = this.tenantIndex.get(normalizedTenant);
+    if (!ids || ids.size === 0) {
+      return [];
+    }
+
+    const result: Stream[] = [];
+    for (const id of ids) {
+      const stream = this.backing.get(id);
+      if (stream) {
+        result.push(stream);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Returns all streams where `walletAddress` is `senderAddress` or `recipient`,
+   * optionally restricted to `tenant`.
+   */
+  listByParticipant(walletAddress: string, tenant?: string | null): Stream[] {
+    const normalizedWallet = walletAddress?.trim();
+    if (!normalizedWallet) {
+      return [];
+    }
+
+    const participantIds = this.participantIndex.get(normalizedWallet);
+    if (!participantIds || participantIds.size === 0) {
+      return [];
+    }
+
+    const filterByTenant = tenant !== undefined && tenant !== null;
+    const targetTenant = filterByTenant
+      ? tenant.trim() || DEFAULT_STREAM_TENANT_ID
+      : null;
+    const tenantIds = targetTenant ? this.tenantIndex.get(targetTenant) : null;
+    if (filterByTenant && (!tenantIds || tenantIds.size === 0)) {
+      return [];
+    }
+
+    const result: Stream[] = [];
+    for (const id of participantIds) {
+      if (tenantIds && !tenantIds.has(id)) {
+        continue;
+      }
+      const stream = this.backing.get(id);
+      if (stream) {
+        result.push(stream);
+      }
+    }
+    return result;
+  }
+
+  private indexStream(id: string, stream: Stream): void {
+    const tenant = resolveStreamTenant(stream);
+    let tenantSet = this.tenantIndex.get(tenant);
+    if (!tenantSet) {
+      tenantSet = new Set<string>();
+      this.tenantIndex.set(tenant, tenantSet);
+    }
+    tenantSet.add(id);
+
+    for (const wallet of extractParticipants(stream)) {
+      let walletSet = this.participantIndex.get(wallet);
+      if (!walletSet) {
+        walletSet = new Set<string>();
+        this.participantIndex.set(wallet, walletSet);
+      }
+      walletSet.add(id);
+    }
+
+    const groupId = (stream as Stream & { multiGroupId?: string }).multiGroupId;
+    if (groupId) {
+      const groupIds = this.multiGroupIndex.get(groupId) ?? new Set<string>();
+      groupIds.add(id);
+      this.multiGroupIndex.set(groupId, groupIds);
+    }
+  }
+
+  private unindexStream(id: string, stream: Stream): void {
+    const tenant = resolveStreamTenant(stream);
+    const tenantSet = this.tenantIndex.get(tenant);
+    if (tenantSet) {
+      tenantSet.delete(id);
+      if (tenantSet.size === 0) {
+        this.tenantIndex.delete(tenant);
+      }
+    }
+
+    for (const wallet of extractParticipants(stream)) {
+      const walletSet = this.participantIndex.get(wallet);
+      if (walletSet) {
+        walletSet.delete(id);
+        if (walletSet.size === 0) {
+          this.participantIndex.delete(wallet);
+        }
+      }
+    }
+
+    const groupId = (stream as Stream & { multiGroupId?: string }).multiGroupId;
+    if (groupId) {
+      const groupIds = this.multiGroupIndex.get(groupId);
+      if (groupIds) {
+        groupIds.delete(id);
+        if (groupIds.size === 0) this.multiGroupIndex.delete(groupId);
+      }
+    }
+  }
+}
+
+export class InMemoryStreamRepository implements StreamRepository {
   readonly activity = new InMemoryKeyValueStore<string, ActivityEvent>(createActivityMap());
-  readonly streams = new InMemoryKeyValueStore<string, Stream>(createStreamsMap());
+  readonly streams = new IndexedStreamStore(createStreamsMap());
   readonly users = new InMemoryKeyValueStore<string, User>(createUsersMap());
   private readonly locks = new Map<string, Promise<void>>();
+
+  listByTenant(tenant?: string | null): Stream[] {
+    return this.streams.listByTenant(tenant);
+  }
+
+  listByParticipant(walletAddress: string, tenant?: string | null): Stream[] {
+    return this.streams.listByParticipant(walletAddress, tenant);
+  }
 
   reset(): void {
     resetKeyValueStore(this.users, createUsersMap());
     resetKeyValueStore(this.streams, createStreamsMap());
     resetKeyValueStore(this.activity, createActivityMap());
     this.locks.clear();
+  }
+
+  getMultiGroupStreamIds(groupId: string): string[] {
+    return this.streams.getMultiGroupStreamIds(groupId);
   }
 
   async withLock<T>(id: string, callback: () => Promise<T>): Promise<T> {

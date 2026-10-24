@@ -6,15 +6,33 @@
  *   - `Content-Type: application/json` — `{ "csv": "<string>" }` or `{ "rows": [...] }`
  *
  * Query parameters:
- *   - `dryRun=true` — validate every row without persisting any stream.
+ *   - `dryRun=true` — validate every row without persisting any stream or touching
+ *     the idempotency store.
  *   - `dryRun=false` (default) — validate then persist valid rows; failed rows are
- *     skipped but do not block the rest of the batch (partial-import semantics).
+ *     skipped and duplicate rows are deduplicated without blocking the rest of the
+ *     batch (partial-import semantics). Requires an `Idempotency-Key` header.
+ *
+ * Headers:
+ *   - `Idempotency-Key` — required when `dryRun=false`. Requests are fingerprinted
+ *     by their canonical row list. Replaying the same key and canonical rows returns
+ *     the original 207 body; reusing the key with different rows returns 409
+ *     `IDEMPOTENCY_CONFLICT`; a concurrent replay while the original request is still
+ *     in flight returns 409 `IDEMPOTENCY_IN_FLIGHT`.
  *
  * CSV columns (case-insensitive header):
- *   `recipient`, `rate`|`amount`, `schedule`, `token`|`asset`, `memo`
+ *   `recipient`, `rate`|`amount`, `schedule`, `token`|`asset`, `memo`, `external_id`
  *
- * Each row is validated independently.  The endpoint returns a 207 Multi-Status
- * with per-row results and a summary block.
+ * Row identity & deduplication:
+ *   Each row's dedupe key is its `external_id` (when provided) or the SHA-256 hash
+ *   of the normalised `(recipient, rate, schedule, token, memo)` tuple. Duplicate
+ *   keys within the same file or previously imported by the same caller are skipped
+ *   and reported with `status: "duplicate"` and the existing `streamId`.
+ *
+ * Timeout safety:
+ *   Persistence is bounded by the route timeout (`withRouteTimeout`). Each row is
+ *   recorded as soon as it is persisted, and an aborted/timed-out request releases
+ *   its in-flight idempotency reservation so a retry reports already-persisted rows
+ *   as `duplicate` and imports only the remaining rows.
  *
  * ## Response (207)
  *
@@ -23,49 +41,86 @@
  *   "summary": { "total": 3, "valid": 2, "failed": 1, "imported": 2 },
  *   "results": [
  *     { "row": 1, "status": "imported", "streamId": "stream-abc123" },
- *     { "row": 2, "status": "error", "errors": [...] }
+ *     { "row": 2, "status": "duplicate", "streamId": "stream-abc123" },
+ *     { "row": 3, "status": "error", "errors": [...] }
  *   ]
  * }
  * ```
  *
  * ## Errors
  *
- * | Status | Code                  | Reason                                |
- * |--------|-----------------------|---------------------------------------|
- * | 400    | `INVALID_CSV`         | CSV body is empty or unparseable       |
- * | 400    | `TOO_MANY_ROWS`       | More than 500 rows                     |
- * | 400    | `INVALID_REQUEST`     | Body is not valid JSON                 |
- * | 207    | —                     | Partial success (some rows failed)     |
+ * | Status | Code                       | Reason                                           |
+ * |--------|----------------------------|--------------------------------------------------|
+ * | 400    | `INVALID_CSV`              | CSV body is empty or unparseable                 |
+ * | 400    | `TOO_MANY_ROWS`            | More than 500 rows                               |
+ * | 400    | `INVALID_REQUEST`          | Body is not valid JSON                           |
+ * | 400    | `IDEMPOTENCY_KEY_REQUIRED` | Missing `Idempotency-Key` when `dryRun=false`    |
+ * | 409    | `IDEMPOTENCY_CONFLICT`     | `Idempotency-Key` reused with different rows     |
+ * | 409    | `IDEMPOTENCY_IN_FLIGHT`    | Concurrent request with same `Idempotency-Key`   |
+ * | 504    | `GATEWAY_TIMEOUT`          | Persistence exceeded the route deadline          |
+ * | 207    | —                          | Multi-Status batch result                        |
  */
 
+import { createHash } from "crypto";
 import { NextResponse } from "next/server";
-import { getStore } from "@/app/lib/db";
-import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
-import { getCorrelationContext, logger } from "@/app/lib/logger";
-import { validateCreateStreamBody } from "@/app/lib/stream-validation";
+import {
+  computeFingerprint,
+  getStore,
+  IDEMPOTENCY_TTL_MS,
+  idempotencyToken,
+  newStreamId,
+  setIdempotency,
+} from "@/app/lib/db";
+import { errorResponse } from "@/app/lib/errors/server";
+import { logger } from "@/app/lib/logger";
+import { parseCreateStreamBody, type NormalisedCreateStreamInput } from "@/app/lib/stream-validation";
 import { checkTokenAllowed, normaliseToken } from "@/app/lib/token-allowlist";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
+import { TimeoutError } from "@/app/lib/with-timeout";
+import { ROUTE_TIMEOUT_MS, withRouteTimeout } from "@/src/middleware/timeout";
 
 const MAX_ROWS = 500;
 
-interface RowResult {
+export interface RowResult {
   row: number;
-  status: "imported" | "error" | "valid";
+  status: "imported" | "error" | "valid" | "duplicate";
   streamId?: string;
   errors?: RowError[];
 }
 
-interface RowError {
+export interface RowError {
   field: string;
   code: string;
   message: string;
 }
 
-interface ImportSummary {
+export interface ImportSummary {
   total: number;
   valid: number;
   failed: number;
   imported?: number;
+}
+
+interface NormalisedRow {
+  recipient: string;
+  rate: string;
+  schedule: string;
+  token: string;
+  memo: string;
+  external_id: string;
+}
+
+interface StoredIdempotencyRecord {
+  state?: "in_flight" | "completed";
+  fingerprint: string;
+  expiresAt: number;
+  status?: number;
+  body?: unknown;
+}
+
+interface StoredRowDedupeRecord {
+  streamId: string;
+  expiresAt: number;
 }
 
 // ── CSV Parser ────────────────────────────────────────────────────────────────
@@ -124,28 +179,69 @@ function parseCSVLine(line: string): string[] {
   return values;
 }
 
-// ── Row normalisation ─────────────────────────────────────────────────────────
+// ── Row normalisation & identity ──────────────────────────────────────────────
 
-function normaliseRow(
-  raw: Record<string, string>,
-): Record<string, string> {
-  const row: Record<string, string> = {};
+function normaliseRow(raw: Record<string, string>): NormalisedRow {
+  return {
+    recipient: (raw.recipient ?? "").trim(),
+    rate: (raw.rate || raw.amount || "").trim(),
+    schedule: (raw.schedule ?? "").trim(),
+    token: (raw.token || raw.asset || "").trim(),
+    memo: (raw.memo ?? "").trim(),
+    external_id: (raw.external_id ?? raw.externalId ?? "").trim(),
+  };
+}
 
-  row.recipient = raw.recipient ?? "";
-  row.rate = raw.rate || raw.amount || "";
-  row.schedule = raw.schedule ?? "";
-  row.token = raw.token || raw.asset || "";
-  row.memo = raw.memo ?? "";
+function canonicaliseRowForFingerprint(row: NormalisedRow): NormalisedRow {
+  let token = row.token || "XLM";
+  try {
+    token = normaliseToken(token);
+  } catch {
+    // Keep raw token when malformed so distinct invalid payloads do not collide.
+  }
 
-  return row;
+  return {
+    recipient: row.recipient,
+    rate: row.rate,
+    schedule: row.schedule.toLowerCase(),
+    token,
+    memo: row.memo,
+    external_id: row.external_id,
+  };
+}
+
+export function computeRowKey(row: NormalisedRow, normalisedToken: string): string {
+  if (row.external_id) {
+    return row.external_id;
+  }
+
+  const canonicalTuple = JSON.stringify([
+    row.recipient,
+    row.rate,
+    row.schedule.toLowerCase(),
+    normalisedToken,
+    row.memo,
+  ]);
+  return createHash("sha256").update(canonicalTuple).digest("hex");
+}
+
+function resolveCallerId(request: Request): string {
+  return (
+    request.headers.get("Actor-Wallet-Address")?.trim() ||
+    request.headers.get("x-tenant-id")?.trim() ||
+    request.headers.get("X-API-Key")?.trim() ||
+    request.headers.get("authorization")?.trim() ||
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    request.headers.get("x-real-ip")?.trim() ||
+    "anonymous"
+  );
 }
 
 // ── Row validation ────────────────────────────────────────────────────────────
 
 async function validateRow(
-  row: Record<string, string>,
-  index: number,
-): Promise<RowError[]> {
+  row: NormalisedRow,
+): Promise<{ errors: RowError[]; normalisedToken?: string; parsed?: NormalisedCreateStreamInput }> {
   const errors: RowError[] = [];
 
   if (!row.recipient) {
@@ -172,22 +268,23 @@ async function validateRow(
     });
   }
 
-  if (errors.length > 0) return errors;
+  if (errors.length > 0) return { errors };
 
   // Use the shared stream validation for deeper checks
-  const fieldErrors = validateCreateStreamBody(row as unknown as Record<string, unknown>);
-  for (const fe of fieldErrors) {
-    errors.push({
-      field: fe.field,
-      code: fe.code,
-      message: fe.message,
-    });
+  const parseResult = parseCreateStreamBody(row as unknown as Record<string, unknown>);
+  if (!parseResult.success) {
+    for (const fe of parseResult.errors) {
+      errors.push({
+        field: fe.field,
+        code: fe.code,
+        message: fe.message,
+      });
+    }
+    return { errors };
   }
 
-  if (errors.length > 0) return errors;
-
   // Token allowlist check
-  const tokenStr = row.token?.trim() || "XLM";
+  const tokenStr = row.token || "XLM";
   let normalisedToken: string;
   try {
     normalisedToken = normaliseToken(tokenStr);
@@ -198,7 +295,7 @@ async function validateRow(
       code: "INVALID_TOKEN",
       message: `Invalid token format: ${msg}`,
     });
-    return errors;
+    return { errors };
   }
 
   const allowlistResult = await checkTokenAllowed(normalisedToken);
@@ -208,15 +305,16 @@ async function validateRow(
       code: "TOKEN_NOT_ALLOWED",
       message: allowlistResult.reason,
     });
+    return { errors };
   }
 
-  return errors;
+  return { errors, normalisedToken, parsed: parseResult.data };
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
-  const { streamRepository } = getStore();
+  const { idempotencyStore, streamRepository } = getStore();
   const url = new URL(request.url);
   const dryRun = url.searchParams.get("dryRun") === "true";
 
@@ -229,7 +327,11 @@ export async function POST(request: Request) {
     const text = await request.text();
     rows = parseCSV(text);
     if (rows.length === 0) {
-      return errorResponse("INVALID_CSV", "CSV body is empty, has no data rows, or is unparseable.", 400);
+      return errorResponse(
+        "INVALID_CSV",
+        "CSV body is empty, has no data rows, or is unparseable.",
+        400,
+      );
     }
   } else {
     let body: { csv?: string; rows?: unknown[] };
@@ -257,12 +359,17 @@ export async function POST(request: Request) {
             schedule: String(obj.schedule ?? ""),
             token: String(obj.token ?? obj.asset ?? ""),
             memo: String(obj.memo ?? ""),
+            external_id: String(obj.external_id ?? obj.externalId ?? ""),
           };
         }
         return {} as Record<string, string>;
       });
     } else {
-      return errorResponse("INVALID_REQUEST", "Request must include a 'csv' string or a 'rows' array.", 400);
+      return errorResponse(
+        "INVALID_REQUEST",
+        "Request must include a 'csv' string or a 'rows' array.",
+        400,
+      );
     }
   }
 
@@ -275,72 +382,219 @@ export async function POST(request: Request) {
     );
   }
 
-  // ── 3. Process each row ────────────────────────────────────────────────────
-  const results: RowResult[] = [];
-  let valid = 0;
-  let failed = 0;
+  const normalisedRows = rows.map(normaliseRow);
   const authenticatedActor = tryAuthenticateRequest(request);
   const senderAddress = authenticatedActor?.walletAddress ?? null;
   const ownership: "individual" | "unclaimed" = authenticatedActor ? "individual" : "unclaimed";
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = normaliseRow(rows[i]);
-    const rowErrors = await validateRow(row, i);
+  // ── 3. Idempotency check & reservation (skipped on dryRun) ─────────────────
+  const callerId = resolveCallerId(request);
+  let reqToken: string | null = null;
+  let fingerprint = "";
 
-    if (rowErrors.length > 0) {
-      results.push({ row: i + 1, status: "error", errors: rowErrors });
-      failed++;
-      continue;
-    }
-
-    valid++;
-
-    if (dryRun) {
-      results.push({ row: i + 1, status: "valid" });
-    } else {
-      const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
-      const now = new Date().toISOString();
-      const tokenStr = row.token?.trim() || "XLM";
-      let normalisedToken: string;
-      try {
-        normalisedToken = normaliseToken(tokenStr);
-      } catch {
-        normalisedToken = "XLM";
-      }
-
-      const newStream = {
-        createdAt: now,
-        id,
-        nextAction: "start" as const,
-        rate: row.rate,
-        recipient: row.recipient,
-        schedule: row.schedule,
-        status: "draft" as const,
-        updatedAt: now,
-        token: normalisedToken,
-        memo: row.memo || undefined,
-        senderAddress,
-        ownership,
-      };
-
-      streamRepository.streams.set(id, newStream);
-      results.push({ row: i + 1, status: "imported", streamId: id });
-    }
-  }
-
-  // ── 4. Build response ──────────────────────────────────────────────────────
-  const summary: ImportSummary = { total: rows.length, valid, failed };
   if (!dryRun) {
-    summary.imported = valid;
+    const idempotencyKey = request.headers.get("Idempotency-Key")?.trim() ?? "";
+    if (!idempotencyKey) {
+      return errorResponse(
+        "IDEMPOTENCY_KEY_REQUIRED",
+        "Idempotency-Key header is required when dryRun is false.",
+        400,
+      );
+    }
+
+    const canonicalRows = normalisedRows.map(canonicaliseRowForFingerprint);
+    fingerprint = computeFingerprint("POST", "/api/streams/import", canonicalRows);
+    reqToken = idempotencyToken(`streams.import.req.${callerId}`, idempotencyKey);
+
+    const existingRaw = idempotencyStore.get(reqToken) as
+      | Partial<StoredIdempotencyRecord>
+      | undefined;
+
+    if (existingRaw !== undefined) {
+      if (
+        typeof existingRaw.fingerprint !== "string" ||
+        typeof existingRaw.expiresAt !== "number" ||
+        existingRaw.expiresAt < Date.now()
+      ) {
+        idempotencyStore.delete(reqToken);
+      } else if (existingRaw.state === "in_flight") {
+        return errorResponse(
+          "IDEMPOTENCY_IN_FLIGHT",
+          "A request with this Idempotency-Key is currently in flight.",
+          409,
+        );
+      } else if (existingRaw.fingerprint !== fingerprint) {
+        return errorResponse(
+          "IDEMPOTENCY_CONFLICT",
+          "Idempotency-Key has already been used with a different request payload.",
+          409,
+        );
+      } else if (typeof existingRaw.status === "number" && existingRaw.body !== undefined) {
+        return NextResponse.json(existingRaw.body, {
+          status: existingRaw.status,
+          headers: { "Idempotency-Replay": "true" },
+        });
+      } else {
+        idempotencyStore.delete(reqToken);
+      }
+    }
+
+    // Reserve key while request is in flight
+    const reservation: StoredIdempotencyRecord = {
+      state: "in_flight",
+      fingerprint,
+      expiresAt: Date.now() + IDEMPOTENCY_TTL_MS,
+    };
+    idempotencyStore.set(reqToken, reservation);
   }
 
-  logger.info("Stream import completed", {
-    dryRun,
-    total: rows.length,
-    valid,
-    failed,
-    imported: dryRun ? undefined : valid,
-  });
+  // ── 4. Process each row under the route timeout ────────────────────────────
+  const timeoutMs = Number(process.env.ROUTE_TIMEOUT_MS) || ROUTE_TIMEOUT_MS;
+  let completed = false;
 
-  return NextResponse.json({ summary, results }, { status: 207 });
+  const releaseReservation = () => {
+    if (!completed && reqToken) {
+      idempotencyStore.delete(reqToken);
+    }
+  };
+
+  try {
+    return await withRouteTimeout(
+      request,
+      async (signal) => {
+        signal.addEventListener("abort", releaseReservation, { once: true });
+
+        const results: RowResult[] = [];
+        const seenInBatch = new Map<string, string | undefined>();
+        let valid = 0;
+        let failed = 0;
+        let imported = 0;
+
+        for (let i = 0; i < normalisedRows.length; i++) {
+          if (signal.aborted) {
+            throw new TimeoutError(timeoutMs);
+          }
+
+          const row = normalisedRows[i];
+          const { errors: rowErrors, normalisedToken, parsed } = await validateRow(row);
+
+          if (signal.aborted) {
+            throw new TimeoutError(timeoutMs);
+          }
+
+          if (rowErrors.length > 0 || !normalisedToken || !parsed) {
+            results.push({ row: i + 1, status: "error", errors: rowErrors });
+            failed++;
+            continue;
+          }
+
+          valid++;
+          const rowKey = computeRowKey(row, normalisedToken);
+
+          if (dryRun) {
+            if (seenInBatch.has(rowKey)) {
+              results.push({ row: i + 1, status: "duplicate" });
+            } else {
+              seenInBatch.set(rowKey, undefined);
+              results.push({ row: i + 1, status: "valid" });
+            }
+            continue;
+          }
+
+          // In-file duplicate check
+          if (seenInBatch.has(rowKey)) {
+            results.push({
+              row: i + 1,
+              status: "duplicate",
+              streamId: seenInBatch.get(rowKey),
+            });
+            continue;
+          }
+
+          // Cross-request caller-scoped duplicate check
+          const rowDedupeToken = idempotencyToken(`streams.import.row.${callerId}`, rowKey);
+          const existingRow = idempotencyStore.get(rowDedupeToken) as
+            | Partial<StoredRowDedupeRecord>
+            | undefined;
+
+          if (existingRow !== undefined) {
+            if (
+              typeof existingRow.streamId === "string" &&
+              typeof existingRow.expiresAt === "number" &&
+              existingRow.expiresAt >= Date.now() &&
+              streamRepository.streams.has(existingRow.streamId)
+            ) {
+              seenInBatch.set(rowKey, existingRow.streamId);
+              results.push({
+                row: i + 1,
+                status: "duplicate",
+                streamId: existingRow.streamId,
+              });
+              continue;
+            }
+            idempotencyStore.delete(rowDedupeToken);
+          }
+
+          if (signal.aborted) {
+            throw new TimeoutError(timeoutMs);
+          }
+
+          const id = newStreamId();
+          const now = new Date().toISOString();
+          const newStream = {
+            createdAt: now,
+            id,
+            nextAction: "start" as const,
+            rate: parsed.rate,
+            recipient: parsed.recipient,
+            schedule: parsed.schedule,
+            status: "draft" as const,
+            updatedAt: now,
+            token: normalisedToken,
+            memo: row.memo || undefined,
+            senderAddress,
+            ownership,
+          };
+
+          streamRepository.streams.set(id, newStream);
+          idempotencyStore.set(rowDedupeToken, {
+            streamId: id,
+            expiresAt: Date.now() + IDEMPOTENCY_TTL_MS,
+          });
+          seenInBatch.set(rowKey, id);
+          imported++;
+          results.push({ row: i + 1, status: "imported", streamId: id });
+        }
+
+        // ── 5. Build response ────────────────────────────────────────────────
+        const summary: ImportSummary = { total: normalisedRows.length, valid, failed };
+        if (!dryRun) {
+          summary.imported = imported;
+        }
+
+        const payload = { summary, results };
+
+        if (reqToken) {
+          setIdempotency(idempotencyStore, reqToken, fingerprint, 207, payload);
+        }
+        completed = true;
+
+        logger.info("Stream import completed", {
+          dryRun,
+          total: normalisedRows.length,
+          valid,
+          failed,
+          imported: dryRun ? undefined : imported,
+        });
+
+        return NextResponse.json(payload, {
+          status: 207,
+          headers: dryRun ? undefined : { "Idempotency-Replay": "false" },
+        });
+      },
+      timeoutMs,
+    );
+  } finally {
+    releaseReservation();
+  }
 }
