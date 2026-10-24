@@ -7,6 +7,7 @@ import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { getCorrelationContext, logger, withCorrelationContext } from "@/app/lib/logger";
 import type { ActivityTimelineEntry } from "@/app/lib/repositories/activity-timeline";
 import type { Stream } from "@/app/types/openapi";
+import { withRouteSpan } from "@/lib/routeSpan";
 import { withRouteTimeout } from "@/src/middleware/timeout";
 import { resolveRequestId, isValidRequestId, generateRequestId } from "@/lib/requestId";
 
@@ -107,19 +108,21 @@ async function handleActivityGet(request: Request) {
 
   const { searchParams } = url;
 
-  const request_id = resolveRequestId(
-    request instanceof Request ? request.headers : new Headers(),
-  );
-  // If handleActivityGet receives Request:
   const headers = request.headers;
   const request_id = resolveRequestId(headers);
   const rawCorr = headers.get("x-correlation-id");
   const correlation_id =
     rawCorr && isValidRequestId(rawCorr) ? rawCorr : generateRequestId();
 
+  // withRouteSpan installs a correlation context carrying the active span's
+  // trace/span ids; propagate them into the request-scoped context.
+  const spanContext = getCorrelationContext();
   const context = {
     correlation_id,
     request_id,
+    trace_id: spanContext?.trace_id,
+    span_id: spanContext?.span_id,
+    traceparent: spanContext?.traceparent,
   };
 
   return withCorrelationContext(context, async () => {
@@ -206,5 +209,7 @@ async function handleActivityGet(request: Request) {
 }
 
 export async function GET(request: Request) {
-  return withRouteTimeout(request, () => handleActivityGet(request));
+  return withRouteSpan("/api/activity", () =>
+    withRouteTimeout(request, () => handleActivityGet(request)),
+  )(request);
 }

@@ -11,6 +11,8 @@ shape is documented in the [README](../README.md#error-envelope).
 | `BAD_REQUEST`          | 400  | no        | Input failed schema validation. |
 | `UNAUTHORIZED`         | 401  | no        | Missing or invalid bearer token. |
 | `FORBIDDEN`            | 403  | no        | Authenticated but lacks permission. |
+| `ACTOR_REQUIRED`       | 403  | no        | Org stream lifecycle action requires a verified actor identity. |
+| `ACTOR_MISMATCH`       | 403  | no        | JWT actor identity does not match Actor-Wallet-Address header. |
 | `CSRF_TOKEN_INVALID`   | 403  | no        | CSRF token validation failed or tokens mismatched. |
 | `NOT_FOUND`            | 404  | no        | Resource does not exist (or not visible to you). |
 | `ORG_NOT_FOUND`        | 404  | no        | Organization id does not exist. |

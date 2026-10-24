@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { NextResponse } from "next/server";
 import { resolveRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
@@ -63,10 +62,22 @@ function resolveJwtSecret(): string {
 }
 
 /**
- * The resolved JWT secret. Validated at module load — throws in production
- * if the secret is missing or too short.
+ * Resolve the JWT secret at call time.
+ *
+ * Prefer this over importing a module-level constant: environment changes
+ * (e.g. secret rotation or test overrides) made after this module is imported
+ * are picked up on the next call.
  */
-export const JWT_SECRET: string = resolveJwtSecret();
+export function getJwtSecret(): string {
+  return resolveJwtSecret();
+}
+
+/**
+ * @deprecated Use `getJwtSecret()` instead. This module-level snapshot does not
+ * observe `process.env.JWT_SECRET` changes after import and will be removed
+ * after one release.
+ */
+export const JWT_SECRET: string = getJwtSecret();
 
 interface JwtKeyConfig {
   kid: string;
@@ -82,7 +93,7 @@ function getPreviousKeyId(): string {
 }
 
 function getConfiguredJwtSecrets(): JwtKeyConfig[] {
-  const currentSecret = resolveJwtSecret();
+  const currentSecret = getJwtSecret();
   const secrets: JwtKeyConfig[] = [{ kid: getCurrentKeyId(), secret: currentSecret }];
   const previousSecret = process.env.JWT_PREVIOUS_SECRET?.trim();
 
@@ -205,28 +216,15 @@ function createErrorResponse(
     },
   );
 }
-}
 
 /**
  * Validates double-submit CSRF tokens using constant-time comparison.
  * Protects wallet authentication endpoints from timing and CSRF attacks.
+ *
+ * The single implementation lives in `lib/csrf.ts` so the middleware and the
+ * route handlers can never drift apart.
  */
-export function validateCsrfToken(cookieToken: string | null, headerToken: string | null): boolean {
-  if (!cookieToken || !headerToken) return false;
-
-  try {
-    const bufCookie = Buffer.from(cookieToken);
-    const bufHeader = Buffer.from(headerToken);
-
-    if (bufCookie.length !== bufHeader.length) {
-      return false;
-    }
-
-    return crypto.timingSafeEqual(bufCookie, bufHeader);
-  } catch {
-    return false;
-  }
-}
+export { validateCsrfToken } from "@/lib/csrf";
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -237,7 +235,7 @@ export function signToken(
   walletAddress: string,
   extra: Record<string, unknown> = {},
 ): string {
-  const currentSecret = resolveJwtSecret();
+  const currentSecret = getJwtSecret();
   return jwt.sign(
     { sub: walletAddress, iss: JWT_ISSUER, aud: JWT_AUDIENCE, ...extra },
     currentSecret,
@@ -304,18 +302,18 @@ export function requireAuditLogAccess(
   const actor = tryAuthenticateRequest(request);
   if (!actor) {
     return createErrorResponse(
-  request,
-  "UNAUTHORIZED",
-  "Missing or invalid authorization header",
-  401,
-);
-// ...
-return createErrorResponse(
-  request,
-  "FORBIDDEN",
-  "You do not have permission to access audit logs",
-  403,
-);
+      request,
+      "UNAUTHORIZED",
+      "Missing or invalid authorization header",
+      401,
+    );
+  }
+
+  const allowedRoles =
+    access === "export" ? AUDIT_LOG_EXPORT_ROLES : AUDIT_LOG_READ_ROLES;
+  if (!allowedRoles.has(actor.role)) {
+    return createErrorResponse(
+      request,
       "FORBIDDEN",
       "You do not have permission to access audit logs",
       403,

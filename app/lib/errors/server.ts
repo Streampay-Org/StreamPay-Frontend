@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { safeJson } from "@/lib/safe-json";
+import { getCorrelationContext } from "@/app/lib/logger";
+import { generateRequestId } from "@/lib/requestId";
 
 /**
  * Canonical error envelope used by every API route.
@@ -8,7 +9,11 @@ import { safeJson } from "@/lib/safe-json";
  * Shape:
  * ```json
  * {
- *   "equest_id": "req_01HZ..."
+ *   "error": {
+ *     "code":       "STREAM_NOT_FOUND",
+ *     "message":    "The requested stream does not exist.",
+ *     "request_id": "req_01HZ..."
+ *   }
  * }
  * ```
  */
@@ -25,6 +30,7 @@ export const ErrorCode = {
   INTERNAL_SERVER_ERROR: "INTERNAL_SERVER_ERROR",
   NOT_FOUND: "NOT_FOUND",
   BAD_REQUEST: "BAD_REQUEST",
+  UNSUPPORTED_QUERY: "UNSUPPORTED_QUERY",
   UNAUTHORIZED: "UNAUTHORIZED",
   FORBIDDEN: "FORBIDDEN",
   WEBHOOK_PROCESSING_FAILED: "WEBHOOK_PROCESSING_FAILED",
@@ -33,6 +39,9 @@ export const ErrorCode = {
   KMS_SIGN_FAILED: "KMS_SIGN_FAILED",
   KMS_SIGN_INVALID_INPUT: "KMS_SIGN_INVALID_INPUT",
   GATEWAY_TIMEOUT: "GATEWAY_TIMEOUT",
+  CHALLENGE_UNKNOWN: "CHALLENGE_UNKNOWN",
+  CHALLENGE_EXPIRED: "CHALLENGE_EXPIRED",
+  CHALLENGE_ADDRESS_MISMATCH: "CHALLENGE_ADDRESS_MISMATCH",
   WALLET_CHALLENGE_FAILED: "WALLET_CHALLENGE_FAILED",
   WALLET_VERIFY_FAILED: "WALLET_VERIFY_FAILED",
   JWKS_BUILD_FAILED: "JWKS_BUILD_FAILED",
@@ -44,7 +53,7 @@ export const ErrorCode = {
   SOROBAN_SUBMIT_FAILED: "SOROBAN_SUBMIT_FAILED",
   SOROBAN_SUBMIT_BAD_AUTH: "SOROBAN_SUBMIT_BAD_AUTH",
   SOROBAN_SUBMIT_INSUFFICIENT_FUNDS: "SOROBAN_SUBMIT_INSUFFICIENT_FUNDS",
-  SOROBAN_RPC_UAVAILABLE: "SOROBAN_RPC_UAVAILABLE",
+  SOROBAN_RPC_UNAVAILABLE: "SOROBAN_RPC_UNAVAILABLE",
   SOROBAN_RPC_TIMEOUT: "SOROBAN_RPC_TIMEOUT",
   SOROBAN_CONTRACT_NOT_FOUND: "SOROBAN_CONTRACT_NOT_FOUND",
   SOROBAN_STREAM_NOT_FOUND: "SOROBAN_STREAM_NOT_FOUND",
@@ -54,19 +63,26 @@ export const ErrorCode = {
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
 
+export interface ErrorResponseOptions {
+  requestId?: string;
+  context?: Record<string, unknown>;
+}
+
 /**
- * Reads the `x-request-id` header forwarded by the gateway/load-balancer,
- * or generates a lightweight fallback so every response always carries one.
+ * Resolves request ID from:
+ * 1. an explicit requestId option
+ * 2. getCorrelationContext()?.request_id
+ * 3. generateRequestId() fallback
  */
-async function resolveRequestId(): Promise<string> {
-  try {
-    const hdrs = await headers();
-    const forwarded = hdrs.get("x-request-id");
-    if (forwarded) return forwarded;
-  } catch {
-    // headers() throws outside a request context (e.g. unit tests)
+function resolveRequestId(options?: ErrorResponseOptions): string {
+  if (options?.requestId) {
+    return options.requestId;
   }
-  return `req_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 10)}`;
+  const correlationContext = getCorrelationContext();
+  if (correlationContext?.request_id) {
+    return correlationContext.request_id;
+  }
+  return generateRequestId();
 }
 
 /**
@@ -76,19 +92,22 @@ async function resolveRequestId(): Promise<string> {
  * @param message - Human-readable description safe to expose to clients
  * @param status  - HTTP status code (default 500)
  * @param context - Optional structured context to preserve (will be serialized safely)
+ * @param options - Optional configuration options including explicit requestId
  */
-export async function errorResponse(
+export function errorResponse(
   code: string,
   message: string,
   status = 500,
   context?: Record<string, unknown>,
-): Promise<NextResponse<ErrorEnvelope>> {
-  const request_id = await resolveRequestId();
-  const error : ErrorEnvelope["error"] = {
+  options?: ErrorResponseOptions,
+): NextResponse<ErrorEnvelope> {
+  const request_id = resolveRequestId(options);
+  const details = options?.context ?? context;
+  const error: ErrorEnvelope["error"] = {
     code,
     message,
     request_id,
-    ...(context ? { details: context } : {}),
+    ...(details ? { details } : {}),
   };
 
   return new NextResponse<ErrorEnvelope>(

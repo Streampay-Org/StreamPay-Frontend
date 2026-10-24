@@ -4,7 +4,13 @@
 
 import { render } from "@testing-library/react";
 const { screen, within } = require("@testing-library/react") as any;
-import HelpPage from "./page";
+import HelpPage, { FAQ_SECTIONS } from "./page";
+
+// The FAQ search island copies deep links and confirms with a toast; the page
+// is rendered without the app shell's ToastProvider here.
+jest.mock("../hooks/useToast", () => ({
+  useToast: () => ({ success: jest.fn(), error: jest.fn(), info: jest.fn(), warning: jest.fn() }),
+}));
 import { SHORTCUT_GROUPS, formatShortcutKeys, getShortcut } from "@/lib/shortcuts";
 
 describe("HelpPage", () => {
@@ -12,7 +18,7 @@ describe("HelpPage", () => {
     render(<HelpPage />);
 
     expect(
-      screen.getByRole("heading", { level: 1, name: /help.*faq/i }),
+      screen.getByRole("heading", { level: 1, name: /help.*.faq/i }),
     ).toBeInTheDocument();
 
     expect(screen.getByText(/common questions/i)).toBeInTheDocument();
@@ -123,6 +129,42 @@ describe("HelpPage", () => {
   it("does not render any tabindex overrides", () => {
     const { container } = render(<HelpPage />);
     expect(container.querySelectorAll("[tabindex]")).toHaveLength(0);
+  });
+
+  it("server renders all FAQ items without the client island", () => {
+    const { container } = render(<HelpPage />);
+
+    const totalItems = FAQ_SECTIONS.reduce(
+      (count, section) => count + section.items.length,
+      0,
+    );
+
+    expect(container.querySelectorAll(".faq-item").length).toBe(
+      totalItems,
+    );
+  });
+
+  it("gives each FAQ item a copy-link button with an accessible label", () => {
+    render(<HelpPage />);
+
+    const buttons = screen.getAllByRole("button", {
+      name: /copy link to/i,
+    });
+
+    const totalItems = FAQ_SECTIONS.reduce(
+      (count, section) => count + section.items.length,
+      0,
+    );
+
+    expect(buttons.length).toBe(totalItems);
+  });
+
+  it("exposes a labelled search input", () => {
+    render(<HelpPage />);
+
+    expect(
+      screen.getByLabelText(/search the faq/i),
+    ).toBeInTheDocument();
   });
 });
 

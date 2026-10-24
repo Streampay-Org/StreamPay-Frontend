@@ -728,7 +728,6 @@ export const sorobanRetryQueue = {
   dequeue(
     now: number = Date.now(),
   ): RetryQueueResult<RetryQueueEntry | null> {
-    const cid = randomUUID();
     // Clamp now to a valid Date range. Infinity / NaN cause Date#toISOString
     // to throw, and tests pass Infinity as a sentinel for "any time".
     const safeNow = Number.isFinite(now) ? now : 4_000_000_000_000;

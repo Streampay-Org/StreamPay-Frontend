@@ -5,6 +5,7 @@ import {
   getStore,
   idempotencyToken,
   setIdempotency,
+  newStreamId,
 } from "@/app/lib/db";
 import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
@@ -12,8 +13,9 @@ import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { checkTokenAllowed, checkTokenAllowedForOrg, normaliseToken } from "@/app/lib/token-allowlist";
-import { validateCreateStreamBody } from "@/app/lib/stream-validation";
+import { parseCreateStreamBody } from "@/app/lib/stream-validation";
 import { orgDb } from "@/app/lib/org-db";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
 
 const MAX_BATCH_SIZE = 20;
 
@@ -177,21 +179,21 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    const fieldErrors = validateCreateStreamBody(item);
-    for (const err of fieldErrors) {
-      validationErrors.push({
-        index: i,
-        field: err.field,
-        code: err.code,
-        message: err.message,
-      });
-    }
-
-    if (fieldErrors.length > 0) {
+    const parseResult = parseCreateStreamBody(item);
+    if (!parseResult.success) {
+      for (const err of parseResult.errors) {
+        validationErrors.push({
+          index: i,
+          field: err.field,
+          code: err.code,
+          message: err.message,
+        });
+      }
       continue;
     }
 
-    const { rate, recipient, schedule, token: rawToken, orgId } = item as Record<string, string>;
+    const { rate, recipient, schedule, token: rawToken } = parseResult.data;
+    const orgId = typeof (item as Record<string, unknown>).orgId === "string" ? ((item as Record<string, unknown>).orgId as string) : undefined;
 
     const tokenStr = rawToken?.trim() || "XLM";
     let normalisedToken: string;
@@ -247,9 +249,21 @@ export async function POST(request: NextRequest) {
 
   const now = new Date().toISOString();
   const createdStreams = [];
+  const authenticatedActor = tryAuthenticateRequest(request);
+  const senderAddress = authenticatedActor?.walletAddress ?? null;
 
   for (const input of validItems) {
-    const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
+    const id = newStreamId();
+    const ownership: "individual" | "org" | "unclaimed" = input.orgId
+      ? "org"
+      : authenticatedActor
+        ? "individual"
+        : "unclaimed";
+
+    if (input.orgId) {
+      orgDb.streamOwnership.set(id, input.orgId);
+    }
+
     const newStream = {
       createdAt: now,
       id,
@@ -260,6 +274,8 @@ export async function POST(request: NextRequest) {
       status: "draft" as const,
       updatedAt: now,
       token: input.token,
+      senderAddress,
+      ownership,
     };
 
     streamRepository.streams.set(id, newStream);

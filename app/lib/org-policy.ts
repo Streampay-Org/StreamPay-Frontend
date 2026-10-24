@@ -34,6 +34,8 @@ import {
 } from "./org-types";
 import { orgDb } from "./org-db";
 import { tryAuthenticateRequest } from "./auth";
+import { getCorrelationContext } from "./logger";
+import { generateRequestId, isValidRequestId } from "@/lib/requestId";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -80,30 +82,120 @@ const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
 // ─── Actor resolution ─────────────────────────────────────────────────────────
 
 /**
+ * Creates an error response adhering to the standardized error envelope:
+ * { error: { code, message, request_id } }
+ */
+export function createRbacErrorResponse(
+  request: Request,
+  code: string,
+  message: string,
+  status: number,
+): NextResponse {
+  const context = getCorrelationContext();
+  let requestId = context?.request_id;
+  if (!requestId) {
+    const headerId = request.headers?.get?.("x-request-id");
+    if (headerId && isValidRequestId(headerId)) {
+      requestId = headerId;
+    } else {
+      requestId = generateRequestId();
+    }
+  }
+
+  const res = NextResponse.json(
+    {
+      error: {
+        code,
+        message,
+        request_id: requestId,
+      },
+    },
+    { status },
+  );
+  (res as any).errorDetail = { code, message };
+  return res;
+}
+
+/**
+ * Determines whether raw `Actor-Wallet-Address` headers are accepted.
+ * Controlled by the STREAMPAY_ALLOW_ACTOR_HEADER environment variable:
+ * - "true": accepts raw header
+ * - "false": rejects raw header without verified JWT
+ * - unset: defaults to `true` in test environment, `false` in production
+ */
+export function isActorHeaderAllowed(): boolean {
+  const envVal = process.env.STREAMPAY_ALLOW_ACTOR_HEADER;
+  if (envVal !== undefined) {
+    return envVal.trim().toLowerCase() === "true";
+  }
+  return process.env.NODE_ENV === "test";
+}
+
+/**
+ * Error thrown when an incoming request supplies both a verified JWT and an
+ * `Actor-Wallet-Address` header, but the two wallet identities do not match.
+ */
+export class ActorMismatchError extends Error {
+  readonly code = "ACTOR_MISMATCH";
+  constructor(message = "Actor in JWT does not match Actor-Wallet-Address header.") {
+    super(message);
+    this.name = "ActorMismatchError";
+  }
+}
+
+/**
  * Resolve the actor wallet address for a privileged stream action.
  *
  * Priority:
  *   1. Verified JWT `sub` claim (most trusted — cryptographically signed).
- *   2. `Actor-Wallet-Address` header (fallback for internal/service callers).
+ *   2. `Actor-Wallet-Address` header (fallback, only accepted when
+ *      STREAMPAY_ALLOW_ACTOR_HEADER=true, defaulting to false in production
+ *      and true in test).
  *
- * Returns `null` when neither source provides an identity. Callers MUST
- * treat `null` as a hard 403 — never skip RBAC for missing actor.
+ * Conflict check:
+ *   - When both JWT and Actor-Wallet-Address are present and differ, throws
+ *     ActorMismatchError (which causes requireStreamActor and enforceStreamRbac
+ *     to return 403 ACTOR_MISMATCH).
+ *
+ * Returns `null` when neither source provides an authorized identity.
  */
 export function resolveActorAddress(request: Request): string | null {
   // 1. JWT (preferred)
   const jwtActor = tryAuthenticateRequest(request);
-  if (jwtActor?.walletAddress) return jwtActor.walletAddress;
+  const jwtAddress = jwtActor?.walletAddress ?? null;
 
-  // 2. Raw header fallback (internal service callers)
+  // 2. Raw header
   const header = request.headers?.get?.("Actor-Wallet-Address") ?? null;
-  return header?.trim() || null;
+  const headerAddress = header?.trim() || null;
+
+  // 3. Conflict detection: if both are present and differ, reject
+  if (jwtAddress && headerAddress && jwtAddress !== headerAddress) {
+    throw new ActorMismatchError(
+      `Actor in JWT ('${jwtAddress}') does not match Actor-Wallet-Address header ('${headerAddress}').`,
+    );
+  }
+
+  // Preferred: verified JWT identity
+  if (jwtAddress) {
+    return jwtAddress;
+  }
+
+  // Fallback: raw header only when allowed by flag
+  if (headerAddress) {
+    if (isActorHeaderAllowed()) {
+      return headerAddress;
+    }
+    return null;
+  }
+
+  return null;
 }
 
 /**
- * Resolve the actor and return a 403 NextResponse if no identity is found.
+ * Resolve the actor and return a 403 NextResponse if no identity is found or
+ * if an identity conflict is detected.
  *
- * Use this at the top of every privileged route handler:
- *
+ * Use this at the top of privileged route handlers or through enforceStreamRbac:
  *   const actorResult = requireStreamActor(request);
  *   if (actorResult instanceof NextResponse) return actorResult;
  *   const actorAddress = actorResult;
@@ -111,21 +203,29 @@ export function resolveActorAddress(request: Request): string | null {
 export function requireStreamActor(
   request: Request,
 ): string | NextResponse {
-  const actor = resolveActorAddress(request);
-  if (!actor) {
-    return NextResponse.json(
-      {
-        error: {
-          code: "ACTOR_REQUIRED",
-          message:
-            "A verified actor identity is required for this action. " +
-            "Provide a valid Bearer JWT or Actor-Wallet-Address header.",
-        },
-      },
-      { status: 403 },
-    );
+  try {
+    const actor = resolveActorAddress(request);
+    if (!actor) {
+      return createRbacErrorResponse(
+        request,
+        "ACTOR_REQUIRED",
+        "A verified actor identity is required for this action. " +
+          "Provide a valid Bearer JWT or Actor-Wallet-Address header.",
+        403,
+      );
+    }
+    return actor;
+  } catch (err) {
+    if (err instanceof ActorMismatchError) {
+      return createRbacErrorResponse(
+        request,
+        "ACTOR_MISMATCH",
+        err.message,
+        403,
+      );
+    }
+    throw err;
   }
-  return actor;
 }
 
 // ─── Core policy check ────────────────────────────────────────────────────────
@@ -207,8 +307,9 @@ export function checkStreamOrgPolicy(
 /**
  * Mandatory RBAC enforcement for stream lifecycle routes.
  *
- * Combines actor resolution + org policy check into a single call.
- * Returns a NextResponse error on any denial, or `null` on success.
+ * Resolves stream ownership FIRST:
+ * - Individually owned streams (not in orgDb) pass through without requiring an actor identity.
+ * - Org-owned streams strictly require a verified actor identity and check org policy permissions.
  *
  * Usage in route handlers:
  *
@@ -216,11 +317,10 @@ export function checkStreamOrgPolicy(
  *   if (rbacError) return rbacError;
  *
  * Behaviour:
+ * - Stream not org-owned   → null (pass-through)
  * - Missing actor identity → 403 ACTOR_REQUIRED
- * - Stream not org-owned   → null (pass-through; individually owned streams
- *                            are governed by the sender/recipient check in
- *                            the route itself)
- * - Org policy denied      → 403 with policy code
+ * - Identity mismatch      → 403 ACTOR_MISMATCH
+ * - Org policy denied      → 403 with policy code (e.g. ROLE_INSUFFICIENT, NOT_ORG_MEMBER)
  * - Approval required      → 409 APPROVAL_REQUIRED
  */
 export function enforceStreamRbac(
@@ -228,34 +328,36 @@ export function enforceStreamRbac(
   streamId: string,
   action: OrgAction,
 ): NextResponse | null {
-  // 1. Resolve actor — hard 403 if missing
+  // 1. Resolve ownership FIRST: individually owned streams pass through
+  const orgId = orgDb.streamOwnership.get(streamId);
+  if (!orgId) return null; // Individually owned stream — no org-level restriction applies
+
+  const org = orgDb.orgs.get(orgId);
+  if (!org) return null; // Stale reference — treat as individually owned
+
+  // 2. Resolve actor — hard 403 if missing or mismatched for org-owned streams
   const actorResult = requireStreamActor(request);
   if (actorResult instanceof NextResponse) return actorResult;
   const actorAddress = actorResult;
 
-  // 2. Org policy check
-  const policyResult = checkStreamOrgPolicy(streamId, actorAddress, action);
-
-  // Stream is not org-owned — no org-level restriction applies.
-  if (policyResult === null) return null;
+  // 3. Org policy check
+  const policyResult = checkOrgPolicy(org, actorAddress, action);
 
   if (!policyResult.allowed) {
-    return NextResponse.json(
-      { error: { code: policyResult.code, message: policyResult.message } },
-      { status: policyResult.httpStatus },
+    return createRbacErrorResponse(
+      request,
+      policyResult.code,
+      policyResult.message,
+      policyResult.httpStatus,
     );
   }
 
   if (policyResult.requiresApproval) {
-    return NextResponse.json(
-      {
-        error: {
-          code: "APPROVAL_REQUIRED",
-          message:
-            "This action requires multi-sig approval. Please initiate an approval request.",
-        },
-      },
-      { status: 409 },
+    return createRbacErrorResponse(
+      request,
+      "APPROVAL_REQUIRED",
+      "This action requires multi-sig approval. Please initiate an approval request.",
+      409,
     );
   }
 

@@ -1,3 +1,4 @@
+/** @jest-environment node */
 /**
  * Tests for `lib/otel.ts` — OpenTelemetry auto-instrumentation
  *
@@ -51,7 +52,6 @@ import {
   tracer,
   injectTraceHeaders,
   extractTraceHeaders,
-  isTelemetryConsented,
   setTelemetryConsent,
   resetTelemetryConsent,
   redactAttributes,
@@ -164,6 +164,12 @@ describe('parseTraceparent', () => {
   });
   it('returns null for non-hex spanId', () => {
     expect(parseTraceparent(`00-${traceId}-${'z'.repeat(16)}-01`)).toBeNull();
+  });
+  it('returns null for all-zero traceId per W3C', () => {
+    expect(parseTraceparent(`00-${'0'.repeat(32)}-${spanId}-01`)).toBeNull();
+  });
+  it('returns null for all-zero spanId per W3C', () => {
+    expect(parseTraceparent(`00-${traceId}-${'0'.repeat(16)}-01`)).toBeNull();
   });
   it('round-trips with formatTraceparent', () => {
     const tp  = formatTraceparent(traceId, spanId);
@@ -502,6 +508,24 @@ describe('otlpHttpExport', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it('honours consent toggled at runtime via setTelemetryConsent', async () => {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://otel:4318';
+    jest.resetModules();
+    const { otlpHttpExport: fresh, setTelemetryConsent: grant } = await import('./otel');
+    grant(false);
+    const span: SpanRecord = {
+      traceId: 'a'.repeat(32), spanId: 'b'.repeat(16),
+      name: 'pay', kind: 'SERVER', startTime: 1000, endTime: 1050,
+      durationMs: 50, status: 'OK', attributes: {}, events: [],
+      service: 'svc', traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
+    };
+    await fresh(span);
+    expect(mockFetch).not.toHaveBeenCalled();
+    grant(true);
+    await fresh(span);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
   it('POSTs when endpoint is set AND consent is granted', async () => {
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://otel:4318';
     jest.resetModules();
@@ -534,7 +558,7 @@ describe('otlpHttpExport', () => {
       durationMs: 50, status: 'OK',
       attributes: {
         email: 'user@corp.io',
-        recipient: 'GABCDEF0000000000000000000000000000000000000000000000000000001234',
+        recipient: 'GABCDEF0000000000000000000000000000000000000000000001234',
         safe_metric: 42,
       },
       events: [{ name: 'exception', timestamp: 1001, attributes: { 'exception.message': 'bad for user@corp.io' } }],
@@ -543,7 +567,9 @@ describe('otlpHttpExport', () => {
     await fresh(span);
     const body = JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string);
     const outAttrs = body.resourceSpans[0].scopeSpans[0].spans[0].attributes;
-    const byKey = Object.fromEntries(outAttrs.map((a: any) => [a.key, a.value.stringValue]));
+    const byKey = Object.fromEntries(
+      outAttrs.map((a: any) => [a.key, a.value.stringValue ?? a.value.doubleValue]),
+    );
     expect(byKey.email).toBe('[REDACTED]');
     expect(byKey.recipient).toBe('[REDACTED]');
     expect(byKey.safe_metric).toBe(42);
@@ -565,6 +591,25 @@ describe('otlpHttpExport', () => {
       service: 'svc', traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
     };
     await expect(fresh(span)).resolves.toBeUndefined();
+  });
+
+  it('honours OTEL_EXPORTER_OTLP_ENDPOINT changed after import (lazy getter)', async () => {
+    delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+    jest.resetModules();
+    const { otlpHttpExport: fresh, setTelemetryConsent: grant } = await import('./otel');
+    grant(true);
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://late:4318';
+    const span: SpanRecord = {
+      traceId: 'a'.repeat(32), spanId: 'b'.repeat(16),
+      name: 'late', kind: 'INTERNAL', startTime: 0, endTime: 0,
+      durationMs: 0, status: 'UNSET', attributes: {}, events: [],
+      service: 'svc', traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
+    };
+    await fresh(span);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://late:4318/v1/traces',
+      expect.objectContaining({ method: 'POST' }),
+    );
   });
 
   it('does not mutate the original span record (safe for retries/concurrency)', async () => {
@@ -626,7 +671,7 @@ describe('redactAttributes', () => {
   });
 
   it('masks PII-shaped values even on non-sensitive keys', () => {
-    const out = redactAttributes({ actor: 'user@corp.io', account: 'GABCDEF0000000000000000000000000000000000000000000000000000001234' });
+    const out = redactAttributes({ actor: 'user@corp.io', account: 'GABCDEF0000000000000000000000000000000000000000000001234' });
     expect(out.actor).toBe('[REDACTED]');
     expect(out.account).toBe('[REDACTED]');
   });
@@ -637,7 +682,7 @@ describe('redactAttributes', () => {
   });
 
   it('redacts PII within array attribute values', () => {
-    const out = redactAttributes({ recipients: ['user@corp.io', 'GABCDEF0000000000000000000000000000000000000000000000000000001234', 'pub'] });
+    const out = redactAttributes({ recipients: ['user@corp.io', 'GABCDEF0000000000000000000000000000000000000000000001234', 'pub'] });
     expect(out.recipients).toEqual(['[REDACTED]', '[REDACTED]', 'pub']);
   });
 

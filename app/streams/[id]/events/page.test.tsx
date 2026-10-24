@@ -26,7 +26,9 @@ describe("StreamEventsPage (contract events panel)", () => {
     // Page structure
     expect(screen.getByRole("heading", { name: /contract events/i })).toBeInTheDocument();
     // Display label comes from stream.recipient in the seeded fixture
-    expect(screen.getByText("Ada Creative Studio")).toBeInTheDocument();
+    expect(
+      screen.getByText("GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZK7G"),
+    ).toBeInTheDocument();
 
     // Filter toolbar is present
     expect(
