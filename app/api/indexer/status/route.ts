@@ -67,5 +67,5 @@ async function handleIndexerStatusGet(request: Request) {
 }
 
 export async function GET(request: Request) {
-  return withRouteSpan("/api/indexer/status", () => handleIndexerStatusGet(request));
+  return withRouteSpan("/api/indexer/status", () => handleIndexerStatusGet(request))(request);
 }

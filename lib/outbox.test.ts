@@ -18,7 +18,6 @@ import {
   getOutboxStore,
   setOutboxStore,
   type OutboxEntry,
-  type OutboxStore,
 } from "./outbox";
 import type { WebhookEndpoint, WebhookEvent } from "../app/lib/webhook-delivery";
 

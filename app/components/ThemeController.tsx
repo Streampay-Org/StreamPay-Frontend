@@ -43,7 +43,7 @@ export function updateThemeState() {
   let stored: string | null = null;
   try {
     stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-  } catch (e) {
+  } catch {
     // localStorage unavailable
   }
 
@@ -71,7 +71,7 @@ export function registerThemeController() {
           let stored: string | null = null;
           try {
             stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-          } catch (e) {}
+          } catch {}
 
           if (stored !== 'light' && stored !== 'dark') {
             updateThemeState();

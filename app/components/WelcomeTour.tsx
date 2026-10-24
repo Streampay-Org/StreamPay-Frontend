@@ -1,5 +1,4 @@
 "use client";
-import "./WelcomeTour.module.css";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useFocusTrap } from "@/app/hooks/useFocusTrap";
@@ -143,7 +142,7 @@ export function WelcomeTour({
 
   if (!visible) return null;
 
-  const current = TOUR_STEPs[step];
+  const current = TOUR_STEPS[step];
   const isFirst = step === 0;
   const isLast = step === TOUR_STEPS.length - 1;
   const total = TOUR_STEPS.length;
@@ -153,9 +152,16 @@ export function WelcomeTour({
     <div
       className="welcome-tour-overlay"
       data-testid="welcome-tour-overlay"
-      onClick={dismissSession}
+      role="presentation"
+      onClick={(e) => {
+        // Only a click on the backdrop itself dismisses; clicks inside the
+        // card bubble up with a different target and are ignored.
+        if (e.target === e.currentTarget) dismissSession();
+      }}
     >
-      {/* Dialog card — stop propagation so clicks inside don't dismiss */}
+      {/* Clicks inside the dialog must not reach the backdrop's dismiss handler;
+          keyboard interaction is handled by onKeyDown. */}
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <div
         ref={dialogRef}
         role="dialog"

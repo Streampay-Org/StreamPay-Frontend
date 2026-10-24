@@ -95,7 +95,6 @@ export const Tabs: React.FC<TabsProps> = ({
   );
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
-  const activeIndex = tabs.findIndex((tab) => tab.id === activeTabId);
 
   return (
     <div className="tabs">

@@ -1,5 +1,5 @@
 import { Job, MockQueue } from './queue';
-import { withCorrelationContext, withJobContext, withRetryContext, logger, type CorrelationContext } from './logger';
+import { withCorrelationContext, withJobContext, withRetryContext, logger } from './logger';
 
 /**
  * Mock worker that processes jobs with correlation context restoration

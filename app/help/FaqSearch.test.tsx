@@ -17,7 +17,7 @@ jest.mock("next/navigation", () => ({
 
 jest.mock("../components/ToastProvider", () => ({
   ToastProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  useToast: () => ({ showToast: mockToast }),
+  useToast: () => ({ success: mockToast }),
 }));
 
 const allItems = FAQ_SECTIONS.flatMap((section) => section.items);
@@ -49,7 +49,7 @@ describe("FaqSearch", () => {
     const user = userEvent.setup();
     renderIsland();
     await user.type(screen.getByLabelText(/search faq/i), "freighter");
-    const marks = screen.getAllByTextMatch(/mark/i);
+    const marks = document.querySelectorAll("mark");
     expect(marks.length).toBeGreaterThan(0);
   });
 
@@ -58,10 +58,10 @@ describe("FaqSearch", () => {
     renderIsland();
     const input = screen.getByLabelText(/search faq/i);
     await user.type(input, "settle");
-    const lower = screen.getAllByTextMatch(/mark/i).length;
+    const lower = document.querySelectorAll("mark").length;
     await user.clear(input);
     await user.type(input, "Settle");
-    const upper = screen.getAllByTextMatch(/mark/i).length;
+    const upper = document.querySelectorAll("mark").length;
     expect(upper).toEqual(lower);
   });
 
@@ -81,12 +81,17 @@ describe("FaqSearch", () => {
   });
 
   it("copies a deep link and shows a toast", async () => {
-    const writeText = jest.fn().resolve();
-    Object.assign(navigator, { clipboard: { writeText } });
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    // userEvent.setup() installs its own clipboard stub, so define ours after
+    // it (jsdom exposes `navigator.clipboard` as a getter-only property).
     const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
     renderIsland();
     const item = allItems[0];
-    const escaped = item.question.replace(/[.*+??^${}()|[\]\\\\]/g, "\\$&");
+    const escaped = item.question.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const button = screen.getByRole("button", {
       name: new RegExp(escaped, "i"),
     });
