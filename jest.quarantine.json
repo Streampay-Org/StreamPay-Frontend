@@ -1,5 +1,5 @@
 {
-  "QUARANTINE_MAX": 51,
+  "QUARANTINE_MAX": 49,
   "entries": [
     {
       "path": "app/api/notifications/preferences/route.test.ts",
@@ -11,10 +11,6 @@
     },
     {
       "path": "__tests__/a11y.test.tsx",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "__tests__/openapi-auth-wallet.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
@@ -31,10 +27,6 @@
     },
     {
       "path": "app/api/exports/exports.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "app/api/identity/me/route.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {

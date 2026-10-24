@@ -9,7 +9,9 @@ const { screen, fireEvent, within } = require("@testing-library/react") as typeo
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 
-import ContactsPage, { type Contact } from "./page";
+import ContactsPage, { type Contact, getContactPaymentTarget } from "./page";
+
+const VALID_STELLAR_ADDRESS = "GCLH2SNM5MTV4TGNNOADLYOZJYIFBXTIDVSNW4XP3LEI2UQV2MZ46OD7";
 import * as federation from "../utils/federation";
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
@@ -740,6 +742,171 @@ describe("ContactForm — normalise on submit and accessible errors", () => {
 
     await user.click(saveButton);
     await screen.findByRole("alert");
+
+    const results = await axe.run(dialog, {
+      rules: { "color-contrast": { enabled: false } },
+    });
+    const serious = results.violations.filter(
+      (v) => v.impact === "serious" || v.impact === "critical",
+    );
+    expect(serious).toEqual([]);
+  });
+});
+
+describe("ContactsPage — Federation Required Memo and Checksum Validation", () => {
+  it("Scenario 1: Federation returns memo_type: 'id', memo: '12345' -> saved contact has requiredMemo, locked field is displayed with badge", async () => {
+    (federation.isFederationAddress as jest.Mock).mockReturnValue(true);
+    (federation.resolveFederationAddress as jest.Mock).mockResolvedValue({
+      stellar_address: "alice*example.com",
+      account_id: VALID_STELLAR_ADDRESS,
+      memo_type: "id",
+      memo: "12345",
+    });
+
+    render(<ContactsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /\+ add contact/i }));
+    const dialog = screen.getByRole("dialog");
+
+    fireEvent.change(within(dialog).getByLabelText(/^label$/i), {
+      target: { value: "Alice Fed" },
+    });
+    const addressInput = within(dialog).getByLabelText(
+      /stellar address or federation address/i,
+    );
+    fireEvent.change(addressInput, { target: { value: "alice*example.com" } });
+    fireEvent.blur(addressInput);
+
+    // Required memo field appears and is read-only
+    const memoField = await within(dialog).findByLabelText(/required memo/i);
+    expect(memoField).toHaveValue("12345");
+    expect(memoField).toHaveAttribute("aria-readonly", "true");
+    expect(within(dialog).getByText(/required by alice\*example\.com/i)).toBeInTheDocument();
+
+    // Submit form
+    fireEvent.click(within(dialog).getByRole("button", { name: /add contact/i }));
+
+    await waitFor(() => {
+      expect(localStorageMock.setItem).toHaveBeenCalledWith(
+        "streampay_contacts",
+        expect.stringContaining('"requiredMemo":{"type":"id","value":"12345"}'),
+      );
+    });
+  });
+
+  it("Scenario 2: Federation returns an account_id with a bad checksum -> INVALID_RESPONSE, nothing saved and an error is shown", async () => {
+    (federation.isFederationAddress as jest.Mock).mockReturnValue(true);
+    const { FederationError } = jest.requireMock("../utils/federation") as {
+      FederationError: new (msg: string, code: string) => Error;
+    };
+    (federation.resolveFederationAddress as jest.Mock).mockRejectedValue(
+      new FederationError(
+        "Federation response contains invalid or checksum-failing account_id",
+        "INVALID_RESPONSE",
+      ),
+    );
+
+    render(<ContactsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /\+ add contact/i }));
+    const dialog = screen.getByRole("dialog");
+    const addressInput = within(dialog).getByLabelText(
+      /stellar address or federation address/i,
+    );
+
+    fireEvent.change(addressInput, { target: { value: "bad*example.com" } });
+    fireEvent.blur(addressInput);
+
+    expect(
+      await screen.findByText(/invalid or checksum-failing account_id/i),
+    ).toBeInTheDocument();
+    expect(localStorageMock.setItem).not.toHaveBeenCalled();
+  });
+
+  it("Scenario 6: G-address that passes the regex but fails CRC16 -> the form error 'Invalid Stellar address'", async () => {
+    render(<ContactsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /\+ add contact/i }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/^label$/i), {
+      target: { value: "Checksum Fail" },
+    });
+    const addressInput = within(dialog).getByLabelText(
+      /stellar address or federation address/i,
+    );
+    // 56 chars, matches ^G[A-Z2-7]{55}$ but fails CRC16
+    const badChecksumG = "GBVZZ5QKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2ZQK";
+    fireEvent.change(addressInput, { target: { value: badChecksumG } });
+    fireEvent.blur(addressInput);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: /add contact/i }));
+
+    expect(await screen.findByText("Invalid Stellar address")).toBeInTheDocument();
+    expect(localStorageMock.setItem).not.toHaveBeenCalled();
+  });
+
+  it("Scenario 7: Legacy contact with memo loads as note, with no data loss", () => {
+    const legacy: Contact = {
+      id: "legacy-contact-1",
+      label: "Legacy Partner",
+      address: VALID_STELLAR_ADDRESS,
+      memo: "Legacy note retainer",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    seedContacts([legacy]);
+    render(<ContactsPage />);
+
+    expect(screen.getByText("Legacy Partner")).toBeInTheDocument();
+    expect(screen.getByText("Legacy note retainer")).toBeInTheDocument();
+
+    // Open edit modal and verify Note field is populated with the legacy memo
+    fireEvent.click(screen.getByRole("button", { name: /edit contact legacy partner/i }));
+    const dialog = screen.getByRole("dialog");
+    const noteInput = within(dialog).getByLabelText(/^note/i);
+    expect(noteInput).toHaveValue("Legacy note retainer");
+  });
+
+  it("Scenario 8: getContactPaymentTarget returns the memo when one is required and omits private note", () => {
+    const withReqMemo: Contact = {
+      id: "c-1",
+      label: "Exchange User",
+      address: VALID_STELLAR_ADDRESS,
+      memo: "Private retainer note",
+      requiredMemo: { type: "id", value: "987654" },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    const targetWith = getContactPaymentTarget(withReqMemo);
+    expect(targetWith.address).toBe(VALID_STELLAR_ADDRESS);
+    expect(targetWith.memo).toEqual({ type: "id", value: "987654" });
+
+    const withoutReqMemo: Contact = {
+      id: "c-2",
+      label: "Individual",
+      address: VALID_STELLAR_ADDRESS,
+      memo: "Private note only",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    const targetWithout = getContactPaymentTarget(withoutReqMemo);
+    expect(targetWithout.address).toBe(VALID_STELLAR_ADDRESS);
+    expect(targetWithout.memo).toBeUndefined();
+  });
+
+  it("Scenario 9: axe on the form with the locked required memo badge has no serious violations", async () => {
+    (federation.isFederationAddress as jest.Mock).mockReturnValue(true);
+    (federation.resolveFederationAddress as jest.Mock).mockResolvedValue({
+      stellar_address: "alice*example.com",
+      account_id: VALID_STELLAR_ADDRESS,
+      memo_type: "id",
+      memo: "12345",
+    });
+
+    render(<ContactsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /\+ add contact/i }));
+    const dialog = screen.getByRole("dialog");
+    const addressInput = within(dialog).getByLabelText(
+      /stellar address or federation address/i,
+    );
+    fireEvent.change(addressInput, { target: { value: "alice*example.com" } });
+    fireEvent.blur(addressInput);
+
+    await within(dialog).findByLabelText(/required memo/i);
 
     const results = await axe.run(dialog, {
       rules: { "color-contrast": { enabled: false } },

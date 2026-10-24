@@ -1874,6 +1874,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
+            /** @description Unprocessable entity ? query parameter failed validation. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             /** @description IP rate limit exceeded for challenge issuance (20 req/min per IP). */
             429: {
                 headers: {
@@ -1937,7 +1946,15 @@ export interface operations {
                     "application/json": components["schemas"]["WalletToken"];
                 };
             };
-            400: components["responses"]["400"];
+            /** @description Bad request ? invalid request body. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             /** @description Authentication failed — invalid signature, unknown challenge, expired challenge, or address mismatch. */
             401: {
                 headers: {
@@ -1948,7 +1965,15 @@ export interface operations {
                 };
             };
             403: components["responses"]["403"];
-            422: components["responses"]["422"];
+            /** @description Unprocessable entity ? request body failed schema validation. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             /** @description IP rate limit exceeded for wallet login (5 req/min per IP). */
             429: {
                 headers: {
