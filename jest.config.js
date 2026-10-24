@@ -39,8 +39,6 @@ const config = {
     "<rootDir>/app/api/streams/v1-contract.test.ts",
     "<rootDir>/app/api/v2/streams/batch/route.test.ts",
     "<rootDir>/app/api/v2/streams/multi/route.test.ts",
-    "<rootDir>/app/api/v2/streams/route.test.ts",
-    "<rootDir>/app/api/v2/streams/v2-streams-quota.test.ts",
     "<rootDir>/app/api/webhooks/deliveries/route.test.ts",
     "<rootDir>/app/api/webhooks/dlq/route.test.ts",
     "<rootDir>/app/api/webhooks/health/route.test.ts",

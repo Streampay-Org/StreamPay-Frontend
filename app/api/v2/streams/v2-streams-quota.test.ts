@@ -31,10 +31,13 @@ import {
 } from "@/app/lib/org-quota-metrics";
 import { ORG_DAILY_STREAM_QUOTA } from "@/app/lib/rate-limit-config";
 
+const VALID_STELLAR_KEY =
+  "GDSBCG3OKHCMMWS5EBH2X7XOYTJRWXN2YYQPCNS5OFBU4IDO4X7OFSQA";
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function makePostRequest(
-  body: unknown = { recipient: "GABC123", rate: "50 XLM/month", schedule: "30 days" },
+  body: unknown = { recipient: VALID_STELLAR_KEY, rate: "50", schedule: "month" },
   headers: Record<string, string> = {},
 ) {
   return new Request("http://localhost/api/v2/streams", {
@@ -216,7 +219,7 @@ describe("idempotent replay does not consume quota", () => {
       "X-API-Key": "key-idem",
       "Idempotency-Key": "idem-quota-1",
     };
-    const body = { recipient: "GIDEM", rate: "10 XLM/day", schedule: "daily" };
+    const body = { recipient: VALID_STELLAR_KEY, rate: "10", schedule: "day" };
 
     // First call — consumes 1 quota unit.
     await createStreamV2(makePostRequest(body, headers));
@@ -311,17 +314,18 @@ describe("secondsUntilUtcMidnight()", () => {
 
 // ── Validation still works ─────────────────────────────────────────────────
 
-describe("request validation is unaffected by quota", () => {
-  it("returns 422 for missing fields", async () => {
+describe("request validation is unaffected by quota and does not consume quota", () => {
+  it("returns 422 for missing fields and leaves quota unchanged", async () => {
     const res = await createStreamV2(
       makePostRequest({ recipient: "GABC" }, { "X-API-Key": "key-validation" }),
     );
     expect(res.status).toBe(422);
     const body = await res.json();
     expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(await quotaStore.peek("key-validation")).toBe(0);
   });
 
-  it("returns 400 for invalid JSON", async () => {
+  it("returns 400 for invalid JSON and leaves quota unchanged", async () => {
     const req = new Request("http://localhost/api/v2/streams", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-API-Key": "key-badjson" },
@@ -330,5 +334,6 @@ describe("request validation is unaffected by quota", () => {
     const res = await createStreamV2(req);
     expect(res.status).toBe(400);
     expect((await res.json()).error.code).toBe("INVALID_REQUEST");
+    expect(await quotaStore.peek("key-badjson")).toBe(0);
   });
 });
