@@ -49,6 +49,7 @@ import {
   type WebhookEndpoint,
   type WebhookEvent,
 } from "@/app/lib/webhook-delivery";
+import { isSafePublicHttpUrl } from "@/app/lib/ssrf-guard";
 import {
   checkRateLimit,
   getClientIdentity,
@@ -150,6 +151,13 @@ export async function POST(
             return createErrorResponse(
               ErrorCode.BAD_REQUEST,
               "'endpoint_url' is not a valid URL.",
+              400,
+            );
+          }
+          if (!isSafePublicHttpUrl(parsed.endpoint_url)) {
+            return createErrorResponse(
+              ErrorCode.BAD_REQUEST,
+              "'endpoint_url' must be a public http(s) URL (private, loopback and metadata hosts are blocked).",
               400,
             );
           }
