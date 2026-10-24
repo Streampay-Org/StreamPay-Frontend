@@ -8,8 +8,9 @@ import {
   withLock,
 } from "@/app/lib/db";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
-import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
+import { enforceStreamRbac, resolveActorAddress } from "@/app/lib/org-policy";
 import { publishStreamChange } from "@/app/lib/stream-publish";
+import { resolveRequestId } from "@/lib/requestId";
 
 const MAX_BATCH_SIZE = 20;
 
@@ -17,6 +18,30 @@ function getHeader(request: Request, name: string): string | null {
   return request.headers?.get?.(name) ?? null;
 }
 
+/** Best-effort actor for event attribution; RBAC is enforced separately. */
+function resolveEventActor(request: Request): string | undefined {
+  try {
+    return resolveActorAddress(request) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * POST /api/streams/batch/start
+ *
+ * Batch starts or resumes streams.
+ *
+ * Actor resolution order:
+ * 1. Verified JWT `sub` claim (Bearer token).
+ * 2. `Actor-Wallet-Address` header (fallback only when STREAMPAY_ALLOW_ACTOR_HEADER=true).
+ * If both are present and differ, returns 403 ACTOR_MISMATCH.
+ *
+ * RBAC ordering:
+ * Evaluated per stream ID in the dry-run validation phase, immediately after
+ * 404 existence checks and before state transitions. Fails all-or-nothing
+ * with 422 VALIDATION_ERROR detailing the failing stream index.
+ */
 export async function POST(request: NextRequest) {
   const { idempotencyStore, streamRepository } = getStore();
   const idempotencyKey = getHeader(request, "Idempotency-Key");
@@ -71,6 +96,14 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      // Dry-run RBAC check: runs after 404 and before any state check
+      const rbacError = enforceStreamRbac(request, id, "start");
+      if (rbacError) {
+        const errData = (rbacError as any).errorDetail ?? (await rbacError.json()).error;
+        errors.push({ index: i, id, code: errData.code, message: errData.message });
+        continue;
+      }
+
       // Treat already-active streams as idempotent no-ops and include them
       // in the response rather than failing the entire batch.
       if (stream.status === "active") {
@@ -83,25 +116,13 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      const actor = getHeader(request, "Actor-Wallet-Address");
-      const policyResult = actor ? checkStreamOrgPolicy(id, actor, "start") : null;
-      if (policyResult) {
-        if (!policyResult.allowed) {
-          errors.push({ index: i, id, code: policyResult.code, message: policyResult.message });
-          continue;
-        }
-        if (policyResult.requiresApproval) {
-          errors.push({ index: i, id, code: "APPROVAL_REQUIRED", message: "This action requires multi-sig approval." });
-          continue;
-        }
-      }
-
       toUpdate.push(id);
     }
 
     if (errors.length > 0) {
       logger.warn("Batch start validation failed", { batchSize: ids.length, errorCount: errors.length });
-      return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "One or more streams failed validation. No changes were applied.", details: errors, request_id: getCorrelationContext()?.request_id } }, { status: 422 });
+      const requestId = getCorrelationContext()?.request_id ?? resolveRequestId(request.headers);
+      return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "One or more streams failed validation. No changes were applied.", details: errors, request_id: requestId } }, { status: 422 });
     }
 
     const updated: any[] = [...preExistingActive];
@@ -122,7 +143,7 @@ export async function POST(request: NextRequest) {
 
       publishStreamChange({
         action: "start",
-        actor: getHeader(request, "Actor-Wallet-Address") ?? undefined,
+        actor: resolveEventActor(request),
         after: updatedStream,
         before,
         correlationId: getCorrelationContext()?.correlation_id,

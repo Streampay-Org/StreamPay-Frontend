@@ -66,7 +66,7 @@ async function handleWebhooksPost(req: NextRequest) {
         return createBodySizeTooLargeResponse(
           error.receivedBytes,
           error.maxBytes,
-          resolveRequestId(req.headers),
+          resolveRequestId(req.headers ?? new Headers()),
         );
       }
       if (error instanceof InvalidJsonError) {

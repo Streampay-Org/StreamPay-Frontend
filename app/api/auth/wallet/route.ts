@@ -1,7 +1,10 @@
 import { NextResponse, NextRequest } from "next/server";
-import { createHash, randomBytes, randomUUID } from "crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
-import { validateCsrfToken } from "@/app/lib/auth";
+import { validateCsrfToken, signToken } from "@/app/lib/auth";
+import { getCsrfCookieValue, getCsrfHeaderValue } from "@/lib/csrf";
+import { verifyStellarSignature } from "@/app/lib/wallet-link";
+import jwt from "jsonwebtoken";
 import { checkIpRateLimit, walletIpRateLimitResponse as rateLimitResponse } from "@/src/middleware/rateLimit";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { withRouteSpan } from "@/lib/routeSpan";
@@ -156,6 +159,24 @@ export function listWalletChallengesForTesting(): string[] {
     walletChallengeStore.values(),
     (record) => record.challenge,
   );
+}
+
+export function seedWalletChallengeForTesting(record: {
+  address: string;
+  challenge: string;
+  expires_at: string;
+}): void {
+  const id = randomUUID();
+  walletChallengeStore.set(id, {
+    id,
+    address: record.address,
+    challenge: record.challenge,
+    created_at: new Date().toISOString(),
+    expires_at: record.expires_at,
+  });
+  const ids = walletChallengeIdsByAddress.get(record.address) ?? new Set<string>();
+  ids.add(id);
+  walletChallengeIdsByAddress.set(record.address, ids);
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -418,6 +439,13 @@ async function handleWalletChallengeGet(req: NextRequest) {
   }
 }
 
+function timingSafeEqualStrings(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf-8");
+  const bufB = Buffer.from(b, "utf-8");
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
 // ── POST /api/auth/wallet ─────────────────────────────────────────────────────
 
 /**
@@ -499,14 +527,17 @@ async function handleWalletVerifyPost(req: NextRequest) {
             );
           }
 
-          const { address, signature } = body as {
+          const { address, challenge, signature } = body as {
             address: string;
             challenge: string;
             signature: string;
           };
 
-          const csrfCookie = req.cookies.get("csrf-token")?.value ?? null;
-          const csrfHeader = req.headers.get("x-csrf-token");
+          // Read both the legacy `csrf-token` and the `__Host-csrf-token`
+          // cookie through the shared helper so the handler stays in sync
+          // with the middleware.
+          const csrfCookie = getCsrfCookieValue(req);
+          const csrfHeader = getCsrfHeaderValue(req);
 
           // Double-submit cookie check
           if (!validateCsrfToken(csrfCookie, csrfHeader)) {
@@ -521,7 +552,71 @@ async function handleWalletVerifyPost(req: NextRequest) {
             return errorResponse(ErrorCode.FORBIDDEN, "CSRF token mismatch.", 403);
           }
 
-          const isValid = signature.length > 0;
+          // Challenge lookup using constant-time comparison
+          let matched: WalletChallengeRecord | undefined;
+          for (const candidate of walletChallengeStore.values()) {
+            if (timingSafeEqualStrings(candidate.challenge, challenge)) {
+              matched = candidate;
+              break;
+            }
+          }
+
+          if (!matched) {
+            logAccessEvent({
+              method: "POST",
+              path: req.nextUrl.pathname,
+              status: 401,
+              durationMs: Date.now() - startedAt,
+              errorCode: ErrorCode.CHALLENGE_UNKNOWN,
+              errorMessage: "Challenge not found or already consumed.",
+            });
+            return errorResponse(
+              ErrorCode.CHALLENGE_UNKNOWN,
+              "Challenge not found or already consumed.",
+              401,
+            );
+          }
+
+          // Atomically consume challenge on first verification attempt
+          const record = matched;
+          deleteWalletChallenge(record);
+
+          // Challenge issued to a different address
+          if (!timingSafeEqualStrings(record.address, address)) {
+            logAccessEvent({
+              method: "POST",
+              path: req.nextUrl.pathname,
+              status: 401,
+              durationMs: Date.now() - startedAt,
+              errorCode: ErrorCode.CHALLENGE_ADDRESS_MISMATCH,
+              errorMessage: "Challenge was not issued for this address.",
+            });
+            return errorResponse(
+              ErrorCode.CHALLENGE_ADDRESS_MISMATCH,
+              "Challenge was not issued for this address.",
+              401,
+            );
+          }
+
+          // Expired challenge check
+          if (Date.parse(record.expires_at) <= Date.now()) {
+            logAccessEvent({
+              method: "POST",
+              path: req.nextUrl.pathname,
+              status: 401,
+              durationMs: Date.now() - startedAt,
+              errorCode: ErrorCode.CHALLENGE_EXPIRED,
+              errorMessage: "Challenge has expired.",
+            });
+            return errorResponse(
+              ErrorCode.CHALLENGE_EXPIRED,
+              "Challenge has expired.",
+              401,
+            );
+          }
+
+          // Signature verification
+          const isValid = verifyStellarSignature(address, challenge, signature);
 
           if (!isValid) {
             logAccessEvent({
@@ -539,12 +634,11 @@ async function handleWalletVerifyPost(req: NextRequest) {
             );
           }
 
-          const token = `tok_${Buffer.from(address)
-            .toString("base64url")
-            .slice(0, 24)}`;
-          const expiresAt = new Date(
-            Date.now() + 24 * 60 * 60 * 1000,
-          ).toISOString();
+          const token = signToken(address);
+          const decoded = jwt.decode(token) as { exp?: number } | null;
+          const expiresAt = decoded?.exp
+            ? new Date(decoded.exp * 1000).toISOString()
+            : new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
           logAccessEvent({
             method: "POST",
@@ -554,7 +648,7 @@ async function handleWalletVerifyPost(req: NextRequest) {
           });
 
           return NextResponse.json(
-            { token, expires_at: expiresAt },
+            { token, token_type: "Bearer", expires_at: expiresAt },
             { status: 200 },
           );
         } catch (error) {
@@ -589,9 +683,9 @@ async function handleWalletVerifyPost(req: NextRequest) {
 // ── Route instrumentation ────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
-  return withRouteSpan("/api/auth/wallet", () => handleWalletChallengeGet(req));
+  return withRouteSpan("/api/auth/wallet", () => handleWalletChallengeGet(req))(req);
 }
 
 export async function POST(req: NextRequest) {
-  return withRouteSpan("/api/auth/wallet", () => handleWalletVerifyPost(req));
+  return withRouteSpan("/api/auth/wallet", () => handleWalletVerifyPost(req))(req);
 }

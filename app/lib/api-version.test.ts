@@ -21,7 +21,7 @@ describe("toV2Stream()", () => {
 
   it("renames 'actions' → 'allowed_actions'", () => {
     const v2 = toV2Stream(baseV1);
-    expect(v2.allowed_actions).toEqual(["pause", "stop", "settle"]);
+    expect(v2.allowed_actions).toEqual(["pause", "stop", "settle", "cancel"]);
   });
 
   it("renames 'createdAt' → 'created_at'", () => {

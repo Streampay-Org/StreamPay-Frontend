@@ -4,9 +4,14 @@
 
 import { render } from "@testing-library/react";
 const { screen, within } = require("@testing-library/react") as any;
-import HelpPage from "./page";
+import HelpPage, { FAQ_SECTIONS } from "./page";
+
+// The FAQ search island copies deep links and confirms with a toast; the page
+// is rendered without the app shell's ToastProvider here.
+jest.mock("../hooks/useToast", () => ({
+  useToast: () => ({ success: jest.fn(), error: jest.fn(), info: jest.fn(), warning: jest.fn() }),
+}));
 import { SHORTCUT_GROUPS, formatShortcutKeys, getShortcut } from "@/lib/shortcuts";
-import { FAQ_SECTIONS } from "./faq-data";
 
 describe("HelpPage", () => {
   it("renders the page shell and hero", () => {
@@ -14,9 +19,9 @@ describe("HelpPage", () => {
 
     expect(
       screen.getByRole("heading", { level: 1, name: /help.*.faq/i }),
-    ).toBeInDocument();
+    ).toBeInTheDocument();
 
-    expect(screen.getByText(/common questions/i)).toBeInDocument();
+    expect(screen.getByText(/common questions/i)).toBeInTheDocument();
   });
 
   it("renders the eyebrow label", () => {
@@ -50,7 +55,7 @@ describe("HelpPage", () => {
     for (const heading of expectedHeadings) {
       expect(
         screen.getByRole("heading", { level: 2, name: heading }),
-      ).toBeInDocument();
+      ).toBeInTheDocument();
     }
   });
 
@@ -112,7 +117,7 @@ describe("HelpPage", () => {
     ];
 
     for (const label of sections) {
-      expect(screen.getByRole("region", { name: label })).toBeInDocument();
+      expect(screen.getByRole("region", { name: label })).toBeInTheDocument();
     }
   });
 
@@ -159,7 +164,7 @@ describe("HelpPage", () => {
 
     expect(
       screen.getByLabelText(/search the faq/i),
-    ).toBeInDocument();
+    ).toBeInTheDocument();
   });
 });
 
@@ -170,7 +175,7 @@ describe("HelpPage — keyboard shortcut reference (issue #1649)", () => {
     const answer = document.querySelector("#shortcuts-list")?.textContent ?? "";
     expect(answer.length).toBeGreaterThan(0);
 
-    for (const group of SHORTCUS_GROUPS) {
+    for (const group of SHORTCUT_GROUPS) {
       expect(answer).toContain(group.label);
       for (const shortcut of group.shortcuts) {
         expect(answer).toContain(shortcut.description);

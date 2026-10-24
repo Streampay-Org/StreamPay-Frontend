@@ -1,8 +1,15 @@
 import type { Stream as AppStream } from "@/app/types/openapi";
 
-type Stream = AppStream & {
+/**
+ * Timing fields arrive either as raw millisecond integers (contract parity,
+ * see `vestedAmount`) or as ISO-8601 strings (persisted API records), so the
+ * escrow helpers accept the wider representation.
+ */
+type Stream = Omit<AppStream, "total" | "totalPausedMs" | "startTime" | "endTime"> & {
   total?: string | number | bigint;
   totalPausedMs?: string | number | bigint;
+  startTime?: string | number | bigint;
+  endTime?: string | number | bigint;
 };
 
 /**
@@ -135,8 +142,8 @@ function parseAmount(value: string | undefined): bigint | null {
     : null;
 }
 
-function parseTime(value: string | undefined): number | null {
-  if (!value) return null;
+function parseTime(value: unknown): number | null {
+  if (typeof value !== "string" || !value) return null;
   const time = Date.parse(value);
   return Number.isFinite(time) ? time : null;
 }

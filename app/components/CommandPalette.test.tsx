@@ -5,7 +5,7 @@
 import { render } from "@testing-library/react";
 const { fireEvent, screen } = require("@testing-library/react") as any;
 import { CommandPalette } from "./CommandPalette";
-import { mockStreams } from "../streams/StreamsPageContent";
+import { mockStreams } from "../streams/fixtures";
 
 const mockPush = jest.fn();
 

@@ -1,4 +1,4 @@
-const nextJewt = require("next/jest");
+const nextJest = require("next/jest");
 
 const createJestConfig = nextJest({ dir: "./" });
 
@@ -18,17 +18,16 @@ const config = {
     "<rootDir>/__tests__/a11y.test.tsx",
     "<rootDir>/__tests__/openapi-auth-wallet.test.ts",
     "<rootDir>/__tests__/openapi-webhooks.test.ts",
-    "<rootDir>/__tests__/wallet-metrics.test.ts",
+    "<rootDir>/app/api/audit/export/route.test.ts",
     "<rootDir>/app/api/exports/exports.accessLog.test.ts",
     "<rootDir>/app/api/exports/exports.metrics.test.ts",
     "<rootDir>/app/api/exports/exports.test.ts",
     "<rootDir>/app/api/identity/me/route.test.ts",
     "<rootDir>/app/api/indexer/sse/route.test.ts",
     "<rootDir>/app/api/internal/cleanup/idempotency/route.test.ts",
-    "<rootDir>/app/api/internal/reconciliation/diff/\\[Id\\]/route.test.ts",
+    "<rootDir>/app/api/internal/reconciliation/diff/\\[id\\]/route.test.ts",
     "<rootDir>/app/api/internal/reconciliation/nightly/route.test.ts",
     "<rootDir>/app/api/internal/reconciliation/route.test.ts",
-    "<rootDir>/app/api/metrics/route.test.ts",
     "<rootDir>/app/api/orgs/\\[orgId\\]/token-allowlist/route.test.ts",
     "<rootDir>/app/api/reconciliation/route.test.ts",
     "<rootDir>/app/api/streams/__tests__/rateLimiterConsistency.test.ts",

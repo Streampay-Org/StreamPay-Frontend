@@ -349,8 +349,8 @@ describe("ContactsPage — add contact modal", () => {
     const addressInput = within(dialog).getByLabelText(
       /stellar address or federation address/i,
     );
-    // Use a valid 56-char Stellar address (G + 55 chars from A-Z,2-7)
-    const validAddress = `G${'A'.repeat(55)}`;
+    // A checksum-valid Stellar account ID (addresses are CRC-16 verified).
+    const validAddress = "GCLH2SNM5MTV4TGNNOADLYOZJYIFBXTIDVSNW4XP3LEI2UQV2MZ46OD7";
     fireEvent.change(addressInput, {
       target: { value: validAddress },
     });
@@ -548,7 +548,8 @@ describe("ContactsPage — delete contact", () => {
 // ─── Submit-time normalisation & accessible errors ───────────────────────────
 
 describe("ContactForm — normalise on submit and accessible errors", () => {
-  const VALID_UPPER = `G${"A".repeat(55)}`;
+  // Checksum-valid account ID (the validator verifies the strkey CRC-16).
+  const VALID_UPPER = "GCLH2SNM5MTV4TGNNOADLYOZJYIFBXTIDVSNW4XP3LEI2UQV2MZ46OD7";
   const RESOLVED_ID = `G${"B".repeat(55)}`;
 
   function deferred<T>() {

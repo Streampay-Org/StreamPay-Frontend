@@ -17,7 +17,7 @@ import type {
   ErrorPresentation,
   ErrorSeverity,
 } from './types';
-import { isRetryableError, getRetryGuidance, getUserMessage } from './codes';
+import { getRetryGuidance, getUserMessage } from './codes';
 import { normalizeError, isStreamPayError } from './mapper';
 
 /**
@@ -371,7 +371,7 @@ export class GlobalErrorHandler {
   private notifyHandlers(event: ErrorEvent): void {
     for (const handler of this.handlers) {
       try {
-        handler(event.error);
+        void handler(event.error);
       } catch {
         // Don't let handler errors break other handlers
       }

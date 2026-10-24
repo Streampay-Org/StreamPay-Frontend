@@ -1,5 +1,5 @@
 {
-  "QUARANTINE_MAX": 57,
+  "QUARANTINE_MAX": 51,
   "entries": [
     {
       "path": "app/api/notifications/preferences/route.test.ts",
@@ -19,10 +19,6 @@
     },
     {
       "path": "__tests__/openapi-webhooks.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "__tests__/wallet-metrics.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
@@ -62,10 +58,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "app/api/metrics/route.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/api/orgs/[orgId]/token-allowlist/route.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
@@ -86,15 +78,7 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "app/api/streams/[id]/withdraw/route.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/api/streams/concurrency.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "app/api/streams/route.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
@@ -195,14 +179,6 @@
     },
     {
       "path": "app/StreamTypeChip.test.tsx",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "lib/otel.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "lib/requestId.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {

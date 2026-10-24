@@ -174,11 +174,11 @@ describe("WebhookOutboxStore", () => {
 });
 
 describe("WebhookDeliveryWorker - Outbox", () => {
-  let store: WebhookOutboxStore;
+  let _store: WebhookOutboxStore;
   let worker: WebhookDeliveryWorker;
 
   beforeEach(() => {
-    store = new WebhookOutboxStore();
+    _store = new WebhookOutboxStore();
     worker = new WebhookDeliveryWorker(
       { maxAttempts: 1 },
       () => Promise.resolve()

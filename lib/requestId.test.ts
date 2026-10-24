@@ -197,13 +197,28 @@ describe('middleware request-id propagation (integration)', () => {
     }
   });
 
+  const ENV_KEYS = [
+    'STELLAR_NETWORK',
+    'JWT_SECRET',
+    'NODE_ENV',
+    'ALLOWED_ORIGINS',
+    'CI',
+    'GITHUB_ACTIONS',
+  ] as const;
+  let savedEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
+
   beforeEach(async () => {
     jest.resetModules();
 
+    savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
     (process.env as any).STELLAR_NETWORK = 'testnet';
     (process.env as any).JWT_SECRET = 'test-secret-at-least-32-characters-long';
     (process.env as any).NODE_ENV = 'production';
     (process.env as any).ALLOWED_ORIGINS = 'https://allowed.example.com';
+    // Simulate a production deployment rather than a CI runner: the config
+    // validator (correctly) refuses non-dev secrets when CI is detected.
+    delete (process.env as any).CI;
+    delete (process.env as any).GITHUB_ACTIONS;
 
     jest.resetModules();
     const mod = await import('../middleware');
@@ -211,10 +226,11 @@ describe('middleware request-id propagation (integration)', () => {
   });
 
   afterEach(() => {
-    delete (process.env as any).STELLAR_NETWORK;
-    delete (process.env as any).JWT_SECRET;
-    delete (process.env as any).NODE_ENV;
-    delete (process.env as any).ALLOWED_ORIGINS;
+    for (const key of ENV_KEYS) {
+      const value = savedEnv[key];
+      if (value === undefined) delete (process.env as any)[key];
+      else (process.env as any)[key] = value;
+    }
   });
 
   it('echoes a valid incoming X-Request-Id back on the response', async () => {
@@ -296,7 +312,7 @@ describe('middleware request-id propagation (integration)', () => {
 
     expect(response.status).toBe(403);
     const body = await response.json();
-    expect(body.error.code).toBe('FORBIDDEN');
+    expect(body.error.code).toBe('CSRF_TOKEN_INVALID');
     expect(response.headers.get(REQUEST_ID_HEADER)).toBe('req_csrf_test_789');
   });
 

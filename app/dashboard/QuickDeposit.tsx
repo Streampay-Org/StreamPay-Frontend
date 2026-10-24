@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useId, useState } from "react";
+import React, { useId, useMemo, useState } from "react";
+
+import { formatStroops, parseStroops } from "@/app/lib/amount";
 
 /**
  * QuickDeposit
@@ -12,8 +14,14 @@ import React, { useId, useState } from "react";
  * - Controlled amount input with quick-select preset chips (10 / 50 / 100).
  * - Client-side validation: positive decimal, at most 7 fractional digits
  *   (Stellar precision). Errors are announced to assistive tech.
+ * - Amounts are parsed into exact `bigint` stroops (never `Number`), so the
+ *   Stellar int64 maximum is enforced without precision loss.
+ * - When `availableStroops` (and optionally `reserveStroops`) are supplied the
+ *   card is balance-aware: the deposit must not exceed the spendable amount,
+ *   a "Max" chip fills the spendable amount, and presets above it are
+ *   disabled with an explanation.
  * - On submit, calls `onDeposit(amount)` and reflects a pending state while
- *   the promise resolves.
+ *   the promise resolves. A failed deposit keeps the entered amount.
  *
  * ## Accessibility (WCAG 2.1 AA)
  * - The card is a labelled `<form>`; the input has an associated `<label>`.
@@ -37,18 +45,61 @@ export interface QuickDepositProps {
   presets?: readonly number[];
   /** Disables the whole card (e.g. wallet not connected). */
   disabled?: boolean;
+  /**
+   * Spendable wallet balance in stroops (1 XLM = 10_000_000 stroops).
+   * When provided, the card validates deposits against the spendable amount
+   * and shows a "Max" chip.
+   */
+  availableStroops?: bigint;
+  /**
+   * Network reserve that must stay in the account, in stroops. Subtracted
+   * from `availableStroops` to obtain the spendable amount.
+   */
+  reserveStroops?: bigint;
 }
 
-/** Positive decimal with up to 7 fractional digits (Stellar precision). */
-const AMOUNT_PATTERN = /^\d+(?:\.\d{1,7})?$/;
+/**
+ * Parse a preset chip value into stroops without `Number` arithmetic.
+ * Returns `null` when the preset is not a valid amount.
+ */
+function presetToStroops(preset: number): bigint | null {
+  if (!Number.isFinite(preset)) return null;
 
-function validateAmount(raw: string): string | null {
+  const result = parseStroops(String(preset));
+  return result.ok ? result.value : null;
+}
+
+function validateAmount(
+  raw: string,
+  spendableStroops: bigint | null,
+  reserveStroops: bigint,
+  asset: string,
+): string | null {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return "Enter an amount to deposit.";
-  if (!AMOUNT_PATTERN.test(trimmed)) {
+
+  const parsed = parseStroops(trimmed);
+
+  if (!parsed.ok) {
+    if (parsed.error.code === "AMOUNT_OVERFLOW") {
+      return "Amount exceeds the Stellar maximum.";
+    }
+
     return "Amount must be a positive number with up to 7 decimal places.";
   }
-  if (Number(trimmed) <= 0) return "Amount must be greater than zero.";
+
+  if (parsed.value <= 0n) return "Amount must be greater than zero.";
+
+  if (spendableStroops !== null && parsed.value > spendableStroops) {
+    const spendable = formatStroops(spendableStroops);
+
+    if (reserveStroops > 0n) {
+      return `You can deposit up to ${spendable} ${asset} (keeping ${formatStroops(reserveStroops)} for the network reserve).`;
+    }
+
+    return `You can deposit up to ${spendable} ${asset}.`;
+  }
+
   return null;
 }
 
@@ -57,6 +108,8 @@ export function QuickDeposit({
   asset = "XLM",
   presets = [10, 50, 100],
   disabled = false,
+  availableStroops,
+  reserveStroops = 0n,
 }: QuickDepositProps) {
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -65,9 +118,23 @@ export function QuickDeposit({
   const inputId = useId();
   const errorId = useId();
 
+  /**
+   * The amount the user may actually spend: the balance minus the network
+   * reserve. `null` when no balance was supplied (validation is then limited
+   * to the Stellar int64 maximum).
+   */
+  const spendableStroops = useMemo(() => {
+    if (availableStroops === undefined) return null;
+
+    const spendable = availableStroops - reserveStroops;
+    return spendable > 0n ? spendable : 0n;
+  }, [availableStroops, reserveStroops]);
+
+  const spendableText = spendableStroops === null ? null : formatStroops(spendableStroops);
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    const validationError = validateAmount(amount);
+    const validationError = validateAmount(amount, spendableStroops, reserveStroops, asset);
     if (validationError) {
       setError(validationError);
       return;
@@ -101,20 +168,49 @@ export function QuickDeposit({
       <p className="quick-deposit__hint">Top up your balance to keep streams flowing.</p>
 
       <div className="quick-deposit__presets" role="group" aria-label="Preset amounts">
-        {presets.map((preset) => (
+        {presets.map((preset) => {
+          const presetStroops = presetToStroops(preset);
+          const exceedsSpendable =
+            spendableStroops !== null && presetStroops !== null && presetStroops > spendableStroops;
+          const descriptionId = `${inputId}-preset-${preset}`;
+
+          return (
+            <React.Fragment key={preset}>
+              <button
+                type="button"
+                className="quick-deposit__chip"
+                onClick={() => {
+                  setAmount(String(preset));
+                  setError(null);
+                }}
+                disabled={isDisabled || exceedsSpendable}
+                aria-describedby={exceedsSpendable ? descriptionId : undefined}
+              >
+                {preset} {asset}
+              </button>
+              {exceedsSpendable && (
+                <span id={descriptionId} className="sr-only">
+                  {`Preset ${preset} ${asset} is above your spendable balance of ${spendableText} ${asset}.`}
+                </span>
+              )}
+            </React.Fragment>
+          );
+        })}
+
+        {spendableText !== null && (
           <button
-            key={preset}
             type="button"
             className="quick-deposit__chip"
             onClick={() => {
-              setAmount(String(preset));
+              setAmount(spendableText);
               setError(null);
             }}
             disabled={isDisabled}
+            aria-label={`Max ${spendableText} ${asset}`}
           >
-            {preset} {asset}
+            Max
           </button>
-        ))}
+        )}
       </div>
 
       <label className="quick-deposit__label" htmlFor={inputId}>

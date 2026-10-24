@@ -44,7 +44,7 @@ import {
   withLock,
 } from "@/app/lib/db";
 import { getCorrelationContext } from "@/app/lib/logger";
-import { checkStreamOrgPolicy, resolveActorAddress } from "@/app/lib/org-policy";
+import { checkStreamOrgPolicy, requireStreamActor, resolveActorAddress } from "@/app/lib/org-policy";
 import { orgDb } from "@/app/lib/org-db";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
@@ -62,10 +62,10 @@ import { webhookOutboxStore, toWebhookEvent } from "@/app/lib/webhook-outbox";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function createErrorResponse(code: string, message: string, status: number) {
+function createErrorResponse(code: string, message: string, status: number, legacyCode?: string) {
   const ctx = getCorrelationContext();
   return NextResponse.json(
-    { error: { code, message, request_id: ctx?.request_id } },
+    { error: { code, ...(legacyCode ? { legacy_code: legacyCode } : {}), message, request_id: ctx?.request_id } },
     { status },
   );
 }
@@ -161,14 +161,11 @@ export async function POST(
           403,
         );
       }
-      const actor = resolveActorAddress(request);
-      if (!actor) {
-        return createErrorResponse(
-          "ACTOR_REQUIRED",
-          "A verified actor identity is required for this action.",
-          403,
-        );
-      }
+      // Verified JWT first, header only when allowed; JWT/header conflicts
+      // are rejected with 403 ACTOR_MISMATCH.
+      const actorResult = requireStreamActor(request);
+      if (actorResult instanceof NextResponse) return actorResult;
+      const actor = actorResult;
       const policyResult = checkStreamOrgPolicy(id, actor, "stop");
       if (policyResult) {
         if (!policyResult.allowed) {

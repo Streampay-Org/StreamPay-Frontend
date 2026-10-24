@@ -11,8 +11,6 @@
 import { 
   getNetworkProfile, 
   getSupportedNetworks, 
-  validatePassphraseForNetwork,
-  validateHorizonUrlForNetwork,
   StellarNetwork,
   StellarNetworkProfile 
 } from './stellar';

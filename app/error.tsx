@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ErrorRecovery } from "./components/ErrorRecovery";
-import { reportClientError } from "./lib/reportClientError";
+import { reportClientError } from "@/lib/reportClientError";
 
 type ErrorProps = {
   error: Error & { digest?: string };

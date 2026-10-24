@@ -1,10 +1,6 @@
-import {
-  generateRequestId,
-  isValidRequestId,
-  REQUEST_ID_HEADER,
-} from "@/lib/requestId";
+import { generateRequestId, isValidRequestId } from "@/lib/requestId";
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { isSecret, redactSecrets } from './config';
+import { redactSecrets } from './config';
 
 // Correlation context interface
 export interface CorrelationContext {

@@ -4,7 +4,7 @@ import { errorResponse } from './server';
 
 describe('request ID resolution in error responses', () => {
   it('preserves the request ID from correlation context', async () => {
-    await withCorrelationContext({ request_id: 'req_forwarded' }, async () => {
+    await withCorrelationContext({ request_id: 'req_forwarded', correlation_id: 'req_forwarded' }, async () => {
       const response = errorResponse('BAD_REQUEST', 'Invalid input', 400);
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({

@@ -45,6 +45,17 @@ export interface StreamRepository {
   readonly activity: KeyValueStore<string, ActivityEvent>;
   readonly streams: KeyValueStore<string, Stream>;
   readonly users: KeyValueStore<string, User>;
+  getMultiGroupStreamIds(groupId: string): string[];
+  /**
+   * Returns all streams belonging to `tenant` using the secondary index
+   * (`O(streams in tenant)` instead of `O(all streams)`).
+   */
+  listByTenant?(tenant: string): Stream[];
+  /**
+   * Returns all streams where `walletAddress` is a participant (`senderAddress`
+   * or `recipient`), optionally scoped to `tenant`.
+   */
+  listByParticipant?(walletAddress: string, tenant?: string): Stream[];
   reset(): void;
   withLock<T>(id: string, callback: () => Promise<T>): Promise<T>;
 }

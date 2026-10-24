@@ -11,6 +11,9 @@
 import { POST } from "../route";
 import { createInMemoryPersistenceStore, getStore, setStore } from "@/app/lib/db";
 import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
+import { _resetAllowlistForTesting, addAllowedToken } from "@/app/lib/token-allowlist";
+import { POST as createStream } from "../../route";
+import fc from "fast-check";
 
 // ── Mock logger (keeps test output clean) ─────────────────────────────────
 
@@ -52,6 +55,7 @@ function streamCount(): number {
 beforeEach(() => {
   setStore(createInMemoryPersistenceStore());
   resetRateLimitStore();
+  _resetAllowlistForTesting();
 });
 
 // ── Valid body ────────────────────────────────────────────────────────────
@@ -280,9 +284,9 @@ describe("preview_stream", () => {
 // ── Validation errors ─────────────────────────────────────────────────────
 
 describe("validation errors", () => {
-  it("returns 400 when body is empty", async () => {
+  it("returns 422 when body is empty", async () => {
     const res = await POST(makeRequest({}));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
   it("returns VALIDATION_ERROR code for missing required fields", async () => {
@@ -291,21 +295,21 @@ describe("validation errors", () => {
     expect(body.error.code).toBe("VALIDATION_ERROR");
   });
 
-  it("returns 400 when recipient is missing", async () => {
+  it("returns 422 when recipient is missing", async () => {
     const res = await POST(makeRequest({ rate: "50", schedule: "month" }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const body = await res.json();
     expect(body.error.code).toBe("VALIDATION_ERROR");
   });
 
-  it("returns 400 when rate is missing", async () => {
+  it("returns 422 when rate is missing", async () => {
     const res = await POST(makeRequest({ recipient: VALID_STELLAR_KEY, schedule: "month" }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
-  it("returns 400 when schedule is missing", async () => {
+  it("returns 422 when schedule is missing", async () => {
     const res = await POST(makeRequest({ recipient: VALID_STELLAR_KEY, rate: "50" }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
   it("includes field-level details in the error envelope", async () => {
@@ -318,27 +322,27 @@ describe("validation errors", () => {
     expect(body.error.details[0]).toHaveProperty("message");
   });
 
-  it("returns 400 when recipient is not a valid Stellar key", async () => {
+  it("returns 422 when recipient is not a valid Stellar key", async () => {
     const res = await POST(
       makeRequest({ recipient: "not-a-stellar-key", rate: "50", schedule: "month" }),
     );
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const body = await res.json();
     expect(body.error.details.some((d: { field: string }) => d.field === "recipient")).toBe(true);
   });
 
-  it("returns 400 when rate is zero", async () => {
+  it("returns 422 when rate is zero", async () => {
     const res = await POST(
       makeRequest({ recipient: VALID_STELLAR_KEY, rate: "0", schedule: "month" }),
     );
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
-  it("returns 400 when schedule is not a supported value", async () => {
+  it("returns 422 when schedule is not a supported value", async () => {
     const res = await POST(
       makeRequest({ recipient: VALID_STELLAR_KEY, rate: "50", schedule: "quarterly" }),
     );
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const body = await res.json();
     expect(body.error.details.some((d: { field: string }) => d.field === "schedule")).toBe(true);
   });
@@ -360,6 +364,107 @@ describe("validation errors", () => {
     const before = streamCount();
     await POST(makeRequest({ recipient: "bad-key", rate: "50", schedule: "month" }));
     expect(streamCount()).toBe(before);
+  });
+
+  it("returns the same invalid-recipient details as stream creation", async () => {
+    const input = { recipient: "not-a-stellar-key", rate: "50", schedule: "month" };
+    const preview = await POST(makeRequest(input));
+    const previewBody = await preview.json();
+    const created = await createStream(
+      new Request("http://localhost/api/streams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-forwarded-for": "192.0.2.229" },
+        body: JSON.stringify(input),
+      }),
+    );
+    const createBody = await created.json();
+
+    expect(preview.status).toBe(422);
+    expect(previewBody.error.code).toBe("VALIDATION_ERROR");
+    expect(previewBody.error.details).toEqual(createBody.error.details);
+  });
+
+  it("rejects non-allowlisted tokens exactly like stream creation", async () => {
+    addAllowedToken("XLM");
+    const input = {
+      recipient: VALID_STELLAR_KEY,
+      rate: "1",
+      schedule: "day",
+      token: "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+    };
+    const preview = await POST(makeRequest(input));
+    const previewBody = await preview.json();
+    const created = await createStream(
+      new Request("http://localhost/api/streams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-forwarded-for": "192.0.2.230" },
+        body: JSON.stringify(input),
+      }),
+    );
+    const createBody = await created.json();
+
+    expect(preview.status).toBe(422);
+    expect(previewBody.data.valid).toBe(false);
+    expect(previewBody.error.code).toBe("TOKEN_NOT_ALLOWED");
+    expect(previewBody.error).toEqual(createBody.error);
+  });
+
+  it("does not treat an allowlisted EURC token as USDC for cost estimation", async () => {
+    const eurc = "EURC:GDHU6WRG4IEQXM5NZ4BMPKOXHW76MZM4Y2IEMFDVXBSDP6SJY4ITNPPA";
+    addAllowedToken(eurc);
+    const res = await POST(
+      makeRequest({ recipient: VALID_STELLAR_KEY, rate: "5", schedule: "day", token: eurc }),
+    );
+    const body = await res.json();
+    expect(body.data.valid).toBe(true);
+    expect(body.data.preview_stream.asset).toBe(eurc);
+    expect(body.data.cost_estimate).toBeNull();
+    expect(body.data.cost_estimate_reason).toContain("EURC");
+    expect(body.data.cost_estimate_reason).not.toContain("USDC");
+  });
+
+  it("matches stream creation status for generated bodies", async () => {
+    let requestId = 0;
+    await fc.assert(
+      fc.asyncProperty(fc.dictionary(fc.string(), fc.jsonValue()), async (body) => {
+        const ip = `198.51.100.${(requestId++ % 250) + 1}`;
+        const preview = await POST(
+          makeRequest(body, { "x-forwarded-for": ip }),
+        );
+        const created = await createStream(
+          new Request("http://localhost/api/streams", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-forwarded-for": ip,
+              "Idempotency-Key": `property-${requestId}`,
+            },
+            body: JSON.stringify(body),
+          }),
+        );
+        const previewBody = await preview.json();
+        expect(previewBody.data?.valid === true).toBe(created.status === 201);
+      }),
+      { numRuns: 40 },
+    );
+  });
+
+  it("does not write stream or idempotency stores across 1000 previews", async () => {
+    setStore(createInMemoryPersistenceStore());
+    const store = getStore();
+    const streamsBefore = store.streamRepository.streams.size;
+    const idempotencyBefore = store.idempotencyStore.size;
+    for (let i = 0; i < 1000; i++) {
+      const res = await POST(
+        makeRequest(
+          { recipient: VALID_STELLAR_KEY, rate: "1", schedule: "day" },
+          { "x-forwarded-for": `203.0.113.${(i % 254) + 1}` },
+        ),
+      );
+      expect(res.status).toBe(200);
+    }
+    expect(store.streamRepository.streams.size).toBe(streamsBefore);
+    expect(store.idempotencyStore.size).toBe(idempotencyBefore);
   });
 });
 
@@ -423,4 +528,66 @@ describe("all supported schedules return 200", () => {
       expect(res.status).toBe(200);
     });
   }
+});
+
+// ── INVALID_TOKEN (malformed token string) ────────────────────────────────
+
+describe("INVALID_TOKEN branch", () => {
+  it("returns 422 INVALID_TOKEN for a malformed token string", async () => {
+    // "BADFORMAT" is a string (passes Zod's typeof check) but fails
+    // normaliseToken because it has no colon and is not XLM.
+    const res = await POST(
+      makeRequest({
+        recipient: VALID_STELLAR_KEY,
+        rate: "5",
+        schedule: "day",
+        token: "BADFORMAT",
+      }),
+    );
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error.code).toBe("INVALID_TOKEN");
+    expect(body.data.valid).toBe(false);
+  });
+
+  it("INVALID_TOKEN response also includes data envelope with valid: false", async () => {
+    const res = await POST(
+      makeRequest({
+        recipient: VALID_STELLAR_KEY,
+        rate: "1",
+        schedule: "week",
+        token: "NOISSUER",
+      }),
+    );
+    const body = await res.json();
+    expect(body.data).toBeDefined();
+    expect(body.data.valid).toBe(false);
+    expect(body.data.cost_estimate).toBeNull();
+    expect(body.data.preview_stream).toBeNull();
+  });
+});
+
+// ── Cost estimator unavailable path ──────────────────────────────────────
+
+describe("cost_estimate unavailable for unsupported asset", () => {
+  it("returns null cost_estimate with a reason mentioning the asset code", async () => {
+    // EURC is allowlisted → valid: true, but EURC is not in SUPPORTED_ASSETS
+    // so estimateStreamCost is not called; cost_estimate is null.
+    const eurc = "EURC:GDHU6WRG4IEQXM5NZ4BMPKOXHW76MZM4Y2IEMFDVXBSDP6SJY4ITNPPA";
+    addAllowedToken(eurc);
+    const res = await POST(
+      makeRequest({
+        recipient: VALID_STELLAR_KEY,
+        rate: "1",
+        schedule: "month",
+        token: eurc,
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.valid).toBe(true);
+    expect(body.data.cost_estimate).toBeNull();
+    expect(typeof body.data.cost_estimate_reason).toBe("string");
+    expect(body.data.cost_estimate_reason).toContain("EURC");
+  });
 });

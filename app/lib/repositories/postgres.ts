@@ -228,6 +228,10 @@ class PostgresStreamRepository implements StreamRepository {
     throw unsupported("postgres-stream-repository", "reset");
   }
 
+  getMultiGroupStreamIds(): string[] {
+    throw unsupported("postgres-stream-repository", "getMultiGroupStreamIds");
+  }
+
   async withLock<T>(_id: string, _callback: () => Promise<T>): Promise<T> {
     throw unsupported("postgres-stream-repository", "withLock");
   }

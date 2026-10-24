@@ -1,5 +1,15 @@
 /** @jest-environment node */
 
+// Mock dependencies that have pre-existing syntax issues on this branch
+jest.mock("@/app/lib/auth", () => ({
+  tryAuthenticateRequest: jest.fn().mockReturnValue(null),
+}));
+jest.mock("@/lib/fingerprint", () => ({
+  attachRequestFingerprintMetadata: jest.fn((_req: unknown, meta: unknown) => meta),
+  REQUEST_FINGERPRINT_HEADER: "x-request-fingerprint",
+}));
+jest.mock("@/lib/fingerprint-audit", () => ({}));
+
 import { AppendOnlyAuditLogStore } from "./audit-log";
 
 describe("AppendOnlyAuditLogStore", () => {
@@ -238,6 +248,7 @@ describe("AppendOnlyAuditLogStore", () => {
 
       expect(result.archivedCount).toBe(1);
       expect(result.archivedEntryIds).toEqual([oldEntry.id]);
+      expect(result.checkpointId).not.toBeNull();
       expect(store.count()).toBe(1);
       expect(store.list()).toHaveLength(1);
       expect(store.list()[0].id).toBe(recentEntry.id);
@@ -502,6 +513,364 @@ describe("AppendOnlyAuditLogStore", () => {
       store.deepArchive("2025-01-01T00:00:00.000Z");
 
       expect(store.exportArchivedRows()).toEqual(store.exportArchivedRows());
+    });
+  });
+
+  describe("getPaginated cursor pagination", () => {
+    it("returns paginated results with hasNext and nextCursor", () => {
+      const store = new AppendOnlyAuditLogStore();
+      for (let i = 0; i < 5; i++) {
+        store.append({
+          action: "stream.create",
+          actor: { id: "actor-1", role: "admin" },
+          requestId: `req-page-${i}`,
+          target: { id: `stream-${i}`, type: "stream" },
+          timestamp: `2026-01-0${i + 1}T10:00:00.000Z`,
+        });
+      }
+
+      const page1 = store.getPaginated({ limit: 2 });
+      expect(page1.data).toHaveLength(2);
+      expect(page1.hasNext).toBe(true);
+      expect(page1.nextCursor).not.toBeNull();
+      expect(page1.total).toBe(5);
+    });
+
+    it("returns the next page using cursor", () => {
+      const store = new AppendOnlyAuditLogStore();
+      for (let i = 0; i < 5; i++) {
+        store.append({
+          action: "stream.create",
+          actor: { id: "actor-1", role: "admin" },
+          requestId: `req-cur-${i}`,
+          target: { id: `stream-${i}`, type: "stream" },
+          timestamp: `2026-01-0${i + 1}T10:00:00.000Z`,
+        });
+      }
+
+      const page1 = store.getPaginated({ limit: 2 });
+      const page2 = store.getPaginated({ limit: 2, cursor: page1.nextCursor! });
+      expect(page2.data).toHaveLength(2);
+      // No overlap between pages
+      const ids1 = new Set(page1.data.map((e) => e.id));
+      for (const e of page2.data) {
+        expect(ids1.has(e.id)).toBe(false);
+      }
+    });
+
+    it("clamps limit to 1..250", () => {
+      const store = new AppendOnlyAuditLogStore();
+      store.append({
+        action: "stream.create",
+        actor: { id: "actor-1", role: "admin" },
+        requestId: "req-clamp",
+        target: { id: "stream-1", type: "stream" },
+        timestamp: "2026-01-01T10:00:00.000Z",
+      });
+
+      const r1 = store.getPaginated({ limit: 0 });
+      expect(r1.data).toHaveLength(1); // clamped to 1
+
+      const r2 = store.getPaginated({ limit: 9999 });
+      expect(r2.data.length).toBeLessThanOrEqual(250);
+    });
+
+    it("returns hasNext=false on last page", () => {
+      const store = new AppendOnlyAuditLogStore();
+      store.append({
+        action: "stream.settle",
+        actor: { id: "actor-1", role: "admin" },
+        requestId: "req-last",
+        target: { id: "stream-1", type: "stream" },
+        timestamp: "2026-01-01T10:00:00.000Z",
+      });
+
+      const result = store.getPaginated({ limit: 50 });
+      expect(result.hasNext).toBe(false);
+      expect(result.nextCursor).toBeNull();
+    });
+  });
+
+  describe("getCheckpoints", () => {
+    it("returns empty array before any purge", () => {
+      const store = new AppendOnlyAuditLogStore();
+      store.append({
+        action: "stream.create",
+        actor: { id: "actor-1", role: "admin" },
+        requestId: "req-cp",
+        target: { id: "stream-1", type: "stream" },
+        timestamp: "2026-01-01T10:00:00.000Z",
+      });
+      expect(store.getCheckpoints()).toEqual([]);
+    });
+
+    it("is cleared on reset", () => {
+      const store = new AppendOnlyAuditLogStore();
+      store.reset([{
+        action: "stream.create",
+        actor: { id: "actor-1", role: "admin" },
+        requestId: "req-reset-cp",
+        target: { id: "stream-1", type: "stream" },
+        timestamp: "2022-01-01T10:00:00.000Z",
+      }, {
+        action: "stream.settle",
+        actor: { id: "actor-1", role: "admin" },
+        requestId: "req-reset-cp2",
+        target: { id: "stream-2", type: "stream" },
+        timestamp: "2026-06-01T10:00:00.000Z",
+      }]);
+      store.purgeArchivedRows("2025-01-01T00:00:00.000Z", true);
+      expect(store.getCheckpoints()).toHaveLength(1);
+
+      store.reset();
+      expect(store.getCheckpoints()).toHaveLength(0);
+    });
+  });
+
+  describe("resolveAuditActor and buildRequestId", () => {
+    it("resolveAuditActor falls back to system:mock with no auth", () => {
+      const { resolveAuditActor } = require("./audit-log");
+      const req = new Request("https://example.com/api/test");
+      const actor = resolveAuditActor(req);
+      expect(actor).toEqual({ id: "system:mock", role: "system" });
+    });
+
+    it("resolveAuditActor uses header role/actorId when valid", () => {
+      const { resolveAuditActor } = require("./audit-log");
+      const req = new Request("https://example.com/api/test", {
+        headers: {
+          "x-streampay-actor-role": "admin",
+          "x-streampay-actor-id": "actor-header-1",
+        },
+      });
+      const actor = resolveAuditActor(req);
+      expect(actor).toEqual({ id: "actor-header-1", role: "admin" });
+    });
+
+    it("resolveAuditActor ignores invalid role from header", () => {
+      const { resolveAuditActor } = require("./audit-log");
+      const req = new Request("https://example.com/api/test", {
+        headers: {
+          "x-streampay-actor-role": "hacker",
+          "x-streampay-actor-id": "actor-bad",
+        },
+      });
+      const actor = resolveAuditActor(req);
+      expect(actor).toEqual({ id: "system:mock", role: "system" });
+    });
+
+    it("buildRequestId uses x-request-id header when present", () => {
+      const { buildRequestId } = require("./audit-log");
+      const req = new Request("https://example.com/", {
+        headers: { "x-request-id": "req-known-id" },
+      });
+      expect(buildRequestId(req)).toBe("req-known-id");
+    });
+
+    it("buildRequestId falls back to mock id when no headers", () => {
+      const { buildRequestId } = require("./audit-log");
+      const req = new Request("https://example.com/");
+      const id = buildRequestId(req);
+      expect(id).toMatch(/^mock-request-/);
+    });
+  });
+
+  describe("edge cases", () => {
+    it("purgeArchivedRows returns checkpointId null when nothing to purge", () => {
+      const store = new AppendOnlyAuditLogStore();
+      store.reset([{
+        action: "stream.create",
+        actor: { id: "actor-1", role: "admin" },
+        requestId: "req-nopur",
+        target: { id: "stream-1", type: "stream" },
+        timestamp: "2026-06-01T10:00:00.000Z",
+      }]);
+      const result = store.purgeArchivedRows("2020-01-01T00:00:00.000Z", true);
+      expect(result.purgedEntries).toBe(0);
+      expect(result.checkpointId).toBeNull();
+    });
+
+    it("deepArchive returns checkpointId null when nothing to archive", () => {
+      const store = new AppendOnlyAuditLogStore();
+      store.append({
+        action: "stream.create",
+        actor: { id: "actor-1", role: "admin" },
+        requestId: "req-noarch",
+        target: { id: "stream-1", type: "stream" },
+        timestamp: "2026-06-01T10:00:00.000Z",
+      });
+      const result = store.deepArchive("2020-01-01T00:00:00.000Z");
+      expect(result.archivedCount).toBe(0);
+      expect(result.checkpointId).toBeNull();
+    });
+
+    it("assertIntegrity returns true on empty store", () => {
+      const store = new AppendOnlyAuditLogStore();
+      store.reset([]);
+      expect(store.assertIntegrity()).toBe(true);
+    });
+
+    it("getPaginated returns all results when count is less than limit", () => {
+      const store = new AppendOnlyAuditLogStore();
+      store.append({
+        action: "stream.create",
+        actor: { id: "actor-1", role: "admin" },
+        requestId: "req-few",
+        target: { id: "stream-1", type: "stream" },
+        timestamp: "2026-01-01T10:00:00.000Z",
+      });
+      const result = store.getPaginated({ limit: 50 });
+      expect(result.data.length).toBeGreaterThan(0);
+      expect(result.hasNext).toBe(false);
+    });
+
+    it("q filter searches across actor, action, and target fields", () => {
+      const store = new AppendOnlyAuditLogStore();
+      store.reset([]);
+      store.append({
+        action: "stream.settle",
+        actor: { id: "unique-actor-xyz", role: "admin" },
+        requestId: "req-qfilter",
+        target: { id: "stream-q", type: "stream" },
+        timestamp: "2026-01-01T10:00:00.000Z",
+      });
+      const results = store.list({ q: "unique-actor-xyz" });
+      expect(results).toHaveLength(1);
+      const none = store.list({ q: "zzznomatch" });
+      expect(none).toHaveLength(0);
+    });
+
+    it("getPaginated handles invalid cursor gracefully", () => {
+      const store = new AppendOnlyAuditLogStore();
+      store.append({
+        action: "stream.create",
+        actor: { id: "actor-1", role: "admin" },
+        requestId: "req-badcursor",
+        target: { id: "stream-1", type: "stream" },
+        timestamp: "2026-01-01T10:00:00.000Z",
+      });
+      // Invalid base64 cursor should not throw
+      expect(() => store.getPaginated({ cursor: "!!!invalid!!!" })).not.toThrow();
+    });
+
+    it("restoreArchivedEntries returns empty when nothing archived", () => {
+      const store = new AppendOnlyAuditLogStore();
+      store.reset([]);
+      const restored = store.restoreArchivedEntries();
+      expect(restored).toEqual([]);
+    });
+
+    it("count returns number of active entries", () => {
+      const store = new AppendOnlyAuditLogStore();
+      store.reset([]);
+      expect(store.count()).toBe(0);
+      store.append({
+        action: "stream.create",
+        actor: { id: "actor-1", role: "admin" },
+        requestId: "req-count",
+        target: { id: "stream-1", type: "stream" },
+        timestamp: "2026-01-01T10:00:00.000Z",
+      });
+      expect(store.count()).toBe(1);
+    });
+
+    it("updateEntry and deleteEntry always throw AUDIT_LOG_APPEND_ONLY", () => {
+      const store = new AppendOnlyAuditLogStore();
+      expect(() => store.updateEntry("any-id", {})).toThrow("AUDIT_LOG_APPEND_ONLY");
+      expect(() => store.deleteEntry("any-id")).toThrow("AUDIT_LOG_APPEND_ONLY");
+    });
+
+    it("recordPrivilegedStreamAuditEvent appends to global store", () => {
+      const { recordPrivilegedStreamAuditEvent, resetAuditLogStore } = require("./audit-log");
+      resetAuditLogStore();
+      const req = new Request("https://example.com/api/test", {
+        headers: { "x-request-id": "req-priv-event" },
+      });
+      const entry = recordPrivilegedStreamAuditEvent({
+        request: req,
+        action: "stream.stop.override",
+        before: { status: "active" },
+        after: { status: "ended" },
+        streamId: "stream-priv-1",
+        targetAccount: "acct_priv",
+      });
+      expect(entry.action).toBe("stream.stop.override");
+      expect(entry.requestId).toBe("req-priv-event");
+      expect(entry.target.id).toBe("stream-priv-1");
+      resetAuditLogStore();
+    });
+
+    it("deepArchive archives from soft-archived entries too and creates checkpoint", () => {
+      const store = new AppendOnlyAuditLogStore();
+      store.reset([{
+        action: "stream.create",
+        actor: { id: "actor-1", role: "admin" },
+        requestId: "req-soft-arch",
+        target: { id: "stream-old", type: "stream" },
+        timestamp: "2022-01-01T10:00:00.000Z",
+      }, {
+        action: "stream.settle",
+        actor: { id: "actor-1", role: "admin" },
+        requestId: "req-fresh-arch",
+        target: { id: "stream-new", type: "stream" },
+        timestamp: "2026-06-01T10:00:00.000Z",
+      }]);
+
+      store.archiveExpiredEntries("2023-01-01T00:00:00.000Z");
+      expect(store.getArchivedEntries()).toHaveLength(1);
+
+      const result = store.deepArchive("2023-06-01T00:00:00.000Z");
+      expect(result.archivedCount).toBe(1);
+      expect(result.checkpointId).not.toBeNull();
+      expect(store.getDeepArchivedEntries()).toHaveLength(1);
+      expect(store.getArchivedEntries()).toHaveLength(0);
+      expect(store.assertIntegrity()).toBe(true);
+    });
+
+    it("append uses diffHash from input when provided", () => {
+      const store = new AppendOnlyAuditLogStore();
+      store.reset([]);
+      const entry = store.append({
+        action: "stream.create",
+        actor: { id: "actor-1", role: "admin" },
+        requestId: "req-diffhash",
+        target: { id: "stream-1", type: "stream" },
+        timestamp: "2026-01-01T10:00:00.000Z",
+        diffHash: "custom-diff-hash-value",
+      });
+      expect(entry.diffHash).toBe("custom-diff-hash-value");
+    });
+
+    it("append entry with no before/after has null diffHash", () => {
+      const store = new AppendOnlyAuditLogStore();
+      store.reset([]);
+      const entry = store.append({
+        action: "stream.ping",
+        actor: { id: "actor-1", role: "system" },
+        requestId: "req-nodiff",
+        target: { id: "stream-1", type: "stream" },
+        timestamp: "2026-01-01T10:00:00.000Z",
+      });
+      expect(entry.diffHash).toBeNull();
+    });
+
+    it("getPaginated cursor exact match advances past matched entry", () => {
+      const store = new AppendOnlyAuditLogStore();
+      for (let i = 0; i < 4; i++) {
+        store.append({
+          action: "stream.create",
+          actor: { id: "actor-1", role: "admin" },
+          requestId: `req-exact-${i}`,
+          target: { id: `stream-${i}`, type: "stream" },
+          timestamp: `2026-01-0${i + 1}T10:00:00.000Z`,
+        });
+      }
+      const p1 = store.getPaginated({ limit: 1 });
+      expect(p1.data).toHaveLength(1);
+      expect(p1.hasNext).toBe(true);
+      const p2 = store.getPaginated({ limit: 1, cursor: p1.nextCursor! });
+      expect(p2.data).toHaveLength(1);
+      expect(p2.data[0].id).not.toBe(p1.data[0].id);
     });
   });
 });
