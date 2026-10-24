@@ -92,11 +92,6 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: TEMP regenerate OpenAPI types diff
-        if: always()
-        continue-on-error: true
-        run: node scripts/generate-openapi-types.mjs && git --no-pager diff -U5 -- app/types/openapi.generated.ts
-
       - name: Run smoke tests
         run: npm run smoke
 

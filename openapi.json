@@ -1676,7 +1676,7 @@
       "get": {
         "operationId": "listStreams",
         "summary": "List payment streams (v1, deprecated)",
-        "description": "Returns a cursor-paginated list of streams owned by the authenticated identity. **Deprecated** — use `GET /api/v2/streams` instead.",
+        "description": "Returns a cursor-paginated list of streams scoped to the caller's tenant (`x-tenant-id`, defaulting to `default-tenant`) and ownership (sender, recipient, owning organisation member, or admin). Unauthenticated requests are restricted to the resolved tenant and omit PII fields (`email`, `label`, `memo`, `partnerId`). `meta.total` reflects the filtered count. **Deprecated** — use `GET /api/v2/streams` instead.",
         "deprecated": true,
         "tags": [
           "Streams v1"
