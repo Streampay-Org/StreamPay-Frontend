@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getStore } from "@/app/lib/db";
 import { getCorrelationContext } from "@/app/lib/logger";
 import { ProjectionError, toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
+import { deleteStream } from "@/app/lib/stream-delete";
+import { streamCache } from "@/app/lib/cache";
 import { inferStreamChangeAction, publishStreamChange } from "@/app/lib/stream-publish";
 import type { Stream } from "@/app/types/openapi";
 
@@ -17,7 +19,7 @@ export async function GET(request: Request, { params }: Context) {
   const { streamRepository } = getStore();
   const { id } = await params;
   const stream = streamRepository.streams.get(id);
-  if (!stream) {
+  if (!stream || stream.deletedAt) {
     return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
   }
 
@@ -63,22 +65,26 @@ export async function GET(request: Request, { params }: Context) {
 }
 
 /** DELETE /api/v2/streams/:id */
-export async function DELETE(_request: Request, { params }: Context) {
-  const { streamRepository } = getStore();
+export async function DELETE(request: Request, { params }: Context) {
   const { id } = await params;
-  const stream = streamRepository.streams.get(id);
-  if (!stream) {
-    return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
+  const actor = await resolveV2Actor(request);
+  const tenant = await resolveV2Tenant(request);
+  const result = await deleteStream(id, actor, tenant);
+  if (result.status === 204) {
+    streamCache.invalidate(id);
+    return new NextResponse(null, { status: 204 });
   }
-  if (stream.status === "active" || stream.status === "paused") {
-    return errorResponse(
-      "STREAM_INACTIVE_STATE",
-      "Cannot delete an active or paused stream. Stop it first.",
-      409,
-    );
-  }
-  streamRepository.streams.delete(id);
-  return new NextResponse(null, { status: 204 });
+  return errorResponse(result.code, result.message, result.status);
+}
+
+async function resolveV2Actor(request: Request): Promise<string | null> {
+  const actor = request.headers.get("x-actor-address") ?? request.headers.get("x-stellar-address");
+  return actor && actor.trim().length > 0 ? actor.trim() : null;
+}
+
+async function resolveV2Tenant(request: Request): Promise<string | null> {
+  const tenant = request.headers.get("x-tenant-id");
+  return tenant && tenant.trim().length > 0 ? tenant.trim() : null;
 }
 
 /** PATCH /api/v2/streams/:id */
@@ -87,7 +93,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const params = await context.params;
   const id = params.id;
   const stream = streamRepository.streams.get(id);
-  if (!stream) {
+  if (!stream || stream.deletedAt) {
     return errorResponse("NOT_FOUND", `Stream '${id}' not found`, 404);
   }
 
