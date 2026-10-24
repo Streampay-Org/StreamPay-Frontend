@@ -167,6 +167,10 @@ class UnsupportedKeyValueStore<K, V> implements KeyValueStore<K, V> {
     throw unsupported(this.resourceName, "get");
   }
 
+  insert(_key: K, _value: V): boolean {
+    throw unsupported(this.resourceName, "insert");
+  }
+
   has(_key: K): boolean {
     throw unsupported(this.resourceName, "has");
   }

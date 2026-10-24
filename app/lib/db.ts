@@ -28,6 +28,7 @@ export interface KeyValueStore<K, V> {
   forEach(callbackfn: (value: V, key: K) => void): void;
   get(key: K): V | undefined;
   has(key: K): boolean;
+  insert(key: K, value: V): boolean;
   set(key: K, value: V): void;
   values(): IterableIterator<V>;
 }
@@ -383,4 +384,5 @@ export function decodeCompositeCursor(cursor: string): { timestamp: string; id: 
   return { timestamp, id };
 }
 
+export { newStreamId } from "./stream-id";
 export { createInMemoryPersistenceStore, createPostgresPersistenceStore, POSTGRES_SCHEMA_SKETCH, POSTGRES_ROLLOUT_NOTES };

@@ -373,6 +373,17 @@ export const NotificationSettings = forwardRef<
               </div>
             </div>
 
+            {quietHours.startTime === quietHours.endTime && isValidTimeFormat(quietHours.startTime) && (
+              <div
+                className="alert alert--warning"
+                role="status"
+                aria-live="polite"
+                data-testid="quiet-hours-always-on-warning"
+              >
+                <strong>Always-on quiet hours:</strong> Quiet hours will be active all day on selected days. Notifications will only be delivered to fallback channels.
+              </div>
+            )}
+
             <div className="setting-item setting-item--stacked">
               <div className="setting-item__info">
                 <label htmlFor="quiet-hours-timezone" className="setting-item__label">
