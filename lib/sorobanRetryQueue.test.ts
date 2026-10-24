@@ -366,7 +366,7 @@ describe("dequeue", () => {
 
   it("returns the oldest eligible entry when multiple are pending", () => {
     // Enqueue at different times by manipulating nextRetryAt
-    const r1 = sorobanRetryQueue.enqueue("fetchStream", { streamId: "first" });
+    sorobanRetryQueue.enqueue("fetchStream", { streamId: "first" });
     sorobanRetryQueue.enqueue("fetchStream", { streamId: "second" });
 
     // Set the first entry's nextRetryAt to 5000

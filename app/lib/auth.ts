@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { NextResponse } from "next/server";
 import { resolveRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";

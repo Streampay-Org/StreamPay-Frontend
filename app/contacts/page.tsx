@@ -64,7 +64,6 @@ function persistContacts(contacts: Contact[]): void {
 // ─── Import / export constants ────────────────────────────────────────────────
 
 const MAX_IMPORT_BYTES = 1024 * 1024;
-const MAX_IMPORT_ROWS = 1000;
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
