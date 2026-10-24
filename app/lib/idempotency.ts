@@ -171,8 +171,26 @@ export async function withIdempotency(
       return NextResponse.json({ error: "IdempotencyKeyReused", message: "This Idempotency-Key was used with a different request body." }, { status: 409 });
     }
 
+    // A statusCode-0 record is the in-flight reservation written before the
+    // handler runs (#1721): a concurrent duplicate must be refused instead of
+    // double-executing the mutation.
+    if (existing.statusCode === 0) {
+      return NextResponse.json(
+        { error: "IdempotencyKeyInFlight", message: "This Idempotency-Key is currently being processed." },
+        { status: 409 },
+      );
+    }
+
     const headers = new Headers({ "Idempotency-Replay": "true", "Idempotency-Key": key, "Content-Type": "application/json" });
     return new NextResponse(JSON.stringify(existing.body), { status: existing.statusCode, headers });
+  }
+
+  // Reserve the key before executing the handler (#1721): the reservation is
+  // overwritten by the final response below, so it is safe to write here.
+  try {
+    await store.set(storeKey, { fingerprint, statusCode: 0, body: { __idempotencyInflight: true }, createdAt: Date.now() });
+  } catch (err: any) {
+    logger.warn("Idempotency reservation failed; proceeding without in-flight guard", { err: err?.message });
   }
 
   // No existing record — run handler and then persist the response for future replays.
@@ -192,10 +210,16 @@ export async function withIdempotency(
     respBody = null;
   }
 
-  try {
-    await store.set(storeKey, { fingerprint, statusCode: response.status, body: respBody, createdAt: Date.now() });
-  } catch (err: any) {
-    logger.error("Idempotency store write failed; response not persisted", { err: err?.message });
+  if (response.status < 500) {
+    try {
+      await store.set(storeKey, { fingerprint, statusCode: response.status, body: respBody, createdAt: Date.now() });
+    } catch (err: any) {
+      logger.error("Idempotency store write failed; response not persisted", { err: err?.message });
+    }
+  } else {
+    // 5xx responses are transient — caching them for 24h would turn a blip
+    // into a 24h outage for replays of this key (#1721).
+    logger.warn("Idempotency response not cached because the request failed with a 5xx", { status: response.status });
   }
 
   // Tag response as non-replay
