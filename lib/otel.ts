@@ -42,9 +42,6 @@ const TRACEPARENT_VERSION = '00';
 /** Default service name; override with the SERVICE_NAME env variable. */
 const SERVICE_NAME = process.env.SERVICE_NAME ?? 'streampay-frontend';
 
-/** OTLP HTTP endpoint; omit to disable export. */
-const OTLP_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? null;
-
 /**
  * Telemetry consent gate.
  *
@@ -56,10 +53,20 @@ const OTLP_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? null;
  * The consent flag is the single chokepoint enforced inside `otlpHttpExport`,
  * so callers cannot accidentally bypass it.
  */
-const TELEMETRY_CONSENT_ENV = process.env.STREAMPAY_TELEMETRY_CONSENT;
-const DEFAULT_TELEMETRY_CONSENT =
-  TELEMETRY_CONSENT_ENV === 'true' || TELEMETRY_CONSENT_ENV === '1';
+function readDefaultTelemetryConsent(): boolean {
+  const env = process.env.STREAMPAY_TELEMETRY_CONSENT;
+  return env === 'true' || env === '1';
+}
 
+/**
+ * Resolves the OTLP HTTP endpoint lazily so that runtime overrides (and
+ * tests) can change `OTEL_EXPORTER_OTLP_ENDPOINT` after module load.
+ */
+function getOtlpEndpoint(): string | null {
+  return process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? null;
+}
+
+const DEFAULT_TELEMETRY_CONSENT = readDefaultTelemetryConsent();
 let _telemetryConsent = DEFAULT_TELEMETRY_CONSENT;
 
 /** Returns whether telemetry export is currently permitted. */
@@ -74,7 +81,7 @@ export function setTelemetryConsent(value: boolean): void {
 
 /** Restores the deploy-time default consent state. */
 export function resetTelemetryConsent(): void {
-  _telemetryConsent = DEFAULT_TELEMETRY_CONSENT;
+  _telemetryConsent = readDefaultTelemetryConsent();
 }
 
 /** Maximum number of attributes per span (prevents unbounded growth). */
@@ -214,6 +221,10 @@ export function parseTraceparent(traceparent: string | null | undefined): TraceC
   if (!spanId  || spanId.length  !== 16) return null;
   if (!traceFlags || traceFlags.length !== 2) return null;
   if (!/^[0-9a-f]+$/.test(traceId) || !/^[0-9a-f]+$/.test(spanId)) return null;
+  if (!/^[0-9a-f]+$/.test(traceFlags)) return null;
+  // W3C: all-zero trace-id and span-id are invalid.
+  if (/^0+$/.test(traceId)) return null;
+  if (/^0+$/.test(spanId)) return null;
   return { traceId, spanId, traceFlags, traceparent };
 }
 
@@ -428,7 +439,8 @@ export function redactSpanRecord(span: SpanRecord): SpanRecord {
  * @param span - Completed span record
  */
 export async function otlpHttpExport(span: SpanRecord): Promise<void> {
-  if (!OTLP_ENDPOINT) return;
+  const endpoint = getOtlpEndpoint();
+  if (!endpoint) return;
 
   // Consent gate (least privilege): never export telemetry without consent.
   if (!isTelemetryConsented()) return;
@@ -486,7 +498,7 @@ export async function otlpHttpExport(span: SpanRecord): Promise<void> {
   };
 
   try {
-    await fetch(`${OTLP_ENDPOINT}/v1/traces`, {
+    await fetch(`${endpoint}/v1/traces`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(payload),
@@ -575,8 +587,10 @@ export class Tracer {
 
     span.setAttributes(attributes);
 
-    // Propagate traceparent into the AsyncLocalStorage correlation context
-    const correlation = correlationContext.getStore();
+    // Propagate traceparent into the AsyncLocalStorage correlation context.
+    // Optional chaining keeps the tracer usable in environments/tests where
+    // the logger module is mocked without a real AsyncLocalStorage instance.
+    const correlation = correlationContext?.getStore?.();
     if (correlation) {
       correlation.traceparent = traceparent;
     }
@@ -607,9 +621,7 @@ export class Tracer {
     const span = this.startSpan(name, options);
     try {
       const result = await fn(span);
-      if (span.context) {
-        span.setStatus('OK');
-      }
+      span.setStatus('OK');
       return result;
     } catch (error) {
       span.recordError(error);
@@ -624,7 +636,7 @@ export class Tracer {
    * store (set by `app/lib/logger.ts → extractCorrelationContext`).
    */
   private _ambientTraceContext(): TraceContext | null {
-    const store = correlationContext.getStore();
+    const store = correlationContext?.getStore?.();
     if (!store?.traceparent) return null;
     return parseTraceparent(store.traceparent);
   }
@@ -656,4 +668,20 @@ export function injectTraceHeaders(headers: Headers, ctx: TraceContext): void {
  */
 export function extractTraceHeaders(headers: Headers): TraceContext | null {
   return parseTraceparent(headers.get('traceparent'));
+}
+
+/**
+ * Returns the currently configured OTLP endpoint (or null if disabled).
+ * Exposed for diagnostics and tests; reads the env var lazily.
+ */
+export function getOtlpEndpointForTesting(): string | null {
+  return getOtlpEndpoint();
+}
+
+/**
+ * Returns the deploy-time default telemetry consent, re-read from the
+ * environment. Exposed for diagnostics and tests.
+ */
+export function getDefaultTelemetryConsent(): boolean {
+  return readDefaultTelemetryConsent();
 }

@@ -19,6 +19,10 @@ declare namespace NodeJS {
     ALLOWED_ORIGINS?: string;
     /** Node runtime mode ('development' | 'production' | 'test'). */
     NODE_ENV?: string;
+    /** Upstream reverse proxy configuration for client IP extraction. */
+    TRUST_PROXY?: string;
+    /** Comma-separated list of SHA-256 hashes of valid API keys. */
+    STREAMPAY_API_KEYS?: string;
 
     // -------------------------------------------------------------------------
     // 2. Application & Service Metadata
@@ -131,6 +135,16 @@ declare namespace NodeJS {
 
     /** Rate limit storage backend type ('in-memory' | 'redis'). */
     RATE_LIMIT_STORE_TYPE?: 'in-memory' | 'redis';
+    /** Upstash (or compatible) REST URL for the shared Redis rate-limit store. */
+    RATE_LIMIT_REDIS_URL?: string;
+    /** Bearer token for authenticating requests to the Upstash REST API. */
+    RATE_LIMIT_REDIS_TOKEN?: string;
+    /**
+     * Failure mode when the Redis rate-limit store is unreachable.
+     *   open   – allow the request (default; safe for read/low-risk tiers)
+     *   closed – consult local shadow bucket; deny when shadow is also empty
+     */
+    RATE_LIMIT_FAIL_MODE?: 'open' | 'closed';
     /** Maximum stream creation operations per organization per UTC day. */
     ORG_DAILY_STREAM_QUOTA_LIMIT?: string;
 
@@ -142,6 +156,8 @@ declare namespace NodeJS {
     MAX_STREAM_BODY_BYTES?: string;
     /** Maximum request body size cap in bytes for webhook routes (/api/webhooks*). */
     MAX_WEBHOOK_BODY_BYTES?: string;
+    /** Per-request timeout in milliseconds for /api/webhooks* routes. */
+    WEBHOOK_TIMEOUT_MS?: string;
     /** General fallback per-request timeout in milliseconds for API routes. */
     ROUTE_TIMEOUT_MS?: string;
     /** Per-request timeout in milliseconds for /api/v2/streams* routes. */

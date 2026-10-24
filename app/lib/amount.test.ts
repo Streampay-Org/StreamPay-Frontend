@@ -8,6 +8,7 @@ import {
   formatStroops,
   parseDurationSeconds,
   parseStroops,
+  parseTemplateAmount,
 } from "./amount";
 
 describe("Amount.parse", () => {
@@ -301,6 +302,112 @@ describe("Fuzz-style bounded checks", () => {
         expect(["SUB_OPERATION_PRECISION", "AMOUNT_OVERFLOW", "INVALID_DURATION"]).toContain(total.error.code);
         expect([400, 422]).toContain(total.error.httpStatus);
       }
+    }
+  });
+});
+
+describe("parseTemplateAmount", () => {
+  it("accepts valid decimal strings with up to 7 decimal places", () => {
+    const validCases = [
+      ["120.5", "120.5"],
+      ["120", "120"],
+      ["0.1", "0.1"],
+      ["0.0000001", "0.0000001"],
+      ["922337203685.4775807", "922337203685.4775807"],
+      ["  50.25  ", "50.25"],
+    ];
+
+    for (const [input, expected] of validCases) {
+      const res = parseTemplateAmount(input);
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.value).toBe(expected);
+      }
+    }
+  });
+
+  it("accepts safe legacy numeric inputs converting them to decimal strings", () => {
+    const resInt = parseTemplateAmount(120);
+    expect(resInt).toEqual({ ok: true, value: "120" });
+
+    const resDec = parseTemplateAmount(120.5);
+    expect(resDec).toEqual({ ok: true, value: "120.5" });
+  });
+
+  it("rejects non-numeric strings, exponentials, and invalid numbers", () => {
+    const invalidInputs = [
+      "abc",
+      "Infinity",
+      "NaN",
+      "1e-9",
+      "1E3",
+      "",
+      "   ",
+      "-5",
+      "-0.1",
+      "0",
+      "0.0000000",
+      null,
+      undefined,
+      false,
+      true,
+      {},
+      [],
+    ];
+
+    for (const input of invalidInputs) {
+      const res = parseTemplateAmount(input);
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.code).toBe("INVALID_AMOUNT");
+      }
+    }
+  });
+
+  it("rejects strings exceeding 7 decimal places", () => {
+    const res = parseTemplateAmount("0.12345678");
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.code).toBe("INVALID_AMOUNT");
+    }
+  });
+
+  it("rejects numeric inputs where precision is lost or exceeding 7 decimals", () => {
+    // 0.1 + 0.2 has 17 decimal places due to IEEE-754
+    const resLost = parseTemplateAmount(0.1 + 0.2);
+    expect(resLost.ok).toBe(false);
+    if (!resLost.ok) {
+      expect(resLost.code).toBe("INVALID_AMOUNT");
+    }
+
+    // 1e-9 has exponent format
+    const resExp = parseTemplateAmount(1e-9);
+    expect(resExp.ok).toBe(false);
+    if (!resExp.ok) {
+      expect(resExp.code).toBe("INVALID_AMOUNT");
+    }
+
+    // Negative number
+    const resNeg = parseTemplateAmount(-10);
+    expect(resNeg.ok).toBe(false);
+    if (!resNeg.ok) {
+      expect(resNeg.code).toBe("INVALID_AMOUNT");
+    }
+
+    // Zero
+    const resZero = parseTemplateAmount(0);
+    expect(resZero.ok).toBe(false);
+    if (!resZero.ok) {
+      expect(resZero.code).toBe("INVALID_AMOUNT");
+    }
+  });
+
+  it("rejects amounts exceeding Stellar int64 stroop bounds", () => {
+    const overflowStr = "922337203685.4775808";
+    const res = parseTemplateAmount(overflowStr);
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.code).toBe("INVALID_AMOUNT");
     }
   });
 });

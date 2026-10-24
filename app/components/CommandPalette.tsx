@@ -13,6 +13,8 @@ import type { StreamRowData } from "./StreamRow";
 
 interface CommandPaletteProps {
   streams: StreamRowData[];
+  /** Mount already open (used by the lazy launcher on first trigger). */
+  defaultOpen?: boolean;
 }
 
 function highlightMatch(text: string, query: string) {
@@ -30,9 +32,9 @@ function highlightMatch(text: string, query: string) {
   );
 }
 
-export function CommandPalette({ streams }: CommandPaletteProps) {
+export function CommandPalette({ streams, defaultOpen = false }: CommandPaletteProps) {
   const router = useRouter();
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(defaultOpen);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);

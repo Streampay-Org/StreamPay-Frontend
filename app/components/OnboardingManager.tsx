@@ -1,5 +1,4 @@
 "use client";
-import "./OnboardingManager.module.css";
 
 import { useEffect, useState } from "react";
 import { WelcomeTour, WELCOME_TOUR_KEY } from "./WelcomeTour";

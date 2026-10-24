@@ -18,10 +18,59 @@ To protect our API endpoints against Cross-Site Request Forgery (CSRF) attacks (
 
 ## API Configuration
 
-- **CSRF Cookie Name**: `csrf-token`
+- **CSRF Cookie Name**: `csrf-token` (`__Host-csrf-token` in production)
 - **CSRF Header Name**: `x-csrf-token`
 - **Protected Paths**: `/api/*`
 - **Exempt Paths**: `/api/webhooks/*` (external webhook deliveries authenticated via signatures)
+
+## Credential-less API clients
+
+CSRF only threatens requests that carry **ambient** credentials, i.e. cookies
+that a browser attaches automatically. Server-to-server integrations that
+authenticate with `Authorization: Bearer …` or `X-API-Key` cannot be forged
+by another origin, so the double-submit token is not required for them.
+
+The middleware therefore skips the CSRF check when **all** of the following
+hold:
+
+1. the request method is state-changing (`POST`, `PUT`, `PATCH`, `DELETE`);
+2. the request carries **no** `Cookie` header at all;
+3. the request carries an `Authorization: Bearer …`
+   or a non-empty `X-API-Key` header.
+
+A request that carries any cookie is always checked, even when it also
+carries a bearer token, so browser sessions keep the full double-submit
+protection.
+
+## Cookie hardening
+
+- In production the cookie is named `__Host-csrf-token`. Browsers only accept
+  a `__Host-` cookie when it is `Secure`, has `Path=/` and has no `Domain`
+  attribute, which prevents a sub-domain from setting ("cookie tossing") a
+  token the app would trust.
+- The legacy `csrf-token` name is still **read** for one release so existing
+  sessions migrate without a logout.
+- Token generation requires a cryptographically secure random source
+  (`crypto.getRandomValues`); there is no `Math.random()` fallback.
+
+## Same-origin requests and the CORS gate
+
+`middleware.ts` decides the CORS outcome through the shared
+`buildCorsDecision()` helper in `app/lib/cors.ts`:
+
+| `Origin` header                    | Decision      | Result                          |
+| ---------------------------------- | ------------- | ------------------------------- |
+| absent                             | `none`        | request proceeds                |
+| equals the request origin          | `same-origin` | request proceeds, no CORS headers |
+| listed in `ALLOWED_ORIGINS`        | `allowed`     | CORS headers are sent            |
+| `null`                             | `null-origin` | `403 CORS_ORIGIN_NULL`          |
+| anything else                      | `denied`      | `403 CORS_ORIGIN_DISALLOWED`    |
+
+Same-origin requests skip the allowlist, because browsers send `Origin` on
+same-origin writes and deployment URLs (for example Vercel preview URLs) are
+frequently not listed in `ALLOWED_ORIGINS`. Allowed cross-origin responses
+also expose `x-request-id`, `retry-after` and `etag`, and merge — instead of
+overwrite — the `Vary` header.
 
 ## Error Response Shape
 

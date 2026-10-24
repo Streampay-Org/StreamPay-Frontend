@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRateLimitStore, RateLimitStore } from "@/app/lib/rate-limit-store";
 import { recordThrottle, recordRequest, redactRateLimitIdentity } from "@/app/lib/rate-limit-metrics";
 import { resolveRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
+import { resolveClientIp } from "@/lib/clientIp";
 
 /**
  * Wallet auth IP rate limits (independent of the general API rate limiter).
@@ -41,16 +42,7 @@ export function resolveCorrelationId(req: NextRequest): string {
  * Prefer the leftmost X-Forwarded-For entry (original client).
  */
 function extractIp(req: NextRequest): string {
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  const realIp = req.headers.get("x-real-ip");
-  if (realIp && realIp.trim().length > 0) {
-    return realIp.trim();
-  }
-  return "unknown";
+  return resolveClientIp(req.headers);
 }
 
 /**

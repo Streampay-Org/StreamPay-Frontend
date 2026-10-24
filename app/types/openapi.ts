@@ -74,6 +74,9 @@ export interface Stream {
    * Required for the cancel-stream refund preview split.
    */
   totalAmount?: string;
+  /** ISO-8601 bounds of linear vesting, when a vesting window is configured. */
+  startTime?: string;
+  endTime?: string;
   /**
    * Present only on cancelled streams. Contains the full refund-split
    * breakdown so callers can verify the escrow-conservation invariant.
@@ -127,6 +130,8 @@ export interface Stream {
    * Webhook endpoint (HTTPS) notified on stream lifecycle transitions.
    */
   webhook_url?: string;
+  /** Completed pause time in milliseconds, excluded from linear vesting. */
+  pausedDurationMs?: number;
 }
 
 export interface User {
@@ -134,7 +139,7 @@ export interface User {
   email: string | null;
   display_name: string;
   avatar_url: string | null;
-  created_at: string;
+  created_at: string | null;
   last_seen: string | null;
 }
 

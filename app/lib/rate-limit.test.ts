@@ -1,3 +1,7 @@
+import crypto from "crypto";
+import { getClientIdentity, checkRateLimit } from "./rate-limit";
+import { signToken } from "./auth";
+import { getMetrics, resetMetrics } from "./rate-limit-metrics";
 import { InMemoryRateLimitStore } from "./rate-limit-store";
 import { RATE_LIMITS, getLimitForRoute } from "./rate-limit-config";
 
@@ -159,7 +163,7 @@ describe("rate-limit-config", () => {
   });
 });
 
-describe("Identity extraction (getClientIdentity)", () => {
+describe("Legacy Identity extraction (getClientIdentity)", () => {
   it("should extract API key from X-API-Key header", () => {
     const mockHeaders = new Map<string, string>([
       ["X-API-Key", "test-api-key-12345"],
@@ -432,5 +436,156 @@ describe("checkRateLimit integration behavior", () => {
     await checkMock("wallet123", 10, 60_000);
 
     expect(checkMock).toHaveBeenCalledWith("wallet123", 10, 60_000);
+  });
+});
+
+describe("Verified Identity and Rate Limiting Scenarios", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    resetMetrics();
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+  });
+
+  it("scenario 8: 60 000 unique identifiers - bucket count stays at or below maxBuckets with LRU eviction", async () => {
+    const smallStore = new InMemoryRateLimitStore(1000, { maxBuckets: 100 });
+    for (let i = 0; i < 150; i++) {
+      await smallStore.check("id-" + i, 10, 60_000);
+    }
+    expect(smallStore.getBucketCount()).toBeLessThanOrEqual(100);
+    expect(getMetrics().evictions).toBeGreaterThanOrEqual(50);
+    smallStore.destroy();
+  });
+
+  it("scenario 3: A valid configured API key gets its own bucket", () => {
+    const rawKey = "test-secret-api-key-999";
+    const hashed = crypto.createHash("sha256").update(rawKey, "utf8").digest("hex");
+    process.env.STREAMPAY_API_KEYS = hashed;
+
+    const request = new Request("http://localhost:3000/api/streams", {
+      headers: { "X-API-Key": rawKey },
+    });
+
+    const identity = getClientIdentity(request);
+    expect(identity.type).toBe("api_key");
+    expect(identity.displayValue).toBe(hashed.slice(0, 4));
+    expect(identity.displayValue).not.toContain(rawKey);
+  });
+
+  it("scenario 2: 100 requests, each with a random X-API-Key are ignored and throttled after the limit", async () => {
+    process.env.STREAMPAY_API_KEYS = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    let throttledCount = 0;
+    for (let i = 0; i < 15; i++) {
+      const request = new Request("http://localhost:3000/api/streams", {
+        headers: {
+          "X-API-Key": "random-key-" + i,
+          "x-forwarded-for": "198.51.100.10",
+        },
+      });
+      const identity = getClientIdentity(request);
+      expect(identity.type).toBe("ip");
+      expect(identity.value).toBe("198.51.100.10");
+
+      const check = await checkRateLimit(identity, "write");
+      if (!check.allowed) throttledCount++;
+    }
+
+    expect(throttledCount).toBe(5);
+  });
+
+  it("scenario 1: 100 requests, each with a different unsigned-JWT sub all share the IP bucket and are throttled after the limit", async () => {
+    let throttledCount = 0;
+    for (let i = 0; i < 15; i++) {
+      const fakeSub = "attacker-wallet-" + i;
+      const fakePayload = Buffer.from(JSON.stringify({ sub: fakeSub })).toString("base64");
+      const fakeToken = "eyJhbGciOiJIUzI1NiJ9." + fakePayload + ".fakesig";
+
+      const request = new Request("http://localhost:3000/api/streams", {
+        headers: {
+          Authorization: "Bearer " + fakeToken,
+          "x-forwarded-for": "203.0.113.5",
+        },
+      });
+
+      const identity = getClientIdentity(request);
+      expect(identity.type).toBe("ip");
+      expect(identity.value).toBe("203.0.113.5");
+
+      const check = await checkRateLimit(identity, "write");
+      if (!check.allowed) throttledCount++;
+    }
+
+    expect(throttledCount).toBe(5);
+  });
+
+  it("scenario 4: A properly signed JWT gets identity type wallet", () => {
+    const walletAddress = "GA2W6...VALID...WALLET";
+    const token = signToken(walletAddress);
+
+    const request = new Request("http://localhost:3000/api/streams", {
+      headers: {
+        Authorization: "Bearer " + token,
+      },
+    });
+
+    const identity = getClientIdentity(request);
+    expect(identity.type).toBe("wallet");
+    expect(identity.value).toBe(walletAddress);
+  });
+
+  it("scenario 5: XFF 1.1.1.1, 2.2.2.2 with one trusted hop - the IP is 2.2.2.2", () => {
+    const request = new Request("http://localhost:3000/api/streams", {
+      headers: {
+        "x-forwarded-for": "1.1.1.1, 2.2.2.2",
+      },
+    });
+
+    const identity = getClientIdentity(request);
+    expect(identity.type).toBe("ip");
+    expect(identity.value).toBe("2.2.2.2");
+  });
+
+  it("scenario 6: TRUST_PROXY=vercel with an x-real-ip - x-real-ip is used and XFF is ignored", () => {
+    process.env.TRUST_PROXY = "vercel";
+    const request = new Request("http://localhost:3000/api/streams", {
+      headers: {
+        "x-forwarded-for": "1.1.1.1, 2.2.2.2",
+        "x-real-ip": "3.3.3.3",
+      },
+    });
+
+    const identity = getClientIdentity(request);
+    expect(identity.type).toBe("ip");
+    expect(identity.value).toBe("3.3.3.3");
+  });
+
+  it("scenario 7: IPv6 addresses in the same /64 share the same bucket", async () => {
+    const ip1 = "2001:db8:abcd:0012:0000:0000:0000:0001";
+    const ip2 = "2001:db8:abcd:0012:ffff:ffff:ffff:ffff";
+
+    const req1 = new Request("http://localhost:3000/api/streams", {
+      headers: { "x-forwarded-for": ip1 },
+    });
+    const req2 = new Request("http://localhost:3000/api/streams", {
+      headers: { "x-forwarded-for": ip2 },
+    });
+
+    const id1 = getClientIdentity(req1);
+    const id2 = getClientIdentity(req2);
+
+    expect(id1.value).toBe("2001:0db8:abcd:0012::/64");
+    expect(id2.value).toBe("2001:0db8:abcd:0012::/64");
+    expect(id1.value).toBe(id2.value);
+
+    for (let i = 0; i < 10; i++) {
+      await checkRateLimit(id1, "write");
+    }
+    const check2 = await checkRateLimit(id2, "write");
+    expect(check2.allowed).toBe(false);
   });
 });

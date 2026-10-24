@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 /**
@@ -57,8 +58,79 @@ export function extractProcessEnvTypes(filePath: string = GLOBAL_DTS_PATH): Set<
 }
 
 /**
+ * Remove line and block comments while preserving comments that appear inside
+ * string/template literals. This keeps the scanner from treating commented-out
+ * env reads (or prose in JSDoc) as real configuration dependencies.
+ */
+export function stripComments(source: string): string {
+  type State = 'code' | 'single' | 'double' | 'template' | 'line' | 'block';
+  let state: State = 'code';
+  let result = '';
+
+  for (let i = 0; i < source.length; i++) {
+    const char = source[i];
+    const next = source[i + 1];
+
+    switch (state) {
+      case 'code':
+        if (char === '/' && next === '/') {
+          state = 'line';
+          i++;
+        } else if (char === '/' && next === '*') {
+          state = 'block';
+          i++;
+        } else {
+          result += char;
+          if (char === "'") state = 'single';
+          else if (char === '"') state = 'double';
+          else if (char === '`') state = 'template';
+        }
+        break;
+
+      case 'single':
+      case 'double':
+      case 'template': {
+        result += char;
+        const quote = state === 'single' ? "'" : state === 'double' ? '"' : '`';
+        if (char === '\\') {
+          if (next !== undefined) {
+            result += next;
+            i++;
+          }
+        } else if (char === quote) {
+          state = 'code';
+        }
+        break;
+      }
+
+      case 'line':
+        // Preserve the newline so line numbers / token boundaries stay sane.
+        if (char === '\n') {
+          result += char;
+          state = 'code';
+        }
+        break;
+
+      case 'block':
+        if (char === '*' && next === '/') {
+          i++;
+          state = 'code';
+        } else if (char === '\n') {
+          result += char;
+        }
+        break;
+    }
+  }
+
+  return result;
+}
+
+/**
  * Scan source files across app/, lib/, src/, and middleware.ts for process.env reads.
  * Returns a map of variable name -> array of relative file paths where read.
+ *
+ * Test/spec/mock files and comments are ignored so the result reflects only
+ * runtime configuration dependencies.
  */
 export function scanSourceFilesForEnvVars(
   baseDir: string = ROOT_DIR,
@@ -85,17 +157,16 @@ export function scanSourceFilesForEnvVars(
 
   function scanFile(filePath: string) {
     const relPath = path.relative(baseDir, filePath);
-    // Ignore test files, specs, and mocks
+    const normalizedPath = relPath.split(path.sep).join('/');
+    // Ignore test files, specs, and mocks in any directory.
     if (
-      relPath.includes('.test.') ||
-      relPath.includes('.spec.') ||
-      relPath.includes('__tests__') ||
-      relPath.includes('__mocks__')
+      /\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$/.test(normalizedPath) ||
+      /(^|\/)(__tests__|__mocks__)(\/|$)/.test(normalizedPath)
     ) {
       return;
     }
 
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const content = stripComments(fs.readFileSync(filePath, 'utf-8'));
 
     for (const m of content.matchAll(propPattern)) {
       record(m[1], relPath);
@@ -265,21 +336,63 @@ describe('Environment Variable Inventory & Documentation (Issue #1635)', () => {
     expect(missingInTypes).toEqual([]);
   });
 
-  it('should detect undocumented environment variable reads when an undocumented read is simulated', () => {
-    const documentedVars = new Set(['EXISTING_VAR_A', 'EXISTING_VAR_B']);
-    const scannedVars = new Map<string, string[]>([
-      ['EXISTING_VAR_A', ['app/api/foo.ts']],
-      ['NEW_UNDOCUMENTED_SECRET', ['app/api/secret.ts']],
-    ]);
+  it('should detect undocumented env reads in a fixture source file and name them', () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'streampay-env-fixture-'));
+    try {
+      const appDir = path.join(fixtureRoot, 'app');
+      fs.mkdirSync(appDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(appDir, 'secret.ts'),
+        [
+          'const documented = process.env.EXISTING_VAR_A;',
+          'const undocumented = process.env.NEW_UNDOCUMENTED_SECRET;',
+          'export { documented, undocumented };',
+        ].join('\n')
+      );
 
-    const undocumented: string[] = [];
-    Array.from(scannedVars.keys()).forEach((v) => {
-      if (!documentedVars.has(v)) {
-        undocumented.push(v);
-      }
-    });
+      const documentedVars = new Set(['EXISTING_VAR_A']);
+      const scannedVars = scanSourceFilesForEnvVars(fixtureRoot, ['app'], []);
+      const undocumented = Array.from(scannedVars.keys()).filter(
+        (variable) => !documentedVars.has(variable)
+      );
 
-    expect(undocumented).toContain('NEW_UNDOCUMENTED_SECRET');
-    expect(undocumented).toHaveLength(1);
+      expect(undocumented).toEqual(['NEW_UNDOCUMENTED_SECRET']);
+    } finally {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('should ignore test/spec files and comments while scanning', () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'streampay-env-scan-'));
+    try {
+      const appDir = path.join(fixtureRoot, 'app');
+      fs.mkdirSync(appDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(appDir, 'real.ts'),
+        [
+          '// process.env.COMMENTED_LINE',
+          '/* process.env.COMMENTED_BLOCK',
+          '   process.env.ALSO_COMMENTED */',
+          'const url = "https://example.com//path";',
+          'const one = process.env.REAL_DOCUMENTED;',
+          'const two = process.env["REAL_BRACKET"];',
+          'export { url, one, two };',
+        ].join('\n')
+      );
+      fs.writeFileSync(path.join(appDir, 'ignored.test.ts'), 'process.env.TEST_ONLY;');
+      fs.writeFileSync(path.join(appDir, 'ignored.spec.ts'), 'process.env.SPEC_ONLY;');
+      const nestedTestsDir = path.join(appDir, '__tests__');
+      fs.mkdirSync(nestedTestsDir);
+      fs.writeFileSync(path.join(nestedTestsDir, 'helper.ts'), 'process.env.NESTED_TEST_ONLY;');
+
+      const scannedVars = scanSourceFilesForEnvVars(fixtureRoot, ['app'], []);
+
+      expect(Array.from(scannedVars.keys()).sort()).toEqual([
+        'REAL_BRACKET',
+        'REAL_DOCUMENTED',
+      ]);
+    } finally {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 });

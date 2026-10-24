@@ -19,9 +19,9 @@ import { SHORTCUT_GROUPS } from "@/lib/shortcuts";
 // the app about which scope a shortcut belongs to (issue #1649).
 //
 
-export function ShortcutsOverlay() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [shouldRender, setShouldRender] = useState(false);
+export function ShortcutsOverlay({ defaultOpen = false }: { defaultOpen?: boolean } = {}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  const [shouldRender, setShouldRender] = useState(defaultOpen);
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
   const pointerDownOnOverlayRef = useRef(false);

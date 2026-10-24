@@ -50,7 +50,10 @@ function isSupportedAsset(asset: string): asset is SupportedAsset {
 
 function normalizeDecimalString(stroops: bigint): string {
   const whole = stroops / STROOPS_SCALE;
-  const fraction = (stroops % STROOPS_SCALE).toString().padStart(7, "0").replace(/0+$/, "");
+  const fraction = (stroops % STROOPS_SCALE)
+    .toString()
+    .padStart(7, "0")
+    .replace(/0+$/, "");
 
   if (fraction.length === 0) {
     return whole.toString();
@@ -70,7 +73,7 @@ export class Amount {
       return validationError(
         422,
         "UNSUPPORTED_ASSET",
-        `Unsupported asset \"${asset}\". Supported assets: ${SUPPORTED_ASSETS.join(", ")}.`,
+        `Unsupported asset "${asset}". Supported assets: ${SUPPORTED_ASSETS.join(", ")}.`,
       );
     }
 
@@ -250,4 +253,90 @@ export function parseDurationSeconds(input: string): ValidationResult<bigint> {
   }
 
   return { ok: true, value };
+}
+
+export const TEMPLATE_AMOUNT_PATTERN = /^\d{1,12}(?:\.\d{1,7})?$/;
+
+export type TemplateAmountValidationResult =
+  | { ok: true; value: string }
+  | { ok: false; code: "INVALID_AMOUNT"; message: string };
+
+/**
+ * Validates and converts a template amount input into a canonical decimal string.
+ *
+ * Rules:
+ * - Must be a decimal string matching `^\d{1,12}(\.\d{1,7})?$` or legacy numeric input.
+ * - Greater than 0.
+ * - At most the Stellar int64-stroop maximum (STELLAR_MAX_I64).
+ * - For numeric input, rejects if precision would be lost (more than 7 decimals, scientific notation, etc.).
+ */
+export function parseTemplateAmount(input: unknown): TemplateAmountValidationResult {
+  if (input === null || input === undefined || typeof input === "boolean") {
+    return {
+      ok: false,
+      code: "INVALID_AMOUNT",
+      message: "amountPerInterval must be a positive decimal number with at most 7 decimal places.",
+    };
+  }
+
+  let candidate: string;
+
+  if (typeof input === "number") {
+    if (!Number.isFinite(input) || input <= 0) {
+      return {
+        ok: false,
+        code: "INVALID_AMOUNT",
+        message: "amountPerInterval must be a positive number.",
+      };
+    }
+
+    const rawStr = input.toString();
+    if (rawStr.includes("e") || rawStr.includes("E")) {
+      return {
+        ok: false,
+        code: "INVALID_AMOUNT",
+        message: "amountPerInterval must be a plain decimal without scientific notation.",
+      };
+    }
+
+    candidate = rawStr;
+  } else if (typeof input === "string") {
+    candidate = input.trim();
+  } else {
+    return {
+      ok: false,
+      code: "INVALID_AMOUNT",
+      message: "amountPerInterval must be a string or number.",
+    };
+  }
+
+  if (!TEMPLATE_AMOUNT_PATTERN.test(candidate)) {
+    return {
+      ok: false,
+      code: "INVALID_AMOUNT",
+      message: "amountPerInterval must be a positive decimal number with at most 7 decimal places.",
+    };
+  }
+
+  const [wholePart, fractionPart = ""] = candidate.split(".");
+  const paddedFraction = fractionPart.padEnd(7, "0");
+  const stroops = BigInt(wholePart) * STROOPS_SCALE + BigInt(paddedFraction);
+
+  if (stroops <= 0n) {
+    return {
+      ok: false,
+      code: "INVALID_AMOUNT",
+      message: "amountPerInterval must be greater than zero.",
+    };
+  }
+
+  if (stroops > STELLAR_MAX_I64) {
+    return {
+      ok: false,
+      code: "INVALID_AMOUNT",
+      message: "amountPerInterval exceeds maximum Stellar bounds.",
+    };
+  }
+
+  return { ok: true, value: candidate };
 }

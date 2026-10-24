@@ -13,10 +13,17 @@ import {
   checkStreamOrgPolicy,
   initiateApproval,
   castApproval,
+  resolveActorAddress,
+  requireStreamActor,
+  enforceStreamRbac,
+  isActorHeaderAllowed,
+  ActorMismatchError,
+  createRbacErrorResponse,
   OrgAction,
 } from "./org-policy";
 import { OrgRecord, OrgRole, DEFAULT_STREAM_POLICY } from "./org-types";
 import { orgDb } from "./org-db";
+import { signToken } from "./auth";
 
 // ─── Test fixtures ────────────────────────────────────────────────────────────
 
@@ -440,5 +447,258 @@ describe("Cross-org isolation — end-to-end policy checks", () => {
     // Any wallet address should get null (caller decides to allow or use its own authz)
     expect(checkStreamOrgPolicy("stream-kemi", OUTSIDER_ADDR, "stop")).toBeNull();
     expect(checkStreamOrgPolicy("stream-kemi", OWNER_ADDR, "stop")).toBeNull();
+  });
+});
+
+// ─── Actor Resolution & Flag Tests ──────────────────────────────────────────
+
+describe("Actor Resolution & STREAMPAY_ALLOW_ACTOR_HEADER flag", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+  });
+
+  it("isActorHeaderAllowed returns true in test environment by default", () => {
+    delete process.env.STREAMPAY_ALLOW_ACTOR_HEADER;
+    process.env.NODE_ENV = "test";
+    expect(isActorHeaderAllowed()).toBe(true);
+  });
+
+  it("isActorHeaderAllowed returns false in production by default", () => {
+    delete process.env.STREAMPAY_ALLOW_ACTOR_HEADER;
+    process.env.NODE_ENV = "production";
+    expect(isActorHeaderAllowed()).toBe(false);
+  });
+
+  it("isActorHeaderAllowed honors STREAMPAY_ALLOW_ACTOR_HEADER=false", () => {
+    process.env.STREAMPAY_ALLOW_ACTOR_HEADER = "false";
+    expect(isActorHeaderAllowed()).toBe(false);
+  });
+
+  it("isActorHeaderAllowed honors STREAMPAY_ALLOW_ACTOR_HEADER=true", () => {
+    process.env.STREAMPAY_ALLOW_ACTOR_HEADER = "true";
+    process.env.NODE_ENV = "production";
+    expect(isActorHeaderAllowed()).toBe(true);
+  });
+
+  it("resolveActorAddress returns null when neither JWT nor header is provided", () => {
+    const req = new Request("http://localhost/api/streams/stream-ada/pause");
+    expect(resolveActorAddress(req)).toBeNull();
+  });
+
+  it("resolveActorAddress prefers JWT over header", () => {
+    const token = signToken(OWNER_ADDR);
+    const req = new Request("http://localhost/api/streams/stream-ada/pause", {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+    expect(resolveActorAddress(req)).toBe(OWNER_ADDR);
+  });
+
+  it("resolveActorAddress accepts matching JWT and header", () => {
+    const token = signToken(OWNER_ADDR);
+    const req = new Request("http://localhost/api/streams/stream-ada/pause", {
+      headers: {
+        authorization: `Bearer ${token}`,
+        "Actor-Wallet-Address": OWNER_ADDR,
+      },
+    });
+    expect(resolveActorAddress(req)).toBe(OWNER_ADDR);
+  });
+
+  it("resolveActorAddress throws ActorMismatchError when JWT and header differ", () => {
+    const token = signToken(OWNER_ADDR);
+    const req = new Request("http://localhost/api/streams/stream-ada/pause", {
+      headers: {
+        authorization: `Bearer ${token}`,
+        "Actor-Wallet-Address": PAUSER_ADDR,
+      },
+    });
+    expect(() => resolveActorAddress(req)).toThrow(ActorMismatchError);
+  });
+
+  it("resolveActorAddress accepts header-only when flag is true", () => {
+    process.env.STREAMPAY_ALLOW_ACTOR_HEADER = "true";
+    const req = new Request("http://localhost/api/streams/stream-ada/pause", {
+      headers: {
+        "Actor-Wallet-Address": PAUSER_ADDR,
+      },
+    });
+    expect(resolveActorAddress(req)).toBe(PAUSER_ADDR);
+  });
+
+  it("resolveActorAddress rejects header-only when flag is false", () => {
+    process.env.STREAMPAY_ALLOW_ACTOR_HEADER = "false";
+    const req = new Request("http://localhost/api/streams/stream-ada/pause", {
+      headers: {
+        "Actor-Wallet-Address": PAUSER_ADDR,
+      },
+    });
+    expect(resolveActorAddress(req)).toBeNull();
+  });
+});
+
+// ─── requireStreamActor ───────────────────────────────────────────────────────
+
+describe("requireStreamActor", () => {
+  it("returns actor address when valid JWT is provided", () => {
+    const token = signToken(OWNER_ADDR);
+    const req = new Request("http://localhost/api/streams/stream-ada/pause", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const result = requireStreamActor(req);
+    expect(typeof result).toBe("string");
+    expect(result).toBe(OWNER_ADDR);
+  });
+
+  it("returns 403 ACTOR_REQUIRED when identity is missing", async () => {
+    const req = new Request("http://localhost/api/streams/stream-ada/pause");
+    const result = requireStreamActor(req);
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      expect(result.status).toBe(403);
+      const body = await result.json();
+      expect(body.error.code).toBe("ACTOR_REQUIRED");
+      expect(body.error.request_id).toBeDefined();
+    }
+  });
+
+  it("returns 403 ACTOR_MISMATCH when JWT and header differ", async () => {
+    const token = signToken(OWNER_ADDR);
+    const req = new Request("http://localhost/api/streams/stream-ada/pause", {
+      headers: {
+        authorization: `Bearer ${token}`,
+        "Actor-Wallet-Address": OUTSIDER_ADDR,
+      },
+    });
+    const result = requireStreamActor(req);
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      expect(result.status).toBe(403);
+      const body = await result.json();
+      expect(body.error.code).toBe("ACTOR_MISMATCH");
+      expect(body.error.request_id).toBeDefined();
+    }
+  });
+});
+
+// ─── enforceStreamRbac ─────────────────────────────────────────────────────────
+
+describe("enforceStreamRbac", () => {
+  it("passes through individually owned streams without requiring an actor", () => {
+    const req = new Request("http://localhost/api/streams/stream-kemi/start");
+    expect(enforceStreamRbac(req, "stream-kemi", "start")).toBeNull();
+  });
+
+  it("returns 403 ACTOR_REQUIRED for org-owned stream with no actor", async () => {
+    const req = new Request("http://localhost/api/streams/stream-ada/start");
+    const result = enforceStreamRbac(req, "stream-ada", "start");
+    expect(result).not.toBeNull();
+    if (result) {
+      expect(result.status).toBe(403);
+      const body = await result.json();
+      expect(body.error.code).toBe("ACTOR_REQUIRED");
+      expect(body.error.request_id).toBeDefined();
+    }
+  });
+
+  it("returns 403 ACTOR_MISMATCH for org-owned stream when JWT and header differ", async () => {
+    const token = signToken(OWNER_ADDR);
+    const req = new Request("http://localhost/api/streams/stream-ada/start", {
+      headers: {
+        authorization: `Bearer ${token}`,
+        "Actor-Wallet-Address": OUTSIDER_ADDR,
+      },
+    });
+    const result = enforceStreamRbac(req, "stream-ada", "start");
+    expect(result).not.toBeNull();
+    if (result) {
+      expect(result.status).toBe(403);
+      const body = await result.json();
+      expect(body.error.code).toBe("ACTOR_MISMATCH");
+      expect(body.error.request_id).toBeDefined();
+    }
+  });
+
+  it("returns 403 ROLE_INSUFFICIENT when viewer attempts to start stream", async () => {
+    const token = signToken(VIEWER_ADDR);
+    const req = new Request("http://localhost/api/streams/stream-ada/start", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const result = enforceStreamRbac(req, "stream-ada", "start");
+    expect(result).not.toBeNull();
+    if (result) {
+      expect(result.status).toBe(403);
+      const body = await result.json();
+      expect(body.error.code).toBe("ROLE_INSUFFICIENT");
+      expect(body.error.request_id).toBeDefined();
+    }
+  });
+
+  it("returns 403 NOT_ORG_MEMBER when outsider attempts to start stream", async () => {
+    const token = signToken(OUTSIDER_ADDR);
+    const req = new Request("http://localhost/api/streams/stream-ada/start", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const result = enforceStreamRbac(req, "stream-ada", "start");
+    expect(result).not.toBeNull();
+    if (result) {
+      expect(result.status).toBe(403);
+      const body = await result.json();
+      expect(body.error.code).toBe("NOT_ORG_MEMBER");
+      expect(body.error.request_id).toBeDefined();
+    }
+  });
+
+  it("returns 409 APPROVAL_REQUIRED when multi-sig approval threshold > 1", async () => {
+    // org-acme has requireApprovals = 2; stop requires two-step approval
+    const token = signToken(OWNER_ADDR);
+    const req = new Request("http://localhost/api/streams/stream-ada/stop", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const result = enforceStreamRbac(req, "stream-ada", "stop");
+    expect(result).not.toBeNull();
+    if (result) {
+      expect(result.status).toBe(409);
+      const body = await result.json();
+      expect(body.error.code).toBe("APPROVAL_REQUIRED");
+      expect(body.error.request_id).toBeDefined();
+    }
+  });
+
+  it("returns null when member has sufficient permission", () => {
+    const token = signToken(OWNER_ADDR);
+    const req = new Request("http://localhost/api/streams/stream-ada/start", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(enforceStreamRbac(req, "stream-ada", "start")).toBeNull();
+  });
+});
+
+describe("createRbacErrorResponse", () => {
+  it("uses provided valid x-request-id", async () => {
+    const req = new Request("http://localhost", {
+      headers: { "x-request-id": "req_custom_123" },
+    });
+    const res = createRbacErrorResponse(req, "TEST_CODE", "Test message", 403);
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error.code).toBe("TEST_CODE");
+    expect(body.error.message).toBe("Test message");
+    expect(body.error.request_id).toBe("req_custom_123");
+    expect((res as any).errorDetail).toEqual({ code: "TEST_CODE", message: "Test message" });
+  });
+
+  it("generates request id if header is missing", async () => {
+    const req = new Request("http://localhost");
+    const res = createRbacErrorResponse(req, "TEST_CODE", "Test message", 403);
+    const body = await res.json();
+    expect(body.error.request_id).toMatch(/^req_/);
   });
 });

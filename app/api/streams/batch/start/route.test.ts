@@ -14,7 +14,10 @@ describe("POST /api/streams/batch/start", () => {
   it("starts multiple draft streams successfully", async () => {
     const req = new Request("http://localhost/api/streams/batch/start", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Actor-Wallet-Address": "GOWNER7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW",
+      },
       body: JSON.stringify(["stream-kemi", "stream-ada"]),
     });
 
