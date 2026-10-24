@@ -15,10 +15,12 @@
 
 import { POST as pausePOST } from "./route";
 import { POST as startPOST } from "@/app/api/streams/[id]/start/route";
-import { db, resetDb } from "@/app/lib/db";
+import { db, getStore, resetDb } from "@/app/lib/db";
 import { auditLogStore, resetAuditLogStore } from "@/app/lib/audit-log";
+import { eventBus } from "@/app/lib/event-bus";
 import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
 import { _resetOrgDbForTesting } from "@/app/lib/org-db";
+import { nextActionFor } from "@/app/lib/state-machine";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -33,16 +35,19 @@ function pauseReq(
 ): Request {
   const headers: Record<string, string> = {};
   if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
-  if (opts.actor) headers["Actor-Wallet-Address"] = opts.actor;
+  const actor = opts.actor !== undefined ? opts.actor : PAUSER_ADDR;
+  if (actor) headers["Actor-Wallet-Address"] = actor;
   return new Request(`http://localhost/api/streams/${streamId}/pause`, {
     method: "POST",
     headers,
   });
 }
 
-function startReq(streamId: string, opts: { idempotencyKey?: string } = {}): Request {
+function startReq(streamId: string, opts: { idempotencyKey?: string; actor?: string } = {}): Request {
   const headers: Record<string, string> = {};
   if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
+  const actor = opts.actor !== undefined ? opts.actor : PAUSER_ADDR;
+  if (actor) headers["Actor-Wallet-Address"] = actor;
   return new Request(`http://localhost/api/streams/${streamId}/start`, {
     method: "POST",
     headers,
@@ -169,23 +174,26 @@ describe("state guard", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.status).toBe("paused");
-    expect(body.data.nextAction).toBe("stop");
+    expect(body.data.nextAction).toBe(nextActionFor("paused"));
   });
 
-  it("returns 409 INVALID_STREAM_STATE when pausing a draft stream", async () => {
+  it("returns 409 ILLEGAL_TRANSITION when pausing a draft stream", async () => {
     const res = await pausePOST(pauseReq(DRAFT_STREAM), ctx(DRAFT_STREAM));
     expect(res.status).toBe(409);
     const body = await res.json();
-    expect(body.error.code).toBe("INVALID_STREAM_STATE");
-    expect(body.error.message).toContain("draft");
+    expect(body.error.code).toBe("ILLEGAL_TRANSITION");
+    expect(body.error.legacy_code).toBe("INVALID_STREAM_STATE");
+    expect(body.error.message).toBe("Action 'pause' is illegal for a stream in 'draft' state.");
     // pausedAt must NOT be set on a failed pause
     expect(db.streams.get(DRAFT_STREAM)?.pausedAt).toBeUndefined();
   });
 
-  it("returns 409 INVALID_STREAM_STATE when pausing an ended stream", async () => {
+  it("returns 409 ILLEGAL_TRANSITION when pausing an ended stream", async () => {
     const res = await pausePOST(pauseReq(ENDED_STREAM), ctx(ENDED_STREAM));
     expect(res.status).toBe(409);
-    expect((await res.json()).error.code).toBe("INVALID_STREAM_STATE");
+    const body = await res.json();
+    expect(body.error.code).toBe("ILLEGAL_TRANSITION");
+    expect(body.error.legacy_code).toBe("INVALID_STREAM_STATE");
     expect(db.streams.get(ENDED_STREAM)?.pausedAt).toBeUndefined();
   });
 
@@ -201,6 +209,20 @@ describe("state guard", () => {
     const after = db.streams.get(DRAFT_STREAM);
     expect(after).toEqual(before);
   });
+
+  it("pausing an already-paused stream is a side-effect-free no-op", async () => {
+    const initial = db.streams.get(ACTIVE_STREAM)!;
+    const pausedAt = "2026-01-01T00:00:00.000Z";
+    const paused = { ...initial, status: "paused" as const, pausedAt, updatedAt: pausedAt };
+    db.streams.set(ACTIVE_STREAM, paused);
+
+    const res = await pausePOST(pauseReq(ACTIVE_STREAM), ctx(ACTIVE_STREAM));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toEqual(paused);
+    expect(db.streams.get(ACTIVE_STREAM)).toEqual(paused);
+    expect(auditLogStore.list({ targetId: ACTIVE_STREAM })).toHaveLength(0);
+  });
 });
 
 // ─── Response shape ───────────────────────────────────────────────────────────
@@ -212,7 +234,7 @@ describe("response shape", () => {
 
     expect(data).toHaveProperty("id", ACTIVE_STREAM);
     expect(data).toHaveProperty("status", "paused");
-    expect(data).toHaveProperty("nextAction", "stop");
+    expect(data).toHaveProperty("nextAction", nextActionFor("paused"));
     expect(data).toHaveProperty("pausedAt");
     expect(data).toHaveProperty("updatedAt");
     expect(data).toHaveProperty("createdAt");
@@ -287,18 +309,19 @@ describe("idempotency", () => {
     // (but stream-kemi is draft, so it errors, confirming scope isolation)
     const res = await pausePOST(pauseReq(DRAFT_STREAM, { idempotencyKey: key }), ctx(DRAFT_STREAM));
     expect(res.status).toBe(409); // wrong state, not a conflict
-    expect((await res.json()).error.code).toBe("INVALID_STREAM_STATE");
+    expect((await res.json()).error.code).toBe("ILLEGAL_TRANSITION");
   });
 
-  it("no idempotency key: each call is independent", async () => {
+  it("no idempotency key: pausing a paused stream is a no-op success", async () => {
     // First call: succeeds
     const first = await pausePOST(pauseReq(ACTIVE_STREAM), ctx(ACTIVE_STREAM));
     expect(first.status).toBe(200);
+    const pausedAt = (await first.json()).data.pausedAt;
 
-    // Second call (no key, stream already paused): fails with state error
+    // Second call (no key, stream already paused): succeeds without rewriting.
     const second = await pausePOST(pauseReq(ACTIVE_STREAM), ctx(ACTIVE_STREAM));
-    expect(second.status).toBe(409);
-    expect((await second.json()).error.code).toBe("INVALID_STREAM_STATE");
+    expect(second.status).toBe(200);
+    expect((await second.json()).data.pausedAt).toBe(pausedAt);
   });
 });
 
@@ -351,11 +374,10 @@ describe("RBAC — org-owned stream (stream-ada → org-acme)", () => {
     expect((await res.json()).error.code).toBe("NOT_ORG_MEMBER");
   });
 
-  it("no Actor-Wallet-Address header skips RBAC (individually-owned path)", async () => {
-    // stream-ada is org-owned, but without the header the policy check is
-    // skipped (opt-in pattern) — the stream still pauses.
-    const res = await pausePOST(pauseReq(ACTIVE_STREAM), ctx(ACTIVE_STREAM));
-    expect(res.status).toBe(200);
+  it("no Actor-Wallet-Address header requires actor on org-owned stream -> 403 ACTOR_REQUIRED", async () => {
+    const res = await pausePOST(pauseReq(ACTIVE_STREAM, { actor: "" }), ctx(ACTIVE_STREAM));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("ACTOR_REQUIRED");
   });
 });
 
@@ -389,6 +411,67 @@ describe("audit log", () => {
   });
 });
 
+// ─── Event publication ────────────────────────────────────────────────────────
+
+describe("event publication", () => {
+  function listen(streamId: string): { events: any[]; detach: () => void } {
+    const events: any[] = [];
+    const listener = (data: any) => events.push(data);
+    eventBus.on(`stream:updated:${streamId}`, listener);
+    return {
+      detach: () => eventBus.off(`stream:updated:${streamId}`, listener),
+      events,
+    };
+  }
+
+  it("publishes one redacted stream:updated and one activity event", async () => {
+    const collector = listen(ACTIVE_STREAM);
+    try {
+      const res = await pausePOST(pauseReq(ACTIVE_STREAM), ctx(ACTIVE_STREAM));
+      expect(res.status).toBe(200);
+
+      expect(collector.events).toHaveLength(1);
+      expect(collector.events[0].status).toBe("paused");
+      expect(collector.events[0]).not.toHaveProperty("email");
+      expect(collector.events[0]).not.toHaveProperty("label");
+      expect(collector.events[0]).not.toHaveProperty("memo");
+      expect(collector.events[0]).not.toHaveProperty("partnerId");
+
+      const timeline = getStore().activityTimeline.query({
+        limit: 10,
+        streamId: ACTIVE_STREAM,
+      });
+      expect(timeline.data).toHaveLength(1);
+      expect(timeline.data[0].type).toBe("stream.pause");
+    } finally {
+      collector.detach();
+    }
+  });
+
+  it("does not publish on an idempotent replay", async () => {
+    const collector = listen(ACTIVE_STREAM);
+    try {
+      const key = "pause-event-replay";
+      await pausePOST(pauseReq(ACTIVE_STREAM, { idempotencyKey: key }), ctx(ACTIVE_STREAM));
+      await pausePOST(pauseReq(ACTIVE_STREAM, { idempotencyKey: key }), ctx(ACTIVE_STREAM));
+      expect(collector.events).toHaveLength(1);
+    } finally {
+      collector.detach();
+    }
+  });
+
+  it("does not publish when the transition is rejected", async () => {
+    const collector = listen(DRAFT_STREAM);
+    try {
+      const res = await pausePOST(pauseReq(DRAFT_STREAM), ctx(DRAFT_STREAM));
+      expect(res.status).toBe(409);
+      expect(collector.events).toHaveLength(0);
+    } finally {
+      collector.detach();
+    }
+  });
+});
+
 // ─── Integration: pause ↔ start round-trip ───────────────────────────────────
 
 describe("integration: pause ↔ resume round-trip", () => {
@@ -417,12 +500,12 @@ describe("integration: pause ↔ resume round-trip", () => {
     expect((await repauseRes.json()).data.pausedAt).toBeDefined();
   });
 
-  it("paused stream cannot be paused again", async () => {
+  it("paused stream can be paused again without side effects", async () => {
     await pausePOST(pauseReq(ACTIVE_STREAM), ctx(ACTIVE_STREAM));
     expect(db.streams.get(ACTIVE_STREAM)?.status).toBe("paused");
 
     const res = await pausePOST(pauseReq(ACTIVE_STREAM), ctx(ACTIVE_STREAM));
-    expect(res.status).toBe(409);
-    expect((await res.json()).error.code).toBe("INVALID_STREAM_STATE");
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.pausedAt).toBe(db.streams.get(ACTIVE_STREAM)?.pausedAt);
   });
 });

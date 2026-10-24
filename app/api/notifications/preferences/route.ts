@@ -10,6 +10,7 @@ import { logger } from "@/app/lib/logger";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
+import { withRouteSpan } from "@/lib/routeSpan";
 import {
   QuietHoursConfig,
   DEFAULT_QUIET_HOURS,
@@ -204,7 +205,7 @@ function parseStrongIfMatch(header: string | null): string | null {
   return candidate;
 }
 
-export async function GET(request: Request) {
+async function handleNotificationPreferencesGet(request: Request) {
   const url = new URL(request.url);
   const limitType = getLimitForRoute("GET", url.pathname);
   const identity = getClientIdentity(request);
@@ -241,7 +242,7 @@ export async function GET(request: Request) {
   });
 }
 
-export async function PUT(request: Request) {
+async function handleNotificationPreferencesPut(request: Request) {
   const url = new URL(request.url);
   const limitType = getLimitForRoute("PUT", url.pathname);
   const identity = getClientIdentity(request);
@@ -361,4 +362,16 @@ export async function PUT(request: Request) {
       "Cache-Control": "private, max-age=0, must-revalidate",
     },
   });
+}
+
+export async function GET(request: Request) {
+  return withRouteSpan("/api/notifications/preferences", () =>
+    handleNotificationPreferencesGet(request),
+  )(request);
+}
+
+export async function PUT(request: Request) {
+  return withRouteSpan("/api/notifications/preferences", () =>
+    handleNotificationPreferencesPut(request),
+  )(request);
 }

@@ -1,11 +1,12 @@
 import type { StreamRowData } from "../components/StreamRow";
 
-function escapeCsv(value: string): string {
+export function escapeCsv(value: string): string {
   let safeValue = value;
-  if (/^[=+\-@]/.test(safeValue)) {
+  // Guard against CSV formula injection, including a leading tab or carriage return.
+  if (/^[=+\-@\r\t]/.test(safeValue)) {
     safeValue = "'" + safeValue;
   }
-  
+
   if (/[",\n\r]/.test(safeValue)) {
     return `"${safeValue.replace(/"/g, '""')}"`;
   }

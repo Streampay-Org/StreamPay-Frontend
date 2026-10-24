@@ -1,0 +1,182 @@
+{
+  "description": "Parity fixtures for vestedAmount, mirroring contracts/contracts/streampay-stream/src/release.rs vested_amount.",
+  "notes": [
+    "Generated from the contract unit tests in release.rs and hand-derived edge cases.",
+    "Times are in milliseconds. Totals are string-encoded bigints.",
+    "effective_now = max(start, min(now, end)), clamped to pausedAt when paused.",
+    "elapsed = effective_now - start - totalPausedMs.",
+    "vested = total * elapsed / duration (integer division).",
+    "Draft streams return 0."
+  ],
+  "cases": [
+    {
+      "name": "draft returns zero",
+      "stream": {
+        "status": "draft",
+        "total": "1000",
+        "startTime": null,
+        "endTime": null,
+        "pausedAt": null,
+        "totalPausedMs": "0"
+      },
+      "nowMs": 1000,
+      "expected": "0"
+    },
+    {
+      "name": "midpoint of 1000 unit stream",
+      "stream": {
+        "status": "active",
+        "total": "1000",
+        "startTime": "0",
+        "endTime": "1000",
+        "pausedAt": null,
+        "totalPausedMs": "0"
+      },
+      "nowMs": 500,
+      "expected": "500"
+    },
+    {
+      "name": "large total 2^80 midpoint",
+      "stream": {
+        "status": "active",
+        "total": "120892581961462917453176",
+        "startTime": "0",
+        "endTime": "1000",
+        "pausedAt": null,
+        "totalPausedMs": "0"
+      },
+      "nowMs": 500,
+      "expected": "60446290980731458726588"
+    },
+    {
+      "name": "paused at 25% now at 75% reports 25% vested",
+      "stream": {
+        "status": "active",
+        "total": "1000",
+        "startTime": "0",
+        "endTime": "1000",
+        "pausedAt": "250",
+        "totalPausedMs": "0"
+      },
+      "nowMs": 750,
+      "expected": "250"
+    },
+    {
+      "name": "resumed after 10s pause elapsed excludes pause and end extended",
+      "stream": {
+        "status": "active",
+        "total": "1000",
+        "startTime": "0",
+        "endTime": "101000",
+        "pausedAt": null,
+        "totalPausedMs": "10000"
+      },
+      "nowMs": 50500,
+      "expected": "500"
+    },
+    {
+      "name": "now past endTime returns total",
+      "stream": {
+        "status": "active",
+        "total": "1000",
+        "startTime": "0",
+        "endTime": "1000",
+        "pausedAt": null,
+        "totalPausedMs": "0"
+      },
+      "nowMs": 5000,
+      "expected": "1000"
+    },
+    {
+      "name": "now before start returns zero",
+      "stream": {
+        "status": "active",
+        "total": "1000",
+        "startTime": "1000",
+        "endTime": "2000",
+        "pausedAt": null,
+        "totalPausedMs": "0"
+      },
+      "nowMs": 0,
+      "expected": "0"
+    },
+    {
+      "name": "exactly at endTime returns total",
+      "stream": {
+        "status": "active",
+        "total": "1000",
+        "startTime": "0",
+        "endTime": "1000",
+        "pausedAt": null,
+        "totalPausedMs": "0"
+      },
+      "nowMs": 1000,
+      "expected": "1000"
+    },
+    {
+      "name": "integer division truncates",
+      "stream": {
+        "status": "active",
+        "total": "1000",
+        "startTime": "0",
+        "endTime": "3000",
+        "pausedAt": null,
+        "totalPausedMs": "0"
+      },
+      "nowMs": 1000,
+      "expected": "333"
+    },
+    {
+      "name": "paused clamp freezes vesting",
+      "stream": {
+        "status": "active",
+        "total": "1000",
+        "startTime": "0",
+        "endTime": "1000",
+        "pausedAt": "400",
+        "totalPausedMs": "0"
+      },
+      "nowMs": 900,
+      "expected": "400"
+    },
+    {
+      "name": "paused with prior pause duration",
+      "stream": {
+        "status": "active",
+        "total": "1000",
+        "startTime": "0",
+        "endTime": "1100",
+        "pausedAt": "500",
+        "totalPausedMs": "100"
+      },
+      "nowMs": 900,
+      "expected": "363"
+    },
+    {
+      "name": "zero duration returns total",
+      "stream": {
+        "status": "active",
+        "total": "1000",
+        "startTime": "500",
+        "endTime": "500",
+        "pausedAt": null,
+        "totalPausedMs": "0"
+      },
+      "nowMs": 500,
+      "expected": "1000"
+    },
+    {
+      "name": "missing timing fields is unknown",
+      "stream": {
+        "status": "active",
+        "total": "1000",
+        "startTime": null,
+        "endTime": null,
+        "pausedAt": null,
+        "totalPausedMs": "0"
+      },
+      "nowMs": 500,
+      "expected": "ESCROW_UNKNOWN"
+    }
+  ]
+}

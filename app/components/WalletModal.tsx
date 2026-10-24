@@ -99,6 +99,8 @@ export function WalletModal({ isOpen, onClose, onSelect }: WalletModalProps) {
               }}
               onMouseOver={(e) => (e.currentTarget.style.background = "var(--panel-elevated)")}
               onMouseOut={(e) => (e.currentTarget.style.background = "var(--panel)")}
+              onFocus={(e) => (e.currentTarget.style.background = "var(--panel-elevated)")}
+              onBlur={(e) => (e.currentTarget.style.background = "var(--panel)")}
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <span>{provider.name}</span>
@@ -129,6 +131,8 @@ export function WalletModal({ isOpen, onClose, onSelect }: WalletModalProps) {
                     style={docsLinkStyle}
                     onMouseOver={(e) => (e.currentTarget.style.color = "var(--accent)")}
                     onMouseOut={(e) => (e.currentTarget.style.color = "var(--muted-light)")}
+                    onFocus={(e) => (e.currentTarget.style.color = "var(--accent)")}
+                    onBlur={(e) => (e.currentTarget.style.color = "var(--muted-light)")}
                   >
                     Docs &nearr;
                   </a>
@@ -162,6 +166,8 @@ export function WalletModal({ isOpen, onClose, onSelect }: WalletModalProps) {
           }}
           onMouseOver={(e) => (e.currentTarget.style.color = "var(--foreground)")}
           onMouseOut={(e) => (e.currentTarget.style.color = "var(--accent)")}
+          onFocus={(e) => (e.currentTarget.style.color = "var(--foreground)")}
+          onBlur={(e) => (e.currentTarget.style.color = "var(--accent)")}
         >
           wallet compatibility docs
         </a>

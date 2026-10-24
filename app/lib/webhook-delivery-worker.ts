@@ -262,7 +262,7 @@ export class WebhookDeliveryWorker {
     };
 
     // Start immediately
-    run();
+    void run();
 
     return () => {
       running = false;

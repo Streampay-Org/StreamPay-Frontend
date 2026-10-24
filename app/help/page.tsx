@@ -1,12 +1,18 @@
+
 /**
  * Help & FAQ page for StreamPay.
  *
- * Static server component — no client-side state or interactivity required.
+ * Server component — the FAQ data is rendered statically, with a small
+ * client island (FaqSearch) layered on top for search and deep links.
  * Covers common questions about wallet connection, payment streams, the
  * Stellar network, and troubleshooting local-dev issues.
  */
 
+import { Suspense } from "react";
 import { SHORTCUT_GROUPS, formatShortcutKeys, getShortcut } from "@/lib/shortcuts";
+import FaqSearch from "./FaqSearch";
+import CopyLinkButton from "./CopyLinkButton";
+import type { FaqSection } from "./faq-data";
 
 /** Keys for a single shortcut id, e.g. "⌘/Ctrl + K". */
 function keysFor(id: string): string {
@@ -32,19 +38,7 @@ export const metadata = {
     "Answers to the most common questions about StreamPay, Stellar wallets, and payment streams.",
 };
 
-interface FaqItem {
-  id: string;
-  question: string;
-  answer: string;
-}
-
-interface FaqSection {
-  id: string;
-  title: string;
-  items: FaqItem[];
-}
-
-const FAQ_SECTIONS: FaqSection[] = [
+export const FAQ_SECTIONS: FaqSection[] = [
   {
     id: "getting-started",
     title: "Getting Started",
@@ -229,13 +223,19 @@ export default function HelpPage() {
         </div>
       </header>
 
+      <Suspense fallback={null}>
+        {/* Search island: the full list below is server-rendered, so the
+            island only renders matches once the visitor types a query. */}
+        <FaqSearch sections={FAQ_SECTIONS} showAllWhenEmpty={false} />
+      </Suspense>
+
       <div className="help-layout">
         {/* Quick-jump nav */}
         <nav aria-label="FAQ sections" className="help-nav">
-          <ul className="help-nav__list" role="list">
+          <ul className="help-nav__list">
             {FAQ_SECTIONS.map((section) => (
               <li key={section.id} className="help-nav__item">
-                <a href={`#${section.id}`} className="help-nav__link">
+                <a href={`#${section.id}`} className="help-nav__link" data-help-nav-link data-help-section={section.id}>
                   {section.title}
                 </a>
               </li>
@@ -262,7 +262,10 @@ export default function HelpPage() {
               <dl className="faq-list">
                 {section.items.map((item) => (
                   <div key={item.id} id={item.id} className="faq-item">
-                    <dt className="faq-item__question">{item.question}</dt>
+                    <dt id={`${item.id}-question`} className="faq-item__question">
+                      {item.question}{" "}
+                      <CopyLinkButton id={item.id} question={item.question} />
+                    </dt>
                     <dd className="faq-item__answer">{item.answer}</dd>
                   </div>
                 ))}

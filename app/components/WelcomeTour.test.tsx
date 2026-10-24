@@ -8,14 +8,25 @@
  */
 
 import { act, fireEvent, render } from "@testing-library/react";
-const { screen, within } = require("@testing-library/react") as any;
+const { screen } = require("@testing-library/react") as any;
 import { WelcomeTour, TOUR_STEPS, WELCOME_TOUR_KEY } from "./WelcomeTour";
 
 const TEST_KEY = "test:welcome-tour";
 
 beforeEach(() => {
   localStorage.clear();
+  // Backdrop clicks dismiss for the session only (sessionStorage); clear it so
+  // one case's dismissal cannot hide the tour in the next.
+  sessionStorage.clear();
 });
+
+/**
+ * Step dots are a group of navigation buttons (not tabs — there is no
+ * tabpanel), with `aria-current="step"` on the active one.
+ */
+function getDots(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>("[data-tour-dot]"));
+}
 
 // ---------------------------------------------------------------------------
 // Visibility
@@ -88,15 +99,15 @@ describe("WelcomeTour — initial render", () => {
 
   it("renders step indicator dots equal to the number of steps", () => {
     render(<WelcomeTour storageKey={TEST_KEY} />);
-    const dots = screen.getAllByRole("tab");
+    const dots = getDots();
     expect(dots).toHaveLength(TOUR_STEPS.length);
   });
 
   it("marks the first dot as selected", () => {
     render(<WelcomeTour storageKey={TEST_KEY} />);
-    const dots = screen.getAllByRole("tab");
-    expect(dots[0]).toHaveAttribute("aria-selected", "true");
-    expect(dots[1]).toHaveAttribute("aria-selected", "false");
+    const dots = getDots();
+    expect(dots[0]).toHaveAttribute("aria-current", "step");
+    expect(dots[1]).not.toHaveAttribute("aria-current");
   });
 });
 
@@ -138,14 +149,14 @@ describe("WelcomeTour — step navigation", () => {
     act(() => {
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
     });
-    const dots = screen.getAllByRole("tab");
-    expect(dots[0]).toHaveAttribute("aria-selected", "false");
-    expect(dots[1]).toHaveAttribute("aria-selected", "true");
+    const dots = getDots();
+    expect(dots[0]).not.toHaveAttribute("aria-current");
+    expect(dots[1]).toHaveAttribute("aria-current", "step");
   });
 
   it("jumps to a step when a dot is clicked", () => {
     render(<WelcomeTour storageKey={TEST_KEY} />);
-    const dots = screen.getAllByRole("tab");
+    const dots = getDots();
     act(() => {
       fireEvent.click(dots[2]);
     });

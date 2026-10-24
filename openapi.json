@@ -59,6 +59,17 @@
             "type": "string",
             "pattern": "^\\d+(\\.\\d{7})?$",
             "description": "Amount owed to this leg, as a fixed 7-decimal string. The legs sum exactly to total_amount."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn"
+            ],
+            "description": "Current lifecycle status of this stream leg."
           }
         }
       },
@@ -105,9 +116,14 @@
           "status": {
             "type": "string",
             "enum": [
-              "draft"
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn",
+              "mixed"
             ],
-            "description": "Every leg is created in `draft`; drive them with the start/pause/stop/settle endpoints."
+            "description": "Common leg status, or `mixed` when legs differ."
           },
           "total_amount": {
             "type": "string",
@@ -241,7 +257,7 @@
       },
       "StreamV1": {
         "type": "object",
-        "description": "v1 payment stream shape. **Deprecated** \u2014 use `StreamV2` via `/api/v2/streams`.",
+        "description": "v1 payment stream shape. **Deprecated** — use `StreamV2` via `/api/v2/streams`.",
         "required": [
           "id",
           "recipient",
@@ -317,6 +333,24 @@
             "format": "date-time",
             "description": "ISO-8601 last-updated timestamp.",
             "example": "2024-01-15T10:00:00.000Z"
+          },
+          "senderAddress": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stellar wallet address of the stream sender (payer). Stored at creation time.",
+            "example": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc5XJLGH5"
+          },
+          "ownership": {
+            "type": "string",
+            "enum": [
+              "individual",
+              "org",
+              "unclaimed"
+            ],
+            "description": "Stream ownership state: individual, org, or unclaimed.",
+            "example": "individual"
           }
         }
       },
@@ -353,7 +387,9 @@
               "draft",
               "active",
               "paused",
-              "ended"
+              "ended",
+              "withdrawn",
+              "cancelled"
             ],
             "description": "Current lifecycle state of the stream."
           },
@@ -362,7 +398,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Actions the authenticated user may perform on this stream. Replaces v1 `actions`.",
+            "description": "Legal actions for the stream's current status, derived from the lifecycle state-machine table (status-changing actions only). Replaces v1 `actions`.",
             "example": [
               "pause",
               "stop"
@@ -379,11 +415,16 @@
               {
                 "type": "object",
                 "required": [
+                  "tx_hash",
                   "settled_at",
                   "amount",
                   "currency"
                 ],
                 "properties": {
+                  "tx_hash": {
+                    "type": "string",
+                    "example": "c3f8a12e4b76"
+                  },
                   "settled_at": {
                     "type": "string",
                     "format": "date-time",
@@ -391,7 +432,8 @@
                   },
                   "amount": {
                     "type": "string",
-                    "example": "360 XLM"
+                    "description": "Raw-unit amount string (releasedAmount or totalAmount).",
+                    "example": "3600000000"
                   },
                   "currency": {
                     "type": "string",
@@ -404,6 +446,24 @@
               }
             ],
             "description": "Settlement details once the stream has been settled, otherwise `null`. Clients must handle `null` explicitly."
+          },
+          "senderAddress": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stellar wallet address of the stream sender (payer). Stored at creation time.",
+            "example": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc5XJLGH5"
+          },
+          "ownership": {
+            "type": "string",
+            "enum": [
+              "individual",
+              "org",
+              "unclaimed"
+            ],
+            "description": "Stream ownership state: individual, org, or unclaimed.",
+            "example": "individual"
           }
         }
       },
@@ -416,8 +476,8 @@
         "properties": {
           "challenge": {
             "type": "string",
-            "description": "One-time nonce the client must sign with their Stellar private key.",
-            "example": "streampay_auth_1716000000000_x7k2m"
+            "description": "One-time challenge the client must sign with their Stellar private key: `streampay-auth:v1:<nonce>|<origin>|<expires_at>`.",
+            "example": "streampay-auth:v1:nKlQNln6SV4hJ6pm6jNMSBVlcqo7r8Pjcj9mqLA_oRg|https://app.streampay.io|2024-01-15T10:05:00.000Z"
           },
           "expires_at": {
             "type": "string",
@@ -431,19 +491,28 @@
         "type": "object",
         "required": [
           "token",
+          "token_type",
           "expires_at"
         ],
         "properties": {
           "token": {
             "type": "string",
-            "description": "Opaque bearer token. Pass as `Authorization: Bearer <token>`.",
-            "example": "tok_R0FCQzEyMzQ1Njc4OTA"
+            "description": "Signed JWT for the authenticated wallet address. Pass as `Authorization: Bearer <token>`.",
+            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJHQ0xIMlNOTTVNVFY0VEdOTk9BRExZT1pKWUlGQlhUSURWU05XNFhQM0xFSTJVUVYyTVo0Nk9ENyIsImlzcyI6InN0cmVhbXBheSIsImF1ZCI6InN0cmVhbXBheS1hcGkiLCJpYXQiOjE3MjE4MDAwMDAsImV4cCI6MTcyMTgwMDkwMH0.sample_signature"
+          },
+          "token_type": {
+            "type": "string",
+            "enum": [
+              "Bearer"
+            ],
+            "example": "Bearer",
+            "description": "Token type, always `Bearer`."
           },
           "expires_at": {
             "type": "string",
             "format": "date-time",
-            "description": "Token expiry (24 hours from issuance).",
-            "example": "2024-01-16T10:00:00.000Z"
+            "description": "Token expiry matching the JWT exp claim (15 minutes from issuance).",
+            "example": "2024-01-15T10:15:00.000Z"
           }
         }
       },
@@ -753,42 +822,156 @@
       },
       "StreamHistoryEntry": {
         "type": "object",
-        "required": ["id", "streamId", "type", "toStatus", "at"],
+        "required": [
+          "id",
+          "streamId",
+          "type",
+          "toStatus",
+          "at"
+        ],
         "description": "Immutable lifecycle event for a stream. No PII — actor wallet truncated to 6 chars.",
         "properties": {
-          "id":         { "type": "string", "description": "Unique entry id.", "example": "3c4d5e6f-7a8b-9c0d-e1f2-a3b4c5d6e7f8" },
-          "streamId":   { "type": "string", "description": "Owning stream id.", "example": "stream-abc12345" },
-          "type":       { "type": "string", "enum": ["created","started","paused","resumed","stopped","settled","withdrawn","cancelled"] },
-          "fromStatus": { "type": "string", "nullable": true, "description": "Status before transition; absent for 'created'." },
-          "toStatus":   { "type": "string", "description": "Status after transition." },
-          "at":         { "type": "string", "format": "date-time", "description": "ISO-8601 UTC timestamp.", "example": "2026-06-01T09:00:00.000Z" },
-          "actor":      { "type": "string", "nullable": true, "description": "First 6 chars of actor wallet (no PII).", "example": "GABCDE" },
-          "txHash":     { "type": "string", "nullable": true, "description": "On-chain tx hash (once indexer is wired)." },
-          "amountRaw":  { "type": "string", "nullable": true, "description": "Human-readable amount label, e.g. '120 XLM'." }
+          "id": {
+            "type": "string",
+            "description": "Unique entry id.",
+            "example": "3c4d5e6f-7a8b-9c0d-e1f2-a3b4c5d6e7f8"
+          },
+          "streamId": {
+            "type": "string",
+            "description": "Owning stream id.",
+            "example": "stream-abc12345"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "created",
+              "started",
+              "paused",
+              "resumed",
+              "stopped",
+              "settled",
+              "withdrawn",
+              "cancelled"
+            ]
+          },
+          "fromStatus": {
+            "type": "string",
+            "nullable": true,
+            "description": "Status before transition; absent for 'created'."
+          },
+          "toStatus": {
+            "type": "string",
+            "description": "Status after transition."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO-8601 UTC timestamp.",
+            "example": "2026-06-01T09:00:00.000Z"
+          },
+          "actor": {
+            "type": "string",
+            "nullable": true,
+            "description": "First 6 chars of actor wallet (no PII).",
+            "example": "GABCDE"
+          },
+          "txHash": {
+            "type": "string",
+            "nullable": true,
+            "description": "On-chain tx hash (once indexer is wired)."
+          },
+          "amountRaw": {
+            "type": "string",
+            "nullable": true,
+            "description": "Human-readable amount label, e.g. '120 XLM'."
+          }
         }
       },
       "StreamHistoryResponse": {
         "type": "object",
-        "required": ["data", "meta"],
+        "required": [
+          "data",
+          "meta"
+        ],
         "properties": {
           "data": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/StreamHistoryEntry" },
+            "items": {
+              "$ref": "#/components/schemas/StreamHistoryEntry"
+            },
             "description": "History entries, newest first."
           },
           "meta": {
             "type": "object",
-            "required": ["nextCursor"],
+            "required": [
+              "nextCursor"
+            ],
             "properties": {
-              "nextCursor": { "type": "string", "nullable": true, "description": "Opaque cursor for the next page; null when none remain." }
+              "nextCursor": {
+                "type": "string",
+                "nullable": true,
+                "description": "Opaque cursor for the next page; null when none remain."
+              }
             }
+          }
+        }
+      },
+      "StreamTemplate": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "asset",
+          "amountPerInterval",
+          "intervalSeconds",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique template identifier (tpl_<uuid>).",
+            "example": "tpl_9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+          },
+          "name": {
+            "type": "string",
+            "description": "Template name.",
+            "example": "Monthly Design Retainer"
+          },
+          "asset": {
+            "type": "string",
+            "description": "Asset code (e.g. XLM, USDC).",
+            "example": "XLM"
+          },
+          "amountPerInterval": {
+            "type": "string",
+            "pattern": "^\\d{1,12}(\\.\\d{1,7})?$",
+            "description": "Payment amount per interval as a decimal string with at most 7 decimals.",
+            "example": "120.5"
+          },
+          "intervalSeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 31536000,
+            "description": "Payout interval in seconds (60 to 31,536,000).",
+            "example": 2592000
+          },
+          "memo": {
+            "type": "string",
+            "description": "Optional memo or description for the template.",
+            "example": "Recurring freelance payment"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when the template was created.",
+            "example": "2026-01-15T00:00:00.000Z"
           }
         }
       }
     },
     "responses": {
       "400": {
-        "description": "Bad request \u2014 invalid input.",
+        "description": "Bad request — invalid input.",
         "content": {
           "application/json": {
             "schema": {
@@ -805,7 +988,7 @@
         }
       },
       "401": {
-        "description": "Unauthorized \u2014 missing or invalid bearer token.",
+        "description": "Unauthorized — missing or invalid bearer token.",
         "content": {
           "application/json": {
             "schema": {
@@ -839,7 +1022,7 @@
         }
       },
       "404": {
-        "description": "Not found \u2014 the requested resource does not exist.",
+        "description": "Not found — the requested resource does not exist.",
         "content": {
           "application/json": {
             "schema": {
@@ -856,7 +1039,7 @@
         }
       },
       "409": {
-        "description": "Conflict \u2014 the operation is not valid for the current stream state.",
+        "description": "Conflict — the operation is not valid for the current stream state.",
         "content": {
           "application/json": {
             "schema": {
@@ -872,8 +1055,25 @@
           }
         }
       },
+      "413": {
+        "description": "Payload too large — request body exceeds size limit.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
+            "example": {
+              "error": {
+                "code": "REQUEST_TOO_LARGE",
+                "message": "Request body exceeds maximum allowed size.",
+                "request_id": "req_01HZ9ABCDEF"
+              }
+            }
+          }
+        }
+      },
       "422": {
-        "description": "Unprocessable entity \u2014 request body failed schema validation.",
+        "description": "Unprocessable entity — request body failed schema validation.",
         "content": {
           "application/json": {
             "schema": {
@@ -909,6 +1109,122 @@
     }
   },
   "paths": {
+    "/api/streams/template": {
+      "get": {
+        "operationId": "listStreamTemplates",
+        "summary": "List all stream templates",
+        "description": "Returns every stream template held in memory on the current instance.",
+        "tags": [
+          "Streams"
+        ],
+        "responses": {
+          "200": {
+            "description": "List of stream templates.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "templates"
+                  ],
+                  "properties": {
+                    "templates": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StreamTemplate"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createStreamTemplate",
+        "summary": "Create a new stream template",
+        "description": "Creates a reusable stream preset with decimal string amounts and collision-free UUID ids.",
+        "tags": [
+          "Streams"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "asset",
+                  "amountPerInterval",
+                  "intervalSeconds"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Non-empty template name.",
+                    "example": "Monthly Design Retainer"
+                  },
+                  "asset": {
+                    "type": "string",
+                    "description": "Asset symbol (e.g. XLM, USDC).",
+                    "example": "XLM"
+                  },
+                  "amountPerInterval": {
+                    "type": "string",
+                    "pattern": "^\\d{1,12}(\\.\\d{1,7})?$",
+                    "description": "Amount per interval as a decimal string (numeric values accepted if lossless).",
+                    "example": "120.5"
+                  },
+                  "intervalSeconds": {
+                    "type": "integer",
+                    "minimum": 60,
+                    "maximum": 31536000,
+                    "description": "Interval in seconds between payouts (60 to 31536000).",
+                    "example": 2592000
+                  },
+                  "memo": {
+                    "type": "string",
+                    "description": "Optional memo string.",
+                    "example": "Recurring freelance payment"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stream template created successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "template"
+                  ],
+                  "properties": {
+                    "template": {
+                      "$ref": "#/components/schemas/StreamTemplate"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          }
+        }
+      }
+    },
     "/api/activity": {
       "get": {
         "operationId": "listActivity",
@@ -971,7 +1287,7 @@
             }
           },
           "401": {
-            "description": "Unauthorized \u2014 missing or invalid bearer token.",
+            "description": "Unauthorized — missing or invalid bearer token.",
             "content": {
               "application/json": {
                 "schema": {
@@ -988,7 +1304,7 @@
             }
           },
           "404": {
-            "description": "Not found \u2014 the requested streamId does not exist or is not owned by the caller.",
+            "description": "Not found — the requested streamId does not exist or is not owned by the caller.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1005,7 +1321,7 @@
             }
           },
           "422": {
-            "description": "Unprocessable entity \u2014 invalid limit (INVALID_LIMIT), type, streamId, or cursor.",
+            "description": "Unprocessable entity — invalid limit (INVALID_LIMIT), type, streamId, or cursor.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1015,7 +1331,7 @@
             }
           },
           "429": {
-            "description": "Too many requests \u2014 rate limit exceeded.",
+            "description": "Too many requests — rate limit exceeded.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1125,7 +1441,7 @@
       "get": {
         "operationId": "getWalletChallenge",
         "summary": "Issue a wallet authentication challenge",
-        "description": "Returns a one-time nonce the client must sign with their Stellar private key, then submit to `POST /api/auth/wallet`.",
+        "description": "Returns a one-time challenge the client must sign with their Stellar private key, then submit to `POST /api/auth/wallet`. Challenges are generated with a CSPRNG and have the format `streampay-auth:v1:<nonce>|<origin>|<expires_at>`, where `nonce` is a 43-character base64url value, `origin` is this deployment's origin, and `expires_at` is the ISO-8601 expiry included in the signed message. Responses always have `Cache-Control: no-store` and never answer `304 Not Modified`. The paginated listing mode was removed: `cursor` and `limit` now return `400 UNSUPPORTED_QUERY` because listing outstanding challenges would let unauthenticated callers harvest live challenges for any address.",
         "security": [],
         "tags": [
           "Auth"
@@ -1135,7 +1451,7 @@
             "name": "address",
             "in": "query",
             "required": true,
-            "description": "Stellar public key (G\u2026, 56 characters).",
+            "description": "Stellar public key (G…, 56 characters).",
             "schema": {
               "type": "string",
               "pattern": "^G[A-Z2-7]{55}$",
@@ -1155,7 +1471,21 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/400"
+            "description": "Unsupported query parameters \u2014 this endpoint does not list outstanding challenges. `cursor` or `limit` are rejected.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNSUPPORTED_QUERY",
+                    "message": "Query parameters 'cursor' and 'limit' are not supported.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
           },
           "429": {
             "description": "IP rate limit exceeded for challenge issuance (20 req/min per IP).",
@@ -1220,8 +1550,8 @@
                   },
                   "challenge": {
                     "type": "string",
-                    "description": "The nonce returned by GET /api/auth/wallet.",
-                    "example": "streampay_auth_1716000000000_x7k2m"
+                    "description": "The challenge returned by GET /api/auth/wallet (shape `streampay-auth:v1:<nonce>|<origin>|<expires_at>`).",
+                    "example": "streampay-auth:v1:nKlQNln6SV4hJ6pm6jNMSBVlcqo7r8Pjcj9mqLA_oRg|https://app.streampay.io|2024-01-15T10:05:00.000Z"
                   },
                   "signature": {
                     "type": "string",
@@ -1248,7 +1578,62 @@
             "$ref": "#/components/responses/400"
           },
           "401": {
-            "$ref": "#/components/responses/401"
+            "description": "Authentication failed — invalid signature, unknown challenge, expired challenge, or address mismatch.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "signatureVerificationFailed": {
+                    "summary": "Signature verification failed",
+                    "value": {
+                      "error": {
+                        "code": "UNAUTHORIZED",
+                        "message": "Signature verification failed.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "challengeUnknown": {
+                    "summary": "Unknown or already consumed challenge",
+                    "value": {
+                      "error": {
+                        "code": "CHALLENGE_UNKNOWN",
+                        "message": "Challenge not found or already consumed.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "challengeExpired": {
+                    "summary": "Expired challenge",
+                    "value": {
+                      "error": {
+                        "code": "CHALLENGE_EXPIRED",
+                        "message": "Challenge has expired.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "challengeAddressMismatch": {
+                    "summary": "Address mismatch",
+                    "value": {
+                      "error": {
+                        "code": "CHALLENGE_ADDRESS_MISMATCH",
+                        "message": "Challenge was not issued for this address.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
           },
           "429": {
             "description": "IP rate limit exceeded for wallet login (5 req/min per IP).",
@@ -1291,7 +1676,7 @@
       "get": {
         "operationId": "listStreams",
         "summary": "List payment streams (v1, deprecated)",
-        "description": "Returns a cursor-paginated list of streams owned by the authenticated identity. **Deprecated** \u2014 use `GET /api/v2/streams` instead.",
+        "description": "Returns a cursor-paginated list of streams scoped to the caller's tenant (`x-tenant-id`, defaulting to `default-tenant`) and ownership (sender, recipient, owning organisation member, or admin). Unauthenticated requests are restricted to the resolved tenant and omit PII fields (`email`, `label`, `memo`, `partnerId`). `meta.total` reflects the filtered count. **Deprecated** — use `GET /api/v2/streams` instead.",
         "deprecated": true,
         "tags": [
           "Streams v1"
@@ -1300,7 +1685,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "Maximum number of streams to return (1\u2013100, default 20).",
+            "description": "Maximum number of streams to return (1–100, default 20).",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -1504,7 +1889,7 @@
       "post": {
         "operationId": "createStream",
         "summary": "Create a payment stream (v1, deprecated)",
-        "description": "Creates a new payment stream in `draft` status. **Deprecated** \u2014 use `POST /api/v2/streams` instead.\n\nSupplying an `Idempotency-Key` header makes this request idempotent; replaying the same key and body returns the cached response.",
+        "description": "Creates a new payment stream in `draft` status. **Deprecated** — use `POST /api/v2/streams` instead.\n\nSupplying an `Idempotency-Key` header makes this request idempotent; replaying the same key and body returns the cached response.",
         "deprecated": true,
         "tags": [
           "Streams v1"
@@ -1535,7 +1920,7 @@
                 "properties": {
                   "recipient": {
                     "type": "string",
-                    "description": "Stellar public key of the payment recipient (56-character G\u2026 address).",
+                    "description": "Stellar public key of the payment recipient (56-character G… address).",
                     "example": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG"
                   },
                   "rate": {
@@ -1631,7 +2016,9 @@
                         "createdAt": "2024-01-15T10:00:00.000Z",
                         "updatedAt": "2024-01-15T10:00:00.000Z"
                       },
-                      "links": { "self": "/api/v1/streams/stream-abc12345" }
+                      "links": {
+                        "self": "/api/v1/streams/stream-abc12345"
+                      }
                     }
                   },
                   "links": {
@@ -1683,6 +2070,515 @@
           },
           "500": {
             "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/streams/preview": {
+      "post": {
+        "operationId": "previewStream",
+        "summary": "Preview stream creation without side effects",
+        "description": "Runs the same recipient, rate, schedule, token normalization, and token allowlist checks as POST /api/streams. Does not write to stream, idempotency, or quota stores. Cost estimation is null with a reason when the normalized asset is unsupported.",
+        "security": [],
+        "tags": [
+          "Streams v1"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "recipient",
+                  "rate",
+                  "schedule"
+                ],
+                "properties": {
+                  "recipient": {
+                    "type": "string",
+                    "description": "Stellar public key."
+                  },
+                  "rate": {
+                    "type": "string",
+                    "description": "Positive decimal stream rate."
+                  },
+                  "schedule": {
+                    "type": "string",
+                    "enum": [
+                      "second",
+                      "minute",
+                      "hour",
+                      "day",
+                      "week",
+                      "month",
+                      "year"
+                    ]
+                  },
+                  "token": {
+                    "type": "string",
+                    "description": "Optional XLM or CODE:ISSUER token."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Valid dry-run stream preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "valid",
+                        "estimated_events",
+                        "cost_estimate",
+                        "preview_stream"
+                      ],
+                      "properties": {
+                        "valid": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "estimated_events": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "type",
+                              "description"
+                            ],
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "cost_estimate": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "description": "Null when the normalized token is unsupported by the cost estimator."
+                        },
+                        "cost_estimate_reason": {
+                          "type": "string"
+                        },
+                        "preview_stream": {
+                          "type": "object"
+                        }
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": [
+                        "dry_run",
+                        "request_id"
+                      ],
+                      "properties": {
+                        "dry_run": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation or token allowlist failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "valid"
+                      ],
+                      "properties": {
+                        "valid": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "validation_errors": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "cost_estimate": {
+                          "type": [
+                            "object",
+                            "null"
+                          ]
+                        },
+                        "preview_stream": {
+                          "type": [
+                            "object",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    "error": {
+                      "$ref": "#/components/schemas/ErrorEnvelope/properties/error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Write-tier rate limit exceeded."
+          }
+        }
+      }
+    },
+    "/api/streams/dryrun": {
+      "post": {
+        "operationId": "dryrunStreamDeprecated",
+        "summary": "Deprecated legacy stream dry-run alias",
+        "description": "Deprecated alias for POST /api/streams/preview. Legacy amountPerInterval is mapped to rate, asset to token, and intervalSeconds must exactly match a supported schedule duration.",
+        "deprecated": true,
+        "security": [],
+        "tags": [
+          "Streams v1"
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "recipient",
+                  "asset",
+                  "amountPerInterval",
+                  "intervalSeconds"
+                ],
+                "properties": {
+                  "recipient": {
+                    "type": "string"
+                  },
+                  "sender": {
+                    "type": "string",
+                    "description": "Accepted for legacy compatibility and ignored by preview."
+                  },
+                  "asset": {
+                    "type": "string"
+                  },
+                  "amountPerInterval": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "intervalSeconds": {
+                    "type": "integer",
+                    "description": "Must exactly match a supported schedule duration: 1, 60, 3600, 86400, 604800, 2592000, or 31536000."
+                  },
+                  "durationSeconds": {
+                    "type": "integer"
+                  },
+                  "memo": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preview response. Deprecation and Sunset headers are included.",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "example": "@1792368000"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Tue, 19 Oct 2027 00:00:00 GMT"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The same response shape as POST /api/streams/preview."
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid stream body or unsupported interval.",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Tue, 19 Oct 2027 00:00:00 GMT"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Write-tier rate limit exceeded."
+          }
+        }
+      }
+    },
+    "/api/streams/import": {
+      "post": {
+        "operationId": "importStreams",
+        "summary": "Bulk-import payment streams from CSV or JSON rows",
+        "description": "Validates and bulk-imports up to 500 payment streams with partial-import semantics (207 Multi-Status).\n\nWhen `dryRun=false` (the default), the `Idempotency-Key` header is required. Requests are fingerprinted by their canonical row list: replaying the same key and rows returns the original 207 response; reusing a key with different rows returns 409 `IDEMPOTENCY_CONFLICT`; a concurrent replay while the first request is in flight returns 409 `IDEMPOTENCY_IN_FLIGHT`.\n\nEach row is identified by an optional `external_id` column/field or a SHA-256 hash of the normalised `(recipient, rate, schedule, token, memo)` tuple. Duplicate rows within the same batch or previously imported by the same caller are reported with `status: \"duplicate\"` and the existing `streamId`.",
+        "tags": [
+          "Streams v1"
+        ],
+        "parameters": [
+          {
+            "name": "dryRun",
+            "in": "query",
+            "required": false,
+            "description": "When `true`, validates rows without persisting streams or touching the idempotency store.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required when `dryRun=false`. Client-generated idempotency key for safe retries.",
+            "schema": {
+              "type": "string",
+              "example": "import-batch-2026-10-20-01"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "text/csv": {
+              "schema": {
+                "type": "string",
+                "description": "CSV payload with headers `recipient,rate,schedule,token,memo,external_id`."
+              }
+            },
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "csv"
+                    ],
+                    "properties": {
+                      "csv": {
+                        "type": "string",
+                        "description": "Raw CSV string with header row."
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "rows"
+                    ],
+                    "properties": {
+                      "rows": {
+                        "type": "array",
+                        "maxItems": 500,
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "recipient",
+                            "schedule"
+                          ],
+                          "properties": {
+                            "recipient": {
+                              "type": "string"
+                            },
+                            "rate": {
+                              "type": "string"
+                            },
+                            "amount": {
+                              "type": "string"
+                            },
+                            "schedule": {
+                              "type": "string"
+                            },
+                            "token": {
+                              "type": "string"
+                            },
+                            "asset": {
+                              "type": "string"
+                            },
+                            "memo": {
+                              "type": "string"
+                            },
+                            "external_id": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "207": {
+            "description": "Multi-Status per-row import summary and results.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "summary",
+                    "results"
+                  ],
+                  "properties": {
+                    "summary": {
+                      "type": "object",
+                      "required": [
+                        "total",
+                        "valid",
+                        "failed"
+                      ],
+                      "properties": {
+                        "total": {
+                          "type": "integer"
+                        },
+                        "valid": {
+                          "type": "integer"
+                        },
+                        "failed": {
+                          "type": "integer"
+                        },
+                        "imported": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "row",
+                          "status"
+                        ],
+                        "properties": {
+                          "row": {
+                            "type": "integer"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "imported",
+                              "duplicate",
+                              "valid",
+                              "error"
+                            ]
+                          },
+                          "streamId": {
+                            "type": "string"
+                          },
+                          "errors": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "field",
+                                "code",
+                                "message"
+                              ],
+                              "properties": {
+                                "field": {
+                                  "type": "string"
+                                },
+                                "code": {
+                                  "type": "string"
+                                },
+                                "message": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "409": {
+            "description": "Idempotency conflict (`IDEMPOTENCY_CONFLICT`) or in-flight request with the same key (`IDEMPOTENCY_IN_FLIGHT`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway timeout when persistence exceeds the route deadline.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -1863,16 +2759,32 @@
                           "updatedAt": "2024-01-16T08:30:00.000Z"
                         }
                       ],
-                      "meta": { "total": 1, "limit": 50, "offset": 0, "count": 1, "query": "abc12345" },
-                      "links": { "self": "/api/streams/search?q=abc12345&limit=50" }
+                      "meta": {
+                        "total": 1,
+                        "limit": 50,
+                        "offset": 0,
+                        "count": 1,
+                        "query": "abc12345"
+                      },
+                      "links": {
+                        "self": "/api/streams/search?q=abc12345&limit=50"
+                      }
                     }
                   },
                   "no-results": {
                     "summary": "No streams matched the search query",
                     "value": {
                       "data": [],
-                      "meta": { "total": 0, "limit": 50, "offset": 0, "count": 0, "query": "nonexistent" },
-                      "links": { "self": "/api/streams/search?q=nonexistent&limit=50" }
+                      "meta": {
+                        "total": 0,
+                        "limit": 50,
+                        "offset": 0,
+                        "count": 0,
+                        "query": "nonexistent"
+                      },
+                      "links": {
+                        "self": "/api/streams/search?q=nonexistent&limit=50"
+                      }
                     }
                   }
                 }
@@ -1932,7 +2844,7 @@
       "get": {
         "operationId": "getStream",
         "summary": "Get a payment stream (v1, deprecated)",
-        "description": "Returns a single stream by ID in the v1 shape. **Deprecated** \u2014 use `GET /api/v2/streams/{id}` instead.\n\nResponses are cached; a cache hit returns `X-Cache: HIT`.",
+        "description": "Returns a single stream by ID in the v1 shape. **Deprecated** — use `GET /api/v2/streams/{id}` instead.\n\nResponses are cached; a cache hit returns `X-Cache: HIT`.",
         "deprecated": true,
         "tags": [
           "Streams v1"
@@ -2066,7 +2978,7 @@
       "post": {
         "operationId": "updateStream",
         "summary": "Update a payment stream (v1, deprecated)",
-        "description": "Partially updates a stream by merging the request body fields. **Deprecated** \u2014 there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.\n\nThe `updatedAt` field is always refreshed. Cache is invalidated on success.",
+        "description": "Partially updates a stream by merging the request body fields. **Deprecated** — there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.\n\nThe `updatedAt` field is always refreshed. Cache is invalidated on success.",
         "deprecated": true,
         "tags": [
           "Streams v1"
@@ -2223,7 +3135,7 @@
       "delete": {
         "operationId": "deleteStream",
         "summary": "Delete a payment stream (v1, deprecated)",
-        "description": "Permanently deletes a stream. **Deprecated** \u2014 use `DELETE /api/v2/streams/{id}` instead.\n\nA stream must be in `draft` or `ended` status before it can be deleted. Attempting to delete an `active` or `paused` stream returns 409. Cache is invalidated on success.",
+        "description": "Permanently deletes a stream. **Deprecated** — use `DELETE /api/v2/streams/{id}` instead.\n\nA stream must be in `draft` or `ended` status before it can be deleted. Attempting to delete an `active` or `paused` stream returns 409. Cache is invalidated on success.",
         "deprecated": true,
         "tags": [
           "Streams v1"
@@ -2314,7 +3226,7 @@
       "post": {
         "operationId": "startStream",
         "summary": "Start a payment stream (v1, deprecated)",
-        "description": "Transitions a stream from `draft` (or `paused`) to `active`, initiating payment disbursements. **Deprecated** \u2014 use `POST /api/v2/streams/{id}/start` instead.",
+        "description": "Transitions a stream from `draft` (or `paused`) to `active`, initiating payment disbursements. **Deprecated** — use `POST /api/v2/streams/{id}/start` instead.",
         "deprecated": true,
         "tags": [
           "Streams v1"
@@ -2393,7 +3305,7 @@
             "$ref": "#/components/responses/404"
           },
           "409": {
-            "description": "Conflict \u2014 stream is not in `draft` or `paused` status.",
+            "description": "Conflict — stream is not in `draft` or `paused` status.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2434,27 +3346,77 @@
     },
     "/api/streams/{id}/history": {
       "parameters": [
-        { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "example": "stream-abc12345" }, "description": "Stream identifier." },
-        { "name": "x-tenant-id", "in": "header", "required": true, "schema": { "type": "string" }, "description": "Tenant id — must match the stream's owner." }
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          },
+          "description": "Stream identifier."
+        },
+        {
+          "name": "x-tenant-id",
+          "in": "header",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Tenant id — must match the stream's owner."
+        }
       ],
       "get": {
         "operationId": "getStreamHistory",
         "summary": "Paginated lifecycle event history for a stream",
         "description": "Returns a newest-first paginated list of committed lifecycle events. No PII. Uses composite (at, id) cursor.",
-        "tags": ["Streams"],
+        "tags": [
+          "Streams"
+        ],
         "parameters": [
-          { "name": "limit",  "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }, "description": "Max entries per page." },
-          { "name": "cursor", "in": "query", "schema": { "type": "string" }, "description": "Opaque cursor from meta.nextCursor of the previous response." }
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "description": "Max entries per page."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque cursor from meta.nextCursor of the previous response."
+          }
         ],
         "responses": {
           "200": {
             "description": "Paginated list of lifecycle events.",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StreamHistoryResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamHistoryResponse"
+                }
+              }
+            }
           },
-          "400": { "$ref": "#/components/responses/400" },
-          "404": { "$ref": "#/components/responses/404" },
-          "422": { "$ref": "#/components/responses/422" },
-          "500": { "$ref": "#/components/responses/500" }
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
         }
       }
     },
@@ -2494,7 +3456,7 @@
       "post": {
         "operationId": "stopStream",
         "summary": "Stop a payment stream (v1, deprecated)",
-        "description": "Permanently stops a stream, transitioning it to `ended` status. Valid from `active` or `draft` states. This action is irreversible. **Deprecated** \u2014 use `POST /api/v2/streams/{id}/stop` instead.",
+        "description": "Permanently stops a stream, transitioning it to `ended` status. Valid from `active` or `draft` states. This action is irreversible. **Deprecated** — use `POST /api/v2/streams/{id}/stop` instead.",
         "deprecated": true,
         "tags": [
           "Streams v1"
@@ -2573,7 +3535,7 @@
             "$ref": "#/components/responses/404"
           },
           "409": {
-            "description": "Conflict \u2014 stream is not in `active` or `draft` status.",
+            "description": "Conflict — stream is not in `active` or `draft` status.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2602,6 +3564,115 @@
                     "message": "Too many requests. Retry after 30 seconds.",
                     "request_id": "req_01HZ9ABCDEF"
                   }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/streams/{id}/cancel": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "Actor-Wallet-Address",
+          "in": "header",
+          "required": false,
+          "description": "Caller wallet address (used for org policy evaluation on org-owned streams).",
+          "schema": {
+            "type": "string",
+            "example": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc5XJLGH5"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": false,
+          "description": "Client-generated key (UUID recommended) to make the request idempotent.",
+          "schema": {
+            "type": "string",
+            "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "cancelStream",
+        "summary": "Cancel a payment stream and split escrow funds",
+        "description": "Terminates an active or paused stream early and splits the escrowed funds: recipient earned payout and sender unvested refund. Authorization: verified stream sender matching `senderAddress` (individual streams) OR canceller role in org policy (org-owned streams). Unclaimed streams cannot be cancelled (403 SENDER_UNKNOWN). Unauthorized callers receive 403 SENDER_AUTH_REQUIRED.",
+        "tags": [
+          "Streams v1"
+        ],
+        "responses": {
+          "200": {
+            "description": "Stream cancelled successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "cancellation"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/StreamV1"
+                    },
+                    "cancellation": {
+                      "type": "object",
+                      "description": "Full refund-split breakdown."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "description": "Forbidden: sender authentication required (SENDER_AUTH_REQUIRED), stream is unclaimed (SENDER_UNKNOWN), or org policy denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict: stream already in terminal state or idempotency conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -2648,7 +3719,7 @@
       "post": {
         "operationId": "pauseStream",
         "summary": "Pause a payment stream (v1, deprecated)",
-        "description": "Temporarily suspends an active stream, transitioning it to `paused` status. Payments are halted and `pausedAt` is recorded until the stream is resumed. Only valid when the stream is `active`. **Deprecated** \u2014 use `POST /api/v2/streams/{id}/pause` instead.",
+        "description": "Temporarily suspends an active stream, transitioning it to `paused` status. Payments are halted and `pausedAt` is recorded until the stream is resumed. Only valid when the stream is `active`. **Deprecated** — use `POST /api/v2/streams/{id}/pause` instead.",
         "deprecated": true,
         "tags": [
           "Streams v1"
@@ -2711,7 +3782,7 @@
             "$ref": "#/components/responses/404"
           },
           "409": {
-            "description": "Conflict \u2014 stream is not in `active` status.",
+            "description": "Conflict — stream is not in `active` status.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2786,7 +3857,7 @@
       "post": {
         "operationId": "settleStream",
         "summary": "Settle a payment stream (v1, deprecated)",
-        "description": "Finalises the stream on Stellar/Soroban, transitioning it to `ended` and recording the settlement transaction. Only valid when the stream is `active` or `paused`. **Deprecated** \u2014 use `POST /api/v2/streams/{id}/settle` instead.",
+        "description": "Finalises the stream on Stellar/Soroban, transitioning it to `ended` and recording the settlement transaction. Only valid when the stream is `active` or `paused`. **Deprecated** — use `POST /api/v2/streams/{id}/settle` instead.",
         "deprecated": true,
         "tags": [
           "Streams v1"
@@ -2865,7 +3936,7 @@
             "$ref": "#/components/responses/404"
           },
           "409": {
-            "description": "Conflict \u2014 stream is not in `active` or `paused` status.",
+            "description": "Conflict — stream is not in `active` or `paused` status.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2902,7 +3973,7 @@
             "$ref": "#/components/responses/500"
           },
           "502": {
-            "description": "Settlement failed \u2014 Stellar/Soroban transaction could not be completed.",
+            "description": "Settlement failed — Stellar/Soroban transaction could not be completed.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2921,11 +3992,241 @@
         }
       }
     },
+    "/api/streams/{id}/withdraw": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Client-generated key (UUID recommended) to make the request idempotent.",
+          "schema": {
+            "type": "string",
+            "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "withdrawStream",
+        "summary": "Withdraw vested funds from a payment stream",
+        "description": "Releases vested-but-unreleased funds to the stream recipient. The caller must be authenticated as the stream recipient, or be an org member with `withdraw` permission. Amounts are raw i128 units (stroops for XLM); omit `amount` to withdraw the full withdrawable balance. Auth is checked before stream state, and stream state before the amount.",
+        "tags": [
+          "Streams v1"
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "string",
+                    "pattern": "^\\d+$",
+                    "description": "Optional raw i128 units as a decimal string. Maximum 2^127-1. Omit to withdraw the full withdrawable balance. Decimals, signs and symbols are rejected.",
+                    "example": "10000000"
+                  }
+                }
+              },
+              "examples": {
+                "full-withdrawal": {
+                  "summary": "Omit amount to withdraw everything available",
+                  "value": {}
+                },
+                "partial-withdrawal": {
+                  "summary": "Withdraw an exact raw-unit amount",
+                  "value": {
+                    "amount": "5000000"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Withdrawal computed and the stream's releasedAmount persisted alongside its finality state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/StreamV1"
+                    },
+                    "withdrawal": {
+                      "type": "object",
+                      "description": "Current withdrawal finality state."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No verified caller identity (Bearer JWT or Actor-Wallet-Address fallback).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "A verified caller identity is required to withdraw from a stream.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is neither the stream recipient nor an org member permitted to withdraw.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "not-recipient": {
+                    "value": {
+                      "error": {
+                        "code": "RECIPIENT_AUTH_REQUIRED",
+                        "message": "Only the stream recipient or an authorized org member may withdraw.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "role-insufficient": {
+                    "value": {
+                      "error": {
+                        "code": "ROLE_INSUFFICIENT",
+                        "message": "Role 'pauser' is not permitted to perform 'withdraw'.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stream not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "STREAM_NOT_FOUND",
+                    "message": "Stream 'stream-abc12345' not found",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stream state or balance conflict: `INVALID_STREAM_STATE`, `NO_WITHDRAWABLE_BALANCE`, or `APPROVAL_REQUIRED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "invalid-state": {
+                    "value": {
+                      "error": {
+                        "code": "INVALID_STREAM_STATE",
+                        "message": "Only ended streams can be withdrawn from",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "no-balance": {
+                    "value": {
+                      "error": {
+                        "code": "NO_WITHDRAWABLE_BALANCE",
+                        "message": "No vested funds are available for withdrawal at this time.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid amount or escrow state: `VALIDATION_ERROR`, `ZERO_AMOUNT`, `OVER_WITHDRAW`, or `INVALID_ESCROW_STATE`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "validation-error": {
+                    "value": {
+                      "error": {
+                        "code": "VALIDATION_ERROR",
+                        "message": "amount must be a non-negative raw i128 integer string.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  },
+                  "over-withdraw": {
+                    "value": {
+                      "error": {
+                        "code": "OVER_WITHDRAW",
+                        "message": "Requested amount exceeds withdrawable balance.",
+                        "request_id": "req_01HZ9ABCDEF"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many requests. Retry after 30 seconds.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
     "/api/v2/streams": {
       "get": {
         "operationId": "listStreamsV2",
         "summary": "List payment streams (v2)",
-        "description": "Returns all streams owned by the authenticated user in the v2 shape (`allowed_actions`, `created_at`, `settlement`).",
+        "description": "Returns all streams owned by the authenticated user within the caller's tenant (`x-tenant-id`, defaulting to `default-tenant`) in the v2 shape (`allowed_actions`, `created_at`, `settlement`). Visibility includes streams where the caller is the sender, recipient, a member of the owning organisation, or an admin (falling back to tenant-scoped visibility when no verified actor claim is present). `meta.total` reflects the filtered stream count.",
         "tags": [
           "Streams"
         ],
@@ -2971,8 +4272,14 @@
                           "settlement": null
                         }
                       ],
-                      "meta": { "hasNext": false, "nextCursor": null, "total": 1 },
-                      "links": { "self": "/api/v2/streams?limit=20" }
+                      "meta": {
+                        "hasNext": false,
+                        "nextCursor": null,
+                        "total": 1
+                      },
+                      "links": {
+                        "self": "/api/v2/streams?limit=20"
+                      }
                     }
                   },
                   "settled-stream": {
@@ -2993,8 +4300,14 @@
                           }
                         }
                       ],
-                      "meta": { "hasNext": false, "nextCursor": null, "total": 1 },
-                      "links": { "self": "/api/v2/streams?limit=20" }
+                      "meta": {
+                        "hasNext": false,
+                        "nextCursor": null,
+                        "total": 1
+                      },
+                      "links": {
+                        "self": "/api/v2/streams?limit=20"
+                      }
                     }
                   },
                   "empty-list": {
@@ -3040,7 +4353,7 @@
                 "properties": {
                   "recipient": {
                     "type": "string",
-                    "description": "Stellar public key of the recipient (56-character G\u2026 address).",
+                    "description": "Stellar public key of the recipient (56-character G… address).",
                     "example": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG"
                   },
                   "rate": {
@@ -3515,7 +4828,10 @@
                       "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
                       "rate": "120 XLM/month",
                       "status": "active",
-                      "allowed_actions": ["pause", "stop"],
+                      "allowed_actions": [
+                        "pause",
+                        "stop"
+                      ],
                       "created_at": "2024-01-15T10:00:00.000Z",
                       "settlement": null
                     }
@@ -3531,7 +4847,7 @@
             "$ref": "#/components/responses/404"
           },
           "409": {
-            "description": "Conflict \u2014 stream is not in `draft` status.",
+            "description": "Conflict — stream is not in `draft` status.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3622,7 +4938,7 @@
             "$ref": "#/components/responses/404"
           },
           "409": {
-            "description": "Conflict \u2014 stream is not in `active` or `paused` status.",
+            "description": "Conflict — stream is not in `active` or `paused` status.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3700,7 +5016,10 @@
                       "recipient": "GDEF1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFGH",
                       "rate": "5000 USDC/month",
                       "status": "paused",
-                      "allowed_actions": ["start", "stop"],
+                      "allowed_actions": [
+                        "start",
+                        "stop"
+                      ],
                       "created_at": "2024-02-01T09:00:00.000Z",
                       "settlement": null
                     }
@@ -3716,7 +5035,7 @@
             "$ref": "#/components/responses/404"
           },
           "409": {
-            "description": "Conflict \u2014 stream is not in `active` status.",
+            "description": "Conflict — stream is not in `active` status.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3815,7 +5134,7 @@
             "$ref": "#/components/responses/404"
           },
           "409": {
-            "description": "Conflict \u2014 stream is not in `ended` status or has already been settled.",
+            "description": "Conflict — stream is not in `ended` status or has already been settled.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3917,7 +5236,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "Number of records to return (1\u2013100, default 20).",
+            "description": "Number of records to return (1–100, default 20).",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -3978,8 +5297,13 @@
     },
     "/api/webhooks/health": {
       "get": {
+        "operationId": "getWebhookHealth",
         "summary": "Webhook delivery system health",
         "description": "Returns the health status of the webhook delivery system along with subscription and delivery statistics.",
+        "security": [],
+        "tags": [
+          "Webhooks"
+        ],
         "responses": {
           "200": {
             "description": "Health status retrieved",
@@ -4165,7 +5489,7 @@
       "post": {
         "operationId": "adminPauseBySender",
         "summary": "Emergency-pause all streams by sender",
-        "description": "Pauses all active payment streams belonging to the given sender address. Gated by admin auth \u2014 only the configured admin address may call this.\n\nNon-active streams (draft, paused, ended) are silently skipped.\n\n**Auth:** Admin wallet address via `Actor-Wallet-Address` header or JWT.\n\n**Idempotency:** Not enforced; repeat calls are safe (already-paused streams are skipped).",
+        "description": "Pauses all active payment streams belonging to the given sender address. Gated by admin auth — only the configured admin address may call this.\n\nNon-active streams (draft, paused, ended) are silently skipped.\n\n**Auth:** Admin wallet address via `Actor-Wallet-Address` header or JWT.\n\n**Idempotency:** Not enforced; repeat calls are safe (already-paused streams are skipped).",
         "tags": [
           "Admin"
         ],
@@ -4412,6 +5736,530 @@
           }
         }
       }
+    },
+    "/api/healthz": {
+      "get": {
+        "operationId": "getHealthz",
+        "summary": "Liveness probe",
+        "description": "Returns service liveness status without checking external dependencies.",
+        "security": [],
+        "tags": [
+          "System"
+        ],
+        "responses": {
+          "200": {
+            "description": "Service is alive.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/readyz": {
+      "get": {
+        "operationId": "getReadyz",
+        "summary": "Readiness probe",
+        "description": "Checks database and dependency readiness before accepting traffic.",
+        "security": [],
+        "tags": [
+          "System"
+        ],
+        "responses": {
+          "200": {
+            "description": "Service is ready.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "degraded"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable."
+          }
+        }
+      }
+    },
+    "/api/metrics": {
+      "get": {
+        "operationId": "getMetrics",
+        "summary": "Scrape Prometheus metrics",
+        "description": "Exports application and runtime metrics in Prometheus text exposition format.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "System"
+        ],
+        "responses": {
+          "200": {
+            "description": "Prometheus metrics payload.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/auth/wallet/health": {
+      "get": {
+        "operationId": "getWalletAuthHealth",
+        "summary": "Wallet authentication subsystem health",
+        "description": "Returns health status of the wallet challenge and session store.",
+        "security": [],
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "Wallet auth subsystem status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "degraded"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable."
+          }
+        }
+      }
+    },
+    "/api/identity/me": {
+      "get": {
+        "operationId": "getIdentityMe",
+        "summary": "Export authenticated user profile and personal data",
+        "description": "Returns the authenticated subject profile, preferences, and stream history for GDPR data portability.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated user identity export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "429": {
+            "description": "Rate limit exceeded."
+          }
+        }
+      }
+    },
+    "/api/identity/me/delete": {
+      "delete": {
+        "operationId": "deleteIdentityMe",
+        "summary": "Erase authenticated user personal data",
+        "description": "Anonymizes or deletes off-chain personal data associated with the authenticated wallet address.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "200": {
+            "description": "Personal data erased.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "429": {
+            "description": "Rate limit exceeded."
+          }
+        }
+      }
+    },
+    "/api/notifications/preferences": {
+      "get": {
+        "operationId": "getNotificationPreferences",
+        "summary": "Get notification preferences",
+        "description": "Returns notification channel and event preferences for the authenticated user.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "Notifications"
+        ],
+        "responses": {
+          "200": {
+            "description": "Notification preferences.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateNotificationPreferences",
+        "summary": "Update notification preferences",
+        "description": "Updates notification channel and event preferences for the authenticated user.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "Notifications"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated notification preferences.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          }
+        }
+      }
+    },
+    "/api/indexer/status": {
+      "get": {
+        "operationId": "getIndexerStatus",
+        "summary": "Get Stellar indexer status",
+        "description": "Returns the latest indexed ledger sequence, lag metrics, and indexer health status.",
+        "security": [],
+        "tags": [
+          "Indexer"
+        ],
+        "responses": {
+          "200": {
+            "description": "Current indexer status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/indexer/sse": {
+      "get": {
+        "operationId": "streamIndexerEvents",
+        "summary": "Subscribe to real-time indexer server-sent events",
+        "description": "Opens a Server-Sent Events (SSE) stream emitting real-time contract and ledger indexing updates.",
+        "security": [],
+        "tags": [
+          "Indexer"
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE event stream.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/exports": {
+      "get": {
+        "operationId": "listExports",
+        "summary": "List data export jobs",
+        "description": "Lists export jobs created by the authenticated user.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "Exports"
+        ],
+        "responses": {
+          "200": {
+            "description": "Export jobs list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createExport",
+        "summary": "Create a data export job",
+        "description": "Enqueues an asynchronous CSV or JSON export job for streams or activity records.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "Exports"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Export job created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          }
+        }
+      }
+    },
+    "/api/exports/health": {
+      "get": {
+        "operationId": "getExportsHealth",
+        "summary": "Export worker subsystem health",
+        "description": "Returns health status and queue depth for the asynchronous export subsystem.",
+        "security": [],
+        "tags": [
+          "Exports"
+        ],
+        "responses": {
+          "200": {
+            "description": "Export subsystem health.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/exports/{id}": {
+      "get": {
+        "operationId": "getExportById",
+        "summary": "Get or download an export job",
+        "description": "Returns the status or downloadable artifact of a specific export job.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "Exports"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Unique identifier of the export job."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Export job details or artifact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          }
+        }
+      }
+    },
+    "/api/audit/archive": {
+      "get": {
+        "operationId": "listAuditArchives",
+        "summary": "List archived audit log batches",
+        "description": "Returns metadata for archived cold-storage audit log batches.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "Audit"
+        ],
+        "responses": {
+          "200": {
+            "description": "Archived audit batches.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          }
+        }
+      }
+    },
+    "/api/audit/export": {
+      "get": {
+        "operationId": "exportAuditLog",
+        "summary": "Export tamper-evident audit log entries",
+        "description": "Exports audit log entries in CSV or JSONL format with cryptographic hash chain fields.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "Audit"
+        ],
+        "responses": {
+          "200": {
+            "description": "Exported audit log entries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          }
+        }
+      }
     }
   },
   "tags": [
@@ -4420,8 +6268,28 @@
       "description": "Activity event log"
     },
     {
+      "name": "Audit",
+      "description": "Tamper-evident audit log queries and exports"
+    },
+    {
       "name": "Auth",
       "description": "Wallet-based authentication flow"
+    },
+    {
+      "name": "Exports",
+      "description": "Asynchronous data export jobs"
+    },
+    {
+      "name": "Identity",
+      "description": "Authenticated user identity and GDPR data rights"
+    },
+    {
+      "name": "Indexer",
+      "description": "Stellar contract indexer status and real-time events"
+    },
+    {
+      "name": "Notifications",
+      "description": "User notification channel and event preferences"
     },
     {
       "name": "Streams",
@@ -4429,7 +6297,11 @@
     },
     {
       "name": "Streams v1",
-      "description": "Payment stream management (v1, deprecated \u2014 use Streams)"
+      "description": "Payment stream management (v1, deprecated — use Streams)"
+    },
+    {
+      "name": "System",
+      "description": "Health probes, readiness checks, and operational metrics"
     },
     {
       "name": "Webhooks",

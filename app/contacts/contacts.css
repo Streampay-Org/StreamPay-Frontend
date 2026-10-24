@@ -1,0 +1,32 @@
+/* Extracted from globals.css; selectors stay global to preserve markup and tests. */
+.contact-row {
+
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1rem;
+  align-items: center;
+}
+
+
+
+.contact-row__actions {
+
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+@media (max-width: 35rem) {
+.contact-row {
+
+    grid-template-columns: 1fr;
+  }.contact-row__actions {
+
+    justify-content: flex-end;
+    width: 100%;
+  }.contact-row__actions .button {
+
+    flex: 1 1 auto;
+  }
+}

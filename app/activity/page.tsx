@@ -87,14 +87,14 @@ export default function ActivityPage() {
 
         setActivities(grouped);
         setPageState(grouped.length > 0 ? "populated" : "empty");
-      } catch (err) {
+      } catch {
         if (mounted) {
           setPageState("error");
         }
       }
     }
     
-    fetchActivity();
+    void fetchActivity();
 
     return () => { mounted = false; };
   }, [loadKey]);

@@ -422,5 +422,23 @@ describe('Stellar Network Configuration', () => {
       const config2 = getConfig();
       expect(config1).not.toBe(config2);
     });
+
+    it('should read the environment at validateConfig() call time', () => {
+      process.env.STELLAR_NETWORK = 'testnet';
+      process.env.JWT_SECRET = 'first-secret-at-least-32-characters-long';
+      process.env.ALLOWED_ORIGINS = 'http://localhost:3000';
+      process.env.SERVICE_NAME = 'first-service';
+
+      const first = validateConfig();
+      expect(first.jwtSecret).toBe('first-secret-at-least-32-characters-long');
+      expect(first.serviceName).toBe('first-service');
+
+      process.env.JWT_SECRET = 'second-secret-at-least-32-characters-long';
+      process.env.SERVICE_NAME = 'second-service';
+
+      const second = validateConfig();
+      expect(second.jwtSecret).toBe('second-secret-at-least-32-characters-long');
+      expect(second.serviceName).toBe('second-service');
+    });
   });
 });

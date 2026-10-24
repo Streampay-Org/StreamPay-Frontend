@@ -12,7 +12,7 @@ import { LiveRegion } from "../components/LiveRegion";
 import styles from "./OnboardingChecklist.module.css";
 
 export function OnboardingChecklist() {
-  const [mounted, setMounted] = useState(false);
+  const [_mounted, setMounted] = useState(false);
   const [hidden, setHidden] = useState(false);
   const [progress, setProgress] = useState<OnboardingProgress>(() =>
     getOnboardingProgress(typeof window !== "undefined" ? window.localStorage : null)
@@ -47,7 +47,7 @@ export function OnboardingChecklist() {
     isFirstRender.current = false;
 
     // Cross-tab updates: listen to storage events
-    const handleStorage = (e: StorageEvent) => {
+    const handleStorage = () => {
       refreshProgress();
     };
 

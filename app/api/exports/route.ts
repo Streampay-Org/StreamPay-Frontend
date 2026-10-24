@@ -1,6 +1,6 @@
 import { createHmac } from "crypto";
 import { NextResponse } from "next/server";
-import { tryAuthenticateRequest, JWT_SECRET } from "@/app/lib/auth";
+import { tryAuthenticateRequest, getJwtSecret } from "@/app/lib/auth";
 import { ExportJob, getStore, encodeCompositeCursor, decodeCompositeCursor } from "@/app/lib/db";
 import { checkRateLimit, rateLimitResponse, type ClientIdentity } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
@@ -59,7 +59,7 @@ function escapeCsvField(value: string | undefined): string {
 /** Creates an HMAC-SHA256 signed download URL scoped to this server. */
 function createSignedUrl(jobId: string, expiresAt: string): string {
   const payload = `${jobId}:${expiresAt}`;
-  const sig = createHmac("sha256", JWT_SECRET).update(payload).digest("hex");
+  const sig = createHmac("sha256", getJwtSecret()).update(payload).digest("hex");
   const safeId = encodeURIComponent(jobId);
   return `/api/exports/${safeId}?download=true&expires=${encodeURIComponent(expiresAt)}&sig=${sig}`;
 }

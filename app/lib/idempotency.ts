@@ -188,7 +188,7 @@ export async function withIdempotency(
     } else {
       respBody = null;
     }
-  } catch (err) {
+  } catch {
     respBody = null;
   }
 
