@@ -6,30 +6,41 @@ import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 import { publishStreamChange } from "@/app/lib/stream-publish";
-import { getStellarSettlementClient } from "@/app/lib/stellar";
-import { addToOutbox } from "@/app/lib/webhook-outbox";
-import { toWebhookEvent, buildStreamWebhookPayload } from "@/app/lib/stream-webhook-events";
+import { getStellarSettlementClient, type SettlementReceipt } from "@/app/lib/stellar";
+import { toWebhookEvent, webhookOutboxStore } from "@/app/lib/webhook-outbox";
+import { runWithTimeout } from "@/app/lib/with-timeout";
 
 type Context = { params: Promise<{ id: string }> };
 
-function createErrorResponse(code: string, message: string, status: number) {
+function createErrorResponse(code: string, message: string, status: number, extra: Record<string, unknown> = {}) {
   const context = getCorrelationContext();
-  return NextResponse.json({ error: { code, message, request_id: context?.request_id } }, { status });
+  return NextResponse.json(
+    {
+      error: {
+        code,
+        message,
+        request_id: context?.request_id,
+        ...extra,
+      },
+    },
+    { status }
+  );
 }
 
-function errorResponse(code: string, message: string, status: number) {
-  return createErrorResponse(code, message, status);
+function errorResponse(code: string, message: string, status: number, extra: Record<string, unknown> = {}) {
+  return createErrorResponse(code, message, status, extra);
 }
 
 function getHeader(request: Request, name: string): string | null {
   return request.headers?.get?.(name) ?? null;
 }
 
+const SETTLEMENT_TIMEOUT_MS = Number(process.env.SETTLEMENT_TIMEOUT_MS) || 15_000;
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
-)
-{
+) {
   const { id } = await params;
   const actorAddress = getHeader(request, "Actor-Wallet-Address");
   // IDEMPOTENCY: Settle is non-idempotent by nature — this wrapper ensures retries return the original response without re-executing the settlement
@@ -61,91 +72,107 @@ export async function POST(
       }
 
       const before = structuredClone(stream);
-      const txHash = `fake-tx-${crypto.randomUUID().slice(0, 8)}`;
+
+      let settlement: SettlementReceipt;
+      try {
+        settlement = await runWithTimeout(SETTLEMENT_TIMEOUT_MS, async () => {
+          return await getStellarSettlementClient().settleStream({ streamId: id });
+        });
+      } catch (err: any) {
+        const errorClass = err?.constructor?.name ?? (err instanceof Error ? err.name : "Error");
+        logger.error("Settlement failed on Stellar/Soroban", {
+          errorClass,
+          correlationId: getCorrelationContext()?.correlation_id,
+        });
+        return errorResponse(
+          "SETTLEMENT_FAILED",
+          "Failed to settle stream on Stellar/Soroban",
+          502,
+          { retryable: true }
+        );
+      }
+
       const now = new Date().toISOString();
       const updatedStream = {
         ...stream,
         nextAction: "withdraw" as const,
-        settlementTxHash: txHash,
+        settlementTxHash: settlement.txHash,
         status: "ended" as const,
+        settledAt: settlement.settledAt,
         updatedAt: now,
         withdrawal: {
           attempts: 0,
           lastCheckedAt: now,
           requestedAt: now,
-          settlementTxHash: txHash,
+          settlementTxHash: settlement.txHash,
           state: "pending" as const,
         },
       };
+
       db.streams.set(id, updatedStream);
 
-      try {
-        const settlement = await getStellarSettlementClient().settleStream({ streamId: id });
+      appendStreamHistoryEvent({
+        streamId: id,
+        type: "settled",
+        fromStatus: stream.status,
+        toStatus: "ended",
+        at: updatedStream.updatedAt,
+        actorWallet: getHeader(request, "Actor-Wallet-Address"),
+        txHash: settlement.txHash,
+      });
 
-        db.streams.set(id, updatedStream);
+      recordPrivilegedStreamAuditEvent({
+        action: "stream.settle",
+        after: updatedStream as any,
+        before: before as any,
+        metadata: {
+          settlementTxHash: settlement.txHash,
+        },
+        request,
+        streamId: id,
+        targetAccount: updatedStream.recipient,
+      });
 
-        appendStreamHistoryEvent({
-          streamId: id,
-          type: "settled",
-          fromStatus: stream.status,
-          toStatus: "ended",
-          at: updatedStream.updatedAt,
-          actorWallet: getHeader(request, "Actor-Wallet-Address"),
-          txHash: settlement.txHash,
-        });
-
-        recordPrivilegedStreamAuditEvent({
-          action: "stream.settle",
-          after: updatedStream as any,
-          before: before as any,
-          metadata: {
-            settlementTxHash: settlement.txHash,
-          },
-          request,
-          streamId: id,
-          targetAccount: updatedStream.recipient,
-        });
-
-        // Enqueue lifecycle webhook after commit, only if the stream has a webhook URL.
-        // Deterministic event id prevents double-enqueue on retries of the same commit.
-        if (updatedStream.webhook_url) {
-          const eventType = toWebhookEvent(before as any, updatedStream as any, "settle");
-          addToOutbox({
-            eventId: `evt_${id}_settle_${updatedStream.updatedAt}`,
-            eventType,
-            streamId: id,
-            url: updatedStream.webhook_url,
-            payload: buildStreamWebhookPayload({
-              eventType,
-              streamId: id,
+      // Enqueue lifecycle webhook after commit, only if the stream has a webhook URL.
+      // Deterministic event id prevents double-enqueue on retries of the same commit.
+      const webhookUrl = (updatedStream as typeof updatedStream & { webhook_url?: string }).webhook_url;
+      if (webhookUrl) {
+        const event = toWebhookEvent(before as any, updatedStream as any, "settle");
+        if (event) {
+          webhookOutboxStore.enqueueStreamLifecycleEventIdempotent(
+            { ...updatedStream, webhook_url: webhookUrl },
+            event,
+            {
+              stream_id: id,
+              status: updatedStream.status,
+              previous_status: before.status,
               action: "settle",
-              before: before as any,
-              after: updatedStream as any,
-              occurredAt: updatedStream.updatedAt,
-            }),
-          });
+              occurred_at: now,
+              token: updatedStream.token,
+              settlement_tx_hash: settlement.txHash,
+            },
+            now,
+          );
         }
-
-        publishStreamChange({
-          action: "settle",
-          actor: actorAddress ?? undefined,
-          after: updatedStream,
-          before,
-          correlationId: getCorrelationContext()?.correlation_id,
-        });
-
-        const payload = { data: { ...updatedStream, settlement } };
-
-        logger.info("Stream settled successfully", {
-          streamId: id,
-          action: "settle",
-          status: "success",
-        });
-
-        return NextResponse.json(payload);
-      } catch {
-        return errorResponse("SETTLEMENT_FAILED", "Failed to settle stream on Stellar/Soroban", 502);
       }
+
+      publishStreamChange({
+        action: "settle",
+        actor: actorAddress ?? undefined,
+        after: updatedStream,
+        before,
+        correlationId: getCorrelationContext()?.correlation_id,
+      });
+
+      const payload = { data: { ...updatedStream, settlement } };
+
+      logger.info("Stream settled successfully", {
+        streamId: id,
+        action: "settle",
+        status: "success",
+      });
+
+      return NextResponse.json(payload);
     });
   }, { resourceId: id, actorId: actorAddress ?? undefined });
 }

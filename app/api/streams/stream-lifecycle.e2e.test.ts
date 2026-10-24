@@ -158,6 +158,9 @@ describe("stream lifecycle E2E (HTTP black-box)", () => {
     if (!headers.has("Idempotency-Key")) {
       headers.set("Idempotency-Key", `idempotency-${Math.random().toString(36).slice(2)}`);
     }
+    if (!headers.has("Actor-Wallet-Address") && !headers.has("Authorization")) {
+      headers.set("Actor-Wallet-Address", VALID_STELLAR_KEY);
+    }
     return realFetch(input, { ...init, headers });
   };
 
@@ -300,22 +303,44 @@ describe("stream lifecycle E2E (HTTP black-box)", () => {
    * withdraw-finality.ts calls the global fetch directly.
    */
   function mockHorizonFound(txHash: string) {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        _embedded: { records: [{ hash: txHash, successful: true }] },
-        _links: { next: { href: "https://horizon-testnet.stellar.org?cursor=c1" } },
-      }),
+    global.fetch = jest.fn(async (url: any) => {
+      const urlStr = typeof url === "string" ? url : url?.toString() ?? "";
+      if (urlStr.includes("ledgers")) {
+        return {
+          ok: true,
+          json: async () => ({
+            _embedded: { records: [{ sequence: 105 }] },
+          }),
+        } as any;
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          _embedded: { records: [{ hash: txHash, successful: true, ledger: 100 }] },
+          _links: { next: { href: "https://horizon-testnet.stellar.org?cursor=c1" } },
+        }),
+      } as any;
     }) as unknown as typeof fetch;
   }
 
   function mockHorizonPending() {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        _embedded: { records: [{ hash: "other-hash", successful: true }] },
-        _links: { next: { href: "https://horizon-testnet.stellar.org?cursor=c2" } },
-      }),
+    global.fetch = jest.fn(async (url: any) => {
+      const urlStr = typeof url === "string" ? url : url?.toString() ?? "";
+      if (urlStr.includes("ledgers")) {
+        return {
+          ok: true,
+          json: async () => ({
+            _embedded: { records: [{ sequence: 105 }] },
+          }),
+        } as any;
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          _embedded: { records: [{ hash: "other-hash", successful: true }] },
+          _links: { next: { href: "https://horizon-testnet.stellar.org?cursor=c2" } },
+        }),
+      } as any;
     }) as unknown as typeof fetch;
   }
 

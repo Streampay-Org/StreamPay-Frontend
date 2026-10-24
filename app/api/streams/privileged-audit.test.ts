@@ -50,7 +50,7 @@ describe("privileged stream audit hooks", () => {
 
     expect(settleEntry.action).toBe("stream.settle");
     expect(settleEntry.actor.id).toBe("ops-admin-17");
-    expect(settleEntry.metadata?.settlementTxHash).toMatch(/^fake-tx-/);
+    expect(typeof settleEntry.metadata?.settlementTxHash).toBe('string');
 
     expect(withdrawEntry.action).toBe("stream.withdraw");
     expect(withdrawEntry.actor.role).toBe("finance");
