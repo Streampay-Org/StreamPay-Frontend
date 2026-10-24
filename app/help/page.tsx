@@ -10,8 +10,8 @@
 
 import { Suspense } from "react";
 import { SHORTCUT_GROUPS, formatShortcutKeys, getShortcut } from "@/lib/shortcuts";
-import { FAQ_SECTIONS } from "./faq-data";
 import FaqSearch from "./FaqSearch";
+import CopyLinkButton from "./CopyLinkButton";
 import type { FaqSection } from "./faq-data";
 
 /** Keys for a single shortcut id, e.g. "⌘/Ctrl + K". */
@@ -224,7 +224,9 @@ export default function HelpPage() {
       </header>
 
       <Suspense fallback={null}>
-        <FaqSearch sections={FAQ_SECTIONS} />
+        {/* Search island: the full list below is server-rendered, so the
+            island only renders matches once the visitor types a query. */}
+        <FaqSearch sections={FAQ_SECTIONS} showAllWhenEmpty={false} />
       </Suspense>
 
       <div className="help-layout">
@@ -260,7 +262,10 @@ export default function HelpPage() {
               <dl className="faq-list">
                 {section.items.map((item) => (
                   <div key={item.id} id={item.id} className="faq-item">
-                    <dt id={`${item.id}-question`} className="faq-item__question" tabIndex={-1}>{item.question}</dt>
+                    <dt id={`${item.id}-question`} className="faq-item__question">
+                      {item.question}{" "}
+                      <CopyLinkButton id={item.id} question={item.question} />
+                    </dt>
                     <dd className="faq-item__answer">{item.answer}</dd>
                   </div>
                 ))}

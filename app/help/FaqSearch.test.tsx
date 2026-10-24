@@ -82,12 +82,13 @@ describe("FaqSearch", () => {
 
   it("copies a deep link and shows a toast", async () => {
     const writeText = jest.fn().mockResolvedValue(undefined);
-    // jsdom exposes `navigator.clipboard` as a getter-only property.
+    // userEvent.setup() installs its own clipboard stub, so define ours after
+    // it (jsdom exposes `navigator.clipboard` as a getter-only property).
+    const user = userEvent.setup();
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText },
     });
-    const user = userEvent.setup();
     renderIsland();
     const item = allItems[0];
     const escaped = item.question.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

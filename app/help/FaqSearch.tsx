@@ -20,6 +20,12 @@ export type FaqSection = {
 export type FaqSearchProps = {
   sections: FaqSection[];
   supportHref?: string;
+  /**
+   * When true (standalone use), every entry is listed while the query is
+   * empty. Pages that already server-render the full list pass `false` so
+   * the island only renders matches for a non-empty query.
+   */
+  showAllWhenEmpty?: boolean;
 };
 
 function highlightMatch(text: string, query: string) {
@@ -38,6 +44,7 @@ function highlightMatch(text: string, query: string) {
 export default function FaqSearch({
   sections,
   supportHref = "/help",
+  showAllWhenEmpty = true,
 }: FaqSearchProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -46,6 +53,7 @@ export default function FaqSearch({
   const inputId = useId();
 
   const [query, setQuery] = useState(searchParams?.get("q") ?? "");
+  const hasQuery = query.trim().length > 0;
 
   const allItems = useMemo(() => {
     return sections.flatMap((section) => section.items);
@@ -53,13 +61,13 @@ export default function FaqSearch({
 
   const filteredItems = useMemo(() => {
     const trimmed = query.trim().toLowerCase();
-    if (!trimmed) return allItems;
+    if (!trimmed) return showAllWhenEmpty ? allItems : [];
     return allItems.filter(
       (item) =>
         item.question.toLowerCase().includes(trimmed) ||
         item.answer.toLowerCase().includes(trimmed),
     );
-  }, [allItems, query]);
+  }, [allItems, query, showAllWhenEmpty]);
 
   useEffect(() => {
     if (typeof window !== "undefined" && window.location.hash) {
@@ -104,7 +112,7 @@ export default function FaqSearch({
           htmlFor={inputId}
           style={{ display: "block", marginBottom: "0.5rem", fontWeight: 600 }}
         >
-          Search FAQ
+          Search the FAQ
         </label>
         <input
           id={inputId}
@@ -126,10 +134,12 @@ export default function FaqSearch({
       </div>
 
       <div role="status" aria-live="polite" style={{ fontSize: "0.875rem", color: "var(--muted)" }}>
-        {filteredItems.length} {filteredItems.length === 1 ? "answer" : "answers"} found
+        {hasQuery || showAllWhenEmpty
+          ? `${filteredItems.length} ${filteredItems.length === 1 ? "answer" : "answers"} found`
+          : null}
       </div>
 
-      {filteredItems.length === 0 ? (
+      {!hasQuery && !showAllWhenEmpty ? null : filteredItems.length === 0 ? (
         <div style={{ margin: "2rem 0", textAlign: "center" }}>
           <p style={{ color: "var(--muted)", marginBottom: "0.75rem" }}>
             No answers match your search.
@@ -147,7 +157,8 @@ export default function FaqSearch({
           {filteredItems.map((item) => (
             <div
               key={item.id}
-              id={item.id}
+              // In embedded mode the server-rendered list owns the anchor ids.
+              id={showAllWhenEmpty ? item.id : undefined}
               style={{
                 marginBottom: "1.5rem",
                 padding: "1rem",
