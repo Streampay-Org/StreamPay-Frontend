@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useId, useEffect, useRef, useState } from "react";
+import React, { useId, useEffect, useRef, useState, useCallback } from "react";
 import { LiveRegion } from "@/app/components/LiveRegion";
 import { usePrefersReducedMotion } from "@/app/hooks/usePrefersReducedMotion";
 
@@ -81,7 +81,7 @@ export interface IndexerStatusProps {
  * Format a relative timestamp like "2m ago" or "just now".
  * Falls back to the raw ISO string if parsing fails.
  */
-function relativeTime(iso: string, now: Date = new Date()): string {
+export function relativeTime(iso: string, now: Date = new Date()): string {
   const target = new Date(iso);
   if (Number.isNaN(target.getTime())) return iso;
 
@@ -96,6 +96,56 @@ function relativeTime(iso: string, now: Date = new Date()): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+}
+
+/**
+ * A `now` value that ticks on an interval while the tab is visible.
+ *
+ * - Ticks every `intervalMs` (default 15s) while `document.visibilityState`
+ *   is `"visible"`.
+ * - Pauses when the tab is hidden; on becoming visible again it updates
+ *   immediately and resumes ticking.
+ * - Clears its interval on unmount.
+ *
+ * @internal exported for testing only
+ */
+export function useNow(intervalMs: number = 15000): Date {
+  const [now, setNow] = useState<Date>(() => new Date());
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clear = useCallback(() => {
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
+  const start = useCallback(() => {
+    clear();
+    intervalRef.current = setInterval(() => {
+      setNow(new Date());
+    }, intervalMs);
+  }, [clear, intervalMs]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        setNow(new Date());
+        start();
+      } else {
+        clear();
+      }
+    };
+
+    handleVisibility();
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      clear();
+    };
+  }, [start, clear]);
+
+  return now;
 }
 
 /** Format a ledger number with locale-aware separators. */
@@ -165,6 +215,24 @@ export function isAssertiveState(state: IndexerState): boolean {
   return state === "error" || state === "stalled";
 }
 
+/**
+ * Bucket a lag value into a named severity tier.
+ * Used to decide when lag changes are significant enough to announce.
+ *
+ * | Bucket    | Lag range   |
+ * |-----------|-------------|
+ * | `"ok"`    | 0 – 2       |
+ * | `"warn"`  | 3 – 10      |
+ * | `"high"`  | > 10        |
+ *
+ * @internal exported for testing only
+ */
+export function lagBucket(lag: number): "ok" | "warn" | "high" {
+  if (lag <= 2) return "ok";
+  if (lag <= 10) return "warn";
+  return "high";
+}
+
 export function IndexerStatus({ data, className = "" }: IndexerStatusProps) {
   const headingId = useId();
   const prefersReducedMotion = usePrefersReducedMotion();
@@ -175,6 +243,7 @@ export function IndexerStatus({ data, className = "" }: IndexerStatusProps) {
   const { network, lastProcessedLedger, latestLedger, status, lastUpdatedAt, lag, message } = data;
   const sev = severity(status, lag);
   const label = statusLabel(status);
+  const now = useNow(15000);
 
   // ── Accessibility: live-region announcement ────────────────────────────────
   // We announce status transitions to screen readers via an ARIA live region.
@@ -314,9 +383,13 @@ export function IndexerStatus({ data, className = "" }: IndexerStatusProps) {
             <span className="indexer-status__status-label" aria-hidden="true">{label}</span>
           </div>
 
-          <span className="indexer-status__timestamp">
-            {mounted ? "updated " + relativeTime(lastUpdatedAt) : "updated"}
-          </span>
+          <time
+            className="indexer-status__timestamp"
+            dateTime={lastUpdatedAt}
+            title={lastUpdatedAt}
+          >
+            {mounted ? "updated " + relativeTime(lastUpdatedAt, now) : "updated"}
+          </time>
         </div>
 
         {message ? (
