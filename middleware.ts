@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { validateConfig } from './app/lib/config/index';
 import {
   buildAllowedOriginSet,
-  isOriginAllowed,
+  buildCorsDecision,
+  DEFAULT_CORS_EXPOSE_HEADERS,
   DEFAULT_CORS_HEADERS,
   DEFAULT_CORS_METHODS,
   DEFAULT_CORS_MAX_AGE_SECONDS,
+  NULL_ORIGIN,
 } from './app/lib/cors';
 import {
   REQUEST_FINGERPRINT_HEADER,
@@ -22,6 +24,7 @@ import {
   createCsrfForbiddenResponse,
   getCsrfCookieValue,
   getCsrfHeaderValue,
+  isCsrfExemptRequest,
   isCsrfProtectedMethod,
   validateCsrfToken,
 } from './lib/csrf';
@@ -61,9 +64,34 @@ function buildCorsHeaders(origin: string) {
   headers.set('Access-Control-Allow-Origin', origin);
   headers.set('Access-Control-Allow-Methods', DEFAULT_CORS_METHODS);
   headers.set('Access-Control-Allow-Headers', DEFAULT_CORS_HEADERS);
+  headers.set('Access-Control-Expose-Headers', DEFAULT_CORS_EXPOSE_HEADERS);
   headers.set('Access-Control-Max-Age', String(DEFAULT_CORS_MAX_AGE_SECONDS));
   headers.set('Vary', 'Origin');
   return headers;
+}
+
+/**
+ * Merge a value into the `Vary` response header instead of overwriting it,
+ * so an existing `Vary: Accept-Encoding` is preserved.
+ */
+function appendVary(headers: Headers, value: string) {
+  const existing = headers.get('Vary');
+
+  if (!existing) {
+    headers.set('Vary', value);
+    return;
+  }
+
+  const values = existing
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  if (values.some((entry) => entry.toLowerCase() === value.toLowerCase())) {
+    return;
+  }
+
+  headers.set('Vary', `${existing}, ${value}`);
 }
 
 function getCanaryPercentage(): number {
@@ -115,6 +143,30 @@ function setCanaryHeader(headers: Headers, isCanary: boolean) {
   }
 }
 
+/**
+ * The origin the request was made to.
+ *
+ * `nextUrl.origin` is used when the request is a `NextRequest`. For a plain
+ * `Request` (Edge runtime fallbacks and unit tests) the origin is derived
+ * from the request URL. Forwarded headers are deliberately ignored: they are
+ * only trustworthy when the deployment runs behind a proxy that sets
+ * `TRUST_PROXY`, and a spoofed `x-forwarded-host` must never be able to
+ * turn a cross-origin request into a same-origin one.
+ */
+function resolveRequestOrigin(request: NextRequest | Request): string | null {
+  const nextUrl = (request as NextRequest).nextUrl;
+
+  if (nextUrl?.origin) {
+    return nextUrl.origin;
+  }
+
+  try {
+    return new URL(request.url).origin;
+  } catch {
+    return null;
+  }
+}
+
 export function createMiddleware(middlewareConfig: MiddlewareConfig) {
   const canaryPercentage = middlewareConfig.getCanaryPercentage ?? getCanaryPercentage;
 
@@ -157,8 +209,6 @@ export function createMiddleware(middlewareConfig: MiddlewareConfig) {
       requestHeaders.set(CANARY_HEADER_NAME, 'true');
     }
 
-    const origin = request.headers.get('origin');
-
     // ------------------------------------------------------------------
     // 1. Request body size cap (O(1) - reads Content-Length)
     // ------------------------------------------------------------------
@@ -169,39 +219,84 @@ export function createMiddleware(middlewareConfig: MiddlewareConfig) {
 
     // ------------------------------------------------------------------
     // 2. CORS: reject disallowed origins before applying CSRF policy.
+    //
+    // The decision table lives in `app/lib/cors.ts` so the middleware and
+    // the unit tests agree:
+    //   - `none`        : no Origin header (not a browser cross-origin request)
+    //   - `same-origin` : the request origin matches the request itself, so
+    //                    the allowlist does not apply and no CORS headers
+    //                    are sent
+    //   - `allowed`     : cross-origin and allowlisted
+    //   - `null-origin` : `Origin: null` (sandboxed iframe / file://) -> 403
+    //   - `denied`      : cross-origin and not allowlisted -> 403
     // ------------------------------------------------------------------
+    const corsDecision = buildCorsDecision(
+      {
+        headers: request.headers,
+        nextUrl: (request as NextRequest).nextUrl,
+        url: request.url,
+        requestOrigin: resolveRequestOrigin(request),
+      },
+      middlewareConfig.allowedOrigins
+    );
+    const corsOrigin = corsDecision.origin;
     let originAllowed = false;
 
-    if (origin) {
-      originAllowed = isOriginAllowed(origin, middlewareConfig.allowedOrigins);
+    if (corsDecision.kind === 'null-origin') {
+      console.warn(
+        JSON.stringify({
+          type: 'cors.null_origin_rejection',
+          origin: corsOrigin,
+          method: request.method,
+          pathname,
+          request_id: requestId,
+        })
+      );
 
-      if (!originAllowed) {
-        console.warn(
-          JSON.stringify({
-            type: 'cors.rejection',
-            origin: origin,
-            method: request.method,
-            pathname,
+      const nullOriginResponse = NextResponse.json(
+        {
+          error: {
+            code: 'CORS_ORIGIN_NULL',
+            message: `Origin '${NULL_ORIGIN}' is not allowed.`,
             request_id: requestId,
-          })
-        );
-
-        const errorResponse = NextResponse.json(
-          {
-            error: {
-              code: 'CORS_ORIGIN_DISALLOWED',
-              message: `Origin '${origin}' is not allowed.`,
-              request_id: requestId,
-            },
           },
-          { status: 403 }
-        );
-        errorResponse.headers.set('Vary', 'Origin');
-        return finalize(errorResponse);
-      }
+        },
+        { status: 403 }
+      );
+      nullOriginResponse.headers.set('Vary', 'Origin');
+      return finalize(nullOriginResponse);
+    }
+
+    if (corsDecision.kind === 'denied') {
+      console.warn(
+        JSON.stringify({
+          type: 'cors.rejection',
+          origin: corsOrigin,
+          method: request.method,
+          pathname,
+          request_id: requestId,
+        })
+      );
+
+      const errorResponse = NextResponse.json(
+        {
+          error: {
+            code: 'CORS_ORIGIN_DISALLOWED',
+            message: `Origin '${corsOrigin}' is not allowed.`,
+            request_id: requestId,
+          },
+        },
+        { status: 403 }
+      );
+      errorResponse.headers.set('Vary', 'Origin');
+      return finalize(errorResponse);
+    }
+
+    if (corsDecision.kind === 'allowed') {
+      originAllowed = true;
 
       if (request.method === 'OPTIONS') {
-        const headers = buildCorsHeaders(origin);
+        const headers = buildCorsHeaders(corsOrigin!);
         headers.set(REQUEST_ID_HEADER, requestId);
         setCanaryHeader(headers, isCanary);
         return finalize(
@@ -213,7 +308,7 @@ export function createMiddleware(middlewareConfig: MiddlewareConfig) {
       }
     }
 
-    if (request.method === 'OPTIONS' && !origin) {
+    if (request.method === 'OPTIONS' && !originAllowed) {
       const response = new NextResponse(null, { status: 204 });
       response.headers.set(REQUEST_ID_HEADER, requestId);
       return finalize(response);
@@ -221,8 +316,17 @@ export function createMiddleware(middlewareConfig: MiddlewareConfig) {
 
     // ------------------------------------------------------------------
     // 3. CSRF protection for state-changing requests
+    //
+    // A request that carries no cookie and authenticates with a bearer
+    // token or an API key carries no ambient credential, so it cannot be
+    // forged by another origin and is exempt from the double-submit token.
+    // Requests that carry any cookie are always checked.
     // ------------------------------------------------------------------
-    if (isCsrfProtectedMethod(request.method) && !isWebhookPath(pathname)) {
+    if (
+      isCsrfProtectedMethod(request.method) &&
+      !isWebhookPath(pathname) &&
+      !isCsrfExemptRequest(request)
+    ) {
       const cookieToken = getCsrfCookieValue(request);
       const headerToken = getCsrfHeaderValue(request);
       if (!validateCsrfToken(cookieToken, headerToken)) {
@@ -245,16 +349,18 @@ export function createMiddleware(middlewareConfig: MiddlewareConfig) {
     if (request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') {
       const csrfResponse = attachCsrfCookie(response, request);
       if (originAllowed) {
-        csrfResponse.headers.set('Access-Control-Allow-Origin', origin!);
-        csrfResponse.headers.set('Vary', 'Origin');
+        csrfResponse.headers.set('Access-Control-Allow-Origin', corsOrigin!);
+        csrfResponse.headers.set('Access-Control-Expose-Headers', DEFAULT_CORS_EXPOSE_HEADERS);
+        appendVary(csrfResponse.headers, 'Origin');
       }
       return finalize(csrfResponse);
     }
 
     // Add CORS headers for allowed origins on non-preflight requests
     if (originAllowed) {
-      response.headers.set('Access-Control-Allow-Origin', origin!);
-      response.headers.set('Vary', 'Origin');
+      response.headers.set('Access-Control-Allow-Origin', corsOrigin!);
+      response.headers.set('Access-Control-Expose-Headers', DEFAULT_CORS_EXPOSE_HEADERS);
+      appendVary(response.headers, 'Origin');
     }
 
     return finalize(response);

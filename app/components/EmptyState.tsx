@@ -77,7 +77,6 @@ export function EmptyState({
   return (
     <section
       className={outerClass}
-      role="region"
       aria-labelledby={titleId}
       aria-describedby={descriptionId}
     >

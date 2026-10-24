@@ -15,23 +15,6 @@ export interface WithdrawalStatus {
   failureCode?: string;
 }
 
-export type * from "./openapi.generated";
-
-export type StreamStatus = "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
-export type StreamAction = "start" | "pause" | "stop" | "settle" | "withdraw" | "cancel";
-export type WithdrawalState = "pending" | "succeeded" | "failed";
-
-export interface WithdrawalStatus {
-  state: WithdrawalState;
-  requestedAt: string;
-  lastCheckedAt: string;
-  attempts: number;
-  settlementTxHash?: string;
-  confirmedTxHash?: string;
-  horizonCursor?: string;
-  failureCode?: string;
-}
-
 /**
  * Describes the refund split produced by cancel_stream.
  *
@@ -65,6 +48,10 @@ export interface CancellationSplit {
 export interface Stream {
   id: string;
   tenant?: string;
+  /** Alternate tenant key used by some persistence adapters (takes precedence over `tenant`). */
+  tenantId?: string;
+  /** Owning organisation id, when the stream is org-managed. */
+  orgId?: string;
   recipient: string;
   rate: string;
   schedule: string;
@@ -78,7 +65,6 @@ export interface Stream {
   updatedAt: string;
   startTime?: string;
   endTime?: string;
-  totalAmount?: string;
   settlementTxHash?: string;
   withdrawal?: WithdrawalStatus;
   /**
@@ -92,9 +78,6 @@ export interface Stream {
    * Required for the cancel-stream refund preview split.
    */
   totalAmount?: string;
-  /** ISO-8601 bounds of linear vesting, when a vesting window is configured. */
-  startTime?: string;
-  endTime?: string;
   /**
    * Present only on cancelled streams. Contains the full refund-split
    * breakdown so callers can verify the escrow-conservation invariant.
@@ -135,6 +118,19 @@ export interface Stream {
    * stream escrow account (GrantFox campaign, issue #pause-entrypoint).
    */
   pausedAt?: string;
+  /**
+   * Total stream duration in milliseconds. Used by the escrow vesting
+   * computation to derive the vested amount.
+   */
+  total?: string;
+  /**
+   * Total time the stream spent paused, in milliseconds.
+   */
+  totalPausedMs?: number;
+  /**
+   * Webhook endpoint (HTTPS) notified on stream lifecycle transitions.
+   */
+  webhook_url?: string;
   /** Completed pause time in milliseconds, excluded from linear vesting. */
   pausedDurationMs?: number;
 }
@@ -144,7 +140,7 @@ export interface User {
   email: string | null;
   display_name: string;
   avatar_url: string | null;
-  created_at: string;
+  created_at: string | null;
   last_seen: string | null;
 }
 

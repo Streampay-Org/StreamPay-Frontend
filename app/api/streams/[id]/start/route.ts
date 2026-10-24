@@ -8,7 +8,7 @@ import {
   withLock,
 } from "@/app/lib/db";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
-import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
+import { enforceStreamRbac, resolveActorAddress } from "@/app/lib/org-policy";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 import { addToOutbox } from "@/app/lib/webhook-outbox";
 import { toWebhookEvent } from "@/app/lib/webhook-events";
@@ -25,6 +25,20 @@ function getHeader(request: Request, name: string): string | null {
   return request.headers?.get?.(name) ?? null;
 }
 
+/**
+ * POST /api/streams/:id/start
+ *
+ * Starts a draft stream or resumes a paused stream.
+ *
+ * Actor resolution order:
+ * 1. Verified JWT `sub` claim (Bearer token).
+ * 2. `Actor-Wallet-Address` header (fallback only when STREAMPAY_ALLOW_ACTOR_HEADER=true).
+ * If both are present and differ, returns 403 ACTOR_MISMATCH.
+ *
+ * RBAC ordering:
+ * Runs after 404 stream existence check and before state transition validation,
+ * inside the stream lock.
+ */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -70,6 +84,10 @@ export async function POST(
       return createErrorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
     }
 
+    // RBAC: evaluated inside the lock, immediately after 404 and before state guard.
+    const rbacError = enforceStreamRbac(request, id, "start");
+    if (rbacError) return rbacError;
+
     // Allow both draft→active (initial start) and paused→active (resume).
     // Any other status is an illegal transition.
     if (stream.status !== "draft" && stream.status !== "paused") {
@@ -87,25 +105,6 @@ export async function POST(
       ? Math.max(0, resumedAt.getTime() - pauseStarted)
       : 0;
 
-    const actorAddress = getHeader(request, "Actor-Wallet-Address");
-    // Use "start" for initial activation; "resume" maps to "start" in the org policy
-    const orgAction = "start" as const;
-    const policyResult = actorAddress
-      ? checkStreamOrgPolicy(id, actorAddress, orgAction)
-      : null;
-    if (policyResult) {
-      if (!policyResult.allowed) {
-        return createErrorResponse(policyResult.code, policyResult.message, policyResult.httpStatus);
-      }
-      if (policyResult.requiresApproval) {
-        return createErrorResponse(
-          "APPROVAL_REQUIRED",
-          "This action requires multi-sig approval. Please initiate an approval request.",
-          409
-        );
-      }
-    }
-
     const updatedStream = {
       ...stream,
       nextAction: "pause" as const,
@@ -119,13 +118,20 @@ export async function POST(
     };
     db.streams.set(id, updatedStream);
 
+    let actorAddress: string | null = null;
+    try {
+      actorAddress = resolveActorAddress(request);
+    } catch {
+      actorAddress = getHeader(request, "Actor-Wallet-Address");
+    }
+
     appendStreamHistoryEvent({
       streamId: id,
       type: isResume ? "resumed" : "started",
       fromStatus: stream.status,
       toStatus: "active",
       at: updatedStream.updatedAt,
-      actorWallet: actorAddress,
+      actorWallet: actorAddress ?? undefined,
     });
     publishStreamChange({
       action: "start",

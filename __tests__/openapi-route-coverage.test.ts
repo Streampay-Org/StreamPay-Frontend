@@ -47,6 +47,11 @@ export const TODO_OTHER_WORKSTREAM_ROUTE_ALLOWLIST: ReadonlySet<string> = new Se
   "POST /api/streams/{id}/withdraw",
   "POST /api/v2/streams/batch",
   "PATCH /api/v2/streams/{id}",
+  // Multi-recipient group read & lifecycle actions (#1839); schemas pending.
+  "GET /api/v2/streams/multi/{groupId}",
+  "POST /api/v2/streams/multi/{groupId}/pause",
+  "POST /api/v2/streams/multi/{groupId}/start",
+  "POST /api/v2/streams/multi/{groupId}/stop",
   // Organizations, reconciliation & webhook subscription management (other workstream)
   "GET /api/orgs",
   "POST /api/orgs",

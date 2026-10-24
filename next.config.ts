@@ -8,7 +8,7 @@ import type { NextConfig } from "next";
  * - `compress`: enable gzip/br compression for all responses.
  * - `poweredByHeader`: remove the `X-Powered-By` header (minor payload trim).
  */
-const nextConfig: NextConfig = {
+const nextConfig = (): NextConfig => ({
   reactStrictMode: true,
   output: 'standalone',
   // CI blocks regressions with typecheck:core (tsconfig.strict-core.json).
@@ -17,11 +17,13 @@ const nextConfig: NextConfig = {
   // `npm run typecheck` (including generated Next types) are error-free.
   typescript: {
     ignoreBuildErrors: true,
+    tsconfigPath: 'tsconfig.json',
   },
   eslint: {
-    ignoreDuringBuilds: true,
+    ignoreDuringBuilds: false,
   },
   serverExternalPackages: ['pg'],
-};
+  experimental: {},
+});
 
 export default nextConfig;

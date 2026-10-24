@@ -46,5 +46,5 @@ async function handleIdentityMeGet(request: Request) {
 export async function GET(request: Request) {
   return withRouteSpan("/api/identity/me", () =>
     withRouteTimeout(request, () => handleIdentityMeGet(request)),
-  );
+  )(request);
 }

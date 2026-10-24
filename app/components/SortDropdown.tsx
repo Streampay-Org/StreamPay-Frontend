@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 
 export type SortOption = "newest" | "oldest" | "recipient-asc" | "recipient-desc" | "rate-asc" | "rate-desc";
 

@@ -1,8 +1,8 @@
-export const STROOPS_SCALE = 10_0000000n
+export const STROOPS_SCALE = 10_000_000n;
 export const STELLAR_MAX_I64 = 9_223_372_036_854_775_807n;
 
 export const SUPPORTED_ASSETS = ["XLM", "USDC"] as const;
-export type SupportedAsset = (typeof SUPPORTED_ASSETSs)[number];
+export type SupportedAsset = (typeof SUPPORTED_ASSETS)[number];
 
 export type ValidationError = {
   code:
@@ -179,6 +179,66 @@ export function deriveEscrowTotal(
   return Amount.fromStroops(stroops, rate.amount.asset);
 }
 
+/**
+ * Parse a plain decimal amount string into an exact `bigint` stroop amount.
+ *
+ * This is the shared, precision-safe entry point for UI code that needs to
+ * reason about amounts without going through an `Amount` instance (which is
+ * asset-scoped). No `Number` arithmetic is used, so values above 2^53 stroops
+ * keep their exact value.
+ *
+ * Rejects negative values, more than 7 decimal places and anything above
+ * Stellar's int64 stroop maximum.
+ */
+export function parseStroops(input: string): ValidationResult<bigint> {
+  const normalized = normalizeInput(input);
+
+  if (normalized.length === 0) {
+    return validationError(400, "INVALID_AMOUNT_FORMAT", "Amount must be a plain decimal value.");
+  }
+
+  if (normalized.startsWith("-")) {
+    return validationError(422, "NEGATIVE_AMOUNT", "Amount must be zero or greater.");
+  }
+
+  if (!AMOUNT_PATTERN.test(normalized)) {
+    return validationError(400, "INVALID_AMOUNT_FORMAT", "Amount must be a plain decimal value.");
+  }
+
+  const [wholePart, fractionPart = ""] = normalized.split(".");
+
+  if (fractionPart.length > 7) {
+    return validationError(
+      422,
+      "DECIMAL_PRECISION_EXCEEDED",
+      "Amount supports at most 7 decimal places.",
+    );
+  }
+
+  const whole = BigInt(wholePart);
+  const paddedFraction = `${fractionPart}0000000`.slice(0, 7);
+  const fraction = BigInt(paddedFraction);
+
+  const stroops = whole * STROOPS_SCALE + fraction;
+
+  if (stroops > STELLAR_MAX_I64) {
+    return validationError(422, "AMOUNT_OVERFLOW", "Amount exceeds the Stellar maximum.");
+  }
+
+  return { ok: true, value: stroops };
+}
+
+/**
+ * Format an exact stroop amount as a plain decimal string (no trailing zeros).
+ *
+ * @example
+ *   formatStroops(98_500_000n) // "98.5"
+ *   formatStroops(50_000_000n) // "50"
+ */
+export function formatStroops(stroops: bigint): string {
+  return normalizeDecimalString(stroops);
+}
+
 export function parseDurationSeconds(input: string): ValidationResult<bigint> {
   const normalized = normalizeInput(input);
 
@@ -195,32 +255,88 @@ export function parseDurationSeconds(input: string): ValidationResult<bigint> {
   return { ok: true, value };
 }
 
-export function parseStroops(input: string): ValidationResult<bigint> {
-  const normalized = normalizeInput(input);
+export const TEMPLATE_AMOUNT_PATTERN = /^\d{1,12}(?:\.\d{1,7})?$/;
 
-  if (normalized.startsWith("-")) {
-    return validationError(422, "NEGATIVE_AMOUNT", "Amount must be zero or greater.");
+export type TemplateAmountValidationResult =
+  | { ok: true; value: string }
+  | { ok: false; code: "INVALID_AMOUNT"; message: string };
+
+/**
+ * Validates and converts a template amount input into a canonical decimal string.
+ *
+ * Rules:
+ * - Must be a decimal string matching `^\d{1,12}(\.\d{1,7})?$` or legacy numeric input.
+ * - Greater than 0.
+ * - At most the Stellar int64-stroop maximum (STELLAR_MAX_I64).
+ * - For numeric input, rejects if precision would be lost (more than 7 decimals, scientific notation, etc.).
+ */
+export function parseTemplateAmount(input: unknown): TemplateAmountValidationResult {
+  if (input === null || input === undefined || typeof input === "boolean") {
+    return {
+      ok: false,
+      code: "INVALID_AMOUNT",
+      message: "amountPerInterval must be a positive decimal number with at most 7 decimal places.",
+    };
   }
 
-  if (!AMOUNT_PATTERN.test(normalized)) {
-    return validationError(400, "INVALID_AMOUNT_FORMAT", "Amount must be a plain decimal value.");
+  let candidate: string;
+
+  if (typeof input === "number") {
+    if (!Number.isFinite(input) || input <= 0) {
+      return {
+        ok: false,
+        code: "INVALID_AMOUNT",
+        message: "amountPerInterval must be a positive number.",
+      };
+    }
+
+    const rawStr = input.toString();
+    if (rawStr.includes("e") || rawStr.includes("E")) {
+      return {
+        ok: false,
+        code: "INVALID_AMOUNT",
+        message: "amountPerInterval must be a plain decimal without scientific notation.",
+      };
+    }
+
+    candidate = rawStr;
+  } else if (typeof input === "string") {
+    candidate = input.trim();
+  } else {
+    return {
+      ok: false,
+      code: "INVALID_AMOUNT",
+      message: "amountPerInterval must be a string or number.",
+    };
   }
 
-  const [wholePart, fractionPart = ""] = normalized.split(".");
-
-  if (fractionPart.length > 7) {
-    return validationError(422, "DECIMAL_PRECISION_EXCEEDED", "Amount supports at most 7 decimal places.");
+  if (!TEMPLATE_AMOUNT_PATTERN.test(candidate)) {
+    return {
+      ok: false,
+      code: "INVALID_AMOUNT",
+      message: "amountPerInterval must be a positive decimal number with at most 7 decimal places.",
+    };
   }
 
-  const whole = BigInt(wholePart);
-  const paddedFraction = `${fractionPart}0000000`.slice(0, 7);
-  const fraction = BigInt(paddedFraction);
+  const [wholePart, fractionPart = ""] = candidate.split(".");
+  const paddedFraction = fractionPart.padEnd(7, "0");
+  const stroops = BigInt(wholePart) * STROOPS_SCALE + BigInt(paddedFraction);
 
-  const stroops = whole * STROOPS_SCALE + fraction;
+  if (stroops <= 0n) {
+    return {
+      ok: false,
+      code: "INVALID_AMOUNT",
+      message: "amountPerInterval must be greater than zero.",
+    };
+  }
 
   if (stroops > STELLAR_MAX_I64) {
-    return validationError(422, "AMOUNT_OVERFLOW", "Amount exceeds the Stellar maximum");
+    return {
+      ok: false,
+      code: "INVALID_AMOUNT",
+      message: "amountPerInterval exceeds maximum Stellar bounds.",
+    };
   }
 
-  return { ok: true, value: stroops };
+  return { ok: true, value: candidate };
 }

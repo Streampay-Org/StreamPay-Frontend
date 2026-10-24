@@ -139,7 +139,11 @@ describe("computeWithdraw", () => {
 });
 
 describe("resolveEscrowState", () => {
-  function streamAt(createdAt: string): Stream {
+  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+  /** An ended stream with a 30-day linear vesting window starting at `startTime`. */
+  function streamFrom(startTime: string): Stream {
+    const endTime = new Date(Date.parse(startTime) + THIRTY_DAYS_MS).toISOString();
     return {
       id: "stream-test",
       recipient: RECIPIENT,
@@ -149,30 +153,43 @@ describe("resolveEscrowState", () => {
       token: "XLM",
       totalAmount: "1000",
       releasedAmount: "250",
-      createdAt,
-      updatedAt: createdAt,
+      startTime,
+      endTime,
+      createdAt: startTime,
+      updatedAt: startTime,
     };
   }
 
-  it("vests linearly over the default 30-day schedule", () => {
+  it("vests linearly over the persisted vesting window", () => {
     const state = resolveEscrowState(
-      streamAt("2026-04-13T12:00:00.000Z"),
+      streamFrom("2026-04-13T12:00:00.000Z"),
       NOW,
     );
 
     expect(state).toEqual({
-      totalAmount: 1_000n,
-      releasedAmount: 250n,
-      vestedAmount: 500n,
+      ok: true,
+      value: { total: 1_000n, released: 250n, vested: 500n },
     });
   });
 
-  it("caps vestedAmount at totalAmount after the schedule completes", () => {
+  it("caps the vested amount at the total after the window completes", () => {
     const state = resolveEscrowState(
-      streamAt("2026-01-01T00:00:00.000Z"),
+      streamFrom("2026-01-01T00:00:00.000Z"),
       NOW,
     );
 
-    expect(state.vestedAmount).toBe(1_000n);
+    expect(state.ok && state.value.vested).toBe(1_000n);
+  });
+
+  it("fails closed with ESCROW_UNKNOWN when no window or vested snapshot exists", () => {
+    const { startTime: _start, endTime: _end, ...unknownWindow } = streamFrom(
+      "2026-04-13T12:00:00.000Z",
+    );
+
+    expect(resolveEscrowState(unknownWindow, NOW)).toEqual({
+      ok: false,
+      code: "ESCROW_UNKNOWN",
+    });
   });
 });
+

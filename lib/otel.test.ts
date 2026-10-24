@@ -52,7 +52,6 @@ import {
   tracer,
   injectTraceHeaders,
   extractTraceHeaders,
-  isTelemetryConsented,
   setTelemetryConsent,
   resetTelemetryConsent,
   redactAttributes,
@@ -559,7 +558,7 @@ describe('otlpHttpExport', () => {
       durationMs: 50, status: 'OK',
       attributes: {
         email: 'user@corp.io',
-        recipient: 'GABCDEF0000000000000000000000000000000000000000000000000000001234',
+        recipient: 'GABCDEF0000000000000000000000000000000000000000000001234',
         safe_metric: 42,
       },
       events: [{ name: 'exception', timestamp: 1001, attributes: { 'exception.message': 'bad for user@corp.io' } }],
@@ -568,7 +567,9 @@ describe('otlpHttpExport', () => {
     await fresh(span);
     const body = JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string);
     const outAttrs = body.resourceSpans[0].scopeSpans[0].spans[0].attributes;
-    const byKey = Object.fromEntries(outAttrs.map((a: any) => [a.key, a.value.stringValue]));
+    const byKey = Object.fromEntries(
+      outAttrs.map((a: any) => [a.key, a.value.stringValue ?? a.value.doubleValue]),
+    );
     expect(byKey.email).toBe('[REDACTED]');
     expect(byKey.recipient).toBe('[REDACTED]');
     expect(byKey.safe_metric).toBe(42);
@@ -670,7 +671,7 @@ describe('redactAttributes', () => {
   });
 
   it('masks PII-shaped values even on non-sensitive keys', () => {
-    const out = redactAttributes({ actor: 'user@corp.io', account: 'GABCDEF0000000000000000000000000000000000000000000000000000001234' });
+    const out = redactAttributes({ actor: 'user@corp.io', account: 'GABCDEF0000000000000000000000000000000000000000000001234' });
     expect(out.actor).toBe('[REDACTED]');
     expect(out.account).toBe('[REDACTED]');
   });
@@ -681,7 +682,7 @@ describe('redactAttributes', () => {
   });
 
   it('redacts PII within array attribute values', () => {
-    const out = redactAttributes({ recipients: ['user@corp.io', 'GABCDEF0000000000000000000000000000000000000000000000000000001234', 'pub'] });
+    const out = redactAttributes({ recipients: ['user@corp.io', 'GABCDEF0000000000000000000000000000000000000000000001234', 'pub'] });
     expect(out.recipients).toEqual(['[REDACTED]', '[REDACTED]', 'pub']);
   });
 

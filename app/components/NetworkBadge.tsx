@@ -86,7 +86,7 @@ export function NetworkBadge({
         <span>{labels.label}</span>
       </div>
     );
-  } catch (error) {
+  } catch {
     // If config is not initialized, don't show the badge
     // This can happen during initial load or in error states
     return null;
@@ -148,7 +148,7 @@ export function AssetLabel({
         </span>
       </span>
     );
-  } catch (error) {
+  } catch {
     return <span className={className}>{assetCode}</span>;
   }
 }

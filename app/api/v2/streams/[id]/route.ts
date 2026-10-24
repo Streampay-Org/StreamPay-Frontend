@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getStore } from "@/app/lib/db";
 import { getCorrelationContext } from "@/app/lib/logger";
-import { toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
+import { ProjectionError, toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
 import { inferStreamChangeAction, publishStreamChange } from "@/app/lib/stream-publish";
 import type { Stream } from "@/app/types/openapi";
 

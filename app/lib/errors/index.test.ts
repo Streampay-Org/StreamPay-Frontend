@@ -38,7 +38,7 @@ describe("errorResponse()", () => {
   });
 
   it("resolves request_id from withCorrelationContext", async () => {
-    await withCorrelationContext({ request_id: "abc" }, async () => {
+    await withCorrelationContext({ request_id: "abc", correlation_id: "abc" }, async () => {
       const res = errorResponse(ErrorCode.INTERNAL_SERVER_ERROR, "Oops.");
       const body = await parseBody(res);
       expect(body.error.request_id).toBe("abc");

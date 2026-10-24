@@ -153,7 +153,9 @@ export const dbClient = {
       [status, timestamp] = args as [string, number];
     }
 
-    console.log(`[DB] Updated last run status to ${status}`);
+    console.log(
+      `[DB] Updated last run status for tenant ${tenantId} to ${status} at ${new Date(timestamp).toISOString()}`,
+    );
   },
 };
 

@@ -4,7 +4,7 @@ import { db, resetDb, getStore } from "@/app/lib/db";
 import { eventBus } from "@/app/lib/event-bus";
 import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
 import jwt from "jsonwebtoken";
-import { getJwtSecret } from "@/app/lib/auth";
+import { getJwtSecret, signToken } from "@/app/lib/auth";
 
 describe("GET /api/streams/:id/events (SSE)", () => {
   beforeEach(() => {
@@ -267,7 +267,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const req = new Request("http://localhost/api/streams/stream-ada/events", {
       headers: {
         authorization: `Bearer ${token}`,
-        "x-tenant-id": "tenant-1",
+        "x-tenant-id": "default",
       },
     }) as any;
 
@@ -275,8 +275,14 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     expect(sseRes.status).toBe(200);
     const reader = sseRes.body!.getReader();
 
+    // stream-ada is org-owned, so the pause must carry an authorised org
+    // member identity (org RBAC, #1806): use the org-acme pauser.
+    const pauserToken = signToken("GPAUSER75IVFB7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7G");
     const pauseRes = await pausePOST(
-      new Request("http://localhost/api/streams/stream-ada/pause", { method: "POST" }),
+      new Request("http://localhost/api/streams/stream-ada/pause", {
+        method: "POST",
+        headers: { authorization: `Bearer ${pauserToken}` },
+      }),
       { params: Promise.resolve({ id: "stream-ada" }) },
     );
     expect(pauseRes.status).toBe(200);
@@ -304,7 +310,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
       const req = new Request("http://localhost/api/streams/stream-ada/events", {
         headers: {
           authorization: `Bearer ${token}`,
-          "x-tenant-id": "tenant-1",
+          "x-tenant-id": "default",
         },
       }) as any;
 

@@ -249,7 +249,7 @@ describe("validateMultiRecipientStreamBody", () => {
   it("accepts exactly MAX_RECIPIENTS recipients", () => {
     const recipients = new Array(MAX_RECIPIENTS)
       .fill(0)
-      .map((_, index) => ({ address: KEY_A, percentage: 100 / MAX_RECIPIENTS }));
+      .map(() => ({ address: KEY_A, percentage: 100 / MAX_RECIPIENTS }));
     const errors = validateMultiRecipientStreamBody(validBody({ recipients }));
     expect(errors).toEqual([]);
   });

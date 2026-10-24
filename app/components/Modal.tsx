@@ -242,11 +242,14 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
     }
   };
 
-  if (!shouldRender) return null;
+  // Render in the same commit that `isOpen` flips to true, so the focus trap's
+  // open effect can move focus into an already-mounted dialog.
+  if (!shouldRender && !isOpen) return null;
 
   return (
     <div
       data-modal-overlay="true"
+      role="presentation"
       onMouseDown={handleOverlayPointerDown}
       onClick={handleOverlayClick}
       onAnimationEnd={handleAnimationEnd}
@@ -263,6 +266,9 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
         animation: `${isOpen ? "fadeIn" : "fadeOut"} var(--motion-duration-medium) var(--motion-easing) forwards`,
       }}
     >
+      {/* Clicks inside the dialog must not reach the backdrop's dismiss handler;
+          keyboard interaction is handled by onKeyDown. */}
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <div
         ref={dialogRef}
         role="dialog"
@@ -271,8 +277,8 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
         aria-describedby={ariaDescribedBy}
         tabIndex={-1}
         className={className}
-        onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
+        onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
           maxWidth: "500px",

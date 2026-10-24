@@ -5,7 +5,10 @@ import {
   createRate,
   deriveEscrowTotal,
   formatRate,
+  formatStroops,
   parseDurationSeconds,
+  parseStroops,
+  parseTemplateAmount,
 } from "./amount";
 
 describe("Amount.parse", () => {
@@ -299,6 +302,183 @@ describe("Fuzz-style bounded checks", () => {
         expect(["SUB_OPERATION_PRECISION", "AMOUNT_OVERFLOW", "INVALID_DURATION"]).toContain(total.error.code);
         expect([400, 422]).toContain(total.error.httpStatus);
       }
+    }
+  });
+});
+
+describe("parseTemplateAmount", () => {
+  it("accepts valid decimal strings with up to 7 decimal places", () => {
+    const validCases = [
+      ["120.5", "120.5"],
+      ["120", "120"],
+      ["0.1", "0.1"],
+      ["0.0000001", "0.0000001"],
+      ["922337203685.4775807", "922337203685.4775807"],
+      ["  50.25  ", "50.25"],
+    ];
+
+    for (const [input, expected] of validCases) {
+      const res = parseTemplateAmount(input);
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.value).toBe(expected);
+      }
+    }
+  });
+
+  it("accepts safe legacy numeric inputs converting them to decimal strings", () => {
+    const resInt = parseTemplateAmount(120);
+    expect(resInt).toEqual({ ok: true, value: "120" });
+
+    const resDec = parseTemplateAmount(120.5);
+    expect(resDec).toEqual({ ok: true, value: "120.5" });
+  });
+
+  it("rejects non-numeric strings, exponentials, and invalid numbers", () => {
+    const invalidInputs = [
+      "abc",
+      "Infinity",
+      "NaN",
+      "1e-9",
+      "1E3",
+      "",
+      "   ",
+      "-5",
+      "-0.1",
+      "0",
+      "0.0000000",
+      null,
+      undefined,
+      false,
+      true,
+      {},
+      [],
+    ];
+
+    for (const input of invalidInputs) {
+      const res = parseTemplateAmount(input);
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.code).toBe("INVALID_AMOUNT");
+      }
+    }
+  });
+
+  it("rejects strings exceeding 7 decimal places", () => {
+    const res = parseTemplateAmount("0.12345678");
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.code).toBe("INVALID_AMOUNT");
+    }
+  });
+
+  it("rejects numeric inputs where precision is lost or exceeding 7 decimals", () => {
+    // 0.1 + 0.2 has 17 decimal places due to IEEE-754
+    const resLost = parseTemplateAmount(0.1 + 0.2);
+    expect(resLost.ok).toBe(false);
+    if (!resLost.ok) {
+      expect(resLost.code).toBe("INVALID_AMOUNT");
+    }
+
+    // 1e-9 has exponent format
+    const resExp = parseTemplateAmount(1e-9);
+    expect(resExp.ok).toBe(false);
+    if (!resExp.ok) {
+      expect(resExp.code).toBe("INVALID_AMOUNT");
+    }
+
+    // Negative number
+    const resNeg = parseTemplateAmount(-10);
+    expect(resNeg.ok).toBe(false);
+    if (!resNeg.ok) {
+      expect(resNeg.code).toBe("INVALID_AMOUNT");
+    }
+
+    // Zero
+    const resZero = parseTemplateAmount(0);
+    expect(resZero.ok).toBe(false);
+    if (!resZero.ok) {
+      expect(resZero.code).toBe("INVALID_AMOUNT");
+    }
+  });
+
+  it("rejects amounts exceeding Stellar int64 stroop bounds", () => {
+    const overflowStr = "922337203685.4775808";
+    const res = parseTemplateAmount(overflowStr);
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.code).toBe("INVALID_AMOUNT");
+    }
+  });
+});
+
+describe("parseStroops", () => {
+  it.each([
+    ["0", 0n],
+    ["1", STROOPS_SCALE],
+    ["1.0", STROOPS_SCALE],
+    ["1.0000001", STROOPS_SCALE + 1n],
+    ["0.0000001", 1n],
+    ["98.5", 985_000_000n],
+    ["  25.5  ", 255_000_000n],
+    ["922337203685.4775807", STELLAR_MAX_I64],
+  ])("parses %s exactly", (input, expected) => {
+    const result = parseStroops(input);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(expected);
+    }
+  });
+
+  it("keeps precision above 2^53 stroops", () => {
+    const result = parseStroops("900719925.4740993");
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // 2^53 + 1 stroops: a `Number` round-trip would lose the last digit.
+      expect(result.value).toBe(9_007_199_254_740_993n);
+      expect(result.value > BigInt(Number.MAX_SAFE_INTEGER)).toBe(true);
+    }
+  });
+
+  it.each([
+    ["", "INVALID_AMOUNT_FORMAT"],
+    ["abc", "INVALID_AMOUNT_FORMAT"],
+    ["1e3", "INVALID_AMOUNT_FORMAT"],
+    ["-1", "NEGATIVE_AMOUNT"],
+    ["1.12345678", "DECIMAL_PRECISION_EXCEEDED"],
+    ["922337203685.4775808", "AMOUNT_OVERFLOW"],
+    ["1000000000000", "AMOUNT_OVERFLOW"],
+  ])("rejects %s", (input, code) => {
+    const result = parseStroops(input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe(code);
+    }
+  });
+});
+
+describe("formatStroops", () => {
+  it.each([
+    [0n, "0"],
+    [50_000_000n, "5"],
+    [98_500_000n, "9.85"],
+    [985_000_000n, "98.5"],
+    [1n, "0.0000001"],
+    [STELLAR_MAX_I64, "922337203685.4775807"],
+  ])("formats %s", (stroops, expected) => {
+    expect(formatStroops(stroops)).toBe(expected);
+  });
+
+  it("round-trips through parseStroops", () => {
+    const stroops = 123_456_789n;
+    const parsed = parseStroops(formatStroops(stroops));
+
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value).toBe(stroops);
     }
   });
 });

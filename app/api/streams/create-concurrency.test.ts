@@ -214,7 +214,8 @@ describe("POST /api/streams concurrency and collision safety", () => {
 
   it("Scenario 8: all creation paths use newStreamId() without randomUUID().slice(0, 8) (grep check)", () => {
     const creationFiles = [
-      "app/api/streams/route.ts",
+      // POST /api/streams delegates id generation to the shared create core (#1773).
+      "app/lib/stream-create-core.ts",
       "app/api/v2/streams/route.ts",
       "app/api/streams/batch/route.ts",
       "app/api/streams/import/route.ts",

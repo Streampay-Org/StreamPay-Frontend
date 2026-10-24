@@ -65,7 +65,7 @@ export const VirtualListItem = React.forwardRef<HTMLLIElement, VirtualListItemPr
         resizeObserver.disconnect();
         observer.disconnect();
       };
-    }, [defaultHeight]);
+    }, [defaultHeight, ref]);
 
     return (
       <li
