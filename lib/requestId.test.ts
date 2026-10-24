@@ -1,4 +1,3 @@
-/** @jest-environment node */
 
 /**
  * Tests for X-Request-Id propagation utilities (lib/requestId.ts).
@@ -10,6 +9,7 @@
  *  - applyRequestIdPolicy: stamps both request and response headers
  */
 
+/** @jest-environment node */
 import {
   REQUEST_ID_HEADER,
   generateRequestId,
@@ -17,12 +17,22 @@ import {
   resolveRequestId,
   applyRequestIdPolicy,
 } from './requestId';
+import { webcrypto } from 'node:crypto';
 
 // ---------------------------------------------------------------------------
 // generateRequestId
 // ---------------------------------------------------------------------------
 
 describe('generateRequestId', () => {
+  beforeAll(() => {
+    // `crypto.randomUUID` must be available globally in the node test
+    // environment. jsdom provides it, but the node environment does not,
+    // so we polyfill it from node:crypto when absent.
+    if (typeof globalThis.crypto?.randomUUID !== 'function') {
+      (globalThis as any).crypto = webcrypto;
+    }
+  });
+
   it('returns a string with the req_ prefix', () => {
     const id = generateRequestId();
     expect(id).toMatch(/^req_/);
@@ -67,6 +77,11 @@ describe('isValidRequestId', () => {
   it('accepts a value of exactly 128 characters', () => {
     const atLimit = 'a'.repeat(128);
     expect(isValidRequestId(atLimit)).toBe(true);
+  });
+
+  it('rejects a value of 129 printable characters', () => {
+    const overLimit = 'a'.repeat(129);
+    expect(isValidRequestId(overLimit)).toBe(false);
   });
 
   it('rejects a value containing whitespace', () => {
@@ -176,6 +191,12 @@ describe('applyRequestIdPolicy', () => {
 describe('middleware request-id propagation (integration)', () => {
   let middleware: (req: Request) => Promise<Response>;
 
+  beforeAll(() => {
+    if (typeof globalThis.crypto?.randomUUID !== 'function') {
+      (globalThis as any).crypto = webcrypto;
+    }
+  });
+
   beforeEach(async () => {
     jest.resetModules();
 
@@ -184,6 +205,7 @@ describe('middleware request-id propagation (integration)', () => {
     (process.env as any).NODE_ENV = 'production';
     (process.env as any).ALLOWED_ORIGINS = 'https://allowed.example.com';
 
+    jest.resetModules();
     const mod = await import('../middleware');
     middleware = mod.middleware as any;
   });

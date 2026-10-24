@@ -5,6 +5,7 @@ import {
   getStore,
   idempotencyToken,
   setIdempotency,
+  newStreamId,
 } from "@/app/lib/db";
 import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
@@ -14,6 +15,7 @@ import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { checkTokenAllowed, checkTokenAllowedForOrg, normaliseToken } from "@/app/lib/token-allowlist";
 import { validateCreateStreamBody } from "@/app/lib/stream-validation";
 import { orgDb } from "@/app/lib/org-db";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
 
 const MAX_BATCH_SIZE = 20;
 
@@ -247,9 +249,21 @@ export async function POST(request: NextRequest) {
 
   const now = new Date().toISOString();
   const createdStreams = [];
+  const authenticatedActor = tryAuthenticateRequest(request);
+  const senderAddress = authenticatedActor?.walletAddress ?? null;
 
   for (const input of validItems) {
     const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
+    const ownership: "individual" | "org" | "unclaimed" = input.orgId
+      ? "org"
+      : authenticatedActor
+        ? "individual"
+        : "unclaimed";
+
+    if (input.orgId) {
+      orgDb.streamOwnership.set(id, input.orgId);
+    }
+
     const newStream = {
       createdAt: now,
       id,
@@ -260,6 +274,8 @@ export async function POST(request: NextRequest) {
       status: "draft" as const,
       updatedAt: now,
       token: input.token,
+      senderAddress,
+      ownership,
     };
 
     streamRepository.streams.set(id, newStream);

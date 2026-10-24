@@ -2,11 +2,12 @@
 
 import jwt from "jsonwebtoken";
 import { GET } from "./route";
-import { JWT_SECRET } from "@/app/lib/auth";
+import { getJwtSecret } from "@/app/lib/auth";
 import { auditLogStore, resetAuditLogStore } from "@/app/lib/audit-log";
+import { AuditResponseSchema } from "@/app/lib/dtos/audit.dto";
 
 function signAccessToken(role: string, actorId: string) {
-  return jwt.sign({ sub: `${actorId}-wallet`, role, actorId, iss: "streampay", aud: "streampay-api" }, JWT_SECRET, {
+  return jwt.sign({ sub: `${actorId}-wallet`, role, actorId, iss: "streampay", aud: "streampay-api" }, getJwtSecret(), {
     expiresIn: "15m",
   });
 }
@@ -50,6 +51,8 @@ describe("GET /api/audit", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
+    const parsed = AuditResponseSchema.safeParse(body);
+    expect(parsed.success).toBe(true);
     expect(body.meta.chainIntact).toBe(true);
     expect(body.data).toHaveLength(1);
     expect(body.data[0].action).toBe("stream.settle");

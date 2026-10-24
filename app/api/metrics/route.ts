@@ -1,8 +1,10 @@
 import { logger } from "@/app/lib/logger";
 import { getMetrics } from "@/app/lib/rate-limit-metrics";
+import { withRouteSpan } from "@/lib/routeSpan";
 import { registry } from "@/src/metrics/registry";
 import { NextResponse } from "next/server";
 import { withRouteTimeout } from "@/src/middleware/timeout";
+import { createHash, timingSafeEqual } from "crypto";
 
 /**
  * GET /api/metrics
@@ -15,8 +17,9 @@ import { withRouteTimeout } from "@/src/middleware/timeout";
  * `Authorization: Bearer <token>`. If the variable is unset the route is
  * disabled (returns 503) so metrics are never exposed accidentally.
  *
- * The token comparison is constant-time to avoid leaking its length or
- * contents through timing side-channels.
+ * The token comparison is constant-time (comparing SHA-256 digests via
+ * crypto.timingSafeEqual) to avoid leaking its length or contents through
+ * timing side-channels.
  *
  * ## Response
  * - `200 text/plain; version=0.0.4` — Prometheus metrics on success.
@@ -37,17 +40,13 @@ import { withRouteTimeout } from "@/src/middleware/timeout";
 const PROM_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8";
 
 /**
- * Constant-time string comparison. Returns `true` only when both inputs are
- * identical. The loop always runs over the longer of the two lengths so the
- * timing does not depend on where the first mismatch occurs.
+ * Constant-time string comparison using SHA-256 digests and
+ * crypto.timingSafeEqual to prevent timing side-channel attacks.
  */
-function timingSafeEqual(a: string, b: string): boolean {
-  const len = Math.max(a.length, b.length);
-  let mismatch = a.length ^ b.length;
-  for (let i = 0; i < len; i += 1) {
-    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return mismatch === 0;
+function safeCompareTokens(presented: string, expected: string): boolean {
+  const presentedDigest = createHash("sha256").update(presented).digest();
+  const expectedDigest = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(presentedDigest, expectedDigest);
 }
 
 /** Escapes a Prometheus label value per the text exposition format spec. */
@@ -96,7 +95,7 @@ async function handleMetricsGet(request: Request): Promise<NextResponse> {
     logger.warn("Metrics endpoint requested but METRICS_AUTH_TOKEN is not configured");
     return NextResponse.json(
       { error: { code: "METRICS_DISABLED", message: "Metrics endpoint is not configured." } },
-      { status: 503 }
+      { status: 503, headers: { "Cache-Control": "no-store" } }
     );
   }
 
@@ -105,15 +104,15 @@ async function handleMetricsGet(request: Request): Promise<NextResponse> {
   if (!match) {
     return NextResponse.json(
       { error: { code: "UNAUTHORIZED", message: "Missing or malformed Authorization header." } },
-      { status: 401, headers: { "WWW-Authenticate": "Bearer" } }
+      { status: 401, headers: { "WWW-Authenticate": "Bearer", "Cache-Control": "no-store" } }
     );
   }
 
-  if (!timingSafeEqual(match[1], expected)) {
+  if (!safeCompareTokens(match[1], expected)) {
     logger.warn("Metrics endpoint rejected an invalid token");
     return NextResponse.json(
       { error: { code: "FORBIDDEN", message: "Invalid metrics token." } },
-      { status: 403 }
+      { status: 403, headers: { "Cache-Control": "no-store" } }
     );
   }
 
@@ -130,6 +129,8 @@ async function handleMetricsGet(request: Request): Promise<NextResponse> {
   });
 }
 
-export async function GET(request: Request): Promise<NextResponse> {
-  return withRouteTimeout(request, () => handleMetricsGet(request));
+export async function GET(request: Request): Promise<Response> {
+  return withRouteSpan("/api/metrics", () =>
+    withRouteTimeout(request, () => handleMetricsGet(request)),
+  );
 }

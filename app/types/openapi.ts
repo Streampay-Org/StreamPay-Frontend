@@ -42,6 +42,8 @@ export interface WithdrawalStatus {
  * The contract escrow is fully drained after cancellation (no dust).
  */
 export interface CancellationSplit {
+  /** Wallet address of the stream sender receiving the refund leg. */
+  senderAddress?: string;
   /** Raw units paid to the recipient (vested but not yet released). */
   recipientPayout: string;
   /** Raw units refunded to the sender (unvested remainder). */
@@ -62,6 +64,7 @@ export interface CancellationSplit {
 
 export interface Stream {
   id: string;
+  tenant?: string;
   recipient: string;
   rate: string;
   schedule: string;
@@ -89,6 +92,9 @@ export interface Stream {
    * Required for the cancel-stream refund preview split.
    */
   totalAmount?: string;
+  /** ISO-8601 bounds of linear vesting, when a vesting window is configured. */
+  startTime?: string;
+  endTime?: string;
   /**
    * Present only on cancelled streams. Contains the full refund-split
    * breakdown so callers can verify the escrow-conservation invariant.
@@ -96,9 +102,16 @@ export interface Stream {
   cancellation?: CancellationSplit;
   /**
    * Wallet address of the stream sender (payer). Required for the refund leg
-   * of cancel_stream. Stored at creation time.
+   * of cancel_stream. Stored at creation time. `null` for unclaimed streams.
    */
-  senderAddress?: string;
+  senderAddress?: string | null;
+  /**
+   * Stream ownership state:
+   * - "individual": Owned by a specific wallet sender (requires sender JWT auth to cancel).
+   * - "org": Managed by organization RBAC policy.
+   * - "unclaimed": Created unauthenticated or legacy backfill; cannot be cancelled until claimed.
+   */
+  ownership?: "individual" | "org" | "unclaimed";
   /**
    * Vested amount at the time of the last on-chain update (raw i128 units).
    * Tracks how much the recipient has earned so far.
@@ -122,6 +135,8 @@ export interface Stream {
    * stream escrow account (GrantFox campaign, issue #pause-entrypoint).
    */
   pausedAt?: string;
+  /** Completed pause time in milliseconds, excluded from linear vesting. */
+  pausedDurationMs?: number;
 }
 
 export interface User {
@@ -129,7 +144,7 @@ export interface User {
   email: string | null;
   display_name: string;
   avatar_url: string | null;
-  created_at: string;
+  created_at: string | null;
   last_seen: string | null;
 }
 

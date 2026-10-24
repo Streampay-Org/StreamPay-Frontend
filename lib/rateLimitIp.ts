@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRateLimitStore, RateLimitStore } from "@/app/lib/rate-limit-store";
-import { recordThrottle, recordRequest } from "@/app/lib/rate-limit-metrics";
+import { recordThrottle, recordRequest, redactRateLimitIdentity } from "@/app/lib/rate-limit-metrics";
 import { resolveRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
 
 /**
@@ -26,8 +26,7 @@ export interface WalletRateLimitResult {
  * Prefers gateway-forwarded headers; falls back to a generated id.
  */
 export function resolveCorrelationId(req: NextRequest): string {
-  return resolveRequestId(req.headers);
-}
+  const forwarded =
     req.headers.get("x-request-id") ?? req.headers.get("x-correlation-id");
   if (forwarded && forwarded.trim().length > 0) {
     return forwarded.trim();
@@ -88,7 +87,7 @@ export async function checkIpRateLimit(
         route: req.nextUrl.pathname,
         limitType,
         identityType: "ip",
-        identityDisplay: ip,
+        identityDisplay: redactRateLimitIdentity("ip", ip),
         retryAfter: result.retryAfter,
         timestamp: new Date().toISOString(),
       })

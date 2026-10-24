@@ -5,6 +5,7 @@ import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { getCorrelationContext } from "@/app/lib/logger";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { getLastSeen } from "@/lib/lastSeen";
+import { withRouteSpan } from "@/lib/routeSpan";
 import { withRouteTimeout } from "@/src/middleware/timeout";
 
 function createErrorResponse(code: string, message: string, status: number) {
@@ -43,5 +44,7 @@ async function handleIdentityMeGet(request: Request) {
 }
 
 export async function GET(request: Request) {
-  return withRouteTimeout(request, () => handleIdentityMeGet(request));
+  return withRouteSpan("/api/identity/me", () =>
+    withRouteTimeout(request, () => handleIdentityMeGet(request)),
+  );
 }

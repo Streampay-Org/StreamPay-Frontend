@@ -74,6 +74,7 @@ import { errorResponse } from "@/app/lib/errors/server";
 import { logger } from "@/app/lib/logger";
 import { validateCreateStreamBody } from "@/app/lib/stream-validation";
 import { checkTokenAllowed, normaliseToken } from "@/app/lib/token-allowlist";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { TimeoutError } from "@/app/lib/with-timeout";
 import { ROUTE_TIMEOUT_MS, withRouteTimeout } from "@/src/middleware/timeout";
 
@@ -380,6 +381,9 @@ export async function POST(request: Request) {
   }
 
   const normalisedRows = rows.map(normaliseRow);
+  const authenticatedActor = tryAuthenticateRequest(request);
+  const senderAddress = authenticatedActor?.walletAddress ?? null;
+  const ownership: "individual" | "unclaimed" = authenticatedActor ? "individual" : "unclaimed";
 
   // ── 3. Idempotency check & reservation (skipped on dryRun) ─────────────────
   const callerId = resolveCallerId(request);
@@ -546,6 +550,8 @@ export async function POST(request: Request) {
             updatedAt: now,
             token: normalisedToken,
             memo: row.memo || undefined,
+            senderAddress,
+            ownership,
           };
 
           streamRepository.streams.set(id, newStream);

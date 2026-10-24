@@ -1,4 +1,4 @@
-import { generateRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
+import { generateRequestId, isValidRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { isSecret, redactSecrets } from './config';
 
@@ -6,6 +6,8 @@ import { isSecret, redactSecrets } from './config';
 export interface CorrelationContext {
   request_id: string;
   correlation_id: string;
+  trace_id?: string;
+  span_id?: string;
   traceparent?: string;
   stream_id?: string;
   job_id?: string;
@@ -38,10 +40,6 @@ function parseTraceparent(traceparent: string | null): string | undefined {
   return traceparent;
 }
 
-// Extract correlation context from headers
-export function extractCorrelationContext(headers: Headers): CorrelationContext {
-
-
 // Get current correlation context
 export function getCorrelationContext(): CorrelationContext | undefined {
   return correlationContext.getStore();
@@ -55,34 +53,68 @@ export function withCorrelationContext<T>(
   return correlationContext.run(context, callback);
 }
 
-// Set correlation context without callback (for sync operations)
+// Extract correlation context from headers
 export function extractCorrelationContext(headers: Headers): CorrelationContext {
   const rawRequestId =
     headers.get("x-request-id") ||
     headers.get("request-id") ||
-    headers.get("x-correlation-id");
+    headers.get("correlation-id");
+  const requestId =
+    rawRequestId && isValidRequestId(rawRequestId)
+      ? rawRequestId
+      : generateRequestId();
 
-  let request_id: string;
-  let request_id_rejected = false;
+  const rawCorrelationId =
+    headers.get("x-correlation-id") || headers.get("correlation-id");
+  const correlationId =
+    rawCorrelationId && isValidRequestId(rawCorrelationId)
+      ? rawCorrelationId
+      : requestId;
 
-  if (rawRequestId && isValidRequestId(rawRequestId)) {
-    request_id = rawRequestId;
-  } else if (rawRequestId) {
-    request_id = generateRequestId();
-    request_id_rejected = true;
-  } else {
-    request_id = generateRequestId();
+  const context: CorrelationContext = {
+    request_id: requestId,
+    correlation_id: correlationId,
+  };
+
+  const traceparent = parseTraceparent(headers.get("traceparent"));
+  if (traceparent) context.traceparent = traceparent;
+
+  const streamId = headers.get("x-stream-id") || headers.get("stream-id");
+  if (streamId) context.stream_id = streamId;
+
+  const jobId = headers.get("x-job-id") || headers.get("job-id");
+  if (jobId) context.job_id = jobId;
+
+  const txHash = headers.get("x-stellar-tx-hash");
+  if (txHash) context.stellar_tx_hash = txHash;
+
+  const webhookId = headers.get("x-webhook-id");
+  if (webhookId) context.webhook_id = webhookId;
+
+  const retryCount = headers.get("x-retry-count");
+  if (retryCount && /^\d+$/.test(retryCount)) {
+    context.retry_count = Number(retryCount);
   }
+
+  const correlation_id =
+    headers.get("x-correlation-id") ||
+    headers.get("correlation-id") ||
+    request_id;
 
   const rawStream = headers.get("x-stream-id") || headers.get("stream-id") || undefined;
   const stream_id =
     rawStream && isValidRequestId(rawStream) ? rawStream : undefined;
 
+  const traceparent = parseTraceparent(headers.get("traceparent"));
+  const jobId = headers.get("x-job-id") || headers.get("job-id") || undefined;
+
   return {
     request_id,
+    correlation_id,
     ...(request_id_rejected ? { request_id_rejected: true } : {}),
     ...(stream_id ? { stream_id } : {}),
-    // keep other fields your type already has
+    ...(traceparent ? { traceparent } : {}),
+    ...(jobId ? { job_id: jobId } : {}),
   };
 }
 export function setCorrelationContext(context: CorrelationContext): void {
@@ -104,6 +136,8 @@ export interface LogEntry {
   webhook_id?: string;
   retry_count?: number;
   queue_name?: string;
+  trace_id?: string;
+  span_id?: string;
   traceparent?: string;
   [key: string]: unknown;
 }
@@ -140,6 +174,8 @@ function log(level: 'info' | 'warn' | 'error' | 'debug', message: string, meta: 
   if (context) {
     logEntry.request_id = context.request_id;
     logEntry.correlation_id = context.correlation_id;
+    if (context.trace_id) logEntry.trace_id = context.trace_id;
+    if (context.span_id) logEntry.span_id = context.span_id;
     if (context.traceparent) logEntry.traceparent = context.traceparent;
     if (context.stream_id) logEntry.stream_id = context.stream_id;
     if (context.job_id) logEntry.job_id = context.job_id;

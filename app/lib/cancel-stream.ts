@@ -28,6 +28,7 @@
  */
 
 import type { Stream, CancellationSplit } from "@/app/types/openapi";
+import { allowedActions } from "@/app/lib/state-machine";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -74,8 +75,6 @@ export type CancelErrorCode =
   | "STREAM_NOT_CANCELLABLE"; // stream is in Draft — nothing escrowed yet
 
 /** Statuses that cannot be cancelled (prevents double-refund). */
-const TERMINAL_STATUSES = new Set<Stream["status"]>(["cancelled", "ended", "withdrawn"]);
-
 // ── Core logic ────────────────────────────────────────────────────────────────
 
 /**
@@ -95,7 +94,7 @@ export function computeCancellationSplit(
   input: CancelInput,
 ): CancelResult {
   // ── Terminal-state guard (prevents double-refund) ──────────────────────────
-  if (TERMINAL_STATUSES.has(stream.status)) {
+  if (stream.status !== "draft" && !allowedActions(stream.status).includes("cancel")) {
     return {
       ok: false,
       code: "ALREADY_TERMINAL",
