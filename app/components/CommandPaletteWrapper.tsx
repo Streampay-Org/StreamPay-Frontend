@@ -1,8 +1,7 @@
 "use client";
 
-import { CommandPalette } from "./CommandPalette";
-import { mockStreams } from "../streams/StreamsPageContent";
+import { CommandPaletteLauncher } from "./CommandPaletteLauncher";
 
 export function CommandPaletteWrapper() {
-  return <CommandPalette streams={mockStreams} />;
+  return <CommandPaletteLauncher />;
 }

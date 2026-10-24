@@ -1,7 +1,7 @@
 "use client";
 
-import { ShortcutsOverlay } from "./ShortcutsOverlay";
+import { ShortcutsOverlayLauncher } from "./ShortcutsOverlayLauncher";
 
 export function ShortcutsOverlayWrapper() {
-  return <ShortcutsOverlay />;
+  return <ShortcutsOverlayLauncher />;
 }

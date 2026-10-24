@@ -3,7 +3,10 @@
  */
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { StreamsPageContent, mockStreams } from "./StreamsPageContent";
+import { StreamsPageContent } from "./StreamsPageContent";
+import { mockStreams } from "./fixtures";
+
+
 
 // Mock the StreamRow component
 jest.mock("../components/StreamRow", () => ({
