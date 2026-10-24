@@ -242,7 +242,9 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
     }
   };
 
-  if (!shouldRender) return null;
+  // Render in the same commit that `isOpen` flips to true, so the focus trap's
+  // open effect can move focus into an already-mounted dialog.
+  if (!shouldRender && !isOpen) return null;
 
   return (
     <div

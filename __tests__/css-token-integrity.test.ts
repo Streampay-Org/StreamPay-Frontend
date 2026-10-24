@@ -245,8 +245,9 @@ describe("CSS token integrity", () => {
       ? renderedStyles
       : source;
 
-    expect(css).toContain("background: var(--background)");
-    expect(css).toContain("border: 1px solid var(--border)");
+    // styled-jsx minifies the injected CSS, so compare whitespace-insensitively.
+    expect(css).toMatch(/background:\s*var\(--background\)/);
+    expect(css).toMatch(/border:\s*1px solid var\(--border\)/);
     expect(css).not.toMatch(/var\(--bg(?![A-Za-z0-9_-])/);
   });
 });

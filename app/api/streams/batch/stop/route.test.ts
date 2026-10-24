@@ -4,6 +4,7 @@ import { POST } from "./route";
 import { db, resetDb } from "@/app/lib/db";
 import { eventBus } from "@/app/lib/event-bus";
 import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
+import { orgDb } from "@/app/lib/org-db";
 
 describe("POST /api/streams/batch/stop", () => {
   beforeEach(() => {
@@ -47,6 +48,10 @@ describe("POST /api/streams/batch/stop", () => {
   });
 
   it("publishes a redacted update for each stopped stream", async () => {
+    // Single-approval org policy so the owner can stop directly.
+    const acme = orgDb.orgs.get("org-acme");
+    const previousApprovals = acme?.policy.requireApprovals;
+    if (acme) acme.policy.requireApprovals = 1;
     const events: any[] = [];
     const listener = (data: any) => events.push(data);
     eventBus.on("stream:updated:stream-ada", listener);
@@ -54,7 +59,11 @@ describe("POST /api/streams/batch/stop", () => {
     try {
       const req = new Request("http://localhost/api/streams/batch/stop", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // stream-ada is org-owned; stopping it needs an org owner identity (#1806).
+          "Actor-Wallet-Address": "GOWNER7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW",
+        },
         body: JSON.stringify(["stream-ada"]),
       });
 
@@ -67,6 +76,7 @@ describe("POST /api/streams/batch/stop", () => {
       expect(events[0]).not.toHaveProperty("memo");
       expect(events[0]).not.toHaveProperty("partnerId");
     } finally {
+      if (acme && previousApprovals !== undefined) acme.policy.requireApprovals = previousApprovals;
       eventBus.off("stream:updated:stream-ada", listener);
     }
   });

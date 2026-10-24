@@ -8,7 +8,8 @@ import {
   withLock,
 } from "@/app/lib/db";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
-import { enforceStreamRbac } from "@/app/lib/org-policy";
+import { enforceStreamRbac, resolveActorAddress } from "@/app/lib/org-policy";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { resolveRequestId } from "@/lib/requestId";
 
@@ -16,6 +17,15 @@ const MAX_BATCH_SIZE = 20;
 
 function getHeader(request: Request, name: string): string | null {
   return request.headers?.get?.(name) ?? null;
+}
+
+/** Best-effort actor for event attribution; RBAC is enforced separately. */
+function resolveEventActor(request: Request): string | undefined {
+  try {
+    return resolveActorAddress(request) ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -121,7 +131,7 @@ export async function POST(request: NextRequest) {
 
       publishStreamChange({
         action: "stop",
-        actor: actor ?? undefined,
+        actor: resolveEventActor(request),
         after: updatedStream,
         before,
         correlationId: getCorrelationContext()?.correlation_id,

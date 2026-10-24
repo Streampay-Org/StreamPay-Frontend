@@ -263,7 +263,7 @@ class InMemoryAppendOnlyStore<T> implements AppendOnlyStore<T> {
   }
 }
 
-import { DEFAULT_STREAM_TENANT_ID } from "@/app/lib/stream-view";
+import { DEFAULT_STREAM_TENANT_ID } from "@/app/lib/stream-tenant";
 import { resolveStreamTenant, visibleTo } from "@/app/lib/stream-visibility";
 
 export { visibleTo, resolveStreamTenant };

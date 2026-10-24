@@ -90,6 +90,8 @@ describe("POST /api/streams/:id/cancel — Issue #1731 Test Plan", () => {
         rate: "100",
         schedule: "month",
         token: "XLM",
+        // Escrow amounts are required to compute the refund split (#1740).
+        totalAmount: "1000",
       }),
     });
 
@@ -331,6 +333,7 @@ describe("POST /api/streams/:id/cancel — Issue #1731 Test Plan", () => {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${senderToken}`,
+        "Idempotency-Key": "cancel-row6-import",
       },
       body: JSON.stringify({
         rows: [
@@ -392,6 +395,9 @@ describe("POST /api/streams/:id/cancel — Issue #1731 Test Plan", () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       token: "XLM",
+      totalAmount: "1000",
+      releasedAmount: "0",
+      vestedAmount: "0",
       senderAddress: WALLET_SENDER,
       ownership: "individual",
     });
@@ -420,6 +426,9 @@ describe("POST /api/streams/:id/cancel — Issue #1731 Test Plan", () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       token: "XLM",
+      totalAmount: "1000",
+      releasedAmount: "0",
+      vestedAmount: "0",
       senderAddress: WALLET_SENDER,
       ownership: "individual",
     });
@@ -461,6 +470,9 @@ describe("POST /api/streams/:id/cancel — Issue #1731 Test Plan", () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       token: "XLM",
+      totalAmount: "1000",
+      releasedAmount: "0",
+      vestedAmount: "0",
       senderAddress: WALLET_SENDER,
       ownership: "individual",
     });
@@ -486,6 +498,9 @@ describe("POST /api/streams/:id/cancel — Issue #1731 Test Plan", () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       token: "XLM",
+      totalAmount: "1000",
+      releasedAmount: "0",
+      vestedAmount: "0",
       senderAddress: WALLET_SENDER,
       ownership: "individual",
     });

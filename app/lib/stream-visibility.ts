@@ -3,7 +3,7 @@ import type { Stream } from "@/app/types/openapi";
 import { getAdminAddress } from "@/app/lib/admin-guard";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { orgDb } from "@/app/lib/org-db";
-import { DEFAULT_STREAM_TENANT_ID, TENANT_COOKIE_NAME } from "@/app/lib/stream-view";
+import { DEFAULT_STREAM_TENANT_ID, TENANT_COOKIE_NAME } from "@/app/lib/stream-tenant";
 
 /**
  * Flexible actor representation accepted by {@link visibleTo}.

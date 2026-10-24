@@ -26,9 +26,12 @@ function highlightMatch(text: string, query: string) {
   if (!query.trim()) return text;
   const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp(`(${escaped})`, "gi");
+  // Splitting on a single capture group puts every match at an odd index.
+  // (Re-testing each part with the global regex would be stateful via
+  // `lastIndex` and skip alternate matches.)
   const parts = text.split(regex);
   return parts.map((part, index) =>
-    regex.test(part) ? <mark key={index}>{part}</mark> : part,
+    index % 2 === 1 ? <mark key={index}>{part}</mark> : part,
   );
 }
 
@@ -39,7 +42,7 @@ export default function FaqSearch({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { showToast } = useToast();
+  const { success: showSuccessToast } = useToast();
   const inputId = useId();
 
   const [query, setQuery] = useState(searchParams?.get("q") ?? "");
@@ -63,10 +66,10 @@ export default function FaqSearch({
       const id = window.location.hash.slice(1);
       const element = document.getElementById(id);
       if (element) {
-        const prefersReducedMotion = window.matchMedia(
-          "(prefers-reduced-motion: reduce)",
-        ).matches;
-        element.scrollIntoView({
+        const prefersReducedMotion =
+          typeof window.matchMedia === "function" &&
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        element.scrollIntoView?.({
           behavior: prefersReducedMotion ? "auto" : "smooth",
         });
       }
@@ -90,7 +93,7 @@ export default function FaqSearch({
     const url = `${window.location.origin}${pathname}#${item.id}`;
     if (navigator?.clipboard?.writeText) {
       await navigator.clipboard.writeText(url);
-      showToast({ message: "Link copied to clipboard", type: "success" });
+      showSuccessToast("Link copied to clipboard");
     }
   };
 

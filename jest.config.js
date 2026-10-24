@@ -25,7 +25,7 @@ const config = {
     "<rootDir>/app/api/identity/me/route.test.ts",
     "<rootDir>/app/api/indexer/sse/route.test.ts",
     "<rootDir>/app/api/internal/cleanup/idempotency/route.test.ts",
-    "<rootDir>/app/api/internal/reconciliation/diff/\\[Id\\]/route.test.ts",
+    "<rootDir>/app/api/internal/reconciliation/diff/\\[id\\]/route.test.ts",
     "<rootDir>/app/api/internal/reconciliation/nightly/route.test.ts",
     "<rootDir>/app/api/internal/reconciliation/route.test.ts",
     "<rootDir>/app/api/orgs/\\[orgId\\]/token-allowlist/route.test.ts",

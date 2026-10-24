@@ -5,6 +5,7 @@ import { POST as settlePOST } from "./settle/route";
 import { db, resetDb } from "@/app/lib/db";
 import { resetAuditLogStore } from "@/app/lib/audit-log";
 import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
+import { signToken } from "@/app/lib/auth";
 
 const STREAM_ID = "lifecycle-stream";
 const ACTOR = "GACTOR";
@@ -43,7 +44,11 @@ afterEach(() => {
 it("settling an ended stream is an unchanged no-op without a chain call", async () => {
   const before = structuredClone(db.streams.get(STREAM_ID));
   const response = await settlePOST(
-    new Request(`http://localhost/api/streams/${STREAM_ID}/settle`, { method: "POST" }),
+    new Request(`http://localhost/api/streams/${STREAM_ID}/settle`, {
+      method: "POST",
+      // Settle is wrapped in the idempotency guard, which requires a key.
+      headers: { "Idempotency-Key": "lifecycle-settle-noop" },
+    }),
     context,
   );
 
@@ -59,15 +64,16 @@ it("cancelling a cancelled stream is rejected by the transition table", async ()
   const response = await cancelPOST(
     new Request(`http://localhost/api/streams/${STREAM_ID}/cancel`, {
       method: "POST",
-      headers: { "Actor-Wallet-Address": ACTOR },
+      // Cancellation requires the verified sender (#1807).
+      headers: { Authorization: `Bearer ${signToken(ACTOR)}` },
     }),
     context,
   );
 
+  // The transition table has no `cancel` edge out of `cancelled`; the cancel
+  // route reports that as its documented double-cancel guard.
   expect(response.status).toBe(409);
   expect((await response.json()).error).toMatchObject({
-    code: "ILLEGAL_TRANSITION",
-    legacy_code: "INVALID_STREAM_STATE",
-    message: "Action 'cancel' is illegal for a stream in 'cancelled' state.",
+    code: "ALREADY_TERMINAL",
   });
 });

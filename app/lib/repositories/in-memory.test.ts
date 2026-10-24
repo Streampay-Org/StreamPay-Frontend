@@ -32,7 +32,8 @@ describe("repository adapters", () => {
     setStore(store);
 
     expect(store.streamRepository.users.size).toBe(1);
-    expect(store.streamRepository.streams.size).toBe(3);
+    // Seed: three demo streams plus the legacy unclaimed stream (#1807).
+    expect(store.streamRepository.streams.size).toBe(4);
     expect(store.streamRepository.activity.size).toBe(6);
 
     store.streamRepository.streams.set("stream-extra", {
@@ -65,7 +66,7 @@ describe("repository adapters", () => {
 
     resetDb();
 
-    expect(getStore().streamRepository.streams.size).toBe(3);
+    expect(getStore().streamRepository.streams.size).toBe(4);
     expect(getStore().streamRepository.streams.has("stream-extra")).toBe(false);
     expect(getStore().idempotencyStore.size).toBe(0);
     expect(getStore().exportRepository.jobs.size).toBe(0);
@@ -316,11 +317,12 @@ describe("repository adapters", () => {
       expect(defaultTenantStreams.map((s) => s.id).sort()).toEqual([
         "stream-ada",
         "stream-kemi",
+        "stream-unclaimed",
         "stream-yusuf",
       ]);
 
       // Blank or omitted tenant falls back to default-tenant
-      expect(repo.listByTenant!("").map((s) => s.id)).toHaveLength(3);
+      expect(repo.listByTenant!("").map((s) => s.id)).toHaveLength(4);
       expect(repo.listByTenant!("unknown-tenant")).toEqual([]);
 
       const senderStreams = repo.listByParticipant!(

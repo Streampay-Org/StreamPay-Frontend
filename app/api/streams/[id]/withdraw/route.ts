@@ -4,10 +4,13 @@ import { db, withLock } from "@/app/lib/db";
 import { withIdempotency, withdrawStore } from "@/app/lib/idempotency";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import {
-  ActorMismatchError,
   checkStreamOrgPolicy,
-  resolveActorAddress,
+  isActorHeaderAllowed,
+  requireStreamActor,
 } from "@/app/lib/org-policy";
+import { orgDb } from "@/app/lib/org-db";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
+import { generateRequestId } from "@/lib/requestId";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 import { publishStreamChange } from "@/app/lib/stream-publish";
@@ -30,8 +33,8 @@ const WITHDRAW_ERROR_STATUS: Record<WithdrawErrorCode, number> = {
 };
 
 function createErrorResponse(code: string, message: string, status: number) {
-  const context = getCorrelationContext();
-  return NextResponse.json({ error: { code, message, request_id: context?.request_id } }, { status });
+  const requestId = getCorrelationContext()?.request_id ?? generateRequestId();
+  return NextResponse.json({ error: { code, message, request_id: requestId } }, { status });
 }
 
 function getHeader(request: Request, name: string): string | null {
@@ -39,12 +42,61 @@ function getHeader(request: Request, name: string): string | null {
 }
 
 /**
- * Resolve the caller identity: a verified JWT `sub` first, then the
- * `Actor-Wallet-Address` header only when STREAMPAY_ALLOW_ACTOR_HEADER permits
- * it. A JWT/header conflict is surfaced as ActorMismatchError.
+ * Resolve the caller identity for a withdrawal: the verified JWT `sub` wins;
+ * the `Actor-Wallet-Address` header is only a fallback when
+ * STREAMPAY_ALLOW_ACTOR_HEADER permits it. A spoofed header can therefore
+ * never override a verified identity.
  */
 function resolveCallerAddress(request: Request): string | null {
-  return resolveActorAddress(request);
+  const jwtAddress = tryAuthenticateRequest(request)?.walletAddress ?? null;
+  if (jwtAddress) return jwtAddress;
+  const header = getHeader(request, "Actor-Wallet-Address")?.trim() || null;
+  return header && isActorHeaderAllowed() ? header : null;
+}
+
+/**
+ * Only the recipient, or an org member whose role permits `withdraw` on an
+ * org-owned stream, may withdraw. Returns an error response when denied.
+ */
+function authorizeWithdrawCaller(
+  streamId: string,
+  callerAddress: string,
+  recipient: string,
+): NextResponse | null {
+  if (callerAddress === recipient) return null;
+
+  const policyResult = checkStreamOrgPolicy(streamId, callerAddress, "withdraw");
+  if (!policyResult) {
+    return createErrorResponse(
+      "RECIPIENT_AUTH_REQUIRED",
+      "Only the stream recipient or an authorized org member may withdraw.",
+      403,
+    );
+  }
+  if (!policyResult.allowed) {
+    if (policyResult.code === "ROLE_INSUFFICIENT") {
+      return createErrorResponse(policyResult.code, policyResult.message, policyResult.httpStatus);
+    }
+    return createErrorResponse(
+      "RECIPIENT_AUTH_REQUIRED",
+      "Only the stream recipient or an authorized org member may withdraw.",
+      403,
+    );
+  }
+  if (policyResult.requiresApproval) {
+    return createErrorResponse(
+      "APPROVAL_REQUIRED",
+      "This action requires multi-sig approval. Please initiate an approval request.",
+      409,
+    );
+  }
+  return null;
+}
+
+/** True when the stream is managed by an existing organisation. */
+function isOrgOwnedStream(streamId: string): boolean {
+  const orgId = orgDb.streamOwnership.get(streamId);
+  return Boolean(orgId && orgDb.orgs.get(orgId));
 }
 
 function validationError(message: string) {
@@ -150,15 +202,15 @@ export async function POST(
     return rateCheck.response;
   }
 
-  let resolvedCaller: string | null;
-  try {
-    resolvedCaller = resolveCallerAddress(request);
-  } catch (err) {
-    if (err instanceof ActorMismatchError) {
-      return createErrorResponse("ACTOR_MISMATCH", err.message, 403);
-    }
-    throw err;
+  // Org-owned streams follow the shared RBAC actor contract: a missing
+  // identity is 403 ACTOR_REQUIRED and a JWT/header conflict is 403
+  // ACTOR_MISMATCH (both with a request_id in the envelope).
+  if (isOrgOwnedStream(id)) {
+    const actorResult = requireStreamActor(request);
+    if (actorResult instanceof NextResponse) return actorResult;
   }
+
+  const resolvedCaller = resolveCallerAddress(request);
   if (!resolvedCaller) {
     return createErrorResponse(
       "UNAUTHORIZED",
@@ -168,6 +220,14 @@ export async function POST(
   }
   const callerAddress: string = resolvedCaller;
 
+  // Authorise before consulting the idempotency store so an unauthorised
+  // caller is always told 403, never offered another caller's replay.
+  const existingStream = db.streams.get(id);
+  if (existingStream) {
+    const authError = authorizeWithdrawCaller(id, callerAddress, existingStream.recipient);
+    if (authError) return authError;
+  }
+
   // IDEMPOTENCY: Withdraw is non-idempotent by nature — this wrapper ensures retries return the original response without re-executing the withdrawal
   return withIdempotency(withIdempotencyReadableBody(request), "withdraw", withdrawStore, async () => {
     return withLock(id, async () => {
@@ -176,37 +236,8 @@ export async function POST(
         return createErrorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
       }
 
-      if (callerAddress !== stream.recipient) {
-        const policyResult = checkStreamOrgPolicy(id, callerAddress, "withdraw");
-        if (!policyResult) {
-          return createErrorResponse(
-            "RECIPIENT_AUTH_REQUIRED",
-            "Only the stream recipient or an authorized org member may withdraw.",
-            403,
-          );
-        }
-        if (!policyResult.allowed) {
-          if (policyResult.code === "ROLE_INSUFFICIENT") {
-            return createErrorResponse(
-              policyResult.code,
-              policyResult.message,
-              policyResult.httpStatus,
-            );
-          }
-          return createErrorResponse(
-            "RECIPIENT_AUTH_REQUIRED",
-            "Only the stream recipient or an authorized org member may withdraw.",
-            403,
-          );
-        }
-        if (policyResult.requiresApproval) {
-          return createErrorResponse(
-            "APPROVAL_REQUIRED",
-            "This action requires multi-sig approval. Please initiate an approval request.",
-            409,
-          );
-        }
-      }
+      const authError = authorizeWithdrawCaller(id, callerAddress, stream.recipient);
+      if (authError) return authError;
 
       if (stream.status === "withdrawn") {
         const payload = { data: stream, withdrawal: stream.withdrawal };

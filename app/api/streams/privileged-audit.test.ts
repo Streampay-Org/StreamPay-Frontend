@@ -8,14 +8,21 @@ import { resetDb } from "@/app/lib/db";
 import { orgDb, _resetOrgDbForTesting } from "@/app/lib/org-db";
 
 const SETTLER_ADDR = "GSETTLER5IVFB7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GS";
+/** Recipient of the seeded `stream-yusuf`; withdrawals require the recipient (#1789). */
+const YUSUF_RECIPIENT = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGYWDEAVQBMJ87WGNB55IAA";
 
-function buildRequest(requestId: string, actorId: string, role: string) {
+function buildRequest(
+  requestId: string,
+  actorId: string,
+  role: string,
+  wallet: string = SETTLER_ADDR,
+) {
   return new Request(`http://localhost/${requestId}`, {
     headers: {
       "x-request-id": requestId,
       "x-streampay-actor-id": actorId,
       "x-streampay-actor-role": role,
-      "Actor-Wallet-Address": SETTLER_ADDR,
+      "Actor-Wallet-Address": wallet,
       "idempotency-key": `idempotency-${requestId}`,
     },
     method: "POST",
@@ -42,7 +49,7 @@ describe("privileged stream audit hooks", () => {
     });
     expect(settleResponse.status).toBe(200);
 
-    const withdrawResponse = await withdrawFromStream(buildRequest("req-withdraw-1", "finance-operator-8", "finance") as any, {
+    const withdrawResponse = await withdrawFromStream(buildRequest("req-withdraw-1", "finance-operator-8", "finance", YUSUF_RECIPIENT) as any, {
       params: Promise.resolve({ id: "stream-yusuf" }),
     });
     expect(withdrawResponse.status).toBe(200);

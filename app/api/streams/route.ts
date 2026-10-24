@@ -15,7 +15,12 @@ import {
   isAfterCursor,
   type StreamCursor,
 } from "@/app/lib/stream-cursor";
-import { getCorrelationContext, logger } from "@/app/lib/logger";
+import {
+  extractCorrelationContext,
+  getCorrelationContext,
+  logger,
+  withCorrelationContext,
+} from "@/app/lib/logger";
 import { logAccessEvent } from "@/src/middleware/accessLog";
 import { streamsRateLimit } from "@/src/middleware/rateLimit";
 import {
@@ -113,7 +118,7 @@ function wrapWithTimeout(
   handler: (request: Request) => Promise<Response>,
 ): Promise<Response> {
   const start = process.hrtime();
-  return withRouteTimeout(request, async () => {
+  const run = () => withRouteTimeout(request, async () => {
     const response = await handler(request);
     if (isTimeoutResponse(response)) {
       emitAccessEvent({
@@ -126,6 +131,11 @@ function wrapWithTimeout(
     }
     return response;
   });
+
+  // Establish a request-scoped correlation context (validated x-request-id)
+  // when no upstream wrapper has, so every envelope and log line carries it.
+  if (getCorrelationContext() || !request.headers) return run();
+  return withCorrelationContext(extractCorrelationContext(request.headers), run);
 }
 
 async function handleStreamsGet(request: Request) {

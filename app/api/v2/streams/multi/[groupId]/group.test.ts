@@ -11,7 +11,12 @@ jest.mock("@/app/lib/logger", () => ({
   getCorrelationContext: () => undefined,
   logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
-jest.mock("@/app/lib/org-policy", () => ({ checkStreamOrgPolicy: jest.fn() }));
+jest.mock("@/app/lib/org-policy", () => ({
+  checkStreamOrgPolicy: jest.fn(),
+  // Single-leg lifecycle routes enforce org RBAC; these legs are not org-owned.
+  enforceStreamRbac: jest.fn(() => null),
+  resolveActorAddress: jest.fn(() => null),
+}));
 jest.mock("@/app/lib/audit-log", () => ({ recordPrivilegedStreamAuditEvent: jest.fn() }));
 
 const GROUP_ID = "stream-multi-test-group";

@@ -385,10 +385,17 @@ describe("Stream Lifecycle Org-RBAC Enforcement (Table-Driven)", () => {
     });
 
     // ── Scenario 7 ───────────────────────────────────────────────────────────
-    it("Scenario 7: Individually owned stream, no actor -> Unchanged behaviour (200)", async () => {
+    it("Scenario 7: Individually owned stream, no actor -> Unchanged behaviour", async () => {
       const res = await route.invoke(INDIV_STREAM, {});
-      expect(res.status).toBe(200);
       const body = await res.json();
+      if (route.action === "withdraw") {
+        // Withdrawals always require a verified recipient (or authorised org
+        // member) identity (#1789), independently of org RBAC.
+        expect(res.status).toBe(401);
+        expect(body.error.code).toBe("UNAUTHORIZED");
+        return;
+      }
+      expect(res.status).toBe(200);
       expect(body.data).toBeDefined();
     });
 

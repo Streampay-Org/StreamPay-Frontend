@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useId, useState } from "react";
+import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 import { isValidStellarPublicKey } from "../lib/stellar-address";
 import { CopyAddress } from "../components/CopyAddress";
 import { EmptyState } from "../components/EmptyState";

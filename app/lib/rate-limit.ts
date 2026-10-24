@@ -144,7 +144,8 @@ export function rateLimitResponse(retryAfter: number) {
   return NextResponse.json(
     {
       error: {
-        // keep existing shape
+        code: "rate_limit_exceeded",
+        message: "Rate limit exceeded. Please try again later.",
         request_id: requestId,
       },
     },

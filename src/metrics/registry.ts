@@ -135,8 +135,6 @@ export function observeStreamsRequest(method: string, status: number, start: [nu
  * (timeout, 5xx, network error).  When this spikes, the app is falling back
  * to fail-open or the local shadow bucket.
  */
-export const rateLimitStoreUnavailable = new Counter({
-  name: 'rate_limit_store_unavailable_total',
+export const rateLimitStoreUnavailable = getOrCreateCounter('rate_limit_store_unavailable_total', {
   help: 'Total number of times the shared Redis rate-limit store was unavailable',
-  registers: [registry],
 });

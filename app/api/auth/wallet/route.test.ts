@@ -93,6 +93,15 @@ const CHALLENGE_PREFIX = "streampay-auth:v1:";
 // A challenge that matches the issued shape, for POST validation tests.
 const VALID_CHALLENGE = `${CHALLENGE_PREFIX}nKlQNln6SV4hJ6pm6jNMSBVlcqo7r8Pjcj9mqLA_oRg|http://localhost|2024-01-15T10:05:00.000Z`;
 
+/**
+ * Build a unique challenge in the issued `streampay-auth:v1:<nonce>|<origin>|<expiry>`
+ * shape so seeded challenges pass POST body validation.
+ */
+function walletChallenge(tag: string): string {
+  const nonce = `${tag}_`.padEnd(43, "A");
+  return `${CHALLENGE_PREFIX}${nonce}|http://localhost|2099-01-01T00:00:00.000Z`;
+}
+
 function makeGetRequest(params: Record<string, string> = {}) {
   const searchParams = new URLSearchParams(params);
   return {
@@ -447,7 +456,7 @@ describe("POST /api/auth/wallet validation", () => {
 
   it("ignores unknown extra fields when the known fields are valid", async () => {
     const { address, privateKey } = createTestWallet();
-    const challenge = "streampay_auth_1721800000000_extratest";
+    const challenge = walletChallenge("extratest");
     seedWalletChallengeForTesting({
       address,
       challenge,
@@ -507,7 +516,7 @@ describe("POST /api/auth/wallet", () => {
 
   it("returns 200 with token for valid matching double-submit CSRF tokens", async () => {
     const { address, privateKey } = createTestWallet();
-    const challenge = "streampay_auth_1721800000000_csrftest";
+    const challenge = walletChallenge("csrftest");
     seedWalletChallengeForTesting({
       address,
       challenge,
@@ -536,7 +545,7 @@ describe("POST /api/auth/wallet", () => {
 
     // Exhaust the login limit (5/min)
     for (let i = 0; i < 5; i++) {
-      const challenge = `streampay_auth_1721800000000_rate${i}`;
+      const challenge = walletChallenge(`rate${i}`);
       seedWalletChallengeForTesting({
         address,
         challenge,
@@ -554,7 +563,7 @@ describe("POST /api/auth/wallet", () => {
     }
 
     // 6th request should be rate-limited
-    const challenge6 = "streampay_auth_1721800000000_rate6";
+    const challenge6 = walletChallenge("rate6");
     seedWalletChallengeForTesting({
       address,
       challenge: challenge6,
@@ -578,7 +587,7 @@ describe("POST /api/auth/wallet", () => {
 describe("POST /api/auth/wallet cryptographic verification & lifecycle", () => {
   it("Scenario 1: Valid challenge and a valid signature returns 200, JWT verifies via tryAuthenticateRequest and sub === address", async () => {
     const { address, privateKey } = createTestWallet();
-    const challenge = "streampay_auth_1721800000000_scen1";
+    const challenge = walletChallenge("scen1");
     seedWalletChallengeForTesting({
       address,
       challenge,
@@ -613,7 +622,7 @@ describe("POST /api/auth/wallet cryptographic verification & lifecycle", () => {
   it("Scenario 2: Signature from a different key returns 401", async () => {
     const walletA = createTestWallet();
     const walletB = createTestWallet();
-    const challenge = "streampay_auth_1721800000000_scen2";
+    const challenge = walletChallenge("scen2");
     seedWalletChallengeForTesting({
       address: walletA.address,
       challenge,
@@ -635,7 +644,7 @@ describe("POST /api/auth/wallet cryptographic verification & lifecycle", () => {
 
   it("Scenario 3: Regression proof - signature: 'x' fails with 422 (or 401 on legacy), passes on main", async () => {
     const { address } = createTestWallet();
-    const challenge = "streampay_auth_1721800000000_scen3";
+    const challenge = walletChallenge("scen3");
     seedWalletChallengeForTesting({
       address,
       challenge,
@@ -657,7 +666,7 @@ describe("POST /api/auth/wallet cryptographic verification & lifecycle", () => {
 
   it("Scenario 4: Challenge never issued returns 401 CHALLENGE_UNKNOWN", async () => {
     const { address, privateKey } = createTestWallet();
-    const challenge = "streampay_auth_1721800000000_unissued";
+    const challenge = walletChallenge("unissued");
     const signature = signChallenge(challenge, privateKey);
 
     const res = await POST(
@@ -673,7 +682,7 @@ describe("POST /api/auth/wallet cryptographic verification & lifecycle", () => {
 
   it("Scenario 5: Challenge past expires_at returns 401 CHALLENGE_EXPIRED", async () => {
     const { address, privateKey } = createTestWallet();
-    const challenge = "streampay_auth_1721800000000_scen5";
+    const challenge = walletChallenge("scen5");
     seedWalletChallengeForTesting({
       address,
       challenge,
@@ -694,7 +703,7 @@ describe("POST /api/auth/wallet cryptographic verification & lifecycle", () => {
 
   it("Scenario 6: Replay of a challenge that already succeeded returns 401 CHALLENGE_UNKNOWN", async () => {
     const { address, privateKey } = createTestWallet();
-    const challenge = "streampay_auth_1721800000000_scen6";
+    const challenge = walletChallenge("scen6");
     seedWalletChallengeForTesting({
       address,
       challenge,
@@ -720,7 +729,7 @@ describe("POST /api/auth/wallet cryptographic verification & lifecycle", () => {
   it("Scenario 7: Challenge issued to address A, submitted for address B returns 401 CHALLENGE_ADDRESS_MISMATCH", async () => {
     const walletA = createTestWallet();
     const walletB = createTestWallet();
-    const challenge = "streampay_auth_1721800000000_scen7";
+    const challenge = walletChallenge("scen7");
     // Challenge issued to walletA
     seedWalletChallengeForTesting({
       address: walletA.address,
@@ -743,7 +752,7 @@ describe("POST /api/auth/wallet cryptographic verification & lifecycle", () => {
 
   it("Scenario 8: Signature that is not 64 bytes, or not base64 returns 422 validation error", async () => {
     const { address } = createTestWallet();
-    const challenge = "streampay_auth_1721800000000_scen8";
+    const challenge = walletChallenge("scen8");
 
     // Invalid base64
     const res1 = await POST(
@@ -770,7 +779,7 @@ describe("POST /api/auth/wallet cryptographic verification & lifecycle", () => {
 
   it("Scenario 9: CSRF missing on a valid signature returns 403, and the challenge is not consumed", async () => {
     const { address, privateKey } = createTestWallet();
-    const challenge = "streampay_auth_1721800000000_scen9";
+    const challenge = walletChallenge("scen9");
     seedWalletChallengeForTesting({
       address,
       challenge,
@@ -795,7 +804,7 @@ describe("POST /api/auth/wallet cryptographic verification & lifecycle", () => {
 
   it("Scenario 10: expires_at matches the JWT exp within one second", async () => {
     const { address, privateKey } = createTestWallet();
-    const challenge = "streampay_auth_1721800000000_scen10";
+    const challenge = walletChallenge("scen10");
     seedWalletChallengeForTesting({
       address,
       challenge,
@@ -823,7 +832,7 @@ describe("POST /api/auth/wallet cryptographic verification & lifecycle", () => {
 
   it("Pin error precedence: Rate limit -> JSON & validation -> CSRF -> challenge lookup -> expiry -> signature", async () => {
     const { address, privateKey } = createTestWallet();
-    const challenge = "streampay_auth_1721800000000_precedence";
+    const challenge = walletChallenge("precedence");
 
     // 1. Invalid JSON returns 422 before checking CSRF
     const resJson = await POST(makePostRequest("THROW"));
