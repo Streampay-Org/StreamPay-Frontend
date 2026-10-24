@@ -694,6 +694,11 @@ export default function ContactsPage() {
     resolvedAddress,
     federationAddress,
   }: FormSubmitResult) => {
+    // Verify the resolved account id is a real Stellar account (#1686).
+    if (!/^G[A-Z2-7]{55}$/.test(resolvedAddress ?? "")) {
+      toast.error("Contact not saved: the resolved account id is not a valid Stellar account.");
+      return;
+    }
     const contact: Contact = {
       id: crypto.randomUUID(),
       label,
@@ -714,6 +719,10 @@ export default function ContactsPage() {
     federationAddress,
   }: FormSubmitResult) => {
     if (!editTarget) return;
+    if (!/^G[A-Z2-7]{55}$/.test(resolvedAddress ?? "")) {
+      toast.error("Contact not saved: the resolved account id is not a valid Stellar account.");
+      return;
+    }
     applyUpdate(
       contacts.map((c) =>
         c.id === editTarget.id
