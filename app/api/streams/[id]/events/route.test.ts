@@ -267,7 +267,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     const req = new Request("http://localhost/api/streams/stream-ada/events", {
       headers: {
         authorization: `Bearer ${token}`,
-        "x-tenant-id": "tenant-1",
+        "x-tenant-id": "default",
       },
     }) as any;
 
@@ -310,7 +310,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
       const req = new Request("http://localhost/api/streams/stream-ada/events", {
         headers: {
           authorization: `Bearer ${token}`,
-          "x-tenant-id": "tenant-1",
+          "x-tenant-id": "default",
         },
       }) as any;
 

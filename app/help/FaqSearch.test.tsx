@@ -82,7 +82,11 @@ describe("FaqSearch", () => {
 
   it("copies a deep link and shows a toast", async () => {
     const writeText = jest.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, { clipboard: { writeText } });
+    // jsdom exposes `navigator.clipboard` as a getter-only property.
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
     const user = userEvent.setup();
     renderIsland();
     const item = allItems[0];

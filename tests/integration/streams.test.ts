@@ -136,6 +136,7 @@ describe("streams API integration", () => {
       error: {
         code: "INVALID_REQUEST",
         message: "Request body must be valid JSON",
+        request_id: expect.any(String),
       },
     });
   });

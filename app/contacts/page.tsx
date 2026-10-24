@@ -111,9 +111,11 @@ async function normaliseAddressInput(
     }
   }
 
-  if (isValidStellarAddress(trimmed)) {
-    // Normalise to uppercase so stored addresses are canonical.
-    return { resolved: trimmed.toUpperCase() };
+  // Strkeys are case-insensitive base32; validate and store the canonical
+  // uppercase form so a lowercase paste is accepted and normalised.
+  const upper = trimmed.toUpperCase();
+  if (isValidStellarAddress(upper)) {
+    return { resolved: upper };
   }
 
   return { error: INVALID_ADDRESS_MESSAGE };

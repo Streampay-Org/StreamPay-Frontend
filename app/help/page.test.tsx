@@ -8,8 +8,7 @@ import HelpPage from "./page";
 
 // The FAQ search island copies deep links and confirms with a toast; the page
 // is rendered without the app shell's ToastProvider here.
-jest.mock("../components/ToastProvider", () => ({
-  ...jest.requireActual("../components/ToastProvider"),
+jest.mock("../hooks/useToast", () => ({
   useToast: () => ({ success: jest.fn(), error: jest.fn(), info: jest.fn(), warning: jest.fn() }),
 }));
 import { SHORTCUT_GROUPS, formatShortcutKeys, getShortcut } from "@/lib/shortcuts";

@@ -312,7 +312,7 @@ describe('middleware request-id propagation (integration)', () => {
 
     expect(response.status).toBe(403);
     const body = await response.json();
-    expect(body.error.code).toBe('FORBIDDEN');
+    expect(body.error.code).toBe('CSRF_TOKEN_INVALID');
     expect(response.headers.get(REQUEST_ID_HEADER)).toBe('req_csrf_test_789');
   });
 
