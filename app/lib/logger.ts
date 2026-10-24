@@ -1,8 +1,4 @@
-import {
-  generateRequestId,
-  isValidRequestId,
-  REQUEST_ID_HEADER,
-} from "@/lib/requestId";
+import { generateRequestId, isValidRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { isSecret, redactSecrets } from './config';
 
@@ -10,6 +6,8 @@ import { isSecret, redactSecrets } from './config';
 export interface CorrelationContext {
   request_id: string;
   correlation_id: string;
+  trace_id?: string;
+  span_id?: string;
   traceparent?: string;
   stream_id?: string;
   job_id?: string;
@@ -55,7 +53,7 @@ export function withCorrelationContext<T>(
   return correlationContext.run(context, callback);
 }
 
-// Set correlation context without callback (for sync operations)
+// Extract correlation context from headers
 export function extractCorrelationContext(headers: Headers): CorrelationContext {
   const rawRequestId =
     headers.get("x-request-id") ||
@@ -98,10 +96,26 @@ export function extractCorrelationContext(headers: Headers): CorrelationContext 
     context.retry_count = Number(retryCount);
   }
 
-  const queueName = headers.get("x-queue-name");
-  if (queueName) context.queue_name = queueName;
+  const correlation_id =
+    headers.get("x-correlation-id") ||
+    headers.get("correlation-id") ||
+    request_id;
 
-  return context;
+  const rawStream = headers.get("x-stream-id") || headers.get("stream-id") || undefined;
+  const stream_id =
+    rawStream && isValidRequestId(rawStream) ? rawStream : undefined;
+
+  const traceparent = parseTraceparent(headers.get("traceparent"));
+  const jobId = headers.get("x-job-id") || headers.get("job-id") || undefined;
+
+  return {
+    request_id,
+    correlation_id,
+    ...(request_id_rejected ? { request_id_rejected: true } : {}),
+    ...(stream_id ? { stream_id } : {}),
+    ...(traceparent ? { traceparent } : {}),
+    ...(jobId ? { job_id: jobId } : {}),
+  };
 }
 export function setCorrelationContext(context: CorrelationContext): void {
   correlationContext.enterWith(context);
@@ -122,6 +136,8 @@ export interface LogEntry {
   webhook_id?: string;
   retry_count?: number;
   queue_name?: string;
+  trace_id?: string;
+  span_id?: string;
   traceparent?: string;
   [key: string]: unknown;
 }
@@ -158,6 +174,8 @@ function log(level: 'info' | 'warn' | 'error' | 'debug', message: string, meta: 
   if (context) {
     logEntry.request_id = context.request_id;
     logEntry.correlation_id = context.correlation_id;
+    if (context.trace_id) logEntry.trace_id = context.trace_id;
+    if (context.span_id) logEntry.span_id = context.span_id;
     if (context.traceparent) logEntry.traceparent = context.traceparent;
     if (context.stream_id) logEntry.stream_id = context.stream_id;
     if (context.job_id) logEntry.job_id = context.job_id;

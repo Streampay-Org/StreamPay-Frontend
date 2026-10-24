@@ -1,14 +1,15 @@
 /**
  * @jest-environment jsdom
+ * @jest-environment-options {"url": "https://example.com/"}
  *
  * OnboardingManager — unit tests.
+ * Covers the focus-trap, safe-storage, and backdrop-session test plan rows.
  *
  * Verifies that the component correctly reads from localStorage and shows /
  * hides the onboarding banner and WelcomeTour accordingly.
  */
 
-import { act, fireEvent, render } from "@testing-library/react";
-const { screen } = require("@testing-library/react") as any;
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import OnboardingManager from "./OnboardingManager";
 import { WELCOME_TOUR_KEY } from "./WelcomeTour";
 
@@ -16,6 +17,8 @@ const BANNER_KEY = "streampay_onboarding_dismissed";
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
+  jest.restoreAllMocks();
 });
 
 // ---------------------------------------------------------------------------
@@ -45,6 +48,27 @@ describe("OnboardingManager — first-time visitor", () => {
     });
     expect(localStorage.getItem(WELCOME_TOUR_KEY)).toBe("1");
     expect(localStorage.getItem(BANNER_KEY)).toBe("true");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Blocked storage — privacy modes
+// ---------------------------------------------------------------------------
+
+describe("OnboardingManager — blocked localStorage", () => {
+  it("does not crash and shows the banner when localStorage.getItem throws", () => {
+    const getItemSpy = jest
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new Error("SecurityError");
+      });
+    try {
+      render(<OnboardingManager />);
+      expect(screen.getByTestId("onboarding-banner")).toBeInTheDocument();
+      expect(screen.queryByTestId("welcome-tour")).toBeNull();
+    } finally {
+      getItemSpy.mockRestore();
+    }
   });
 });
 
@@ -80,6 +104,26 @@ describe("OnboardingManager — returning visitor (tour seen, banner not dismiss
       );
     });
     expect(localStorage.getItem(BANNER_KEY)).toBe("true");
+  });
+
+  it("does not crash when localStorage.setItem throws on banner dismiss", () => {
+    localStorage.setItem(WELCOME_TOUR_KEY, "1");
+    const setItemSpy = jest
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("QuotaExceededError");
+      });
+    try {
+      render(<OnboardingManager />);
+      act(() => {
+        fireEvent.click(
+          screen.getByRole("button", { name: /dismiss welcome message/i }),
+        );
+      });
+      expect(screen.queryByTestId("onboarding-banner")).toBeNull();
+    } finally {
+      setItemSpy.mockRestore();
+    }
   });
 });
 

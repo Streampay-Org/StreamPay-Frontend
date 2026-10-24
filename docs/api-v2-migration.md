@@ -137,10 +137,16 @@ after, which is easier to type-check and forward to Horizon lookup logic.
 {
   "settlement": {
     "tx_hash": "c3f8a12e4b76...",
-    "settled_at": "2026-03-01T14:30:00.000Z"
+    "settled_at": "2026-03-01T14:30:00.000Z",
+    "amount": "3600000000",
+    "currency": "XLM"
   }
 }
 ```
+
+`amount` is the raw-unit string taken from `releasedAmount` (falling back to
+`totalAmount`) and `currency` is the stream `token`. `settlement` is `null` until the
+stream has a settlement transaction.
 
 **Migration**
 
@@ -152,6 +158,27 @@ after, which is easier to type-check and forward to Horizon lookup logic.
 +   lookupOnHorizon(stream.settlement.tx_hash);
 + }
 ```
+
+---
+
+## Status and `allowed_actions` projection
+
+v2 reports the stream's real lifecycle status: `draft`, `active`, `paused`, `ended`,
+`withdrawn` or `cancelled`. Statuses are never coerced; a status the API does not
+recognise returns `500 PROJECTION_ERROR`.
+
+`allowed_actions` lists the status-changing actions the lifecycle state machine permits
+for the current status (idempotent no-ops are excluded). `next_action` remains the
+single suggested next step.
+
+| `status` | `allowed_actions` |
+| --- | --- |
+| `draft` | `start`, `stop` |
+| `active` | `pause`, `stop`, `settle` |
+| `paused` | `start`, `stop`, `settle` |
+| `ended` | `withdraw` |
+| `withdrawn` | _(empty)_ |
+| `cancelled` | _(empty)_ |
 
 ---
 

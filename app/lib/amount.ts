@@ -1,8 +1,8 @@
-export const STROOPS_SCALE = 10_000_000n;
+export const STROOPS_SCALE = 10_0000000n
 export const STELLAR_MAX_I64 = 9_223_372_036_854_775_807n;
 
 export const SUPPORTED_ASSETS = ["XLM", "USDC"] as const;
-export type SupportedAsset = (typeof SUPPORTED_ASSETS)[number];
+export type SupportedAsset = (typeof SUPPORTED_ASSETSs)[number];
 
 export type ValidationError = {
   code:
@@ -50,7 +50,10 @@ function isSupportedAsset(asset: string): asset is SupportedAsset {
 
 function normalizeDecimalString(stroops: bigint): string {
   const whole = stroops / STROOPS_SCALE;
-  const fraction = (stroops % STROOPS_SCALE).toString().padStart(7, "0").replace(/0+$/, "");
+  const fraction = (stroops % STROOPS_SCALE)
+    .toString()
+    .padStart(7, "0")
+    .replace(/0+$/, "");
 
   if (fraction.length === 0) {
     return whole.toString();
@@ -70,7 +73,7 @@ export class Amount {
       return validationError(
         422,
         "UNSUPPORTED_ASSET",
-        `Unsupported asset \"${asset}\". Supported assets: ${SUPPORTED_ASSETS.join(", ")}.`,
+        `Unsupported asset "${asset}". Supported assets: ${SUPPORTED_ASSETS.join(", ")}.`,
       );
     }
 
@@ -190,4 +193,34 @@ export function parseDurationSeconds(input: string): ValidationResult<bigint> {
   }
 
   return { ok: true, value };
+}
+
+export function parseStroops(input: string): ValidationResult<bigint> {
+  const normalized = normalizeInput(input);
+
+  if (normalized.startsWith("-")) {
+    return validationError(422, "NEGATIVE_AMOUNT", "Amount must be zero or greater.");
+  }
+
+  if (!AMOUNT_PATTERN.test(normalized)) {
+    return validationError(400, "INVALID_AMOUNT_FORMAT", "Amount must be a plain decimal value.");
+  }
+
+  const [wholePart, fractionPart = ""] = normalized.split(".");
+
+  if (fractionPart.length > 7) {
+    return validationError(422, "DECIMAL_PRECISION_EXCEEDED", "Amount supports at most 7 decimal places.");
+  }
+
+  const whole = BigInt(wholePart);
+  const paddedFraction = `${fractionPart}0000000`.slice(0, 7);
+  const fraction = BigInt(paddedFraction);
+
+  const stroops = whole * STROOPS_SCALE + fraction;
+
+  if (stroops > STELLAR_MAX_I64) {
+    return validationError(422, "AMOUNT_OVERFLOW", "Amount exceeds the Stellar maximum");
+  }
+
+  return { ok: true, value: stroops };
 }

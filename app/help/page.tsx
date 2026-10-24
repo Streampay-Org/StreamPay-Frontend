@@ -8,6 +8,7 @@
  * Stellar network, and troubleshooting local-dev issues.
  */
 
+import { Suspense } from "react";
 import { SHORTCUT_GROUPS, formatShortcutKeys, getShortcut } from "@/lib/shortcuts";
 import { FAQ_SECTIONS } from "./faq-data";
 import FaqSearch from "./FaqSearch";
@@ -222,7 +223,9 @@ export default function HelpPage() {
         </div>
       </header>
 
-      <FaqSearch sections={FAQ_SECTIONS} />
+      <Suspense fallback={null}>
+        <FaqSearch sections={FAQ_SECTIONS} />
+      </Suspense>
 
       <div className="help-layout">
         {/* Quick-jump nav */}
@@ -269,5 +272,3 @@ export default function HelpPage() {
     </main>
   );
 }
-
-

@@ -5,6 +5,7 @@ import {
   getStore,
   idempotencyToken,
   setIdempotency,
+  newStreamId,
 } from "@/app/lib/db";
 import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
 import { getCorrelationContext, logger } from "@/app/lib/logger";

@@ -101,9 +101,13 @@ POST   /api/streams/:id/approvals             → Initiate an approval (settle/s
 POST   /api/streams/:id/approvals/:approvalId/approve  → Cast an approval vote
 ```
 
-Existing stream action routes (`/pause`, `/settle`, `/stop`) gain an org-awareness check:  
-- If the stream has an `orgId`, the request `actorWalletAddress` header is checked against the org policy before forwarding to business logic.
-- Streams **without** an `orgId` continue to work exactly as before (no regression).
+Existing stream action routes (`/start`, `/pause`, `/stop`, `/settle`, `/withdraw`, `/batch/start`, `/batch/stop`) enforce mandatory org RBAC via `enforceStreamRbac`:
+- If the stream is org-owned, a verified actor identity is required and checked against the org policy before state transitions or business logic.
+- Actor resolution order:
+  1. Cryptographically verified Bearer JWT (`sub` claim).
+  2. If both JWT and `Actor-Wallet-Address` header are provided and differ, returns `403 ACTOR_MISMATCH`.
+  3. Raw `Actor-Wallet-Address` header is accepted only when `STREAMPAY_ALLOW_ACTOR_HEADER=true` (defaults to `false` in production and `true` in test environment). If false/unset in production, omitting a valid JWT returns `403 ACTOR_REQUIRED`.
+- Streams **without** an `orgId` (individually owned) pass through RBAC without requiring an actor identity (no regression).
 
 ### 6. Policy Version & Migration Path
 

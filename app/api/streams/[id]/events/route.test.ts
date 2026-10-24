@@ -4,9 +4,7 @@ import { db, resetDb, getStore } from "@/app/lib/db";
 import { eventBus } from "@/app/lib/event-bus";
 import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
 import jwt from "jsonwebtoken";
-import { JWT_SECRET } from "@/app/lib/auth";
-
-const TEST_JWT_SECRET = process.env.JWT_SECRET || "streampay-dev-secret-do-not-use-in-prod";
+import { getJwtSecret } from "@/app/lib/auth";
 
 describe("GET /api/streams/:id/events (SSE)", () => {
   beforeEach(() => {
@@ -24,7 +22,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
         iss: "streampay", 
         aud: "streampay-api" 
       },
-      TEST_JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: "1h" }
     );
   }
@@ -398,7 +396,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
     // Create a token without required claims
     const token = jwt.sign(
       { sub: "GD7H...3J4K" }, // Missing iss and aud
-      TEST_JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: "1h" }
     );
 
@@ -420,7 +418,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
         iss: "wrong-issuer",
         aud: "streampay-api",
       },
-      TEST_JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: "1h" }
     );
 
@@ -442,7 +440,7 @@ describe("GET /api/streams/:id/events (SSE)", () => {
         iss: "streampay",
         aud: "wrong-audience",
       },
-      TEST_JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: "1h" }
     );
 
