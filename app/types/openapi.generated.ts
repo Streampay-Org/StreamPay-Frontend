@@ -1065,6 +1065,11 @@ export interface components {
             percentage: string;
             /** @description Amount owed to this leg, as a fixed 7-decimal string. The legs sum exactly to total_amount. */
             amount: string;
+            /**
+             * @description Current lifecycle status of this stream leg.
+             * @enum {string}
+             */
+            status?: "draft" | "active" | "paused" | "ended" | "withdrawn";
         };
         MultiRecipientStreamV2: {
             /**
@@ -1078,10 +1083,10 @@ export interface components {
             /** @enum {string} */
             token: "XLM" | "USDC";
             /**
-             * @description Every leg is created in `draft`; drive them with the start/pause/stop/settle endpoints.
+             * @description Common leg status, or `mixed` when legs differ.
              * @enum {string}
              */
-            status: "draft";
+            status: "draft" | "active" | "paused" | "ended" | "withdrawn" | "mixed";
             /** @description Total distributed across all legs, as a fixed 7-decimal string. */
             total_amount: string;
             /** @description Sum of the allocation, as a fixed 4-decimal string. Always 100.0000 for an accepted request. */
