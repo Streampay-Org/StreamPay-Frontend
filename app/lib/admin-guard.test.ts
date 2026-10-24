@@ -12,7 +12,7 @@ import {
   setAdmin,
   setPaused,
 } from "@/app/lib/admin-guard";
-import { JWT_AUDIENCE, JWT_ISSUER, JWT_SECRET, signToken } from "@/app/lib/auth";
+import { JWT_AUDIENCE, JWT_ISSUER, getJwtSecret, signToken } from "@/app/lib/auth";
 
 const ADMIN = "GADMIN_DEV_PLACEHOLDER_DO_NOT_USE_IN_PROD";
 const OTHER = "GOTHER000000000000000000000000000000000000000000000000000000";
@@ -65,7 +65,7 @@ describe("resolveCallerAddress", () => {
   it("returns null for expired JWT", () => {
     const token = jwt.sign(
       { sub: ADMIN, iss: JWT_ISSUER, aud: JWT_AUDIENCE },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: -1, algorithm: "HS256" },
     );
     const req = makeRequest({ Authorization: `Bearer ${token}` });
@@ -84,7 +84,7 @@ describe("resolveCallerAddress", () => {
 
   it("returns null for JWT with tampered payload (alg=none bypass attempt)", () => {
     // Craft a token with alg=none — should be rejected
-    const [header64] = jwt.sign({ sub: ADMIN }, JWT_SECRET, { algorithm: "HS256" }).split(".");
+    const [header64] = jwt.sign({ sub: ADMIN }, getJwtSecret(), { algorithm: "HS256" }).split(".");
     const fakeHeader = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
     const payload    = Buffer.from(JSON.stringify({ sub: ADMIN, iss: JWT_ISSUER, aud: JWT_AUDIENCE })).toString("base64url");
     const noneToken  = `${fakeHeader}.${payload}.`;
@@ -95,7 +95,7 @@ describe("resolveCallerAddress", () => {
   it("returns null for JWT missing sub claim", () => {
     const token = jwt.sign(
       { iss: JWT_ISSUER, aud: JWT_AUDIENCE },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: "15m", algorithm: "HS256" },
     );
     const req = makeRequest({ Authorization: `Bearer ${token}` });
@@ -105,7 +105,7 @@ describe("resolveCallerAddress", () => {
   it("returns null for JWT with wrong issuer", () => {
     const token = jwt.sign(
       { sub: ADMIN, iss: "evil-issuer", aud: JWT_AUDIENCE },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: "15m", algorithm: "HS256" },
     );
     const req = makeRequest({ Authorization: `Bearer ${token}` });
@@ -115,7 +115,7 @@ describe("resolveCallerAddress", () => {
   it("returns null for JWT with wrong audience", () => {
     const token = jwt.sign(
       { sub: ADMIN, iss: JWT_ISSUER, aud: "wrong-audience" },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: "15m", algorithm: "HS256" },
     );
     const req = makeRequest({ Authorization: `Bearer ${token}` });
@@ -167,7 +167,7 @@ describe("requireAdmin", () => {
   it("returns 403 for expired token", async () => {
     const token = jwt.sign(
       { sub: ADMIN, iss: JWT_ISSUER, aud: JWT_AUDIENCE },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: -1, algorithm: "HS256" },
     );
     const result = requireAdmin(makeRequest({ Authorization: `Bearer ${token}` }));
@@ -190,7 +190,7 @@ describe("requireAdmin", () => {
   it("returns 403 for missing scope (no sub in token)", async () => {
     const token = jwt.sign(
       { iss: JWT_ISSUER, aud: JWT_AUDIENCE, role: "admin" },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: "15m", algorithm: "HS256" },
     );
     const result = requireAdmin(makeRequest({ Authorization: `Bearer ${token}` }));

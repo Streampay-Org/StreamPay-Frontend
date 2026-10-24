@@ -90,6 +90,45 @@ export function resetWalletLinkChallenges(): void {
   pendingChallenges.clear();
 }
 
+export function verifyStellarSignature(
+  publicKey: string,
+  data: string | Uint8Array,
+  signature: string,
+): boolean {
+  try {
+    const publicKeyBytes = decodeStellarPublicKey(publicKey);
+    if (!publicKeyBytes) {
+      return false;
+    }
+
+    const signatureBytes = Buffer.from(signature, "base64");
+    if (signatureBytes.length !== 64) {
+      return false;
+    }
+
+    const publicKeyDer = Buffer.concat([ED25519_SPki_PREFIX, Buffer.from(publicKeyBytes)]);
+    const dataBuffer = typeof data === "string" ? Buffer.from(data, "utf-8") : Buffer.from(data);
+
+    try {
+      return verify(
+        "ed25519",
+        dataBuffer,
+        { key: publicKeyDer, format: "der", type: "spki" },
+        signatureBytes,
+      );
+    } catch {
+      return verify(
+        null,
+        dataBuffer,
+        { key: publicKeyDer, format: "der", type: "spki" },
+        signatureBytes,
+      );
+    }
+  } catch {
+    return false;
+  }
+}
+
 export function verifyWalletLinkChallenge(input: {
   publicKey: string;
   nonce: string;
@@ -116,24 +155,7 @@ export function verifyWalletLinkChallenge(input: {
     throw new WalletLinkError("INVALID_CHALLENGE", "Challenge data does not match", 401);
   }
 
-  const publicKeyBytes = decodeStellarPublicKey(publicKey);
-  if (!publicKeyBytes) {
-    throw new WalletLinkError("VALIDATION_ERROR", "Invalid Stellar public key", 422);
-  }
-
-  const signatureBytes = Buffer.from(signature, "base64");
-  if (signatureBytes.length !== 64) {
-    throw new WalletLinkError("INVALID_SIGNATURE", "Signature must be a 64-byte Ed25519 signature", 401);
-  }
-
-  const publicKeyDer = Buffer.concat([ED25519_SPki_PREFIX, Buffer.from(publicKeyBytes)]);
-  const verified = verify(
-    "ed25519",
-    Buffer.from(message, "utf-8"),
-    { key: publicKeyDer, format: "der", type: "spki" },
-    signatureBytes
-  );
-
+  const verified = verifyStellarSignature(publicKey, message, signature);
   if (!verified) {
     throw new WalletLinkError("INVALID_SIGNATURE", "Signature verification failed", 401);
   }

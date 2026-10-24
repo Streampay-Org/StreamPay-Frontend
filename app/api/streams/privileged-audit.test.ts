@@ -5,6 +5,9 @@ import { POST as stopStream } from "./[id]/stop/route";
 import { POST as withdrawFromStream } from "./[id]/withdraw/route";
 import { auditLogStore, resetAuditLogStore } from "@/app/lib/audit-log";
 import { resetDb } from "@/app/lib/db";
+import { orgDb, _resetOrgDbForTesting } from "@/app/lib/org-db";
+
+const SETTLER_ADDR = "GSETTLER5IVFB7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GS";
 
 function buildRequest(requestId: string, actorId: string, role: string) {
   return new Request(`http://localhost/${requestId}`, {
@@ -12,6 +15,7 @@ function buildRequest(requestId: string, actorId: string, role: string) {
       "x-request-id": requestId,
       "x-streampay-actor-id": actorId,
       "x-streampay-actor-role": role,
+      "Actor-Wallet-Address": SETTLER_ADDR,
       "idempotency-key": `idempotency-${requestId}`,
     },
     method: "POST",
@@ -21,7 +25,10 @@ function buildRequest(requestId: string, actorId: string, role: string) {
 describe("privileged stream audit hooks", () => {
   beforeEach(() => {
     resetDb();
+    _resetOrgDbForTesting();
     resetAuditLogStore();
+    const acme = orgDb.orgs.get("org-acme");
+    if (acme) acme.policy.requireApprovals = 1;
   });
 
   it("records stop, settle, and withdraw actions in the append-only audit log", async () => {

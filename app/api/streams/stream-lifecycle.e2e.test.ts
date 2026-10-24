@@ -490,7 +490,7 @@ describe("stream lifecycle E2E (HTTP black-box)", () => {
   // ── Section: invalid-state error branches ─────────────────────────────────
 
   describe("invalid-state error branches", () => {
-    it("pause on draft stream → 409 INVALID_STREAM_STATE", async () => {
+    it("pause on draft stream → 409 ILLEGAL_TRANSITION with legacy code", async () => {
       const createRes = await serverFetch(`${server.baseUrl}/api/streams`, {
         body: JSON.stringify({ rate: "10", recipient: VALID_STELLAR_KEY, schedule: "month" }),
         headers: { "Content-Type": "application/json" },
@@ -500,10 +500,12 @@ describe("stream lifecycle E2E (HTTP black-box)", () => {
 
       const res = await serverFetch(`${server.baseUrl}/api/streams/${data.id}/pause`, { method: "POST" });
       expect(res.status).toBe(409);
-      expect((await res.json()).error.code).toBe("INVALID_STREAM_STATE");
+      const body = await res.json();
+      expect(body.error.code).toBe("ILLEGAL_TRANSITION");
+      expect(body.error.legacy_code).toBe("INVALID_STREAM_STATE");
     });
 
-    it("settle on draft stream → 409 INVALID_STREAM_STATE", async () => {
+    it("settle on draft stream → 409 ILLEGAL_TRANSITION with legacy code", async () => {
       const createRes = await serverFetch(`${server.baseUrl}/api/streams`, {
         body: JSON.stringify({ rate: "10", recipient: VALID_STELLAR_KEY, schedule: "month" }),
         headers: { "Content-Type": "application/json" },
@@ -513,7 +515,9 @@ describe("stream lifecycle E2E (HTTP black-box)", () => {
 
       const res = await serverFetch(`${server.baseUrl}/api/streams/${data.id}/settle`, { method: "POST" });
       expect(res.status).toBe(409);
-      expect((await res.json()).error.code).toBe("INVALID_STREAM_STATE");
+      const body = await res.json();
+      expect(body.error.code).toBe("ILLEGAL_TRANSITION");
+      expect(body.error.legacy_code).toBe("INVALID_STREAM_STATE");
       // why: settleStream must not be called for invalid-state transitions —
       // calling it would submit a Soroban transaction that cannot be rolled back.
       expect(settleSpy).not.toHaveBeenCalled();

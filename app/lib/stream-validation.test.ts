@@ -5,8 +5,11 @@
  * recipient, rate, schedule, and optional token.
  */
 
+import fc from "fast-check";
 import {
   validateCreateStreamBody,
+  parseCreateStreamBody,
+  canonicaliseRate,
   validateListStreamsQuery,
   validatePatchStreamBody,
   STREAM_STATUSES,
@@ -188,7 +191,7 @@ describe("validateCreateStreamBody", () => {
     });
     expect(errors).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ field: "rate", code: "NEGATIVE_RATE" }),
+        expect.objectContaining({ field: "rate", code: "RATE_NOT_POSITIVE", alias: "NEGATIVE_RATE" }),
       ]),
     );
   });
@@ -395,7 +398,8 @@ describe("validateCreateStreamBody", () => {
     expect(fields).toContain("schedule");
     const rateErrors = errors.filter((e) => e.field === "rate");
     expect(rateErrors.length).toBeGreaterThanOrEqual(1);
-    expect(rateErrors[0].code).toBe("NEGATIVE_RATE");
+    expect(rateErrors[0].code).toBe("RATE_NOT_POSITIVE");
+    expect(rateErrors[0].alias).toBe("NEGATIVE_RATE");
   });
 
   // ── whitespace handling ──────────────────────────────────────────────────
@@ -586,4 +590,152 @@ describe("validateCreateStreamBody non-object bodies", () => {
       expect(errors[0].code).toBe("INVALID_TYPE");
     },
   );
+});
+
+
+// ── parseCreateStreamBody and Normalisation and Rate Capping ────────────────
+
+describe("parseCreateStreamBody and normalisation rules", () => {
+  it("Row 1: recipient with whitespace is parsed and normalised (trimmed)", () => {
+    const res = parseCreateStreamBody({
+      recipient: `  ${VALID_STELLAR_KEY}  `,
+      rate: "100",
+      schedule: "month",
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.recipient).toBe(VALID_STELLAR_KEY);
+    }
+  });
+
+  it("Row 2: schedule with mixed case is parsed and normalised (lowercased)", () => {
+    const res = parseCreateStreamBody({
+      recipient: VALID_STELLAR_KEY,
+      rate: "100",
+      schedule: "Month",
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.schedule).toBe("month");
+    }
+  });
+
+  it("Row 3: rate with leading/trailing fractional zeros is canonicalised ('0050.5000' -> '50.5')", () => {
+    const res = parseCreateStreamBody({
+      recipient: VALID_STELLAR_KEY,
+      rate: "0050.5000",
+      schedule: "month",
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.rate).toBe("50.5");
+    }
+  });
+
+  it("canonicaliseRate handles edge cases properly", () => {
+    expect(canonicaliseRate("00.120")).toBe("0.12");
+    expect(canonicaliseRate("0100")).toBe("100");
+    expect(canonicaliseRate("100.00")).toBe("100");
+    expect(canonicaliseRate("0.0")).toBe("0");
+    expect(canonicaliseRate("000")).toBe("0");
+    expect(canonicaliseRate("   42.500   ")).toBe("42.5");
+  });
+
+  it("Row 4: rate exceeding STELLAR_MAX_I64 ('922337203685.4775808') returns 422 RATE_TOO_LARGE", () => {
+    const res = parseCreateStreamBody({
+      recipient: VALID_STELLAR_KEY,
+      rate: "922337203685.4775808",
+      schedule: "month",
+    });
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: "rate", code: "RATE_TOO_LARGE" }),
+        ]),
+      );
+    }
+  });
+
+  it("Row 5: rate equal to STELLAR_MAX_I64 ('922337203685.4775807') is accepted", () => {
+    const res = parseCreateStreamBody({
+      recipient: VALID_STELLAR_KEY,
+      rate: "922337203685.4775807",
+      schedule: "month",
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.rate).toBe("922337203685.4775807");
+    }
+  });
+
+  it("Row 6: rate '0' returns 422 RATE_NOT_POSITIVE with NEGATIVE_RATE alias", () => {
+    const res = parseCreateStreamBody({
+      recipient: VALID_STELLAR_KEY,
+      rate: "0",
+      schedule: "month",
+    });
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "rate",
+            code: "RATE_NOT_POSITIVE",
+            alias: "NEGATIVE_RATE",
+          }),
+        ]),
+      );
+    }
+  });
+
+  it("Row 7: rate with > 7 decimals ('1.12345678') returns 422 DECIMAL_PRECISION_EXCEEDED", () => {
+    const res = parseCreateStreamBody({
+      recipient: VALID_STELLAR_KEY,
+      rate: "1.12345678",
+      schedule: "month",
+    });
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "rate",
+            code: "DECIMAL_PRECISION_EXCEEDED",
+          }),
+        ]),
+      );
+    }
+  });
+
+  it("Row 8: fast-check property test for round-trip idempotence on canonicalised rates", () => {
+    fc.assert(
+      fc.property(
+        fc.bigInt({ min: 1n, max: 9223372036854775807n }),
+        (stroops) => {
+          const s = stroops.toString();
+          let formatted: string;
+          if (s.length <= 7) {
+            formatted = "0." + s.padStart(7, "0");
+          } else {
+            formatted = s.slice(0, s.length - 7) + "." + s.slice(s.length - 7);
+          }
+          // canonicalise
+          const canon = canonicaliseRate(formatted);
+          // parseCreateStreamBody on canon should preserve canon
+          const res = parseCreateStreamBody({
+            recipient: VALID_STELLAR_KEY,
+            rate: canon,
+            schedule: "month",
+          });
+          expect(res.success).toBe(true);
+          if (res.success) {
+            expect(res.data.rate).toBe(canon);
+            expect(canonicaliseRate(res.data.rate)).toBe(canon);
+          }
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
 });
