@@ -44,22 +44,25 @@ export const SEED_TEMPLATES: StreamTemplate[] = [
 const templates = new Map<string, StreamTemplate>(SEED_TEMPLATES.map((t) => [t.id, t]));
 
 export async function GET() {
-  return NextResponse.json({ templates: Array.from(templates.values()) });
+  const allTemplates = await listTemplates();
+  return NextResponse.json({ templates: allTemplates });
 }
 
-export async function POST(request: Request) {
-  let body: Partial<StreamTemplate>;
+export async function POST(req: NextRequest) {
   try {
-    const limits = buildLimitsConfig();
-    const maxBytes =
-      getBodySizeLimit(extractPathname(request), limits) ?? limits.default;
-    body = await readJsonBody<Partial<StreamTemplate>>(request, { maxBytes });
-  } catch (error) {
-    if (error instanceof BodyTooLargeError) {
-      return createBodySizeTooLargeResponse(
-        error.receivedBytes,
-        error.maxBytes,
-        resolveRequestId(request.headers),
+    const body = await req.json();
+    const { name, asset, amountPerInterval, intervalSeconds, memo } = body;
+
+    if (!name || typeof name !== "string") {
+      return NextResponse.json({ error: "name is required" }, { status: 400 });
+    }
+    if (!asset || typeof asset !== "string") {
+      return NextResponse.json({ error: "asset is required" }, { status: 400 });
+    }
+    if (typeof amountPerInterval !== "number" || amountPerInterval <= 0) {
+      return NextResponse.json(
+        { error: "amountPerInterval must be positive" },
+        { status: 400 }
       );
     }
     if (error instanceof InvalidJsonError) {
@@ -71,8 +74,6 @@ export async function POST(request: Request) {
         400,
       );
     }
-    throw error;
-  }
 
   // Validation precedence: name -> asset -> amountPerInterval -> intervalSeconds
   if (!body.name || typeof body.name !== "string" || body.name.trim().length === 0) {

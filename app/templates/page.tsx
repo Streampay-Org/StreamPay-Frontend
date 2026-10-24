@@ -194,27 +194,8 @@ function TemplateCard({
   );
 }
 
-function TemplateCardSkeleton() {
-  return (
-    <article className="template-card template-card--skeleton">
-      <div className="template-card__header">
-        <Skeleton className="skeleton--badge" height="1.25rem" width="4rem" />
-      </div>
-      <Skeleton className="skeleton--title" height="1.25rem" width="8rem" />
-      <div className="template-card__details">
-        <div className="template-card__detail">
-          <Skeleton className="skeleton--label" height="0.75rem" width="3rem" />
-          <Skeleton className="skeleton--value" height="1rem" width="6rem" />
-        </div>
-        <div className="template-card__detail">
-          <Skeleton className="skeleton--label" height="0.75rem" width="3rem" />
-          <Skeleton className="skeleton--value" height="1rem" width="5rem" />
-        </div>
-      </div>
-      <Skeleton className="skeleton--button" height="2.75rem" width="7.5rem" />
-    </article>
-  );
-}
+export default async function TemplatesPage() {
+  const templates = await listTemplates();
 
 function TemplateGridSkeleton() {
   return (
@@ -498,7 +479,6 @@ function TemplatesPageShell({
       </section>
 
       <section
-        aria-busy={pageState === "loading"}
         aria-labelledby="templates-overview-title"
         className="stream-layout"
       >
@@ -516,18 +496,5 @@ function TemplatesPageShell({
         {children}
       </section>
     </main>
-  );
-}
-
-/** Templates gallery with URL-backed filters inside the App Router's Suspense boundary. */
-export default function TemplatesPage() {
-  return (
-    <Suspense fallback={
-      <TemplatesPageShell pageState="loading">
-        <TemplateGridSkeleton />
-      </TemplatesPageShell>
-    }>
-      <TemplatesContent />
-    </Suspense>
   );
 }
