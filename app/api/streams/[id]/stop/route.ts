@@ -8,20 +8,40 @@ import {
   withLock,
 } from "@/app/lib/db";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
-import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
+import { enforceStreamRbac, resolveActorAddress } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import { enqueueStreamLifecycleWebhook } from "@/app/lib/stream-webhook-lifecycle";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 
 type Context = { params: Promise<{ id: string }> };
 
-function createErrorResponse(code: string, message: string, status: number) {
+function createErrorResponse(code: string, message: string, status: number, legacyCode?: string) {
   const context = getCorrelationContext();
-  return NextResponse.json({ error: { code, message, request_id: context?.request_id } }, { status });
+  return NextResponse.json(
+    { error: { code, ...(legacyCode ? { legacy_code: legacyCode } : {}), message, request_id: context?.request_id } },
+    { status },
+  );
 }
 
 function getHeader(request: Request, name: string): string | null {
   return request.headers?.get?.(name) ?? null;
 }
 
+/**
+ * POST /api/streams/:id/stop
+ *
+ * Stops an active or draft stream.
+ *
+ * Actor resolution order:
+ * 1. Verified JWT `sub` claim (Bearer token).
+ * 2. `Actor-Wallet-Address` header (fallback only when STREAMPAY_ALLOW_ACTOR_HEADER=true).
+ * If both are present and differ, returns 403 ACTOR_MISMATCH.
+ *
+ * RBAC ordering:
+ * Runs after 404 stream existence check and before state transition validation,
+ * inside the stream lock.
+ */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -29,7 +49,6 @@ export async function POST(
   const { id } = await params;
 
   const idempotencyKey = getHeader(request, "Idempotency-Key");
-  const actorAddress = getHeader(request, "Actor-Wallet-Address");
   const token = idempotencyKey
     ? idempotencyToken(`streams.stop.${id}`, idempotencyKey)
     : null;
@@ -68,38 +87,56 @@ export async function POST(
       return createErrorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
     }
 
-    const policyResult = actorAddress
-      ? checkStreamOrgPolicy(id, actorAddress, "stop")
-      : null;
-    if (policyResult) {
-      if (!policyResult.allowed) {
-        return createErrorResponse(policyResult.code, policyResult.message, policyResult.httpStatus);
-      }
-      if (policyResult.requiresApproval) {
-        return createErrorResponse(
-          "APPROVAL_REQUIRED",
-          "This action requires multi-sig approval. Please initiate an approval request.",
-          409
-        );
-      }
-    }
+    // RBAC: evaluated inside the lock, immediately after 404 and before state guard.
+    const rbacError = enforceStreamRbac(request, id, "stop");
+    if (rbacError) return rbacError;
 
-    if (stream.status !== "active" && stream.status !== "draft") {
+    const result = transition(stream.status, "stop");
+    if (!result.ok) {
       return createErrorResponse(
+        result.code,
+        result.error,
+        409,
         "INVALID_STREAM_STATE",
-        "Only active or draft streams can be stopped",
-        409
       );
     }
 
+    if (result.nextStatus === stream.status) {
+      return NextResponse.json({ data: stream });
+    }
+
     const before = structuredClone(stream);
+    const now = new Date().toISOString();
     const updatedStream = {
       ...stream,
       nextAction: "withdraw" as const,
       status: "ended" as const,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
     };
     db.streams.set(id, updatedStream);
+
+    let actorAddress: string | null = null;
+    try {
+      actorAddress = resolveActorAddress(request);
+    } catch {
+      actorAddress = getHeader(request, "Actor-Wallet-Address");
+    }
+
+    appendStreamHistoryEvent({
+      streamId: id,
+      type: "stopped",
+      fromStatus: stream.status,
+      toStatus: "ended",
+      at: now,
+      actorWallet: actorAddress ?? undefined,
+    });
+    publishStreamChange({
+      action: "stop",
+      actor: actorAddress ?? undefined,
+      after: updatedStream,
+      before,
+      correlationId: getCorrelationContext()?.correlation_id,
+    });
 
     recordPrivilegedStreamAuditEvent({
       action: "stream.stop.override",
@@ -109,6 +146,12 @@ export async function POST(
       request,
       streamId: id,
       targetAccount: updatedStream.recipient,
+    });
+
+    enqueueStreamLifecycleWebhook({
+      action: "stop",
+      after: updatedStream as unknown as Record<string, unknown>,
+      before: before as unknown as Record<string, unknown>,
     });
 
     const payload = { data: updatedStream };

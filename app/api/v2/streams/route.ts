@@ -19,18 +19,34 @@
  */
 
 import { NextResponse } from "next/server";
-import { db, encodeCursor, decodeCursor, idempotencyToken, getStore } from "@/app/lib/db";
-import { getCorrelationContext } from "@/app/lib/logger";
+import { db, idempotencyToken, getStore } from "@/app/lib/db";
+import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { getClientIdentity } from "@/app/lib/rate-limit";
 import { checkOrgDailyQuota, orgQuotaResponse } from "@/app/lib/org-quota";
-import { toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
+import { toV2Stream, dbStreamToV1, ProjectionError } from "@/app/lib/api-version";
+import { validateListStreamsQuery } from "@/app/lib/stream-validation";
+import {
+  decodeStreamCursor,
+  encodeStreamCursor,
+  isAfterCursor,
+  type StreamCursor,
+} from "@/app/lib/stream-cursor";
 import type { Stream } from "@/app/types/openapi";
 import { withRouteTimeout } from "@/src/middleware/timeout";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
 
 
 function errorResponse(code: string, message: string, status: number) {
   const requestId = getCorrelationContext()?.request_id ?? `req-${crypto.randomUUID()}`;
   return NextResponse.json({ error: { code, message, request_id: requestId } }, { status });
+}
+
+function getRequestUrl(request: Request, fallbackPath: string): URL {
+  try {
+    return request.url ? new URL(request.url) : new URL(`http://localhost${fallbackPath}`);
+  } catch {
+    return new URL(`http://localhost${fallbackPath}`);
+  }
 }
 
 /** GET /api/v2/streams — paginated stream list in v2 shape. */
@@ -39,36 +55,117 @@ async function handleV2StreamsGet(request: Request) {
     return errorResponse("UNAUTHORIZED", "Bearer token required.", 401);
   }
 
-  const { searchParams } = new URL(request.url);
-  const cursor = searchParams.get("cursor");
-  const status = searchParams.get("status");
-  const limit = Math.min(parseInt(searchParams.get("limit") ?? "20", 10), 100);
-
-  const { streamRepository } = getStore();
-  let streams = Array.from(streamRepository.streams.values() as Iterable<Stream>).sort((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
-  );
-
-  if (status) streams = streams.filter((s) => s.status === status);
-
-  if (cursor) {
-    const cursorId = decodeCursor(cursor);
-    const idx = streams.findIndex((s) => s.id === cursorId);
-    if (idx >= 0) streams = streams.slice(idx + 1);
+  const { searchParams } = getRequestUrl(request, "/api/v2/streams");
+  const rawQuery: Record<string, string> = {};
+  for (const key of ["limit", "status", "cursor"] as const) {
+    const value = searchParams.get(key);
+    if (value !== null) {
+      rawQuery[key] = value;
+    }
   }
 
+  const { errors: queryErrors, values: query } = validateListStreamsQuery(rawQuery);
+  if (queryErrors.length > 0) {
+    const [firstError] = queryErrors;
+    return errorResponse(firstError.code, firstError.message, 422);
+  }
+
+  const cursor = query.cursor ?? null;
+  const statusFilter = query.status ?? null;
+  const limit = query.limit ?? 20;
+
+  const tenant = resolveRequestTenant(request);
+  const actor = resolveRequestActor(request);
+  const isVisible = visibleTo(actor, tenant);
+
+  const { streamRepository } = getStore();
+  const tenantCandidates = streamRepository.listByTenant
+    ? streamRepository.listByTenant(tenant)
+    : Array.from(streamRepository.streams.values() as Iterable<Stream>);
+
+  const sortedStreams = tenantCandidates
+    .filter(isVisible)
+    .sort((a, b) => {
+      const timeCompare = a.createdAt.localeCompare(b.createdAt);
+      return timeCompare !== 0 ? timeCompare : a.id.localeCompare(b.id);
+    });
+
+  let streams = statusFilter
+    ? sortedStreams.filter((stream) => stream.status === statusFilter)
+    : sortedStreams;
+
+  if (cursor) {
+    let keyset: StreamCursor;
+    try {
+      keyset = decodeStreamCursor(cursor, {
+        resolveLegacyId: (legacyId) => {
+          const legacy = streamRepository.streams.get(legacyId);
+          if (!legacy || !isVisible(legacy)) {
+            return null;
+          }
+          logger.warn("Deprecated plain-id pagination cursor used", {
+            streamId: legacyId,
+          });
+          return { createdAt: legacy.createdAt, id: legacy.id };
+        },
+      });
+    } catch {
+      return errorResponse(
+        "INVALID_CURSOR",
+        "Cursor is malformed or refers to a stream that no longer exists.",
+        422,
+      );
+    }
+
+    const cursorTarget = streamRepository.streams.get(keyset.id);
+    if (cursorTarget && !isVisible(cursorTarget)) {
+      return errorResponse(
+        "INVALID_CURSOR",
+        "Cursor is malformed or refers to a stream that no longer exists.",
+        422,
+      );
+    }
+
+    streams = streams.filter((stream) => isAfterCursor(stream, keyset));
+  }
+
+  const total = streams.length;
   const page = streams.slice(0, limit);
   const hasNext = streams.length > limit;
   const nextCursor =
     hasNext && page.length > 0
-      ? encodeCursor(page[page.length - 1].id)
+      ? encodeStreamCursor(page[page.length - 1])
       : null;
 
+  let projected;
+  try {
+    projected = page.map((stream) => toV2Stream(dbStreamToV1(stream)));
+  } catch (err) {
+    if (err instanceof ProjectionError) {
+      return errorResponse("PROJECTION_ERROR", err.message, 500);
+    }
+    throw err;
+  }
+
   return NextResponse.json({
-    streams: page.map((stream) => toV2Stream(dbStreamToV1(stream))),
+    streams: projected,
     meta: { hasNext, nextCursor, total: streamRepository.streams.size },
     links: { self: `/api/v2/streams?limit=${limit}` },
-  });
+  };
+  const etag = createStrongEtag(payload);
+
+  if (isIfNoneMatchMatch(etag, request.headers?.get?.("if-none-match") ?? null)) {
+    return new NextResponse(null, {
+      status: 304,
+      headers: createCacheHeaders(etag),
+    });
+  }
+
+  const response = NextResponse.json(payload);
+  for (const [name, value] of Object.entries(createCacheHeaders(etag))) {
+    response.headers.set(name, value);
+  }
+  return response;
 }
 
 export async function GET(request: Request) {
@@ -133,8 +230,17 @@ async function handleV2StreamsPost(request: Request) {
   }
 
   // ── 4. Persist and respond ────────────────────────────────────────────────
+  const authenticatedActor = tryAuthenticateRequest(request);
+  const senderAddress = authenticatedActor?.walletAddress ?? null;
+  const ownership: "individual" | "unclaimed" = authenticatedActor ? "individual" : "unclaimed";
+
   const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
   const now = new Date().toISOString();
+  const explicitTenant =
+    request.headers.get("x-tenant-id")?.trim() ||
+    request.headers.get("x-streampay-tenant-id")?.trim() ||
+    undefined;
+  const actor = resolveRequestActor(request);
   const newStream: Stream = {
     id,
     recipient: String(recipient),
@@ -145,9 +251,13 @@ async function handleV2StreamsPost(request: Request) {
     createdAt: now,
     updatedAt: now,
     token: "XLM",
+    senderAddress,
+    ownership,
   };
 
-  db.streams.set(id, newStream);
+  if (!newStream) {
+    return errorResponse("ID_GENERATION_FAILED", "Failed to generate unique stream identifier", 500);
+  }
 
   const stream = toV2Stream(dbStreamToV1(newStream));
   const payload = stream;

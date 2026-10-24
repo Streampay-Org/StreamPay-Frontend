@@ -1,74 +1,123 @@
-import { Registry, Counter, Histogram, collectDefaultMetrics } from 'prom-client';
+import {
+  Registry,
+  Counter,
+  Histogram,
+  collectDefaultMetrics,
+  CounterConfiguration,
+  HistogramConfiguration,
+} from 'prom-client';
 
-export const registry = new Registry();
+const globalForMetrics = globalThis as unknown as {
+  __streampayRegistry?: Registry;
+  __streampayDefaultMetricsRegistered?: boolean;
+};
 
-// Optional: collect default nodejs metrics (CPU, memory, etc.)
-collectDefaultMetrics({ register: registry });
+export const registry: Registry = (globalForMetrics.__streampayRegistry ??= new Registry());
+
+if (!globalForMetrics.__streampayDefaultMetricsRegistered) {
+  collectDefaultMetrics({ register: registry });
+  globalForMetrics.__streampayDefaultMetricsRegistered = true;
+}
+
+export function getOrCreateCounter<T extends string = string>(
+  name: string,
+  cfg: Omit<CounterConfiguration<T>, 'name' | 'registers'> & {
+    name?: string;
+    registers?: Registry[];
+  },
+): Counter<T> {
+  const existing = registry.getSingleMetric(name);
+  if (existing) {
+    return existing as Counter<T>;
+  }
+  return new Counter<T>({
+    ...cfg,
+    name,
+    registers: [registry],
+  });
+}
+
+export function getOrCreateHistogram<T extends string = string>(
+  name: string,
+  cfg: Omit<HistogramConfiguration<T>, 'name' | 'registers'> & {
+    name?: string;
+    registers?: Registry[];
+  },
+): Histogram<T> {
+  const existing = registry.getSingleMetric(name);
+  if (existing) {
+    return existing as Histogram<T>;
+  }
+  return new Histogram<T>({
+    ...cfg,
+    name,
+    registers: [registry],
+  });
+}
 
 // ── /api/webhooks metrics ────────────────────────────────────────────────────
 
-export const webhookCounter = new Counter({
-  name: 'webhook_requests_total',
+export const webhookCounter = getOrCreateCounter('webhook_requests_total', {
   help: 'Total number of webhook requests received',
   labelNames: ['status', 'event_type'],
-  registers: [registry],
 });
 
-export const webhookDuration = new Histogram({
-  name: 'webhook_request_duration_seconds',
+export const webhookDuration = getOrCreateHistogram('webhook_request_duration_seconds', {
   help: 'Histogram of webhook request processing duration in seconds',
   labelNames: ['status', 'event_type'],
   buckets: [0.1, 0.5, 1, 2, 5],
-  registers: [registry],
 });
 
-export const reconciliationCounter = new Counter({
-  name: 'api_reconciliation_requests_total',
+// ── /api/exports metrics ────────────────────────────────────────────────────
+
+export const exportCounter = getOrCreateCounter('export_requests_total', {
+  help: 'Total number of /api/exports requests',
+  labelNames: ['status', 'method'],
+});
+
+export const exportDuration = getOrCreateHistogram('export_request_duration_seconds', {
+  help: 'Histogram of /api/exports request processing duration in seconds',
+  labelNames: ['status', 'method'],
+  buckets: [0.1, 0.5, 1, 2, 5, 15],
+});
+
+// ── /api/reconciliation metrics ─────────────────────────────────────────────
+
+export const reconciliationCounter = getOrCreateCounter('api_reconciliation_requests_total', {
   help: 'Total number of /api/reconciliation requests received',
   labelNames: ['status'],
-  registers: [registry],
 });
 
-export const reconciliationDuration = new Histogram({
-  name: 'api_reconciliation_request_duration_seconds',
+export const reconciliationDuration = getOrCreateHistogram('api_reconciliation_request_duration_seconds', {
   help: 'Histogram of /api/reconciliation request processing duration in seconds',
   labelNames: ['status'],
   buckets: [0.1, 0.5, 1, 2, 5],
-  registers: [registry],
 });
 
 // ── /api/auth/wallet metrics ─────────────────────────────────────────────────
 
-export const walletAuthCounter = new Counter({
-  name: 'api_auth_wallet_requests_total',
+export const walletAuthCounter = getOrCreateCounter('wallet_auth_requests_total', {
   help: 'Total number of /api/auth/wallet requests',
   labelNames: ['method', 'operation', 'status'],
-  registers: [registry],
 });
 
-export const walletAuthDuration = new Histogram({
-  name: 'api_auth_wallet_request_duration_seconds',
+export const walletAuthDuration = getOrCreateHistogram('wallet_auth_request_duration_seconds', {
   help: 'Histogram of /api/auth/wallet request duration in seconds',
   labelNames: ['method', 'operation', 'status'],
-  buckets: [0.1, 0.5, 1, 2, 5],
-  registers: [registry],
+  buckets: [0.005, 0.025, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
 });
 
 // ── /api/streams metrics ─────────────────────────────────────────────────────
 
-export const streamsCounter = new Counter({
-  name: 'api_streams_requests_total',
+export const streamsCounter = getOrCreateCounter('api_streams_requests_total', {
   help: 'Total number of /api/streams requests',
   labelNames: ['method', 'status'],
-  registers: [registry],
 });
 
-export const streamsDuration = new Histogram({
-  name: 'api_streams_request_duration_seconds',
+export const streamsDuration = getOrCreateHistogram('api_streams_request_duration_seconds', {
   help: 'Histogram of /api/streams request duration in seconds',
   labelNames: ['method', 'status'],
   buckets: [0.1, 0.5, 1, 2, 5],
-  registers: [registry],
 });
 
 /** Record a /api/streams request; `start` is a `process.hrtime()` tuple. */

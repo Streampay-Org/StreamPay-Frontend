@@ -1,3 +1,4 @@
+/** @jest-environment node */
 /**
  * Tests for `lib/otel.ts` — OpenTelemetry auto-instrumentation
  *
@@ -30,12 +31,14 @@ jest.mock('../app/lib/logger', () => {
 import * as LoggerMock from '../app/lib/logger';
 
 // Typed accessors into the internal mock state
+// The Jest logger factory adds these test-only state accessors, absent from the production module type.
 const _store  = (LoggerMock as unknown as { __store: Record<string, unknown> }).__store;
+// The Jest logger factory adds these test-only state accessors, absent from the production module type.
 const _getStore = (LoggerMock as unknown as { __getStore: jest.Mock }).__getStore;
 
 // ── Mock fetch ────────────────────────────────────────────────────────────────
 const mockFetch = jest.fn().mockResolvedValue({ ok: true } as Response);
-global.fetch = mockFetch as unknown as typeof fetch;
+global.fetch = mockFetch;
 
 // ── Import under test ─────────────────────────────────────────────────────────
 import {
@@ -71,7 +74,7 @@ function makeCtx(overrides: Partial<TraceContext> = {}): TraceContext {
 
 function freshTracer(): [Tracer, SpanRecord[]] {
   const records: SpanRecord[] = [];
-  return [new Tracer(r => records.push(r)), records];
+  return [new Tracer(r => { records.push(r); }), records];
 }
 
 // ── randomHex ─────────────────────────────────────────────────────────────────
@@ -162,6 +165,12 @@ describe('parseTraceparent', () => {
   });
   it('returns null for non-hex spanId', () => {
     expect(parseTraceparent(`00-${traceId}-${'z'.repeat(16)}-01`)).toBeNull();
+  });
+  it('returns null for all-zero traceId per W3C', () => {
+    expect(parseTraceparent(`00-${'0'.repeat(32)}-${spanId}-01`)).toBeNull();
+  });
+  it('returns null for all-zero spanId per W3C', () => {
+    expect(parseTraceparent(`00-${traceId}-${'0'.repeat(16)}-01`)).toBeNull();
   });
   it('round-trips with formatTraceparent', () => {
     const tp  = formatTraceparent(traceId, spanId);
@@ -500,6 +509,24 @@ describe('otlpHttpExport', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it('honours consent toggled at runtime via setTelemetryConsent', async () => {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://otel:4318';
+    jest.resetModules();
+    const { otlpHttpExport: fresh, setTelemetryConsent: grant } = await import('./otel');
+    grant(false);
+    const span: SpanRecord = {
+      traceId: 'a'.repeat(32), spanId: 'b'.repeat(16),
+      name: 'pay', kind: 'SERVER', startTime: 1000, endTime: 1050,
+      durationMs: 50, status: 'OK', attributes: {}, events: [],
+      service: 'svc', traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
+    };
+    await fresh(span);
+    expect(mockFetch).not.toHaveBeenCalled();
+    grant(true);
+    await fresh(span);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
   it('POSTs when endpoint is set AND consent is granted', async () => {
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://otel:4318';
     jest.resetModules();
@@ -563,6 +590,25 @@ describe('otlpHttpExport', () => {
       service: 'svc', traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
     };
     await expect(fresh(span)).resolves.toBeUndefined();
+  });
+
+  it('honours OTEL_EXPORTER_OTLP_ENDPOINT changed after import (lazy getter)', async () => {
+    delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+    jest.resetModules();
+    const { otlpHttpExport: fresh, setTelemetryConsent: grant } = await import('./otel');
+    grant(true);
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://late:4318';
+    const span: SpanRecord = {
+      traceId: 'a'.repeat(32), spanId: 'b'.repeat(16),
+      name: 'late', kind: 'INTERNAL', startTime: 0, endTime: 0,
+      durationMs: 0, status: 'UNSET', attributes: {}, events: [],
+      service: 'svc', traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
+    };
+    await fresh(span);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://late:4318/v1/traces',
+      expect.objectContaining({ method: 'POST' }),
+    );
   });
 
   it('does not mutate the original span record (safe for retries/concurrency)', async () => {

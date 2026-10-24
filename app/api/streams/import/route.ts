@@ -39,11 +39,12 @@
  */
 
 import { NextResponse } from "next/server";
-import { getStore } from "@/app/lib/db";
+import { getStore, newStreamId } from "@/app/lib/db";
 import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { validateCreateStreamBody } from "@/app/lib/stream-validation";
 import { checkTokenAllowed, normaliseToken } from "@/app/lib/token-allowlist";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
 
 const MAX_ROWS = 500;
 
@@ -278,6 +279,9 @@ export async function POST(request: Request) {
   const results: RowResult[] = [];
   let valid = 0;
   let failed = 0;
+  const authenticatedActor = tryAuthenticateRequest(request);
+  const senderAddress = authenticatedActor?.walletAddress ?? null;
+  const ownership: "individual" | "unclaimed" = authenticatedActor ? "individual" : "unclaimed";
 
   for (let i = 0; i < rows.length; i++) {
     const row = normaliseRow(rows[i]);
@@ -294,7 +298,6 @@ export async function POST(request: Request) {
     if (dryRun) {
       results.push({ row: i + 1, status: "valid" });
     } else {
-      const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
       const now = new Date().toISOString();
       const tokenStr = row.token?.trim() || "XLM";
       let normalisedToken: string;
@@ -315,6 +318,8 @@ export async function POST(request: Request) {
         updatedAt: now,
         token: normalisedToken,
         memo: row.memo || undefined,
+        senderAddress,
+        ownership,
       };
 
       streamRepository.streams.set(id, newStream);

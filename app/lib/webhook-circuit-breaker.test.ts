@@ -60,7 +60,7 @@ beforeEach(() => {
   webhookDeliveryStore.clear();
   webhookOutboxStore.clear();
   fetchMock.mockReset();
-  global.fetch = fetchMock as unknown as typeof fetch;
+  global.fetch = fetchMock;
 });
 
 describe("admin breaker → attemptDelivery", () => {

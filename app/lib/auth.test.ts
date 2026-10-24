@@ -95,7 +95,7 @@ describe("auth JWKS and rotation helpers", () => {
     const token = jwt.sign(
       { sub: WALLET_ADDRESS, iss: "streampay", aud: "streampay-api" },
       PREVIOUS_SECRET,
-      { algorithm: "HS256", expiresIn: "15m", header: { kid: "streampay-previous" } },
+      { algorithm: "HS256", expiresIn: "15m", header: { alg: "HS256", kid: "streampay-previous" } },
     );
     const request = new Request("http://localhost", {
       headers: { authorization: `Bearer ${token}` },

@@ -8,14 +8,6 @@ const INTERNAL_HEADERS = [
   'x-correlation-id-internal',
 ];
 
-// Trusted internal services that can set correlation headers
-// In production, this should be validated via auth tokens or network allowlists
-const TRUSTED_INTERNAL_SERVICES = new Set([
-  'localhost',
-  '127.0.0.1',
-  // Add internal service hostnames here
-]);
-
 /**
  * Converts an unknown error into a plain object so safe-json serialization
  * preserves the error context (Error objects lose their non-enumerable props).
@@ -95,56 +87,6 @@ export async function withCorrelationMiddleware(
       throw error;
     }
   });
-}
-
-/**
- * Security check to prevent header spoofing from external clients
- * External clients should not be able to override internal correlation IDs
- */
-export function isTrustedInternalRequest(request: NextRequest): boolean {
-  const origin = request.headers.get('origin');
-  const host = request.headers.get('host');
-  const forwardedFor = request.headers.get('x-forwarded-for');
-  
-  // Check if request is from trusted internal service
-  if (host && TRUSTED_INTERNAL_SERVICES.has(host)) {
-    return true;
-  }
-  
-  // In production, validate via auth token or service mesh identity
-  const internalAuthToken = request.headers.get('x-internal-auth');
-  const config = (global as any).streampayConfig;
-  const configuredToken = config?.internalAuthToken ?? process.env.INTERNAL_AUTH_TOKEN;
-  if (internalAuthToken && configuredToken && internalAuthToken === configuredToken) {
-    return true;
-  }
-  
-  return false;
-}
-
-/**
- * Sanitize headers to prevent spoofing
- * For external requests, generate new correlation IDs instead of trusting client-provided ones
- */
-export function sanitizeCorrelationHeaders(
-  request: NextRequest,
-  isTrusted: boolean
-): { requestId: string; correlationId: string; traceparent?: string } {
-  if (isTrusted) {
-    // Trusted internal services can set correlation headers
-    return {
-      requestId: request.headers.get('x-request-id') || request.headers.get('request-id') || crypto.randomUUID(),
-      correlationId: request.headers.get('x-correlation-id') || request.headers.get('correlation-id') || crypto.randomUUID(),
-      traceparent: request.headers.get('traceparent') || undefined,
-    };
-  } else {
-    // External clients get fresh correlation IDs to prevent spoofing
-    return {
-      requestId: crypto.randomUUID(),
-      correlationId: crypto.randomUUID(),
-      traceparent: undefined, // Don't trust external traceparent
-    };
-  }
 }
 
 /**

@@ -3,7 +3,6 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { POST } from './route';
-import { JWT_SECRET } from '@/app/lib/auth';
 import {
   webhookSecretStore,
   resetWebhookSecretStore,

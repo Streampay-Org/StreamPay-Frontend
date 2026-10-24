@@ -3,8 +3,19 @@
 @import "./styles/icons.css";
 @import "./styles/patterns.css" layer(patterns);
 @import "./styles/typography.css";
+@import "./activity/activity.css";
+@import "./components/Explainer.css";
+@import "./components/OnboardingManager.css";
+@import "./components/PushOptIn.css";
+@import "./components/WelcomeTour.css";
+@import "./contacts/contacts.css";
+@import "./docs/docs.css";
+@import "./help/help.css";
+@import "./templates/templates.css";
 
 :root {
+  color-scheme: dark;
+
   /* Aliases referenced by some components but never defined. */
   --text: var(--foreground);
   --card-bg: var(--panel);
@@ -152,10 +163,16 @@
   --font-medium: 500;
   --font-semibold: 600;
   --font-bold: 700;
+
+  /* ── Typography & Motion ── */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --motion-easing: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-duration-medium: 200ms;
 }
 
 /* ── Light Theme ── */
 .light {
+  color-scheme: light;
   --background: #ffffff;
   --foreground: #111827;
   --accent: #16a34a;
@@ -276,6 +293,10 @@
   --identicon-6-fg: #b91c1c;
   --identicon-7-bg: #e0e7ff;
   --identicon-7-fg: #3730a3;
+
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --motion-easing: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-duration-medium: 200ms;
 }
 
 /* ── High Contrast Theme (WCAG AAA) ── */
@@ -357,6 +378,10 @@
   --stream-disabled-bg: #18181b;
   --stream-disabled-text: #52525b;
   --stream-disabled-border: #27272a;
+
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --motion-easing: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-duration-medium: 200ms;
 }
 
 .light.high-contrast {
@@ -2198,78 +2223,6 @@ a:hover {
   }
 }
 
-.push-optin {
-  background: linear-gradient(
-    135deg,
-    rgba(14, 165, 233, 0.14),
-    rgba(19, 19, 26, 0.96)
-  );
-  border: 1px solid var(--border);
-  border-radius: 1.25rem;
-  box-shadow: var(--shadow-soft);
-  display: grid;
-  gap: 1.25rem;
-  padding: 1.5rem;
-}
-
-.push-optin--success {
-  background: linear-gradient(
-    135deg,
-    rgba(34, 197, 94, 0.16),
-    rgba(19, 19, 26, 0.96)
-  );
-}
-
-.push-optin--warning {
-  background: linear-gradient(
-    135deg,
-    rgba(245, 158, 11, 0.18),
-    rgba(19, 19, 26, 0.96)
-  );
-}
-
-.push-optin__copy,
-.push-optin__actions {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.push-optin__eyebrow {
-  color: var(--accent-strong);
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.push-optin__title {
-  font-size: 1.35rem;
-}
-
-.push-optin__description,
-.push-optin__security-note,
-.push-optin__message {
-  color: var(--muted-light);
-  line-height: 1.6;
-}
-
-.push-optin__security-note {
-  font-size: 0.875rem;
-}
-
-.push-optin__fallback {
-  align-items: center;
-  display: flex;
-  gap: 0.75rem;
-  min-height: var(--touch-target);
-}
-
-.push-optin__fallback input {
-  accent-color: var(--accent);
-  height: 1rem;
-  width: 1rem;
-}
-
 /* ─── Design QA Checklist (from main) ─── */
 .checklist-shell {
   display: grid;
@@ -2685,6 +2638,53 @@ a:hover {
   height: 6rem;
 }
 
+/* ─── /streams/[id] loading skeleton ───────────────────────────────────────── */
+
+.detail-loading {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.detail-loading__hero {
+  display: grid;
+}
+
+.detail-loading__section,
+.detail-loading__field-stack {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.detail-loading__grid {
+  margin-top: 1.5rem;
+}
+
+.detail-loading__field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.detail-loading__timeline {
+  display: grid;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.detail-loading__timeline-stage {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+}
+
+/* Reduced motion: honour the user's OS preference even though the Skeleton
+   component is rendered before any JS runs. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 .receipt-share-btn {
   align-items: center;
   background: transparent;
@@ -2856,89 +2856,6 @@ a:hover {
 
   .receipt-divider {
     break-after: avoid;
-  }
-}
-
-/* ─── Welcome Tour Overlay ───────────────────────────────────────────────── */
-
-.welcome-tour-overlay {
-  align-items: center;
-  background: rgba(0, 0, 0, 0.8);
-  backdrop-filter: blur(8px);
-  display: flex;
-  inset: 0;
-  justify-content: center;
-  padding: 1rem;
-  position: fixed;
-  z-index: 1000;
-  animation: welcome-tour-fade-in 0.3s ease-out;
-}
-
-.welcome-tour {
-  background: var(--panel-elevated);
-  border: 1px solid var(--border);
-  border-radius: 1.5rem;
-  box-shadow: var(--shadow-soft);
-  max-width: 28rem;
-  padding: 2.5rem;
-  position: relative;
-  width: 100%;
-  animation: welcome-tour-scale-in 0.3s ease-out;
-}
-
-.welcome-tour__step-indicator {
-  color: var(--muted);
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  margin-bottom: 1.25rem;
-  text-transform: uppercase;
-}
-
-.welcome-tour__title {
-  color: var(--foreground);
-  font-size: 1.5rem;
-  font-weight: 700;
-  margin-bottom: 0.75rem;
-}
-
-.welcome-tour__body {
-  color: var(--muted-light);
-  font-size: 0.95rem;
-  line-height: 1.6;
-  margin-bottom: 2rem;
-}
-
-.welcome-tour__actions {
-  display: flex;
-  gap: 0.75rem;
-  justify-content: flex-end;
-}
-
-@keyframes welcome-tour-fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes welcome-tour-scale-in {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .welcome-tour-overlay,
-  .welcome-tour {
-    animation: none;
   }
 }
 
@@ -3295,6 +3212,49 @@ a:hover {
   margin-top: var(--space-3);
 }
 
+/**
+ * Inline outcome for stream lifecycle actions.
+ *
+ * Always rendered so the live region exists before its text changes; emptied
+ * of layout when there is nothing to announce. `overflow-wrap` keeps long
+ * stream IDs from overflowing the card at 320px.
+ */
+.detail-action-status {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  line-height: 1.4;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.detail-action-status:empty {
+  margin-top: 0;
+  padding: 0;
+  border-width: 0;
+}
+
+.detail-action-status:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.detail-action-status--success {
+  background: var(--system-success-bg);
+  border-color: var(--system-success-border);
+  color: var(--system-success-text);
+}
+
+.detail-action-status--error {
+  background: var(--system-error-bg);
+  border-color: var(--system-error-border);
+  color: var(--system-error-text);
+}
+
 .detail-incident-warning {
   color: var(--error);
   font-size: var(--text-xs);
@@ -3453,156 +3413,6 @@ a:hover {
 
 .timeline-item--future .timeline-item-desc {
   color: var(--muted);
-}
-
-/* ─── Activity Feed Specifics ─── */
-.activity-feed-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-8);
-  max-width: 48rem;
-  width: 100%;
-}
-
-.activity-group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.activity-group-title {
-  color: var(--muted-light);
-  font-size: var(--text-xs);
-  font-weight: var(--font-bold);
-  letter-spacing: 0.1em;
-  padding-left: calc(
-    var(--space-6) + var(--space-4)
-  ); /* Align with content, skipping dot */
-  text-transform: uppercase;
-}
-
-.activity-timeline {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.activity-item {
-  display: flex;
-  gap: var(--space-4);
-  position: relative;
-}
-
-.activity-marker {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: var(--space-6);
-  flex-shrink: 0;
-}
-
-.activity-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: var(--radius-full);
-  background: var(--border);
-  margin-top: 6px;
-  z-index: 2;
-}
-
-.activity-line {
-  width: 1px;
-  background: var(--border);
-  flex-grow: 1;
-  z-index: 1;
-}
-
-.activity-item:last-child .activity-line {
-  display: none;
-}
-
-.activity-content {
-  flex-grow: 1;
-  padding-bottom: var(--space-8);
-}
-
-.activity-card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-4);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-4);
-  transition:
-    transform 0.2s ease,
-    border-color 0.2s ease;
-}
-
-.activity-card:hover {
-  border-color: var(--accent);
-  transform: translateX(4px);
-}
-
-/* ─── Contact Row ────────────────────────────────────────────────────────── */
-/* Grid layout for wider viewports; stacks vertically on mobile via the
-   media query below.  Uses CSS class so responsive overrides work (inline
-   styles would win over media queries). */
-.contact-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 1rem;
-  align-items: center;
-}
-
-/* ─── Contact Row Actions ────────────────────────────────────────────────── */
-/* On narrow viewports action buttons stack below the contact info for
-   better readability and larger tap targets (WCAG 2.1 AA min 44x44 px). */
-.contact-row__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
-
-@media (max-width: 35rem) {
-  .contact-row {
-    grid-template-columns: 1fr;
-  }
-
-  .contact-row__actions {
-    justify-content: flex-end;
-    width: 100%;
-  }
-
-  .contact-row__actions .button {
-    flex: 1 1 auto;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .activity-card {
-    transition: none;
-  }
-}
-
-.activity-info {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.activity-title {
-  font-size: var(--text-base);
-  font-weight: var(--font-semibold);
-  color: var(--foreground);
-}
-
-.activity-time {
-  color: var(--muted);
-  font-size: var(--text-xs);
 }
 
 .timestamp {
@@ -3770,160 +3580,6 @@ a:hover {
   justify-content: flex-end;
 }
 
-.explainer {
-  display: grid;
-  gap: 1.5rem;
-}
-
-.explainer__intro {
-  display: grid;
-  gap: 0.75rem;
-  max-width: 42rem;
-}
-
-.explainer__eyebrow {
-  color: var(--accent);
-  font-size: 0.875rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.explainer__title {
-  font-size: clamp(1.75rem, 4vw, 2.5rem);
-}
-
-.explainer__description {
-  color: var(--muted-light);
-  line-height: 1.6;
-}
-
-.explainer__grid {
-  display: grid;
-  gap: 1rem;
-}
-
-.explainer-card {
-  background:
-    radial-gradient(
-      circle at top left,
-      rgba(34, 197, 94, 0.18),
-      transparent 42%
-    ),
-    linear-gradient(180deg, var(--panel-elevated), var(--panel));
-  border: 1px solid var(--border);
-  border-radius: 1.5rem;
-  box-shadow: var(--shadow-soft);
-  display: grid;
-  gap: 1rem;
-  overflow: hidden;
-  padding: 1.25rem;
-}
-
-.explainer-card__art {
-  align-items: center;
-  background: linear-gradient(
-    135deg,
-    rgba(34, 197, 94, 0.15),
-    rgba(59, 130, 246, 0.06)
-  );
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 1rem;
-  display: flex;
-  height: 8rem;
-  justify-content: center;
-  position: relative;
-}
-
-.explainer-card__art--stream {
-  background: linear-gradient(
-    135deg,
-    rgba(14, 165, 233, 0.16),
-    rgba(59, 130, 246, 0.08)
-  );
-}
-
-.explainer-card__art--withdraw {
-  background: linear-gradient(
-    135deg,
-    rgba(245, 158, 11, 0.16),
-    rgba(34, 197, 94, 0.08)
-  );
-}
-
-.explainer-card__step {
-  align-items: center;
-  background: rgba(10, 10, 15, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
-  display: inline-flex;
-  font-size: 1.5rem;
-  font-weight: 700;
-  height: 3rem;
-  justify-content: center;
-  width: 3rem;
-  z-index: 1;
-}
-
-.explainer-card__pulse {
-  animation: live-accrual-tick 3s ease-in-out infinite;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
-  height: 5rem;
-  position: absolute;
-  width: 5rem;
-}
-
-.explainer-card__content {
-  display: grid;
-  gap: 0.5rem;
-}
-
-.explainer-card__content p {
-  color: var(--muted-light);
-  line-height: 1.6;
-}
-
-.explainer__cta-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
-/* Status variants for dots */
-.activity-dot--success {
-  background: var(--success);
-  box-shadow: 0 0 12px var(--success);
-}
-.activity-dot--info {
-  background: var(--info);
-  box-shadow: 0 0 12px var(--info);
-}
-.activity-dot--warning {
-  background: var(--warning);
-  box-shadow: 0 0 12px var(--warning);
-}
-.activity-dot--accent {
-  background: var(--accent);
-  box-shadow: 0 0 12px var(--accent);
-}
-
-/* ==========================================================================
-   STREAMPAY — CONTRACT EVENTS PANEL (EventTimeline)
-   Reuses the shared .activity-* timeline; adds the filter toolbar + event
-   metadata rows. Semantic dot colours are scoped here so reused
-   .activity-dot--* variants render correctly inside the panel in both themes.
-   ========================================================================== */
-
-.event-panel {
-  --success: #22c55e;
-  --info: #0ea5e9;
-  --warning: #eab308;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
 .event-panel__header {
   display: flex;
   flex-direction: column;
@@ -4060,12 +3716,6 @@ a:hover {
   font-size: 0.8125rem;
 }
 
-/* The event card stacks its richer content vertically rather than the
-   space-between row layout used by the base activity card. */
-.activity-card.event-card {
-  align-items: stretch;
-}
-
 /* ==========================================================================
    STREAMPAY — COMPREHENSIVE ACTION LOADING & BUSY MICRO-INTERACTIONS (#219)
    ========================================================================== */
@@ -4108,12 +3758,6 @@ a:hover {
   border-radius: var(--radius-full);
   will-change: transform;
   animation: stream-spin 0.65s linear infinite;
-}
-
-@media (min-width: 48rem) {
-  .explainer__grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 }
 
 @keyframes stream-spin {
@@ -4726,82 +4370,6 @@ a:hover {
   font-size: 0.8125rem;
 }
 
-/* =========================================================
-   Help & FAQ page
-   ========================================================= */
-
-.help-layout {
-  display: grid;
-  gap: 2.5rem;
-}
-
-@media (min-width: 768px) {
-  .help-layout {
-    align-items: start;
-    gap: 3rem;
-    grid-template-columns: 14rem 1fr;
-  }
-}
-
-/* --- Side navigation --- */
-
-.help-nav {
-  position: sticky;
-  top: 1.5rem;
-}
-
-.help-nav__list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.help-nav__item {
-  display: contents;
-}
-
-.help-nav__link {
-  border-radius: 0.375rem;
-  color: var(--muted-light);
-  display: block;
-  font-size: 0.875rem;
-  padding: 0.375rem 0.75rem;
-  text-decoration: none;
-  transition:
-    background-color 0.15s ease,
-    color 0.15s ease;
-}
-
-.help-nav__link:hover,
-.help-nav__link:focus-visible {
-  background-color: var(--surface-raised, rgba(255, 255, 255, 0.06));
-  color: var(--text, #f0f0f0);
-  outline: none;
-}
-
-/* --- Sections --- */
-
-.help-content {
-  display: grid;
-  gap: 3.5rem;
-}
-
-.help-section {
-  display: grid;
-  gap: 1.5rem;
-}
-
-.help-section__title {
-  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  font-size: 1.25rem;
-  font-weight: 700;
-  padding-bottom: 0.75rem;
-  scroll-margin-top: 2rem;
-}
-
 /* --- FAQ list (definition-list pattern) --- */
 
 .faq-list {
@@ -4832,116 +4400,6 @@ a:hover {
   color: var(--muted-light);
   line-height: 1.65;
   margin: 0;
-}
-
-/* =========================================================
-   Welcome Tour (onboarding modal)
-   ========================================================= */
-
-.welcome-tour-overlay {
-  align-items: center;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  bottom: 0;
-  display: flex;
-  justify-content: center;
-  left: 0;
-  padding: 1rem;
-  position: fixed;
-  right: 0;
-  top: 0;
-  z-index: 1000;
-}
-
-.welcome-tour {
-  background: var(--card-bg, #1a1a24);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  border-radius: 1rem;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
-  display: grid;
-  gap: 1.5rem;
-  max-width: 28rem;
-  outline: none;
-  padding: 2rem;
-  width: 100%;
-}
-
-/* --- Step indicator dots --- */
-
-.welcome-tour__dots {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.welcome-tour__dot {
-  background: var(--border, rgba(255, 255, 255, 0.15));
-  border: none;
-  border-radius: 999px;
-  cursor: pointer;
-  height: 6px;
-  padding: 0;
-  transition:
-    background-color 0.2s ease,
-    width 0.2s ease;
-  width: 20px;
-}
-
-.welcome-tour__dot--active {
-  background: var(--accent, #22c55e);
-  width: 32px;
-}
-
-.welcome-tour__dot:hover:not(.welcome-tour__dot--active) {
-  background: var(--muted-light, #a1a1aa);
-}
-
-/* --- Content area --- */
-
-.welcome-tour__content {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.welcome-tour__icon {
-  color: var(--accent, #22c55e);
-  font-size: 2rem;
-  line-height: 1;
-}
-
-.welcome-tour__counter {
-  color: var(--muted-light, #a1a1aa);
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  margin: 0;
-  text-transform: uppercase;
-}
-
-.welcome-tour__title {
-  font-size: 1.375rem;
-  font-weight: 700;
-  line-height: 1.2;
-  margin: 0;
-}
-
-.welcome-tour__body {
-  color: var(--muted-light, #a1a1aa);
-  line-height: 1.65;
-  margin: 0;
-}
-
-/* --- Action row --- */
-
-.welcome-tour__actions {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.welcome-tour__nav {
-  display: flex;
-  gap: 0.5rem;
 }
 
 /* Ghost button — used for Skip */
@@ -4984,6 +4442,10 @@ a:hover {
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
+  /* Keep the focus ring inside the scrollport without moving the controls. */
+  padding: 4px;
+  margin: -4px;
+  scroll-padding-inline: 4px;
 }
 
 .template-controls__categories::-webkit-scrollbar {
@@ -4994,7 +4456,7 @@ a:hover {
   background: none;
   border: 1px solid var(--border);
   border-radius: 999px;
-  color: var(--muted);
+  color: var(--muted-foreground);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -5022,9 +4484,25 @@ a:hover {
   color: var(--accent-on);
 }
 
+.template-controls__tab--active:hover {
+  color: var(--accent-on);
+}
+
+/* The light accent fill needs the darker token to meet AA text contrast. */
+.light .templates-page .page-hero__eyebrow {
+  color: var(--accent-hover);
+}
+
+.light .templates-page .template-controls__tab--active,
+.light .templates-page .button--primary {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
 .template-controls__tab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--background);
 }
 
 .inline-help__trigger:hover {
@@ -5153,20 +4631,6 @@ a:hover {
   .site-header__nav { display: none; }
   .site-header__inner { padding: 0.6rem 1rem; justify-content: space-between; }
 }
-
-/* ── Docs page ───────────────────────────────────────────────────────────── */
-.docs { max-width: 900px; margin: 0 auto; padding: 3rem 1.5rem 6rem; }
-.docs h1 { font-size: clamp(2rem, 5vw, 3rem); letter-spacing: -0.02em; margin: 0.25rem 0 0.75rem; }
-.docs h2 { margin: 2.5rem 0 0.75rem; font-size: 1.4rem; scroll-margin-top: 5rem; }
-.docs p, .docs li { color: var(--muted-light); line-height: 1.7; }
-.docs code { background: rgba(127, 127, 127, 0.16); padding: 0.1rem 0.4rem; border-radius: 6px; font-size: 0.85em; }
-.docs pre { background: rgba(127, 127, 127, 0.12); border: 1px solid rgba(127,127,127,0.2); padding: 1rem; border-radius: 12px; overflow-x: auto; }
-.docs pre code { background: none; padding: 0; }
-.docs table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-.docs th, .docs td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(127,127,127,0.2); vertical-align: top; color: var(--muted-light); }
-.docs th { color: inherit; }
-.docs__toc { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0 0; padding: 0; list-style: none; }
-.docs__toc a { padding: 0.3rem 0.75rem; border-radius: 999px; border: 1px solid rgba(127,127,127,0.3); color: inherit; text-decoration: none; font-size: 0.85rem; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    UI audit fixes — styles for components whose class names had no CSS
@@ -5350,8 +4814,13 @@ a:hover {
   padding: 0.5rem 1rem;
   width: 100%;
 }
-.template-controls__input::placeholder { color: var(--muted); }
+.template-controls__input::placeholder { color: var(--muted-foreground); }
 .template-controls__input:focus { border-color: var(--accent); outline: none; }
+.template-controls__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--background);
+}
 .template-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); }
 .template-card {
   background: var(--panel);
@@ -5382,7 +4851,7 @@ a:hover {
 .template-card__name { font-size: 1.125rem; line-height: 1.3; }
 .template-card__details { display: grid; gap: 0.75rem; grid-template-columns: 1fr 1fr; }
 .template-card__detail { display: grid; gap: 0.2rem; }
-.template-card__detail-label { color: var(--muted); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.template-card__detail-label { color: var(--muted-foreground); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
 .template-card__detail-value { font-weight: 600; margin: 0; }
 .template-card__memo { color: var(--muted-light); flex: 1; font-size: 0.875rem; line-height: 1.5; }
 .template-card__apply { align-self: stretch; margin-top: auto; }
@@ -5414,9 +4883,6 @@ a:hover {
 .theme-toggle__label:has(.theme-toggle__input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .theme-toggle__label--hc { margin-left: auto; }
 @media (max-width: 30rem) { .theme-toggle__label--hc { margin-left: 0; } }
-
-/* Notification settings: spacing between the push card and the next section. */
-.push-optin { margin-bottom: 1.5rem; }
 .notification-settings .input,
 .notification-settings select,
 .notification-settings input[type="time"] {
@@ -5438,6 +4904,13 @@ a:hover {
 .docs__table-wrap { -webkit-overflow-scrolling: touch; overflow-x: auto; }
 .docs__table-wrap table { min-width: 40rem; }
 .docs td code { white-space: nowrap; }
+.docs__api-groups { display: grid; gap: 1.5rem; margin-bottom: 1rem; }
+.docs__api-group { display: grid; gap: 0.5rem; }
+.docs__api-group-header h3 { font-size: 1.125rem; margin: 0; }
+.docs__api-group-description { color: var(--muted-light); font-size: 0.875rem; margin: 0.25rem 0 0; }
+.docs__auth-badge { align-items: center; color: var(--foreground); display: inline-flex; font-size: 0.8125rem; font-weight: 600; gap: 0.375rem; white-space: nowrap; }
+.docs__auth-icon { color: var(--accent); flex-shrink: 0; }
+.docs__public-badge { color: var(--muted-light); font-size: 0.8125rem; white-space: nowrap; }
 
 /* Step indicator: connectors are horizontal-only; on phones the steps stack. */
 @media (max-width: 47.9375rem) { .step-indicator__connector { display: none; } }
@@ -5528,56 +5001,22 @@ a:hover {
   .checklist-item__actions { grid-column: 2; }
   .checklist-item__note { margin-left: 0; }
   .checklist-header { flex-direction: column; }
-}
-/* Light theme contrast: --accent-strong is a pale fill in light mode, so text
+}/* Light theme contrast: --accent-strong is a pale fill in light mode,
+so text
    that uses it switches to the readable success text colour. */
 .light .empty-state__eyebrow,
 .light .empty-state__supporting-title,
 .light .empty-state__supporting-list li::before,
-.light .push-optin__eyebrow,
-.light .timeline-item--past .timeline-item-title { color: var(--system-success-text); }
+.light .timeline-item--past .timeline-item-title {
+ color: var(--system-success-text); }
 .button--danger { color: var(--system-error-text); }
 .light .cancel-stream__blocked { color: var(--system-warning-text); }
 .light { --muted-light: #4b5563; }
 /* Light theme: surfaces that were hard-coded for the dark theme. */
 .light .empty-state { background: linear-gradient(180deg, rgba(34, 197, 94, 0.1), var(--panel)); }
 .light .empty-state__supporting { background: rgba(255, 255, 255, 0.7); }
-.light .push-optin { background: linear-gradient(135deg, rgba(14, 165, 233, 0.1), var(--panel)); }
-.light .push-optin--success { background: linear-gradient(135deg, rgba(34, 197, 94, 0.12), var(--panel)); }
-.light .push-optin--warning { background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), var(--panel)); }
 .light .alert--error { color: var(--system-error-text); }
 .light .confirm-action__warning, .light .cancel-stream__warning { color: var(--system-error-text); }
-.light .explainer-card__step { background: rgba(255, 255, 255, 0.9); color: var(--foreground); }
-.light .help-nav__link:hover, .light .help-nav__link:focus-visible { background-color: var(--panel); color: var(--foreground); }
-/* Welcome banner on the home page (shown after the tour is dismissed). */
-.onboarding-banner {
-  align-items: center;
-  background: var(--system-success-bg);
-  border: 1px solid var(--system-success-border);
-  border-radius: 0.875rem;
-  color: var(--foreground);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem 1rem;
-  justify-content: space-between;
-  margin: 0 auto 1.5rem;
-  max-width: 64rem;
-  padding: 0.75rem 1rem;
-  width: 100%;
-}
-.onboarding-banner__message { font-size: 0.9375rem; }
-.onboarding-banner__dismiss {
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--foreground);
-  cursor: pointer;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  min-height: 2.25rem;
-  padding: 0.35rem 0.9rem;
-}
-.onboarding-banner__dismiss:hover { border-color: var(--accent); }
 
 /* Tailwind utilities used by some components (see tailwind.config.js). Last so they win over base rules. */
 @tailwind utilities;

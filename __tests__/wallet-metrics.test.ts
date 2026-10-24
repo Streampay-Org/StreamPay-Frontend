@@ -7,7 +7,7 @@ import {
 import { resetRateLimitStore } from '@/app/lib/rate-limit-store';
 
 const VALID_ADDRESS = 'GCLH2SNM5MTV4TGNNOADLYOZJYIFBXTIDVSNW4XP3LEI2UQV2MZ46OD7';
-const VALID_CHALLENGE = 'streampay_auth_1721800000000_abc123xyz';
+const VALID_CHALLENGE = 'streampay-auth:v1:nKlQNln6SV4hJ6pm6jNMSBVlcqo7r8Pjcj9mqLA_oRg|http://localhost|2024-01-15T10:05:00.000Z';
 
 /**
  * Helper: search a Prometheus text-exposition string for a sample line whose
@@ -55,7 +55,7 @@ function findSample(
 function makeGetRequest(params: Record<string, string> = {}, headers: Record<string, string> = {}) {
   const searchParams = new URLSearchParams(params);
   return {
-    nextUrl: { searchParams, pathname: '/api/auth/wallet' },
+    nextUrl: { searchParams, pathname: '/api/auth/wallet', origin: 'http://localhost' },
     headers: {
       get: (name: string) => {
         const lower = name.toLowerCase();
@@ -66,12 +66,30 @@ function makeGetRequest(params: Record<string, string> = {}, headers: Record<str
   } as unknown as import('next/server').NextRequest;
 }
 
+function streamFromText(text: string): ReadableStream<Uint8Array> {
+  const encoded = new TextEncoder().encode(text);
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (encoded.byteLength > 0) controller.enqueue(encoded);
+      controller.close();
+    },
+  });
+}
+
 function makePostRequest(
   body: unknown,
   csrfCookie?: string,
   csrfHeader?: string,
 ) {
+  const text =
+    body === 'THROW'
+      ? '{'
+      : typeof body === 'string'
+        ? body
+        : (JSON.stringify(body) ?? '');
+
   return {
+    body: streamFromText(text),
     json: async () => {
       if (body === 'THROW') throw new Error('parse error');
       return body;
@@ -150,7 +168,7 @@ describe('Per-endpoint metrics on /api/auth/wallet', () => {
       ).not.toBeNull();
     });
 
-    it('increments the counter for 422 INVALID_CURSOR on paginated listing', async () => {
+    it('increments the counter for 400 UNSUPPORTED_QUERY on cursor/limit queries', async () => {
       await GET(
         makeGetRequest({ address: VALID_ADDRESS, cursor: 'not-a-cursor' }),
       );
@@ -160,46 +178,29 @@ describe('Per-endpoint metrics on /api/auth/wallet', () => {
         findSample(metrics, 'wallet_auth_requests_total', {
           method: 'GET',
           operation: 'challenge',
-          status: '422',
+          status: '400',
         }),
       ).not.toBeNull();
     });
 
-    it('increments the counter for 304 Not Modified responses', async () => {
-      // Freeze time/randomness so challenge generation is deterministic
-      const origDateNow = Date.now.bind(Date);
-      const origRandom = Math.random.bind(Math);
-      Date.now = () => 1234567890000;
-      Math.random = () => 0.5;
+    it('increments the counter for 200 (never 304) when If-None-Match is sent', async () => {
+      const res1 = await GET(makeGetRequest({ address: VALID_ADDRESS }));
+      expect(res1.status).toBe(200);
+      const etag = res1.headers.get('etag') as string;
 
-      try {
-        const res1 = await GET(makeGetRequest({ address: VALID_ADDRESS }));
-        expect(res1.status).toBe(200);
-        const etag = res1.headers.get('etag') as string;
+      const req = makeGetRequest({ address: VALID_ADDRESS }, { 'if-none-match': etag });
+      const res2 = await GET(req);
+      // Challenge issuance must never answer 304 — the client needs the nonce.
+      expect(res2.status).toBe(200);
 
-        const req = makeGetRequest({ address: VALID_ADDRESS }, { 'if-none-match': etag });
-        const res2 = await GET(req);
-        expect(res2.status).toBe(304);
-
-        const metrics = await registry.metrics();
-        expect(
-          findSample(metrics, 'wallet_auth_requests_total', {
-            method: 'GET',
-            operation: 'challenge',
-            status: '304',
-          }),
-        ).not.toBeNull();
-        expect(
-          findSample(metrics, 'wallet_auth_request_duration_seconds_count', {
-            method: 'GET',
-            operation: 'challenge',
-            status: '304',
-          }),
-        ).not.toBeNull();
-      } finally {
-        Date.now = origDateNow;
-        Math.random = origRandom;
-      }
+      const metrics = await registry.metrics();
+      expect(
+        findSample(metrics, 'wallet_auth_requests_total', {
+          method: 'GET',
+          operation: 'challenge',
+          status: '200',
+        }),
+      ).not.toBeNull();
     });
 
     it('increments the counter for 429 when the challenge limiter trips', async () => {

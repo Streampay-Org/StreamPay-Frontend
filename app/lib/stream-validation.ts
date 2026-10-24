@@ -50,6 +50,9 @@ export interface CreateStreamBody {
   rate: string;
   schedule: string;
   token?: string;
+  totalAmount?: string;
+  startTime?: string;
+  endTime?: string;
 }
 
 /**
@@ -176,6 +179,23 @@ export const createStreamSchema = z
     if (token !== undefined && token !== null && typeof token !== "string") {
       fail("token", "INVALID_TOKEN_FORMAT", "token must be a string if provided.");
     }
+
+    if (body.totalAmount !== undefined && (
+      typeof body.totalAmount !== "string" ||
+      !/^\d+$/.test(body.totalAmount) ||
+      BigInt(body.totalAmount) === 0n ||
+      BigInt(body.totalAmount) > (1n << 127n) - 1n
+    )) {
+      fail("totalAmount", "INVALID_TOTAL_AMOUNT", "totalAmount must be a positive raw i128 string.");
+    }
+
+    if (body.startTime !== undefined || body.endTime !== undefined) {
+      const start = typeof body.startTime === "string" ? Date.parse(body.startTime) : NaN;
+      const end = typeof body.endTime === "string" ? Date.parse(body.endTime) : NaN;
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+        fail("endTime", "INVALID_VESTING_WINDOW", "startTime and endTime must be valid dates with endTime after startTime.");
+      }
+    }
   });
 
 /**
@@ -185,7 +205,7 @@ export const createStreamSchema = z
  * valid (though the caller still needs to handle token allowlisting etc.).
  */
 export function validateCreateStreamBody(
-  body: Record<string, unknown>,
+  body: unknown,
 ): ValidationError[] {
   const result = createStreamSchema.safeParse(body);
   return result.success ? [] : zodIssuesToErrors(result.error);

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { setTheme, setHighContrast, getHighContrast } from '../utils/theme-noflash';
+import { updateThemeState } from './ThemeController';
 
 type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -26,33 +27,17 @@ export function ThemeToggle() {
     setHighContrastState(getHighContrast());
   }, []);
 
-  useEffect(() => {
-    if (mode === 'system') {
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      
-      const handleChange = (e: MediaQueryListEvent) => {
-        document.documentElement.classList.remove('dark', 'light');
-        document.documentElement.classList.add(e.matches ? 'dark' : 'light');
-      };
-      
-      mediaQuery.addEventListener('change', handleChange);
-      return () => mediaQuery.removeEventListener('change', handleChange);
-    }
-  }, [mode]);
-
   const handleChange = (newMode: ThemeMode) => {
     setMode(newMode);
-    
+
     if (newMode === 'system') {
       try {
         window.localStorage.removeItem('streampay-theme');
       } catch (e) {}
-      
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.classList.remove('dark', 'light');
-      document.documentElement.classList.add(prefersDark ? 'dark' : 'light');
+      updateThemeState();
     } else {
       setTheme(newMode);
+      updateThemeState();
     }
   };
 
@@ -63,47 +48,50 @@ export function ThemeToggle() {
   };
 
   return (
-    <div className="theme-toggle" role="radiogroup" aria-label="Theme selection">
-      <label className="theme-toggle__label">
-        <input 
-          type="radio" 
-          name="theme" 
-          value="light" 
-          checked={mode === 'light'} 
-          onChange={() => handleChange('light')}
-          className="theme-toggle__input"
-        />
-        <span>Light</span>
-      </label>
-      <label className="theme-toggle__label">
-        <input 
-          type="radio" 
-          name="theme" 
-          value="dark" 
-          checked={mode === 'dark'} 
-          onChange={() => handleChange('dark')}
-          className="theme-toggle__input"
-        />
-        <span>Dark</span>
-      </label>
-      <label className="theme-toggle__label">
-        <input 
-          type="radio" 
-          name="theme" 
-          value="system" 
-          checked={mode === 'system'} 
-          onChange={() => handleChange('system')}
-          className="theme-toggle__input"
-        />
-        <span>System</span>
-      </label>
+    <div className="theme-toggle">
+      <fieldset className="theme-toggle__group">
+        <legend className="sr-only">Theme selection</legend>
+        <label className="theme-toggle__label">
+          <input
+            type="radio"
+            name="theme"
+            value="light"
+            checked={mode === 'light'}
+            onChange={() => handleChange('light')}
+            className="theme-toggle__input"
+          />
+          <span>Light</span>
+        </label>
+        <label className="theme-toggle__label">
+          <input
+            type="radio"
+            name="theme"
+            value="dark"
+            checked={mode === 'dark'}
+            onChange={() => handleChange('dark')}
+            className="theme-toggle__input"
+          />
+          <span>Dark</span>
+        </label>
+        <label className="theme-toggle__label">
+          <input
+            type="radio"
+            name="theme"
+            value="system"
+            checked={mode === 'system'}
+            onChange={() => handleChange('system')}
+            className="theme-toggle__input"
+          />
+          <span>System</span>
+        </label>
+      </fieldset>
       <label className="theme-toggle__label theme-toggle__label--hc">
         <input
           type="checkbox"
+          aria-label="High contrast mode"
           checked={highContrast}
           onChange={handleHighContrastToggle}
           className="theme-toggle__input"
-          aria-label="High contrast mode"
         />
         <span>High Contrast</span>
       </label>

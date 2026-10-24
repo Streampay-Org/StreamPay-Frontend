@@ -4,6 +4,7 @@ import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { getCorrelationContext, logger, withCorrelationContext } from "@/app/lib/logger";
+import { withRouteSpan } from "@/lib/routeSpan";
 import { withRouteTimeout } from "@/src/middleware/timeout";
 
 function createErrorResponse(code: string, message: string, status: number) {
@@ -30,9 +31,18 @@ async function handleActivityGet(request: Request) {
   const type = searchParams.get("type");
   const limit = Math.min(Number.parseInt(searchParams.get("limit") || "20", 10), 100);
 
+  const headers = request instanceof Request ? request.headers : new Headers();
+  const request_id = resolveRequestId(headers);
+  const rawCorr = headers.get("x-correlation-id");
+  const correlation_id =
+    rawCorr && isValidRequestId(rawCorr) ? rawCorr : generateRequestId();
+
   const context = {
     correlation_id: request.headers.get("x-correlation-id") || `api-${crypto.randomUUID()}`,
     request_id: `req-${crypto.randomUUID()}`,
+    trace_id: spanContext?.trace_id,
+    span_id: spanContext?.span_id,
+    traceparent: spanContext?.traceparent,
   };
 
   return withCorrelationContext(context, async () => {
@@ -77,5 +87,7 @@ async function handleActivityGet(request: Request) {
 }
 
 export async function GET(request: Request) {
-  return withRouteTimeout(request, () => handleActivityGet(request));
+  return withRouteSpan("/api/activity", () =>
+    withRouteTimeout(request, () => handleActivityGet(request)),
+  );
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { safeJson } from "@/lib/safe-json";
+import { getCorrelationContext } from "@/app/lib/logger";
+import { generateRequestId } from "@/lib/requestId";
 
 /**
  * Canonical error envelope used by every API route.
@@ -25,6 +26,7 @@ export const ErrorCode = {
   INTERNAL_SERVER_ERROR: "INTERNAL_SERVER_ERROR",
   NOT_FOUND: "NOT_FOUND",
   BAD_REQUEST: "BAD_REQUEST",
+  UNSUPPORTED_QUERY: "UNSUPPORTED_QUERY",
   UNAUTHORIZED: "UNAUTHORIZED",
   FORBIDDEN: "FORBIDDEN",
   WEBHOOK_PROCESSING_FAILED: "WEBHOOK_PROCESSING_FAILED",
@@ -54,19 +56,26 @@ export const ErrorCode = {
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
 
+export interface ErrorResponseOptions {
+  requestId?: string;
+  context?: Record<string, unknown>;
+}
+
 /**
- * Reads the `x-request-id` header forwarded by the gateway/load-balancer,
- * or generates a lightweight fallback so every response always carries one.
+ * Resolves request ID from:
+ * 1. an explicit requestId option
+ * 2. getCorrelationContext()?.request_id
+ * 3. generateRequestId() fallback
  */
-function resolveRequestId(): string {
-  try {
-    const hdrs = headers();
-    const forwarded = (hdrs as unknown as { get(name: string): string | null }).get("x-request-id");
-    if (forwarded) return forwarded;
-  } catch {
-    // headers() throws outside a request context (e.g. unit tests)
+function resolveRequestId(options?: ErrorResponseOptions): string {
+  if (options?.requestId) {
+    return options.requestId;
   }
-  return `req_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 10)}`;
+  const correlationContext = getCorrelationContext();
+  if (correlationContext?.request_id) {
+    return correlationContext.request_id;
+  }
+  return generateRequestId();
 }
 
 /**
@@ -76,26 +85,29 @@ function resolveRequestId(): string {
  * @param message - Human-readable description safe to expose to clients
  * @param status  - HTTP status code (default 500)
  * @param context - Optional structured context to preserve (will be serialized safely)
+ * @param options - Optional configuration options including explicit requestId
  */
 export function errorResponse(
   code: string,
   message: string,
   status = 500,
   context?: Record<string, unknown>,
+  options?: ErrorResponseOptions,
 ): NextResponse<ErrorEnvelope> {
-  const request_id = resolveRequestId();
-  const error : ErrorEnvelope["error"] = {
+  const request_id = resolveRequestId(options);
+  const details = options?.context ?? context;
+  const error: ErrorEnvelope["error"] = {
     code,
     message,
     request_id,
-    ...(context ? { details: context } : {}),
+    ...(details ? { details } : {}),
   };
 
-  return new NextResponse(
+  return new NextResponse<ErrorEnvelope>(
     safeJson({ error }),
     {
       status,
       headers: { "Content-Type": "application/json" },
     },
-  ) as unknown as NextResponse<ErrorEnvelope>;
+  );
 }

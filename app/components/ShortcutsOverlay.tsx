@@ -19,9 +19,9 @@ import { SHORTCUT_GROUPS } from "@/lib/shortcuts";
 // the app about which scope a shortcut belongs to (issue #1649).
 //
 
-export function ShortcutsOverlay() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [shouldRender, setShouldRender] = useState(false);
+export function ShortcutsOverlay({ defaultOpen = false }: { defaultOpen?: boolean } = {}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  const [shouldRender, setShouldRender] = useState(defaultOpen);
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
   const pointerDownOnOverlayRef = useRef(false);
@@ -189,8 +189,8 @@ export function ShortcutsOverlay() {
           width: "100%",
           maxWidth: "520px",
           maxHeight: "80vh",
-          backgroundColor: "var(--card-surface)",
-          border: "1px solid var(--card-border)",
+          backgroundColor: "var(--panel-elevated)",
+          border: "1px solid var(--border)",
           borderRadius: "1rem",
           boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)",
           animation: `${isOpen ? "shortcutsScaleIn" : "shortcutsScaleOut"} var(--motion-duration-medium, 200ms) var(--motion-easing, ease) forwards`,

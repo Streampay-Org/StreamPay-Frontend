@@ -32,38 +32,54 @@ export interface ModalProps {
    * @default true
    */
   autoRestoreFocus?: boolean;
+  /**
+   * Optional className for the dialog container.
+   */
+  className?: string;
+  /**
+   * Optional aria-labelledby override. Defaults to the internal title id.
+   */
+  ariaLabelledBy?: string;
+  /**
+   * Optional aria-describedby id.
+   */
+  ariaDescribedBy?: string;
+  /**
+   * Whether to render the default header with title and close button.
+   * @default true
+   */
+  showHeader?: boolean;
+  /**
+   * Optional custom onClose for the header close button label.
+   * @default "Close modal"
+   */
+  closeLabel?: string;
 }
 
-export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
-  isOpen,
-  onClose,
-  title,
-  restoreFocusTarget,
-  autoRestoreFocus = true,
-  children,
-}) => {
-  const [shouldRender, setShouldRender] = useState(isOpen);
-  const dialogRef = useRef<HTMLDivElement>(null);
+export interface FocusTrapResult {
+  dialogRef: RefObject<HTMLElement | null>;
+  handleKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+  getFocusableElements: () => HTMLElement[];
+}
+
+export interface UseFocusTrapOptions {
+  restoreFocusTarget?: FocusTarget;
+  autoRestoreFocus?: boolean;
+}
+
+/**
+ * Hook that implements a focus trap for a dialog container.
+ * Captures the previously focused element on open and restores focus on close.
+ */
+export function useFocusTrap(
+  isOpen: boolean,
+  onClose: () => void,
+  options?: UseFocusTrapOptions,
+): FocusTrapResult {
+  const dialogRef = useRef<HTMLElement | null>(null);
   const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
-  const pointerDownOnOverlayRef = useRef(false);
-  const titleId = useId();
-
-  useEffect(() => {
-    if (isOpen) {
-      setShouldRender(true);
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [isOpen]);
+  const restoreFocusTarget = options?.restoreFocusTarget;
+  const autoRestoreFocus = options?.autoRestoreFocus ?? false;
 
   const resolveTargetElement = (): HTMLElement | null => {
     if (restoreFocusTarget !== undefined) {
@@ -79,13 +95,13 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
   };
 
   useEffect(() => {
-    if (isOpen && shouldRender) {
+    if (isOpen) {
       if (!previouslyFocusedElementRef.current) {
         previouslyFocusedElementRef.current =
           document.activeElement as HTMLElement | null;
       }
       dialogRef.current?.focus();
-    } else if (!isOpen && previouslyFocusedElementRef.current) {
+    } else if (previouslyFocusedElementRef.current) {
       if (autoRestoreFocus) {
         const target = resolveTargetElement();
         if (
@@ -102,25 +118,10 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
       }
       previouslyFocusedElementRef.current = null;
     }
-  }, [isOpen, shouldRender, autoRestoreFocus, restoreFocusTarget]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, autoRestoreFocus, restoreFocusTarget]);
 
-  const handleAnimationEnd = () => {
-    if (!isOpen) setShouldRender(false);
-  };
-
-  const handleOverlayPointerDown = (event: MouseEvent<HTMLDivElement>) => {
-    pointerDownOnOverlayRef.current = event.target === event.currentTarget;
-  };
-
-  const handleOverlayClick = (event: MouseEvent<HTMLDivElement>) => {
-    const startedOnOverlay = pointerDownOnOverlayRef.current;
-    pointerDownOnOverlayRef.current = false;
-    if (startedOnOverlay && event.target === event.currentTarget) {
-      onClose();
-    }
-  };
-
-  const getFocusableElements = () => {
+  const getFocusableElements = (): HTMLElement[] => {
     if (!dialogRef.current) return [];
 
     return Array.from(
@@ -131,6 +132,7 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
           "textarea:not([disabled])",
           "input:not([disabled])",
           "select:not([disabled])",
+          "[data-focus-trap-initial]",
           "[tabindex]:not([tabindex='-1'])",
         ].join(","),
       ),
@@ -141,7 +143,7 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
     );
   };
 
-  const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
       onClose();
@@ -183,6 +185,63 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
     }
   };
 
+  return { dialogRef, handleKeyDown, getFocusableElements };
+}
+
+export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
+  isOpen,
+  onClose,
+  title,
+  restoreFocusTarget,
+  autoRestoreFocus = true,
+  className,
+  ariaLabelledBy,
+  ariaDescribedBy,
+  showHeader = true,
+  closeLabel = "Close modal",
+  children,
+}) => {
+  const [shouldRender, setShouldRender] = useState(isOpen);
+  const pointerDownOnOverlayRef = useRef(false);
+  const titleId = useId();
+  const { dialogRef, handleKeyDown } = useFocusTrap(isOpen, onClose, {
+    restoreFocusTarget,
+    autoRestoreFocus,
+  });
+
+  useEffect(() => {
+    if (isOpen) {
+      setShouldRender(true);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isOpen]);
+
+  const handleAnimationEnd = () => {
+    if (!isOpen) setShouldRender(false);
+  };
+
+  const handleOverlayPointerDown = (event: MouseEvent<HTMLElement>) => {
+    pointerDownOnOverlayRef.current = event.target === event.currentTarget;
+  };
+
+  const handleOverlayClick = (event: MouseEvent<HTMLElement>) => {
+    const startedOnOverlay = pointerDownOnOverlayRef.current;
+    pointerDownOnOverlayRef.current = false;
+    if (startedOnOverlay && event.target === event.currentTarget) {
+      onClose();
+    }
+  };
+
   if (!shouldRender) return null;
 
   return (
@@ -208,46 +267,50 @@ export const Modal: React.FC<PropsWithChildren<ModalProps>> = ({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby={titleId}
+        aria-labelledby={ariaLabelledBy ?? ariaLabelledBy ?? titleId}
+        aria-describedby={ariaDescribedBy}
         tabIndex={-1}
+        className={className}
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleDialogKeyDown}
+        onKeyDown={handleKeyDown}
         style={{
           width: "100%",
           maxWidth: "500px",
-          backgroundColor: "var(--card-surface)",
-          border: "1px solid var(--card-border)",
+          backgroundColor: "var(--panel-elevated)",
+          border: "1px solid var(--border)",
           borderRadius: "1rem",
           padding: "1.5rem",
           boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)",
           animation: `${isOpen ? "scaleIn" : "scaleOut"} var(--motion-duration-medium) var(--motion-easing) forwards`,
         }}
       >
-        <header
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "1.5rem",
-          }}
-        >
-          <h2 id={titleId} style={{ fontSize: "1.25rem" }}>
-            {title}
-          </h2>
-          <button
-            onClick={onClose}
-            aria-label="Close modal"
+        {showHeader && (
+          <header
             style={{
-              background: "none",
-              border: "none",
-              color: "var(--muted)",
-              cursor: "pointer",
-              fontSize: "1.5rem",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "1.5rem",
             }}
           >
-            ×
-          </button>
-        </header>
+            <h2 id={titleId} style={{ fontSize: "1.25rem" }}>
+              {title}
+            </h2>
+            <button
+              onClick={onClose}
+              aria-label={closeLabel}
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--muted)",
+                cursor: "pointer",
+                fontSize: "1.5rem",
+              }}
+            >
+              í
+            </button>
+          </header>
+        )}
         {children}
       </div>
 

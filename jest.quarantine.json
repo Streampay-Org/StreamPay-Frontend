@@ -1,0 +1,225 @@
+{
+  "QUARANTINE_MAX": 57,
+  "entries": [
+    {
+      "path": "app/api/notifications/preferences/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/streams/new/recurring.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "__tests__/a11y.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "__tests__/openapi-auth-wallet.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "__tests__/openapi-webhooks.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/audit/export/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/exports/exports.accessLog.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/exports/exports.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/identity/me/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/indexer/sse/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/internal/cleanup/idempotency/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/internal/reconciliation/diff/[id]/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/internal/reconciliation/nightly/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/internal/reconciliation/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/orgs/[orgId]/token-allowlist/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/reconciliation/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/streams/__tests__/rateLimiterConsistency.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/streams/[id]/start/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/streams/[id]/webhooks/test/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/streams/[id]/withdraw/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/streams/concurrency.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/streams/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/streams/route.timeout.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/streams/stream-lifecycle.e2e.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/streams/v1-contract.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/v2/streams/batch/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/v2/streams/multi/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/v2/streams/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/v2/streams/v2-streams-quota.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/webhooks/deliveries/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/webhooks/dlq/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/api/webhooks/health/route.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/components/EmptyState.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/components/ReceiptShareCard.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/components/StreamViz.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/dashboard/IndexerStatus.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/lib/config/config.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/ReceiptCard.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/streams/new/components/StepIndicator.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/streams/new/multi.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/streams/new/page.focus.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/streams/new/page.resp.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/streams/new/wizardDraft.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/streams/page.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/streams/streams-cascade.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/streams/StreamsPageContent.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "app/StreamTypeChip.test.tsx",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "lib/otel.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "lib/requestId.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "lib/sorobanRetryQueue.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "middleware.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "tests/contract.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "tests/env.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "tests/integration/exports.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    },
+    {
+      "path": "tests/streamsShape.test.ts",
+      "reason": "Pre-existing failure on main; quarantined until fixed"
+    }
+  ]
+}

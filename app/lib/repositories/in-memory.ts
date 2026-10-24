@@ -10,6 +10,7 @@ import type {
 } from "@/app/lib/db";
 import type { ActivityEvent, ExportJob, Stream, User } from "@/app/types/openapi";
 import { createActivityTimelineStore, type ActivityTimelineStore, activityEventToTimelineEntry } from "@/app/lib/repositories/activity-timeline";
+import { createStreamHistoryStore } from "@/app/lib/repositories/stream-history";
 
 // Keep seeded demo timestamps recent (no-op under Jest).
 const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
@@ -35,7 +36,7 @@ const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
 /* test-fixture */ const initialStreams: Stream[] = [
   {
     id: "stream-ada",
-    recipient: "Ada Creative Studio",
+    recipient: "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZK7G",
     rate: "120 XLM / month",
     schedule: "Pays every 30 days",
     status: "active",
@@ -46,30 +47,74 @@ const demoDate = makeDemoDateShifter("2026-04-28T12:00:00Z");
     label: "Design Retainer Q2",
     partnerId: "PARTNER-FIXTURE-1", // synthetic partner id
     token: "XLM",
+    settlementTxHash:
+      "c3f8a12e4b76d09e1a23f456bc78d90e1f234a5678b9c0d1e2f3a4b5c6d7e8f9",
+    totalAmount: "3600000000",
+    vestedAmount: "1800000000",
+    releasedAmount: "1200000000",
+    senderAddress: "GSENDER00000000000000000000000000000000000000000000",
+    ownership: "org",
   },
   {
     id: "stream-kemi",
-    recipient: "Kemi Onboarding Support",
+    recipient: "GBVZZ5QKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2Z",
     rate: "32 XLM / week",
     schedule: "Draft stream ready to launch",
     status: "draft",
     nextAction: "start",
+    label: "Kemi Onboarding Support",
     createdAt: demoDate("2026-04-10T14:00:00Z"),
     updatedAt: demoDate("2026-04-28T11:00:00Z"),
     email: "fixture-user-2@example.test", // non-real domain
     memo: "April Support batch",
     token: "XLM",
+    totalAmount: "1280000000",
+    vestedAmount: "0",
+    releasedAmount: "0",
+    senderAddress: "GSENDER00000000000000000000000000000000000000000000",
+    ownership: "individual",
   },
   {
     id: "stream-yusuf",
-    recipient: "Yusuf QA Partnership",
+    recipient: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGYWDEAVQBMJ87WGNB55IAA",
     rate: "18 XLM / day",
     schedule: "Ended yesterday with funds available",
     status: "ended",
     nextAction: "withdraw",
+    label: "Yusuf QA Partnership",
     createdAt: demoDate("2026-04-15T08:00:00Z"),
     updatedAt: demoDate("2026-04-27T20:00:00Z"),
     token: "XLM",
+    settlementTxHash:
+      "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+    withdrawal: {
+      state: "pending",
+      requestedAt: demoDate("2026-04-27T20:15:00Z"),
+      lastCheckedAt: demoDate("2026-04-27T20:20:00Z"),
+      attempts: 1,
+    },
+    totalAmount: "540000000",
+    vestedAmount: "540000000",
+    releasedAmount: "0",
+    senderAddress: "GSENDER00000000000000000000000000000000000000000000",
+    ownership: "individual",
+  },
+  {
+    id: "stream-unclaimed",
+    recipient: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGYWDEAVQBMJ87WGNB55IAA",
+    rate: "10 XLM / day",
+    schedule: "Legacy unclaimed stream",
+    status: "active",
+    nextAction: "pause",
+    label: "Legacy Unclaimed Stream",
+    createdAt: demoDate("2026-04-12T08:00:00Z"),
+    updatedAt: demoDate("2026-04-20T10:00:00Z"),
+    token: "XLM",
+    totalAmount: "1000000000",
+    vestedAmount: "500000000",
+    releasedAmount: "0",
+    senderAddress: null,
+    ownership: "unclaimed",
   },
 ];
 
@@ -156,6 +201,14 @@ class InMemoryKeyValueStore<K, V> implements KeyValueStore<K, V> {
     return this.backing.get(key);
   }
 
+  insert(key: K, value: V): boolean {
+    if (this.backing.has(key)) {
+      return false;
+    }
+    this.backing.set(key, value);
+    return true;
+  }
+
   has(key: K): boolean {
     return this.backing.has(key);
   }
@@ -197,11 +250,215 @@ class InMemoryAppendOnlyStore<T> implements AppendOnlyStore<T> {
   }
 }
 
-class InMemoryStreamRepository implements StreamRepository {
+import { DEFAULT_STREAM_TENANT_ID } from "@/app/lib/stream-view";
+import { resolveStreamTenant, visibleTo } from "@/app/lib/stream-visibility";
+
+export { visibleTo, resolveStreamTenant };
+
+function extractParticipants(stream: Stream): string[] {
+  const wallets = new Set<string>();
+  const sender = stream.senderAddress?.trim();
+  const recipient = stream.recipient?.trim();
+  if (sender && sender.length > 0) {
+    wallets.add(sender);
+  }
+  if (recipient && recipient.length > 0) {
+    wallets.add(recipient);
+  }
+  return Array.from(wallets);
+}
+
+/**
+ * Key-value store for `Stream` records that maintains secondary in-memory
+ * indexes by tenant (`byTenant`) and by participant wallet (`byParticipant`).
+ *
+ * All mutations (`set`, `delete`, `clear`) atomically update both indexes,
+ * including updates that change `tenantId`/`tenant`, `senderAddress`, or
+ * `recipient` on an existing stream ID.
+ */
+export class IndexedStreamStore implements KeyValueStore<string, Stream> {
+  private readonly backing = new Map<string, Stream>();
+  private readonly tenantIndex = new Map<string, Set<string>>();
+  private readonly participantIndex = new Map<string, Set<string>>();
+
+  constructor(initialEntries?: Iterable<[string, Stream]>) {
+    if (initialEntries) {
+      for (const [id, stream] of initialEntries) {
+        this.set(id, stream);
+      }
+    }
+  }
+
+  get size(): number {
+    return this.backing.size;
+  }
+
+  /** Read-only view of the tenant -> stream IDs secondary index. */
+  get byTenant(): ReadonlyMap<string, ReadonlySet<string>> {
+    return this.tenantIndex;
+  }
+
+  /** Read-only view of the participant wallet -> stream IDs secondary index. */
+  get byParticipant(): ReadonlyMap<string, ReadonlySet<string>> {
+    return this.participantIndex;
+  }
+
+  clear(): void {
+    this.backing.clear();
+    this.tenantIndex.clear();
+    this.participantIndex.clear();
+  }
+
+  delete(id: string): boolean {
+    const existing = this.backing.get(id);
+    if (!existing) {
+      return false;
+    }
+    this.unindexStream(id, existing);
+    return this.backing.delete(id);
+  }
+
+  entries(): IterableIterator<[string, Stream]> {
+    return this.backing.entries();
+  }
+
+  forEach(callbackfn: (value: Stream, key: string) => void): void {
+    this.backing.forEach((value, key) => callbackfn(value, key));
+  }
+
+  get(id: string): Stream | undefined {
+    return this.backing.get(id);
+  }
+
+  has(id: string): boolean {
+    return this.backing.has(id);
+  }
+
+  set(id: string, value: Stream): void {
+    const existing = this.backing.get(id);
+    if (existing) {
+      this.unindexStream(id, existing);
+    }
+    this.backing.set(id, value);
+    this.indexStream(id, value);
+  }
+
+  values(): IterableIterator<Stream> {
+    return this.backing.values();
+  }
+
+  /**
+   * Returns all streams belonging to `tenant` in `O(streams in tenant)` time.
+   */
+  listByTenant(tenant?: string | null): Stream[] {
+    const normalizedTenant =
+      tenant && tenant.trim().length > 0 ? tenant.trim() : DEFAULT_STREAM_TENANT_ID;
+    const ids = this.tenantIndex.get(normalizedTenant);
+    if (!ids || ids.size === 0) {
+      return [];
+    }
+
+    const result: Stream[] = [];
+    for (const id of ids) {
+      const stream = this.backing.get(id);
+      if (stream) {
+        result.push(stream);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Returns all streams where `walletAddress` is `senderAddress` or `recipient`,
+   * optionally restricted to `tenant`.
+   */
+  listByParticipant(walletAddress: string, tenant?: string | null): Stream[] {
+    const normalizedWallet = walletAddress?.trim();
+    if (!normalizedWallet) {
+      return [];
+    }
+
+    const participantIds = this.participantIndex.get(normalizedWallet);
+    if (!participantIds || participantIds.size === 0) {
+      return [];
+    }
+
+    const filterByTenant = tenant !== undefined && tenant !== null;
+    const targetTenant = filterByTenant
+      ? tenant.trim() || DEFAULT_STREAM_TENANT_ID
+      : null;
+    const tenantIds = targetTenant ? this.tenantIndex.get(targetTenant) : null;
+    if (filterByTenant && (!tenantIds || tenantIds.size === 0)) {
+      return [];
+    }
+
+    const result: Stream[] = [];
+    for (const id of participantIds) {
+      if (tenantIds && !tenantIds.has(id)) {
+        continue;
+      }
+      const stream = this.backing.get(id);
+      if (stream) {
+        result.push(stream);
+      }
+    }
+    return result;
+  }
+
+  private indexStream(id: string, stream: Stream): void {
+    const tenant = resolveStreamTenant(stream);
+    let tenantSet = this.tenantIndex.get(tenant);
+    if (!tenantSet) {
+      tenantSet = new Set<string>();
+      this.tenantIndex.set(tenant, tenantSet);
+    }
+    tenantSet.add(id);
+
+    for (const wallet of extractParticipants(stream)) {
+      let walletSet = this.participantIndex.get(wallet);
+      if (!walletSet) {
+        walletSet = new Set<string>();
+        this.participantIndex.set(wallet, walletSet);
+      }
+      walletSet.add(id);
+    }
+  }
+
+  private unindexStream(id: string, stream: Stream): void {
+    const tenant = resolveStreamTenant(stream);
+    const tenantSet = this.tenantIndex.get(tenant);
+    if (tenantSet) {
+      tenantSet.delete(id);
+      if (tenantSet.size === 0) {
+        this.tenantIndex.delete(tenant);
+      }
+    }
+
+    for (const wallet of extractParticipants(stream)) {
+      const walletSet = this.participantIndex.get(wallet);
+      if (walletSet) {
+        walletSet.delete(id);
+        if (walletSet.size === 0) {
+          this.participantIndex.delete(wallet);
+        }
+      }
+    }
+  }
+}
+
+export class InMemoryStreamRepository implements StreamRepository {
   readonly activity = new InMemoryKeyValueStore<string, ActivityEvent>(createActivityMap());
-  readonly streams = new InMemoryKeyValueStore<string, Stream>(createStreamsMap());
+  readonly streams = new IndexedStreamStore(createStreamsMap());
   readonly users = new InMemoryKeyValueStore<string, User>(createUsersMap());
   private readonly locks = new Map<string, Promise<void>>();
+
+  listByTenant(tenant?: string | null): Stream[] {
+    return this.streams.listByTenant(tenant);
+  }
+
+  listByParticipant(walletAddress: string, tenant?: string | null): Stream[] {
+    return this.streams.listByParticipant(walletAddress, tenant);
+  }
 
   reset(): void {
     resetKeyValueStore(this.users, createUsersMap());
@@ -271,6 +528,7 @@ export function createInMemoryPersistenceStore(seedTimeline?: boolean): Persiste
   const store: PersistenceStore = {
     kind: "memory",
     activityTimeline: timeline,
+    streamHistory: createStreamHistoryStore(),
     streamRepository: new InMemoryStreamRepository(),
     idempotencyStore: new InMemoryIdempotencyStore(),
     exportRepository: new InMemoryExportRepository(),

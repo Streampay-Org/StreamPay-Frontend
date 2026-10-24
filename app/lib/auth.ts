@@ -62,10 +62,22 @@ function resolveJwtSecret(): string {
 }
 
 /**
- * The resolved JWT secret. Validated at module load — throws in production
- * if the secret is missing or too short.
+ * Resolve the JWT secret at call time.
+ *
+ * Prefer this over importing a module-level constant: environment changes
+ * (e.g. secret rotation or test overrides) made after this module is imported
+ * are picked up on the next call.
  */
-export const JWT_SECRET: string = resolveJwtSecret();
+export function getJwtSecret(): string {
+  return resolveJwtSecret();
+}
+
+/**
+ * @deprecated Use `getJwtSecret()` instead. This module-level snapshot does not
+ * observe `process.env.JWT_SECRET` changes after import and will be removed
+ * after one release.
+ */
+export const JWT_SECRET: string = getJwtSecret();
 
 interface JwtKeyConfig {
   kid: string;
@@ -81,7 +93,7 @@ function getPreviousKeyId(): string {
 }
 
 function getConfiguredJwtSecrets(): JwtKeyConfig[] {
-  const currentSecret = resolveJwtSecret();
+  const currentSecret = getJwtSecret();
   const secrets: JwtKeyConfig[] = [{ kid: getCurrentKeyId(), secret: currentSecret }];
   const previousSecret = process.env.JWT_PREVIOUS_SECRET?.trim();
 
@@ -190,9 +202,10 @@ interface TokenClaims {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function createErrorResponse(code: string, message: string, status: number) {
+  const requestId = crypto.randomUUID();
   return NextResponse.json(
-    { error: { code, message, request_id: "mock-request-id" } },
-    { status },
+    { error: { code, message, request_id: requestId } },
+    { status, headers: { "x-request-id": requestId } },
   );
 }
 
@@ -226,7 +239,7 @@ export function signToken(
   walletAddress: string,
   extra: Record<string, unknown> = {},
 ): string {
-  const currentSecret = resolveJwtSecret();
+  const currentSecret = getJwtSecret();
   return jwt.sign(
     { sub: walletAddress, iss: JWT_ISSUER, aud: JWT_AUDIENCE, ...extra },
     currentSecret,
@@ -293,6 +306,7 @@ export function requireAuditLogAccess(
   const actor = tryAuthenticateRequest(request);
   if (!actor) {
     return createErrorResponse(
+      request,
       "UNAUTHORIZED",
       "Missing or invalid authorization header",
       401,
@@ -303,6 +317,7 @@ export function requireAuditLogAccess(
     access === "export" ? AUDIT_LOG_EXPORT_ROLES : AUDIT_LOG_READ_ROLES;
   if (!allowedRoles.has(actor.role)) {
     return createErrorResponse(
+      request,
       "FORBIDDEN",
       "You do not have permission to access audit logs",
       403,

@@ -16,6 +16,18 @@ import {
   logger,
   withCorrelationContext,
 } from "@/app/lib/logger";
+import {
+  buildLimitsConfig,
+  createBodySizeTooLargeResponse,
+  extractPathname,
+  getBodySizeLimit,
+} from "@/lib/bodySize";
+import {
+  BodyTooLargeError,
+  InvalidJsonError,
+  readJsonBody,
+} from "@/lib/readJsonBody";
+import { resolveRequestId } from "@/lib/requestId";
 
 const VALID_ROLES: OrgRole[] = ["owner", "pauser", "settler", "viewer"];
 
@@ -85,9 +97,28 @@ export async function POST(
 
     let body: unknown;
     try {
-      body = await request.json();
-    } catch {
-      return errorResponse("INVALID_REQUEST", "Request body must be valid JSON.", 400);
+      const limits = buildLimitsConfig();
+      const maxBytes =
+        getBodySizeLimit(extractPathname(request), limits) ?? limits.default;
+      body = await readJsonBody(request, { maxBytes });
+    } catch (error) {
+      if (error instanceof BodyTooLargeError) {
+        return createBodySizeTooLargeResponse(
+          error.receivedBytes,
+          error.maxBytes,
+          resolveRequestId(request.headers),
+        );
+      }
+      if (error instanceof InvalidJsonError) {
+        return errorResponse(
+          error.code === "EMPTY_BODY" ? "EMPTY_BODY" : "INVALID_REQUEST",
+          error.code === "EMPTY_BODY"
+            ? "Request body is required."
+            : "Request body must be valid JSON.",
+          400,
+        );
+      }
+      throw error;
     }
 
     const { walletAddress, role } = body as { walletAddress?: string; role?: string };

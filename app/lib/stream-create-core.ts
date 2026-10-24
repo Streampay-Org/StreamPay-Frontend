@@ -15,7 +15,7 @@ export type CreateStreamCoreResult =
 
 export async function createStreamCore(
   body: Record<string, unknown>,
-  options: { dryRun: boolean },
+  options: { dryRun: boolean; extras?: Partial<Stream> },
 ): Promise<CreateStreamCoreResult> {
   const validationErrors = validateCreateStreamBody(body);
   if (validationErrors.length > 0) {
@@ -63,6 +63,7 @@ export async function createStreamCore(
     status: "draft",
     updatedAt: now,
     token,
+    ...(options.extras ?? {}),
   };
 
   if (!options.dryRun) {
