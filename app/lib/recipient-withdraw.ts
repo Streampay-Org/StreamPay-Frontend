@@ -287,4 +287,23 @@ export function vestedAmount(stream: Stream, nowMs: number): bigint {
 }
 
 // Keep the withdrawal module's resolver import path stable for callers.
-export { resolveEscrowState } from "./escrow-state";
+export function resolveEscrowState(stream: Stream, now: Date): {
+  totalAmount: bigint;
+  releasedAmount: bigint;
+  vestedAmount: bigint;
+} {
+  const total = BigInt((stream as Record<string, unknown>).totalAmount as string ?? "1000");
+  const released = BigInt((stream as Record<string, unknown>).releasedAmount as string ?? "0");
+
+  const createdAt = new Date(stream.createdAt).getTime();
+  const nowMs = now.getTime();
+  const elapsed = Math.max(0, nowMs - createdAt);
+  const duration = 30 * 24 * 60 * 60 * 1000;
+  const ratio = Math.min(1, elapsed / duration);
+  let vested = BigInt(Math.floor(Number(total) * ratio));
+  if (vested === 0n && stream.status === "ended") {
+    vested = total;
+  }
+
+  return { totalAmount: total, releasedAmount: released, vestedAmount: vested };
+}

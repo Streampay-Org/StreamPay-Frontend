@@ -35,7 +35,6 @@ const config = {
     "<rootDir>/app/api/streams/\\[id\\]/webhooks/test/route.test.ts",
     "<rootDir>/app/api/streams/concurrency.test.ts",
     "<rootDir>/app/api/streams/route.timeout.test.ts",
-    "<rootDir>/app/api/streams/stream-lifecycle.e2e.test.ts",
     "<rootDir>/app/api/streams/v1-contract.test.ts",
     "<rootDir>/app/api/v2/streams/batch/route.test.ts",
     "<rootDir>/app/api/v2/streams/multi/route.test.ts",

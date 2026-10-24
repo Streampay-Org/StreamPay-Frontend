@@ -73,7 +73,7 @@ import { enforceStreamRbac, resolveActorAddress } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 import { addToOutbox } from "@/app/lib/webhook-outbox";
-import { toWebhookEvent } from "@/app/lib/webhook-events";
+import { toWebhookEvent, webhookOutboxStore } from "@/app/lib/webhook-outbox";
 import { publishStreamChange } from "@/app/lib/stream-publish";
 
 function createErrorResponse(code: string, message: string, status: number, legacyCode?: string) {

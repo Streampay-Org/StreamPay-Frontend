@@ -86,10 +86,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "app/api/streams/stream-lifecycle.e2e.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/api/streams/v1-contract.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },

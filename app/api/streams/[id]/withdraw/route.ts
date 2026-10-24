@@ -228,6 +228,39 @@ export async function POST(
     if (authError) return authError;
   }
 
+  const streamPrecheck = db.streams.get(id);
+  if (streamPrecheck && callerAddress !== streamPrecheck.recipient) {
+    const policyResult = checkStreamOrgPolicy(id, callerAddress, "withdraw");
+    if (!policyResult) {
+      return createErrorResponse(
+        "RECIPIENT_AUTH_REQUIRED",
+        "Only the stream recipient or an authorized org member may withdraw.",
+        403,
+      );
+    }
+    if (!policyResult.allowed) {
+      if (policyResult.code === "ROLE_INSUFFICIENT") {
+        return createErrorResponse(
+          policyResult.code,
+          policyResult.message,
+          policyResult.httpStatus,
+        );
+      }
+      return createErrorResponse(
+        "RECIPIENT_AUTH_REQUIRED",
+        "Only the stream recipient or an authorized org member may withdraw.",
+        403,
+      );
+    }
+    if (policyResult.requiresApproval) {
+      return createErrorResponse(
+        "APPROVAL_REQUIRED",
+        "This action requires multi-sig approval. Please initiate an approval request.",
+        409,
+      );
+    }
+  }
+
   // IDEMPOTENCY: Withdraw is non-idempotent by nature — this wrapper ensures retries return the original response without re-executing the withdrawal
   return withIdempotency(withIdempotencyReadableBody(request), "withdraw", withdrawStore, async () => {
     return withLock(id, async () => {
