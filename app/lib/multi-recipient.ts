@@ -504,6 +504,26 @@ function validateRecipient(
     return;
   }
 
+  // Ledgers carry stroop units: fan-out legs must be integers (#1743).
+  if (recipient.amount !== undefined && recipient.amount !== null && !Number.isInteger(recipient.amount)) {
+    fail(`${field}.amount`, "NON_INTEGER_AMOUNT", "amount must be an integer number of stroops when provided.");
+    return;
+  }
+
+  // Schema-valid the optional per-leg rate / schedule fields (#1743).
+  const legExtra = raw as Record<string, unknown>;
+  if (legExtra.rate !== undefined && legExtra.rate !== null) {
+    if (typeof legExtra.rate !== "string" || !/^[1-9][0-9]*$/.test(legExtra.rate.trim())) {
+      fail(`${field}.rate`, "INVALID_RATE", "rate must be a positive integer-stroop string.");
+    }
+  }
+  const SCHEDULES = ["second", "minute", "hour", "day", "week", "month", "year"];
+  if (legExtra.schedule !== undefined && legExtra.schedule !== null) {
+    if (typeof legExtra.schedule !== "string" || !SCHEDULES.includes(legExtra.schedule)) {
+      fail(`${field}.schedule`, "INVALID_SCHEDULE", `schedule must be one of: ${SCHEDULES.join(", ")}.`);
+    }
+  }
+
   if (totalAmount === null || totalAmount <= 0) return;
 
   const derived = deriveSingleAmount(totalAmount, percentage);
