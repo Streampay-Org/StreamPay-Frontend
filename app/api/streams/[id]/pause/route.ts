@@ -68,6 +68,7 @@ import {
 } from "@/app/lib/db";
 import { streamsRateLimit } from "@/src/middleware/rateLimit";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
+import { nextActionFor, transition } from "@/app/lib/state-machine";
 import { enforceStreamRbac, resolveActorAddress } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";

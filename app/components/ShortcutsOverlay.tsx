@@ -161,6 +161,7 @@ export function ShortcutsOverlay({ defaultOpen = false }: { defaultOpen?: boolea
   return (
     <div
       data-shortcuts-overlay="true"
+      role="presentation"
       onMouseDown={handleOverlayPointerDown}
       onClick={handleOverlayClick}
       onAnimationEnd={handleAnimationEnd}
@@ -177,14 +178,17 @@ export function ShortcutsOverlay({ defaultOpen = false }: { defaultOpen?: boolea
         animation: `${isOpen ? "shortcutsFadeIn" : "shortcutsFadeOut"} var(--motion-duration-medium, 200ms) var(--motion-easing, ease) forwards`,
       }}
     >
+      {/* Clicks inside the dialog must not reach the backdrop's dismiss handler;
+          keyboard interaction is handled by onKeyDown. */}
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
         onKeyDown={handleDialogKeyDown}
+        onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
           maxWidth: "520px",

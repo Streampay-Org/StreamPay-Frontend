@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRateLimitStore, RateLimitStore } from "@/app/lib/rate-limit-store";
 import { recordThrottle, recordRequest, redactRateLimitIdentity } from "@/app/lib/rate-limit-metrics";
-import { resolveRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
+import { generateRequestId, isValidRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
 import { resolveClientIp } from "@/lib/clientIp";
 
 /**
@@ -27,14 +27,17 @@ export interface WalletRateLimitResult {
  * Prefers gateway-forwarded headers; falls back to a generated id.
  */
 export function resolveCorrelationId(req: NextRequest): string {
-  const forwarded =
-    req.headers.get(REQUEST_ID_HEADER) ?? req.headers.get("x-correlation-id");
+  const forwarded = (
+    req.headers.get(REQUEST_ID_HEADER) ?? req.headers.get("x-correlation-id")
+  )?.trim();
 
-  if (forwarded && forwarded.trim().length > 0) {
-    return forwarded.trim();
+  // Only echo forwarded ids that pass the shared allowlist so untrusted
+  // header values cannot be injected into logs or error envelopes.
+  if (forwarded && isValidRequestId(forwarded)) {
+    return forwarded;
   }
 
-  return resolveRequestId(req.headers);
+  return generateRequestId();
 }
 
 /**

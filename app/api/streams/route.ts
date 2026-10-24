@@ -70,6 +70,33 @@ function emitAccessEvent(context: AccessLogContext) {
   }
 }
 
+/**
+ * Map a final HTTP status to the stable `errorCode` recorded on access-log
+ * events. Codes mirror the error envelopes this route returns for each status.
+ */
+function statusToErrorCode(status: number): string {
+  switch (status) {
+    case 400:
+      return "INVALID_REQUEST";
+    case 401:
+      return "UNAUTHORIZED";
+    case 403:
+      return "FORBIDDEN";
+    case 404:
+      return "NOT_FOUND";
+    case 409:
+      return "CONFLICT";
+    case 422:
+      return "VALIDATION_ERROR";
+    case 429:
+      return "rate_limit_exceeded";
+    case 504:
+      return "GATEWAY_TIMEOUT";
+    default:
+      return status >= 500 ? "INTERNAL_ERROR" : `HTTP_${status}`;
+  }
+}
+
 function durationMsFrom(start: [number, number]): number {
   const [seconds, nanoseconds] = process.hrtime(start);
   return seconds * 1000 + nanoseconds / 1_000_000;
@@ -280,77 +307,93 @@ async function handleStreamsPost(request: Request) {
 
     const fingerprint = computeFingerprint("POST", "/api/streams", body);
 
-    if (token) {
-      const cached = checkIdempotency(idempotencyStore, token, fingerprint);
-      if (cached) {
-        if (!cached.ok) {
-          status = 409;
-          return NextResponse.json(
-            { error: { code: "IDEMPOTENCY_CONFLICT", message: "Idempotency key has been used with a different request." } },
-            { status },
-          );
+    // Serialise creates that share an idempotency key so concurrent retries
+    // cannot both miss the cache and create duplicate streams.
+    const createOnce = async (): Promise<Response> => {
+      if (token) {
+        const cached = checkIdempotency(idempotencyStore, token, fingerprint);
+        if (cached) {
+          if (!cached.ok) {
+            status = 409;
+            return NextResponse.json(
+              { error: { code: "IDEMPOTENCY_CONFLICT", message: "Idempotency key has been used with a different request." } },
+              { status },
+            );
+          }
+          status = cached.status;
+          return NextResponse.json(cached.body, { status: cached.status });
         }
-        status = cached.status;
-        return NextResponse.json(cached.body, { status: cached.status });
       }
-    }
 
-    const { totalAmount, startTime, endTime } = body as {
-      totalAmount?: string;
-      startTime?: string;
-      endTime?: string;
-    };
-    const authenticatedActor = tryAuthenticateRequest(request);
-    const senderAddress = authenticatedActor?.walletAddress ?? null;
-    const ownership: "individual" | "unclaimed" = authenticatedActor ? "individual" : "unclaimed";
+      const { totalAmount, startTime, endTime } = body as {
+        totalAmount?: string;
+        startTime?: string;
+        endTime?: string;
+      };
+      const authenticatedActor = tryAuthenticateRequest(request);
+      const explicitTenant =
+        getHeader(request, "x-tenant-id")?.trim() ||
+        getHeader(request, "x-streampay-tenant-id")?.trim() ||
+        undefined;
+      const senderAddress = authenticatedActor?.walletAddress ?? null;
+      const ownership: "individual" | "unclaimed" = authenticatedActor ? "individual" : "unclaimed";
 
-    const result = await createStreamCore(body, {
-      dryRun: false,
-      extras: {
-        ...(totalAmount === undefined ? {} : { totalAmount, releasedAmount: "0", vestedAmount: "0" }),
-        ...(startTime === undefined ? {} : { startTime, endTime }),
-        senderAddress,
-        ownership,
-      },
-    });
-    if (!result.ok) {
-      status = 422;
-      if (result.code === "VALIDATION_ERROR") {
-        logger.warn("Stream creation validation failed", { errors: result.details });
-      } else if (result.code === "TOKEN_NOT_ALLOWED") {
-        logger.warn("Stream creation rejected: token not in allowlist");
-      }
-      return NextResponse.json(
-        {
-          error: {
-            code: result.code,
-            message: result.message,
-            ...(result.details ? { details: result.details } : {}),
-            request_id: getCorrelationContext()?.request_id,
-          },
+      const result = await createStreamCore(body, {
+        dryRun: false,
+        extras: {
+          ...(totalAmount === undefined ? {} : { totalAmount, releasedAmount: "0", vestedAmount: "0" }),
+          ...(startTime === undefined ? {} : { startTime, endTime }),
+          senderAddress,
+          ownership,
+          ...(explicitTenant ? { tenant: explicitTenant } : {}),
         },
-        { status },
-      );
-    }
+      });
+      if (!result.ok && result.code === "ID_GENERATION_FAILED") {
+        status = 500;
+        logger.error("Stream creation failed: could not allocate a unique id");
+        return createErrorResponse(result.code, result.message, 500);
+      }
+      if (!result.ok) {
+        status = 422;
+        if (result.code === "VALIDATION_ERROR") {
+          logger.warn("Stream creation validation failed", { errors: result.details });
+        } else if (result.code === "TOKEN_NOT_ALLOWED") {
+          logger.warn("Stream creation rejected: token not in allowlist");
+        }
+        return NextResponse.json(
+          {
+            error: {
+              code: result.code,
+              message: result.message,
+              ...(result.details ? { details: result.details } : {}),
+              request_id: getCorrelationContext()?.request_id,
+            },
+          },
+          { status },
+        );
+      }
 
-    const stream = result.stream;
+      const stream = result.stream;
 
-    appendStreamHistoryEvent({
-      streamId: stream.id,
-      type: "created",
-      toStatus: "draft",
-      at: stream.createdAt,
-      actorWallet: getHeader(request, "Actor-Wallet-Address"),
-    });
+      appendStreamHistoryEvent({
+        streamId: stream.id,
+        type: "created",
+        toStatus: "draft",
+        at: stream.createdAt,
+        actorWallet: getHeader(request, "Actor-Wallet-Address"),
+      });
 
-    const payload = { data: stream, links: { self: `/api/v1/streams/${stream.id}` } };
+      const payload = { data: stream, links: { self: `/api/v1/streams/${stream.id}` } };
 
-    if (token) {
-      setIdempotency(idempotencyStore, token, fingerprint, 201, payload);
-    }
+      if (token) {
+        setIdempotency(idempotencyStore, token, fingerprint, 201, payload);
+      }
 
-    status = 201;
-    return NextResponse.json(payload, { status: 201 });
+      status = 201;
+      return NextResponse.json(payload, { status: 201 });
+    };
+
+    return token ? await withLock(`create:${token}`, createOnce) : await createOnce();
   } catch (error) {
     status = 500;
     logger.error("Stream creation failed", { error });

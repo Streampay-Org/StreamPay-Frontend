@@ -135,6 +135,7 @@ export function CommandPalette({ streams, defaultOpen = false }: CommandPaletteP
 
   return (
     <div
+      role="presentation"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) close();
       }}

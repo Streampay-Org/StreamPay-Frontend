@@ -19,7 +19,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { db, idempotencyToken, getStore } from "@/app/lib/db";
+import { db, idempotencyToken, getStore, newStreamId } from "@/app/lib/db";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { getClientIdentity } from "@/app/lib/rate-limit";
 import { checkOrgDailyQuota, orgQuotaResponse } from "@/app/lib/org-quota";
@@ -33,7 +33,16 @@ import {
 } from "@/app/lib/stream-cursor";
 import type { Stream } from "@/app/types/openapi";
 import { withRouteTimeout } from "@/src/middleware/timeout";
+import { createCacheHeaders, createStrongEtag, isIfNoneMatchMatch } from "@/src/middleware/etag";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
+import {
+  resolveRequestActor,
+  resolveRequestTenant,
+  visibleTo,
+} from "@/app/lib/stream-visibility";
+
+/** Attempts at drawing a fresh stream id before giving up on a collision. */
+const MAX_ID_ATTEMPTS = 3;
 
 
 function errorResponse(code: string, message: string, status: number) {
@@ -147,9 +156,9 @@ async function handleV2StreamsGet(request: Request) {
     throw err;
   }
 
-  return NextResponse.json({
+  const payload = {
     streams: projected,
-    meta: { hasNext, nextCursor, total: streamRepository.streams.size },
+    meta: { hasNext, nextCursor, total },
     links: { self: `/api/v2/streams?limit=${limit}` },
   };
   const etag = createStrongEtag(payload);
@@ -234,15 +243,12 @@ async function handleV2StreamsPost(request: Request) {
   const senderAddress = authenticatedActor?.walletAddress ?? null;
   const ownership: "individual" | "unclaimed" = authenticatedActor ? "individual" : "unclaimed";
 
-  const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
   const now = new Date().toISOString();
   const explicitTenant =
     request.headers.get("x-tenant-id")?.trim() ||
     request.headers.get("x-streampay-tenant-id")?.trim() ||
     undefined;
-  const actor = resolveRequestActor(request);
-  const newStream: Stream = {
-    id,
+  const baseStream: Omit<Stream, "id"> = {
     recipient: String(recipient),
     rate: String(rate),
     schedule: String(schedule),
@@ -253,7 +259,18 @@ async function handleV2StreamsPost(request: Request) {
     token: "XLM",
     senderAddress,
     ownership,
+    ...(explicitTenant ? { tenant: explicitTenant } : {}),
   };
+
+  // Create-only insert: never overwrite an existing stream on an id collision.
+  const { streamRepository } = getStore();
+  let newStream: Stream | null = null;
+  for (let attempt = 0; attempt < MAX_ID_ATTEMPTS && !newStream; attempt++) {
+    const candidate: Stream = { ...baseStream, id: newStreamId() };
+    if (streamRepository.streams.insert(candidate.id, candidate)) {
+      newStream = candidate;
+    }
+  }
 
   if (!newStream) {
     return errorResponse("ID_GENERATION_FAILED", "Failed to generate unique stream identifier", 500);

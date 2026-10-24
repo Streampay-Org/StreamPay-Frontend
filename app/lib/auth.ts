@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { NextResponse } from "next/server";
+import { resolveRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
 import type { AuditActorRole } from "@/app/types/audit";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -201,11 +202,19 @@ interface TokenClaims {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function createErrorResponse(code: string, message: string, status: number) {
-  const requestId = crypto.randomUUID();
+function createErrorResponse(
+  request: Request,
+  code: string,
+  message: string,
+  status: number,
+) {
+  const requestId = resolveRequestId(request.headers);
   return NextResponse.json(
     { error: { code, message, request_id: requestId } },
-    { status, headers: { "x-request-id": requestId } },
+    {
+      status,
+      headers: { [REQUEST_ID_HEADER]: requestId },
+    },
   );
 }
 

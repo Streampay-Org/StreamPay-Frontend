@@ -27,11 +27,20 @@ export interface StreamV1 {
   actions?: string[];
   nextAction?: string;
   createdAt: string;
+  updatedAt?: string;
   senderAddress?: string | null;
   ownership?: "individual" | "org" | "unclaimed";
+  /** On-chain settlement tx hash; present once the stream has been settled. */
+  settlementTxHash?: string;
+  /** Raw-unit amount already released to the recipient. */
+  releasedAmount?: string;
+  /** Raw-unit amount escrowed at creation. */
+  totalAmount?: string;
+  /** SEP-41 token / asset code for the stream. */
+  token?: string;
 }
 
-/** v2 wire shape � the canonical contract for /api/v2/streams. */
+/** v2 wire shape — the canonical contract for /api/v2/streams. */
 export interface StreamV2 {
   id: string;
   recipient: string;
@@ -126,7 +135,7 @@ export function toV2Stream(v1: StreamV1): StreamV2 {
     next_action: v1.nextAction ?? null,
     created_at: v1.createdAt,
     createdAt: v1.createdAt,
-    settlement: null,
+    settlement,
     senderAddress: v1.senderAddress ?? null,
     ownership: v1.ownership,
   };

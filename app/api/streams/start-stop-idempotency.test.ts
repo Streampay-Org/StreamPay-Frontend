@@ -29,7 +29,7 @@ beforeEach(() => {
   db.streams.set("stream-indiv-active", { ...base, id: "stream-indiv-active", status: "active" });
 });
 
-describe("POST /api/streams/[id]/start � idempotency", () => {
+describe("POST /api/streams/[id]/start — idempotency", () => {
   const STREAM = "stream-kemi";
 
   it("no key: returns 200 and sets stream to active", async () => {
@@ -85,7 +85,7 @@ describe("POST /api/streams/[id]/start � idempotency", () => {
   });
 });
 
-describe("POST /api/streams/[id]/stop � idempotency", () => {
+describe("POST /api/streams/[id]/stop — idempotency", () => {
   const STREAM = "stream-indiv-active";
 
   it("no key: returns 200 and sets stream to ended", async () => {

@@ -12,7 +12,7 @@ import { Suspense } from "react";
 import { SHORTCUT_GROUPS, formatShortcutKeys, getShortcut } from "@/lib/shortcuts";
 import { FAQ_SECTIONS } from "./faq-data";
 import FaqSearch from "./FaqSearch";
-import type { FaqItem, FaqSection } from "./faq-data";
+import type { FaqSection } from "./faq-data";
 
 /** Keys for a single shortcut id, e.g. "⌘/Ctrl + K". */
 function keysFor(id: string): string {
@@ -230,7 +230,7 @@ export default function HelpPage() {
       <div className="help-layout">
         {/* Quick-jump nav */}
         <nav aria-label="FAQ sections" className="help-nav">
-          <ul className="help-nav__list" role="list">
+          <ul className="help-nav__list">
             {FAQ_SECTIONS.map((section) => (
               <li key={section.id} className="help-nav__item">
                 <a href={`#${section.id}`} className="help-nav__link" data-help-nav-link data-help-section={section.id}>

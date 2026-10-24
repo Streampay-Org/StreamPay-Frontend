@@ -10,7 +10,7 @@ const vi = {
 import { WebhookDeliveryWorker } from '@/app/lib/webhook-delivery-worker';
 import { webhookDeliveryStore } from '@/app/lib/webhook-delivery-store';
 import { WebhookEndpoint, WebhookEvent } from '@/app/lib/webhook-delivery';
-import { logger, setCorrelationContext } from '@/app/lib/logger';
+import { setCorrelationContext } from '@/app/lib/logger';
 
 /**
  * Integration tests with realistic failure scenarios
@@ -410,9 +410,7 @@ describe('Webhook Delivery Integration Tests', () => {
         maxRetries: 2,
       };
 
-      let fetchCount = 0;
       vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-        fetchCount++;
         // First endpoint succeeds, second fails
         if (url.includes('success')) {
           return { status: 200, statusText: 'OK' };
@@ -470,14 +468,14 @@ describe('Webhook Delivery Integration Tests', () => {
         { code: 504, name: 'Gateway Timeout', shouldDeliver: true },
       ];
 
-      const endpoint: WebhookEndpoint = {
+      const _endpoint: WebhookEndpoint = {
         id: 'status-code-endpoint',
         url: 'https://receiver.example.com',
         maxRetries: 3,
       };
 
       testCases.forEach(testCase => {
-        const event: WebhookEvent = {
+        const _event: WebhookEvent = {
           id: `event-status-${testCase.code}`,
           eventType: 'stream.settled',
           streamId: 'stream-123',

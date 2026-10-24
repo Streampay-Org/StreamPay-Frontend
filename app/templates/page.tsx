@@ -278,7 +278,7 @@ function TemplatesContent() {
       }
     }
 
-    fetchTemplates();
+    void fetchTemplates();
     return () => controller.abort();
   }, [loadKey]);
 

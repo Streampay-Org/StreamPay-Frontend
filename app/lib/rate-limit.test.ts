@@ -310,8 +310,6 @@ function extractIdentityFromRequest(request: { headers: Map<string, string> }): 
 }
 
 describe("rate-limit-metrics", () => {
-  const MAX_RECENT_THROTTLES = 100;
-
   let throttled: Record<string, number>;
   let total: Record<string, number>;
   let recentThrottles: Array<{ route: string; limitType: string; identityType: string; identity: string; timestamp: number }>;
@@ -389,7 +387,6 @@ describe("checkRateLimit integration behavior", () => {
       }),
     };
 
-    const identity = { type: "ip" as const, value: "192.168.1.1", displayValue: "192.168.1.1" };
     const result = await mockStore.check("192.168.1.1", 60, 60_000);
 
     expect(result.allowed).toBe(true);
@@ -406,7 +403,6 @@ describe("checkRateLimit integration behavior", () => {
       }),
     };
 
-    const identity = { type: "ip" as const, value: "192.168.1.1", displayValue: "192.168.1.1" };
     const result = await mockStore.check("192.168.1.1", 10, 60_000);
 
     expect(result.allowed).toBe(false);

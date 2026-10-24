@@ -170,7 +170,7 @@ describe("HelpPage — keyboard shortcut reference (issue #1649)", () => {
     const answer = document.querySelector("#shortcuts-list")?.textContent ?? "";
     expect(answer.length).toBeGreaterThan(0);
 
-    for (const group of SHORTCUS_GROUPS) {
+    for (const group of SHORTCUT_GROUPS) {
       expect(answer).toContain(group.label);
       for (const shortcut of group.shortcuts) {
         expect(answer).toContain(shortcut.description);

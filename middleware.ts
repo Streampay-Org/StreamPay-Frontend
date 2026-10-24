@@ -209,8 +209,6 @@ export function createMiddleware(middlewareConfig: MiddlewareConfig) {
       requestHeaders.set(CANARY_HEADER_NAME, 'true');
     }
 
-    const origin = request.headers.get('origin');
-
     // ------------------------------------------------------------------
     // 1. Request body size cap (O(1) - reads Content-Length)
     // ------------------------------------------------------------------

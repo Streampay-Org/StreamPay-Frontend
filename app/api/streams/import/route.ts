@@ -68,6 +68,7 @@ import {
   getStore,
   IDEMPOTENCY_TTL_MS,
   idempotencyToken,
+  newStreamId,
   setIdempotency,
 } from "@/app/lib/db";
 import { errorResponse } from "@/app/lib/errors/server";
@@ -538,7 +539,7 @@ export async function POST(request: Request) {
             throw new TimeoutError(timeoutMs);
           }
 
-          const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
+          const id = newStreamId();
           const now = new Date().toISOString();
           const newStream = {
             createdAt: now,

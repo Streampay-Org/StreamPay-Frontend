@@ -8,7 +8,7 @@
  */
 
 import { act, fireEvent, render } from "@testing-library/react";
-const { screen, within } = require("@testing-library/react") as any;
+const { screen } = require("@testing-library/react") as any;
 import { WelcomeTour, TOUR_STEPS, WELCOME_TOUR_KEY } from "./WelcomeTour";
 
 const TEST_KEY = "test:welcome-tour";

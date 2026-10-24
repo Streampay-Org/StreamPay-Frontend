@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/app/lib/db";
-import { computeTag, ifNoneMatchMatches } from "@/app/lib/etag";
+import { computeETag, ifNoneMatchMatches } from "@/app/lib/etag";
 import { getCorrelationContext } from "@/app/lib/logger";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
@@ -32,7 +32,7 @@ type Context = { params: Promise<{ id: string }> };
  *       since the body is tenant-scoped.
  *     • `max-age=0, must-revalidate` — forces intermediaries to revalidate via
  *       ETag on every request instead of trusting the freshness lifetime.
- * - `X-Cache`: HIT/MISM observability for the in-memory stream cache.
+ * - `X-Cache`: HIT/MISS observability for the in-memory stream cache.
  */
 const CACHE_CONTROL_PRIVATE_REVALIDATE = "private, max-age=0, must-revalidate";
 
@@ -136,7 +136,7 @@ export async function GET(
 export async function POST(
   request: Request,
   { params }: Context
-){
+) {
   const { id } = await params;
   const rateLimited = await enforceRateLimit(request, "POST", `/api/streams/${id}`);
   if (rateLimited) {

@@ -9,7 +9,11 @@ import { generateRequestId } from "@/lib/requestId";
  * Shape:
  * ```json
  * {
- *   "equest_id": "req_01HZ..."
+ *   "error": {
+ *     "code":       "STREAM_NOT_FOUND",
+ *     "message":    "The requested stream does not exist.",
+ *     "request_id": "req_01HZ..."
+ *   }
  * }
  * ```
  */
@@ -49,7 +53,7 @@ export const ErrorCode = {
   SOROBAN_SUBMIT_FAILED: "SOROBAN_SUBMIT_FAILED",
   SOROBAN_SUBMIT_BAD_AUTH: "SOROBAN_SUBMIT_BAD_AUTH",
   SOROBAN_SUBMIT_INSUFFICIENT_FUNDS: "SOROBAN_SUBMIT_INSUFFICIENT_FUNDS",
-  SOROBAN_RPC_UAVAILABLE: "SOROBAN_RPC_UAVAILABLE",
+  SOROBAN_RPC_UNAVAILABLE: "SOROBAN_RPC_UNAVAILABLE",
   SOROBAN_RPC_TIMEOUT: "SOROBAN_RPC_TIMEOUT",
   SOROBAN_CONTRACT_NOT_FOUND: "SOROBAN_CONTRACT_NOT_FOUND",
   SOROBAN_STREAM_NOT_FOUND: "SOROBAN_STREAM_NOT_FOUND",

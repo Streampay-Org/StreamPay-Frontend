@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { logger, withWebhookContext, getCorrelationContext } from "./logger";
+import { logger, getCorrelationContext } from "./logger";
 import {
   WebhookEndpoint,
   WebhookEvent,
@@ -313,12 +313,14 @@ export function addToOutbox(params: AddToOutboxParams): WebhookOutboxEntry {
   const endpoint: WebhookEndpoint = {
     id: `stream:${params.streamId}`,
     url: params.url,
+    maxRetries: 10,
   };
   const event: WebhookEvent = {
     id: params.eventId,
-    eventType: (params.eventType ?? "stream.updated") as any,
+    eventType: params.eventType ?? "stream.updated",
+    streamId: params.streamId,
     data: params.payload ?? params.data ?? {},
-    createdAt: new Date().toISOString(),
+    timestamp: new Date().toISOString(),
   };
   return webhookOutboxStore.addToOutbox(endpoint, event);
 }

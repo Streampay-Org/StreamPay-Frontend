@@ -10,7 +10,7 @@ export type FaqSection = {
   items: FaqItem[];
 };
 
-export const FAQ_SECTIONS: FajSection[] = [
+export const FAQ_SECTIONS: FaqSection[] = [
   {
     id: "getting-started",
     title: "Getting started",

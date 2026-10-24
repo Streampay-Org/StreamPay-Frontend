@@ -5,7 +5,7 @@ This document defines the authoritative state machine for StreamPay streams. The
 ## Transition Matrix
 
 | Current State | Start | Pause | Stop | Settle | Withdraw |
-| :--- | :---: | :---: | :--: | :---: | :--: |
+| :--- | :---: | :---: | :---: | :---: | :---: |
 | **Draft** | Active | ❌ | Ended | ❌ | ❌ |
 | **Active** | (Idem) | Paused | Ended | Ended | ❌ |
 | **Paused** | Active | (Idem) | Ended | Ended | ❌ |
@@ -59,7 +59,7 @@ These mappings ensure that the internal technical states align with the user-vis
 
 The state machine is implemented in [`app/lib/state-machine.ts`](../app/lib/state-machine.ts). Its `allowedActions(status)` helper exposes the table's actions in table order, and `nextActionFor(status)` supplies the preferred client action from those allowed actions. Stop, pause, settle, and cancel routes call `transition()` directly. Start and batch routes remain outside this change.
 
-Vesting is implemented in [`app/lib/escorw-state.ts`](../app/lib/escow-state.ts) (or [`app/lib/recipient-withdraw.ts`](../app/lib/recipient-withdraw.ts) as `vestedAmount(stream, nowMs): bigint`, and is validated against contract fixtures in the parity tests.
+Vesting is implemented in [`app/lib/escrow-state.ts`](../app/lib/escrow-state.ts) (or [`app/lib/recipient-withdraw.ts`](../app/lib/recipient-withdraw.ts) as `vestedAmount(stream, nowMs): bigint`, and is validated against contract fixtures in the parity tests.
 
 ### Error Handling
 Illegal transitions return a standardized error model:
@@ -67,7 +67,7 @@ Illegal transitions return a standardized error model:
 ```json
 {
   "error": {
-    "code": "ILLEGAT_TRANSITION",
+    "code": "ILLEGAL_TRANSITION",
     "message": "Action 'pause' is illegal for a stream in 'draft' state.",
     "legacy_code": "INVALID_STREAM_STATE",
     "request_id": "..."

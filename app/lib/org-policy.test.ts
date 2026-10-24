@@ -21,7 +21,7 @@ import {
   createRbacErrorResponse,
   OrgAction,
 } from "./org-policy";
-import { OrgRecord, OrgRole, DEFAULT_STREAM_POLICY } from "./org-types";
+import { OrgRecord, DEFAULT_STREAM_POLICY } from "./org-types";
 import { orgDb } from "./org-db";
 import { signToken } from "./auth";
 
@@ -465,13 +465,13 @@ describe("Actor Resolution & STREAMPAY_ALLOW_ACTOR_HEADER flag", () => {
 
   it("isActorHeaderAllowed returns true in test environment by default", () => {
     delete process.env.STREAMPAY_ALLOW_ACTOR_HEADER;
-    process.env.NODE_ENV = "test";
+    (process.env as Record<string, string | undefined>).NODE_ENV = "test";
     expect(isActorHeaderAllowed()).toBe(true);
   });
 
   it("isActorHeaderAllowed returns false in production by default", () => {
     delete process.env.STREAMPAY_ALLOW_ACTOR_HEADER;
-    process.env.NODE_ENV = "production";
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
     expect(isActorHeaderAllowed()).toBe(false);
   });
 
@@ -482,7 +482,7 @@ describe("Actor Resolution & STREAMPAY_ALLOW_ACTOR_HEADER flag", () => {
 
   it("isActorHeaderAllowed honors STREAMPAY_ALLOW_ACTOR_HEADER=true", () => {
     process.env.STREAMPAY_ALLOW_ACTOR_HEADER = "true";
-    process.env.NODE_ENV = "production";
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
     expect(isActorHeaderAllowed()).toBe(true);
   });
 

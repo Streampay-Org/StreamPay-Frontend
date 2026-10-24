@@ -1,4 +1,3 @@
-import type { Stream } from "@/app/types/openapi";
 
 /**
  * Schema version for stream storage.

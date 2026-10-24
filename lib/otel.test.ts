@@ -52,7 +52,6 @@ import {
   tracer,
   injectTraceHeaders,
   extractTraceHeaders,
-  isTelemetryConsented,
   setTelemetryConsent,
   resetTelemetryConsent,
   redactAttributes,

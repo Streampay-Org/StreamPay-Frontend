@@ -227,7 +227,7 @@ describe("AppendOnlyAuditLogStore.purgeArchivedRows", () => {
     const origEnv = process.env.NODE_ENV;
     const origKey = process.env.AUDIT_CHAIN_KEY;
 
-    process.env.NODE_ENV = "production";
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
     delete process.env.AUDIT_CHAIN_KEY;
 
     const store = new AppendOnlyAuditLogStore();
@@ -235,7 +235,7 @@ describe("AppendOnlyAuditLogStore.purgeArchivedRows", () => {
       store.append(entry("test", "2026-06-01T00:00:00.000Z"));
     }).toThrow("AUDIT_CHAIN_KEY is required in production");
 
-    process.env.NODE_ENV = origEnv;
+    (process.env as Record<string, string | undefined>).NODE_ENV = origEnv;
     if (origKey !== undefined) process.env.AUDIT_CHAIN_KEY = origKey;
   });
 

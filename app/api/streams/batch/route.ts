@@ -253,7 +253,7 @@ export async function POST(request: NextRequest) {
   const senderAddress = authenticatedActor?.walletAddress ?? null;
 
   for (const input of validItems) {
-    const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
+    const id = newStreamId();
     const ownership: "individual" | "org" | "unclaimed" = input.orgId
       ? "org"
       : authenticatedActor

@@ -1,4 +1,4 @@
-import { randomUUID, createHash, verify } from "crypto";
+import { randomUUID, verify } from "crypto";
 import { MAINNET_PROFILE, TESTNET_PROFILE } from "./config/stellar";
 import {
   decodeStellarPublicKey,

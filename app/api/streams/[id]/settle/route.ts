@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db, withLock } from "@/app/lib/db";
 import { withIdempotency, settleStore } from "@/app/lib/idempotency";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
+import { nextActionFor, transition } from "@/app/lib/state-machine";
 import { enforceStreamRbac, resolveActorAddress } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
@@ -20,8 +21,8 @@ function createErrorResponse(code: string, message: string, status: number, lega
   );
 }
 
-function errorResponse(code: string, message: string, status: number) {
-  return createErrorResponse(code, message, status);
+function errorResponse(code: string, message: string, status: number, legacyCode?: string) {
+  return createErrorResponse(code, message, status, legacyCode);
 }
 
 function getHeader(request: Request, name: string): string | null {

@@ -37,7 +37,7 @@ export default function CommandPaletteContainer() {
   useEffect(() => {
     if (fresh()) return;
     const controller = new AbortController();
-    (async () => {
+    void (async () => {
       try {
         const res = await fetch("/api/streams?limit=50", {
           signal: controller.signal,

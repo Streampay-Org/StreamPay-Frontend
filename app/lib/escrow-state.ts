@@ -1,6 +1,6 @@
 import type { Stream as AppStream } from "@/app/types/openapi";
 
-type Stream = AppStream & {
+type Stream = Omit<AppStream, "total" | "totalPausedMs"> & {
   total?: string | number | bigint;
   totalPausedMs?: string | number | bigint;
 };

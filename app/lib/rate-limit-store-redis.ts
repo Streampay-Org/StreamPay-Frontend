@@ -177,7 +177,7 @@ async function redisEval(
   token: string,
   keys: string[],
   args: (string | number)[],
-  nowFn: () => number
+  _nowFn: () => number
 ): Promise<[number, number, number]> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REDIS_TIMEOUT_MS);
@@ -298,7 +298,7 @@ export class RedisRateLimitStore implements RateLimitStore {
         resetAt: resetAtSec,
         retryAfter,
       };
-    } catch (err) {
+    } catch {
       // Redis is unavailable — increment the metric counter
       recordUnavailable();
 

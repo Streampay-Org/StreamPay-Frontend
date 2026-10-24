@@ -1,4 +1,5 @@
 import { getStore } from "@/app/lib/db";
+import { newStreamId } from "@/app/lib/stream-id";
 import { checkTokenAllowed, normaliseToken } from "@/app/lib/token-allowlist";
 import { parseCreateStreamBody, type ValidationError } from "@/app/lib/stream-validation";
 import type { Stream } from "@/app/types/openapi";
@@ -11,7 +12,17 @@ export type CreateStreamCoreResult =
       code: "VALIDATION_ERROR" | "INVALID_TOKEN" | "TOKEN_NOT_ALLOWED";
       message: string;
       details?: ValidationError[];
+    }
+  | {
+      ok: false;
+      status: 500;
+      code: "ID_GENERATION_FAILED";
+      message: string;
+      details?: undefined;
     };
+
+/** Attempts at drawing a fresh stream id before giving up on a collision. */
+const MAX_ID_ATTEMPTS = 3;
 
 export async function createStreamCore(
   body: Record<string, unknown>,
@@ -54,9 +65,9 @@ export async function createStreamCore(
   }
 
   const now = new Date().toISOString();
-  const stream: Stream = {
+  const draft: Stream = {
     createdAt: now,
-    id: `${options.dryRun ? "preview" : "stream"}-${crypto.randomUUID().slice(0, 8)}`,
+    id: "",
     nextAction: "start",
     rate: parsed.rate,
     recipient: parsed.recipient,
@@ -67,9 +78,26 @@ export async function createStreamCore(
     ...(options.extras ?? {}),
   };
 
-  if (!options.dryRun) {
-    getStore().streamRepository.streams.set(stream.id, stream);
+  if (options.dryRun) {
+    // Previews are never persisted; give them a distinct, non-colliding prefix.
+    const previewId = newStreamId().replace(/^stream-/, "preview-");
+    return { ok: true, stream: { ...draft, id: previewId } };
   }
 
-  return { ok: true, stream };
+  // Create-only insert: an id collision must never overwrite an existing
+  // stream, so draw a fresh id and retry a bounded number of times.
+  const { streams } = getStore().streamRepository;
+  for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
+    const stream: Stream = { ...draft, id: newStreamId() };
+    if (streams.insert(stream.id, stream)) {
+      return { ok: true, stream };
+    }
+  }
+
+  return {
+    ok: false,
+    status: 500,
+    code: "ID_GENERATION_FAILED",
+    message: "Failed to generate unique stream identifier",
+  };
 }

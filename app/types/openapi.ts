@@ -48,6 +48,10 @@ export interface CancellationSplit {
 export interface Stream {
   id: string;
   tenant?: string;
+  /** Alternate tenant key used by some persistence adapters (takes precedence over `tenant`). */
+  tenantId?: string;
+  /** Owning organisation id, when the stream is org-managed. */
+  orgId?: string;
   recipient: string;
   rate: string;
   schedule: string;
@@ -74,9 +78,6 @@ export interface Stream {
    * Required for the cancel-stream refund preview split.
    */
   totalAmount?: string;
-  /** ISO-8601 bounds of linear vesting, when a vesting window is configured. */
-  startTime?: string;
-  endTime?: string;
   /**
    * Present only on cancelled streams. Contains the full refund-split
    * breakdown so callers can verify the escrow-conservation invariant.

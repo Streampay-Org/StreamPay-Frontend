@@ -208,7 +208,7 @@ export class AppendOnlyAuditLogStore {
           cursorTimestamp = parts[0];
           cursorId = parts[1];
         }
-      } catch (e) {
+      } catch {
         // Invalid cursor format handled by returning no results or ignoring?
         // We'll throw an error and let the caller handle it or just return empty
       }

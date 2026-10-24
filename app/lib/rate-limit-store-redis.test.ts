@@ -98,7 +98,7 @@ function makeFetchMock(db: FakeRedis): jest.Mock {
 // Helpers — create a store with injected fetch + clock
 // ---------------------------------------------------------------------------
 
-function makeStore(
+function _makeStore(
   db: FakeRedis,
   failMode: FailMode = "open",
   nowFn?: () => number

@@ -1,4 +1,4 @@
-import { logger, getCorrelationContext, type CorrelationContext } from '../app/lib/logger';
+import { logger, getCorrelationContext } from '../app/lib/logger';
 
 /**
  * SLO configuration for an endpoint
