@@ -1,13 +1,12 @@
-/**
+/*
  * GET  /api/notifications/preferences  - Get notification preferences for authenticated user
  * PUT  /api/notifications/preferences  - Update notification preferences
  */
 
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { computeETag, ifNoneMatchMatches } from "@/app/lib/etag";
+import { computeETag } from "@/app/lib/etag";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
-import { getCorrelationContext, logger } from "@/app/lib/logger";
+import { logger } from "@/app/lib/logger";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
@@ -48,6 +47,13 @@ export interface NotificationPreferences {
 
 const prefsStore = new Map<string, NotificationPreferences>();
 
+/**
+ * Reset the in-memory preferences store. Intended for test isolation only.
+ */
+export function resetNotificationPreferencesStoreForTesting(): void {
+  prefsStore.clear();
+}
+
 const DEFAULT_PREFS: Omit<NotificationPreferences, "userId" | "updatedAt"> = {
   email: true,
   inApp: true,
@@ -83,20 +89,15 @@ function isBoolean(value: unknown): value is boolean {
 }
 
 function getRequestId(request: Request): string {
-  return (
-    request.headers.get("x-request-id") ??
-    request.headers.get("request-id") ??
-    getCorrelationContext()?.request_id ??
-    randomUUID()
-  );
+  return resolveRequestId(request.headers);
 }
 
 function createErrorResponse(request: Request, code: string, message: string, status: number) {
   return NextResponse.json(
     {
       error: {
-        code,
-        message,
+        code: code,
+        message: message,
         request_id: getRequestId(request),
       },
     },
@@ -181,6 +182,27 @@ function validatePreferencePayload(body: unknown): PartialPreferencePayload | nu
   }
 
   return normalized;
+}
+
+/**
+ * Parse an If-Match header and return the strong ETag it references, or null
+ * if the header is missing, weak, or otherwise unusable.
+ */
+function parseStrongIfMatch(header: string | null): string | null {
+  if (!header) return null;
+  const trimmed = header.trim();
+  if (!trimmed) {
+    return null;
+  }
+  // Weak ETags (W/"...") are not acceptable for optimistic concurrency.
+  if (/^W\//i.test(trimmed)) return null;
+  // Support a single strong ETag or a comma-separated list; reject wildcards.
+  if (trimmed === "*") return null;
+  const candidates = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
+  if (candidates.length !== 1) return null;
+  const candidate = candidates[0];
+  if (!/^\"[^\"]*\"$/.test(candidate)) return null;
+  return candidate;
 }
 
 async function handleNotificationPreferencesGet(request: Request) {
@@ -277,22 +299,39 @@ async function handleNotificationPreferencesPut(request: Request) {
     );
   }
 
+  const stored = prefsStore.get(actor.actorId);
   const existing = getPreferences(actor.actorId);
   const currentEtag = computeETag(actor.actorId, existing);
-  const ifMatch = request.headers.get("if-match");
+  const ifMatchHeader = request.headers.get("if-match");
 
-  if (ifMatch && !ifNoneMatchMatches(ifMatch, currentEtag)) {
-    logger.warn("Notification preferences update conflict detected", {
+  // Require If-Match when a stored record exists to prevent lost updates.
+  if (stored && !ifMatchHeader) {
+    logger.warn("Notification preferences update rejected: missing If-Match", {
       actorId: actor.actorId,
-      ifMatch,
-      currentEtag,
     });
     return createErrorResponse(
       request,
-      "STATE_CONFLICT",
-      "Notification preferences have been modified concurrently. Please reload and retry.",
-      409,
+      "PRECONDITION_REQUIRED",
+      "If-Match header is required to update notification preferences",
+      428,
     );
+  }
+
+  if (ifMatchHeader) {
+    const strongEtag = parseStrongIfMatch(ifMatchHeader);
+    if (!strongEtag || strongEtag !== currentEtag) {
+      logger.warn("Notification preferences update conflict detected", {
+        actorId: actor.actorId,
+        ifMatch: ifMatchHeader,
+        currentEtag,
+      });
+      return createErrorResponse(
+        request,
+        "STATE_CONFLICT",
+        "Notification preferences have been modified concurrently. Please reload and retry.",
+        409,
+      );
+    }
   }
 
   const updated: NotificationPreferences = {

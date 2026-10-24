@@ -1,0 +1,21 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-1710-un-quarantine-the-notification-preferences",
+    "main",
+    "origin",
+    "security/issue-1682-add-rate-limited-api-client-errors-ingestion"
+  ],
+  "parent": {
+    "fix/issue-1710-un-quarantine-the-notification-preferences": "main",
+    "main": null,
+    "origin": "main",
+    "security/issue-1682-add-rate-limited-api-client-errors-ingestion": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-1710-un-quarantine-the-notification-preferences",
+    "origin",
+    "security/issue-1682-add-rate-limited-api-client-errors-ingestion"
+  ]
+}
