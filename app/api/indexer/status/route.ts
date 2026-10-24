@@ -16,6 +16,10 @@
  * Clients should use EventSource:
  *   const es = new EventSource('/api/indexer/status');
  *   es.addEventListener('indexer_status', (e) => console.log(JSON.parse(e.data)));
+ *
+ * The stream is bounded: it emits an initial status immediately, then updates
+ * every 5 seconds for up to 30 seconds, and always closes cleanly. A `: ping`
+ * heartbeat is sent alongside each update so proxies keep the connection open.
  */
 
 export const dynamic = "force-dynamic";
@@ -33,10 +37,27 @@ async function handleIndexerStatusGet(request: Request) {
 
   const stream = new ReadableStream({
     async start(controller) {
+      let closed = false;
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        try {
+          controller.close();
+        } catch {
+          // Already closed or errored; nothing to do.
+        }
+      };
+
       const send = (event: string, data: unknown) => {
+        if (closed) return;
         controller.enqueue(
           encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`),
         );
+      };
+
+      const ping = () => {
+        if (closed) return;
+        controller.enqueue(encoder.encode(": ping\n\n"));
       };
 
       // Send initial status immediately.
@@ -46,13 +67,18 @@ async function handleIndexerStatusGet(request: Request) {
       for (let i = 0; i < 6; i++) {
         await new Promise((r) => setTimeout(r, 5000));
         try {
+          ping();
           send("indexer_status", getIndexerStatus());
         } catch {
           break;
         }
       }
 
-      controller.close();
+      close();
+    },
+    cancel() {
+      // Client disconnected; the loop above will observe the closed controller
+      // on its next enqueue and stop. Nothing else to release here.
     },
   });
 

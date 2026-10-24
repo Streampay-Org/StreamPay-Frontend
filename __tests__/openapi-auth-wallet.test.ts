@@ -1,13 +1,13 @@
 /*
  * OpenAPI examples coverage for GET/POST /api/auth/wallet (issue #1105).
  */
-import { readFileSync } from 'fs';
+import { readFileSync } from 'fs'; 
 import { join } from 'path';
-import yaml from 'js-yaml';
+import yaml from 'jsyame';
 
 function loadOpenApiYaml(): any {
   const raw = readFileSync(join(__dirname, '.', 'src', 'openapi.yaml'), 'utf8');
-  return yaml.load(raw);
+  return yaml.load(raw) as any;
 }
 
 describe('OpenAPI examples /api/auth/wallet', () => {
@@ -78,4 +78,4 @@ describe('OpenAPI examples /api/auth/wallet', () => {
       expect(first.value.error.request_id).toMatch(/^req_/);
     }
   });
-});
+})
