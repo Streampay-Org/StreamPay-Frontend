@@ -4,7 +4,6 @@ import {
   resetSloMonitor,
   type SloConfig,
   type SloBurnAlert,
-  type SloMonitorError,
 } from './sloMonitor';
 import { logger } from '@/app/lib/logger';
 
@@ -469,10 +468,10 @@ describe('SloMonitor', () => {
 
   describe('alert callbacks', () => {
     let monitor: SloMonitor;
-    let alerts: SloBurnAlert[];
+    let _alerts: SloBurnAlert[];
 
     beforeEach(() => {
-      alerts = [];
+      _alerts = [];
       monitor = new SloMonitor();
       monitor.registerEndpoint({
         endpoint: '/api/test',

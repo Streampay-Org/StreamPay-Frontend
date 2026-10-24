@@ -134,8 +134,9 @@ describe("Org Members API", () => {
     it("accepts a chunked body with no Content-Length", async () => {
       const walletAddress = "GCHUNK7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNR";
       const req = makeChunkedPostRequest(
+        // One JSON object split across two chunks.
         streamFromChunks([
-          JSON.stringify({ walletAddress }),
+          JSON.stringify({ walletAddress }).slice(0, -1),
           ',"role":"viewer"}',
         ]),
       );

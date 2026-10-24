@@ -277,3 +277,30 @@ describe("rate limit isolation between limit types", () => {
     store.destroy();
   });
 });
+
+describe("Wallet login rotating XFF spoofing scenario 9", () => {
+  it("scenario 9: Wallet login, 6 attempts with rotating XFF - the 6th returns 429", async () => {
+    const store = new InMemoryRateLimitStore();
+    let lastResult: any;
+
+    for (let i = 0; i < 6; i++) {
+      // Attacker tries to bypass rate limit by rotating spoofed client XFF header: "spoofed.ip.i, 198.51.100.1"
+      // Since trustedProxyHops = 1, resolveClientIp selects the trusted hop 198.51.100.1 every time!
+      const req = {
+        headers: new Map([
+          ["x-forwarded-for", "10.0.0." + i + ", 198.51.100.1"],
+        ]),
+        nextUrl: { pathname: "/api/auth/wallet" },
+      } as any;
+
+      lastResult = await checkIpRateLimit(req, "login", store);
+      if (i < 5) {
+        expect(lastResult.allowed).toBe(true);
+      }
+    }
+
+    expect(lastResult.allowed).toBe(false);
+    expect(lastResult.retryAfter).toBeDefined();
+    store.destroy();
+  });
+});

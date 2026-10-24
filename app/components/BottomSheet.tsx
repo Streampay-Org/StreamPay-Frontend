@@ -139,6 +139,7 @@ export const BottomSheet: React.FC<PropsWithChildren<BottomSheetProps>> = ({
   return (
     <div
       data-testid="bottom-sheet-overlay"
+      role="presentation"
       onMouseDown={handleOverlayPointerDown}
       onClick={handleOverlayClick}
       onAnimationEnd={handleAnimationEnd}
@@ -156,14 +157,17 @@ export const BottomSheet: React.FC<PropsWithChildren<BottomSheetProps>> = ({
           : { animation: `${isOpen ? "sheetFadeIn" : "sheetFadeOut"} var(--motion-duration-medium, 200ms) var(--motion-easing, cubic-bezier(0.16, 1, 0.3, 1)) forwards` }),
       }}
     >
+      {/* Clicks inside the dialog must not reach the backdrop's dismiss handler;
+          keyboard interaction is handled by onKeyDown. */}
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <div
         ref={containerRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
+        onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
           maxHeight: "90vh",

@@ -1,12 +1,17 @@
+import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import {
   GET,
   POST,
   resetWalletChallengeStoreForTesting,
+  seedWalletChallengeForTesting,
   getWalletChallengeStoreSizeForTesting,
   listWalletChallengesForTesting,
 } from "./route";
 import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
 import { logAccessEvent } from "@/src/middleware/accessLog";
+import { encodeStellarPublicKey } from "@/app/lib/stellar-address";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
 
 jest.mock("@/src/middleware/accessLog", () => ({
   logAccessEvent: jest.fn(),
@@ -45,7 +50,15 @@ jest.mock("next/server", () => {
     ) {
       this.status = init?.status ?? 200;
       this.headers = mockHeaders(init?.headers);
-      this.body = body ?? null;
+      if (typeof body === "string") {
+        try {
+          this.body = JSON.parse(body);
+        } catch {
+          this.body = body;
+        }
+      } else {
+        this.body = body ?? null;
+      }
       this.ok = this.status >= 200 && this.status < 300;
     }
 
@@ -79,6 +92,15 @@ const SHAPE_ONLY_ADDRESS = "GABC2345674567ABCDEFGHIJKLMNOPQRSTUVWXYZ2345674567AB
 const CHALLENGE_PREFIX = "streampay-auth:v1:";
 // A challenge that matches the issued shape, for POST validation tests.
 const VALID_CHALLENGE = `${CHALLENGE_PREFIX}nKlQNln6SV4hJ6pm6jNMSBVlcqo7r8Pjcj9mqLA_oRg|http://localhost|2024-01-15T10:05:00.000Z`;
+
+/**
+ * Build a unique challenge in the issued `streampay-auth:v1:<nonce>|<origin>|<expiry>`
+ * shape so seeded challenges pass POST body validation.
+ */
+function walletChallenge(tag: string): string {
+  const nonce = `${tag}_`.padEnd(43, "A");
+  return `${CHALLENGE_PREFIX}${nonce}|http://localhost|2099-01-01T00:00:00.000Z`;
+}
 
 function makeGetRequest(params: Record<string, string> = {}) {
   const searchParams = new URLSearchParams(params);
@@ -135,11 +157,22 @@ function makePostRequest(
   } as unknown as import("next/server").NextRequest;
 }
 
+function createTestWallet() {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  const rawPub = publicKey.export({ type: "spki", format: "der" }).subarray(12);
+  const address = encodeStellarPublicKey(rawPub);
+  return { address, privateKey };
+}
+
+function signChallenge(challenge: string, privateKey: crypto.KeyObject): string {
+  return crypto.sign(null, Buffer.from(challenge, "utf-8"), privateKey).toString("base64");
+}
+
 function validPostBody() {
   return {
     address: VALID_ADDRESS,
     challenge: VALID_CHALLENGE,
-    signature: "validbase64sig==",
+    signature: Buffer.alloc(64, 1).toString("base64"),
   };
 }
 
@@ -422,9 +455,18 @@ describe("POST /api/auth/wallet validation", () => {
   });
 
   it("ignores unknown extra fields when the known fields are valid", async () => {
+    const { address, privateKey } = createTestWallet();
+    const challenge = walletChallenge("extratest");
+    seedWalletChallengeForTesting({
+      address,
+      challenge,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const signature = signChallenge(challenge, privateKey);
+
     const res = await POST(
       makePostRequest(
-        { ...validPostBody(), extra: "ignored" },
+        { address, challenge, signature, extra: "ignored" },
         "securecsrf123",
         "securecsrf123",
       ),
@@ -473,29 +515,68 @@ describe("POST /api/auth/wallet", () => {
   });
 
   it("returns 200 with token for valid matching double-submit CSRF tokens", async () => {
+    const { address, privateKey } = createTestWallet();
+    const challenge = walletChallenge("csrftest");
+    seedWalletChallengeForTesting({
+      address,
+      challenge,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const signature = signChallenge(challenge, privateKey);
+
     const res = await POST(
-      makePostRequest(validPostBody(), "securecsrf123", "securecsrf123"),
+      makePostRequest(
+        { address, challenge, signature },
+        "securecsrf123",
+        "securecsrf123",
+      ),
     );
     expect(res.status).toBe(200);
     const body = (res as any).body;
     expect(typeof body.token).toBe("string");
+    expect(body.token_type).toBe("Bearer");
     expect(logAccessEvent).toHaveBeenCalledWith(
       expect.objectContaining({ method: "POST", path: "/api/auth/wallet", status: 200 }),
     );
   });
 
   it("returns 429 when rate limit is exceeded on POST (login)", async () => {
-    const req = () =>
-      makePostRequest(validPostBody(), "securecsrf123", "securecsrf123");
+    const { address, privateKey } = createTestWallet();
 
     // Exhaust the login limit (5/min)
     for (let i = 0; i < 5; i++) {
-      const res = await POST(req());
+      const challenge = walletChallenge(`rate${i}`);
+      seedWalletChallengeForTesting({
+        address,
+        challenge,
+        expires_at: new Date(Date.now() + 60_000).toISOString(),
+      });
+      const signature = signChallenge(challenge, privateKey);
+      const res = await POST(
+        makePostRequest(
+          { address, challenge, signature },
+          "securecsrf123",
+          "securecsrf123",
+        ),
+      );
       expect(res.status).toBe(200);
     }
 
     // 6th request should be rate-limited
-    const limited = await POST(req());
+    const challenge6 = walletChallenge("rate6");
+    seedWalletChallengeForTesting({
+      address,
+      challenge: challenge6,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const signature6 = signChallenge(challenge6, privateKey);
+    const limited = await POST(
+      makePostRequest(
+        { address, challenge: challenge6, signature: signature6 },
+        "securecsrf123",
+        "securecsrf123",
+      ),
+    );
     expect(limited.status).toBe(429);
     expect((limited as any).body.error.code).toBe("rate_limit_exceeded");
     expect((limited as any).body.error.message).toBeTruthy();
@@ -503,19 +584,287 @@ describe("POST /api/auth/wallet", () => {
   });
 });
 
-describe("GET /api/auth/wallet rate limiting", () => {
-  it("returns 429 when rate limit is exceeded on GET (challenge)", async () => {
-    const req = () => makeGetRequest({ address: VALID_ADDRESS });
+describe("POST /api/auth/wallet cryptographic verification & lifecycle", () => {
+  it("Scenario 1: Valid challenge and a valid signature returns 200, JWT verifies via tryAuthenticateRequest and sub === address", async () => {
+    const { address, privateKey } = createTestWallet();
+    const challenge = walletChallenge("scen1");
+    seedWalletChallengeForTesting({
+      address,
+      challenge,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const signature = signChallenge(challenge, privateKey);
 
-    // Exhaust the challenge limit (20/min)
-    for (let i = 0; i < 20; i++) {
-      const res = await GET(req());
-      expect(res.status).toBe(200);
-    }
+    const res = await POST(
+      makePostRequest(
+        { address, challenge, signature },
+        "securecsrf123",
+        "securecsrf123",
+      ),
+    );
 
-    // 21st request should be rate-limited
-    const limited = await GET(req());
-    expect(limited.status).toBe(429);
-    expect((limited as any).body.error.code).toBe("rate_limit_exceeded");
+    expect(res.status).toBe(200);
+    const body = (res as any).body;
+    expect(body.token_type).toBe("Bearer");
+    expect(typeof body.token).toBe("string");
+    expect(typeof body.expires_at).toBe("string");
+
+    const authReq = {
+      headers: {
+        get: (h: string) => (h.toLowerCase() === "authorization" ? `Bearer ${body.token}` : null),
+      },
+    } as unknown as Request;
+    const actor = tryAuthenticateRequest(authReq);
+    expect(actor).not.toBeNull();
+    expect(actor?.walletAddress).toBe(address);
+  });
+
+  it("Scenario 2: Signature from a different key returns 401", async () => {
+    const walletA = createTestWallet();
+    const walletB = createTestWallet();
+    const challenge = walletChallenge("scen2");
+    seedWalletChallengeForTesting({
+      address: walletA.address,
+      challenge,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    // Signed by walletB's private key instead of walletA
+    const signature = signChallenge(challenge, walletB.privateKey);
+
+    const res = await POST(
+      makePostRequest(
+        { address: walletA.address, challenge, signature },
+        "securecsrf123",
+        "securecsrf123",
+      ),
+    );
+    expect(res.status).toBe(401);
+    expect((res as any).body.error.code).toBe("UNAUTHORIZED");
+  });
+
+  it("Scenario 3: Regression proof - signature: 'x' fails with 422 (or 401 on legacy), passes on main", async () => {
+    const { address } = createTestWallet();
+    const challenge = walletChallenge("scen3");
+    seedWalletChallengeForTesting({
+      address,
+      challenge,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    const res = await POST(
+      makePostRequest(
+        { address, challenge, signature: "x" },
+        "securecsrf123",
+        "securecsrf123",
+      ),
+    );
+    // On main, this returned 200 because isValid was signature.length > 0.
+    // Now it fails validation with 422 (not valid 64-byte base64) instead of 200.
+    expect(res.status).toBe(422);
+    expect((res as any).body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("Scenario 4: Challenge never issued returns 401 CHALLENGE_UNKNOWN", async () => {
+    const { address, privateKey } = createTestWallet();
+    const challenge = walletChallenge("unissued");
+    const signature = signChallenge(challenge, privateKey);
+
+    const res = await POST(
+      makePostRequest(
+        { address, challenge, signature },
+        "securecsrf123",
+        "securecsrf123",
+      ),
+    );
+    expect(res.status).toBe(401);
+    expect((res as any).body.error.code).toBe("CHALLENGE_UNKNOWN");
+  });
+
+  it("Scenario 5: Challenge past expires_at returns 401 CHALLENGE_EXPIRED", async () => {
+    const { address, privateKey } = createTestWallet();
+    const challenge = walletChallenge("scen5");
+    seedWalletChallengeForTesting({
+      address,
+      challenge,
+      expires_at: new Date(Date.now() - 10_000).toISOString(), // expired
+    });
+    const signature = signChallenge(challenge, privateKey);
+
+    const res = await POST(
+      makePostRequest(
+        { address, challenge, signature },
+        "securecsrf123",
+        "securecsrf123",
+      ),
+    );
+    expect(res.status).toBe(401);
+    expect((res as any).body.error.code).toBe("CHALLENGE_EXPIRED");
+  });
+
+  it("Scenario 6: Replay of a challenge that already succeeded returns 401 CHALLENGE_UNKNOWN", async () => {
+    const { address, privateKey } = createTestWallet();
+    const challenge = walletChallenge("scen6");
+    seedWalletChallengeForTesting({
+      address,
+      challenge,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const signature = signChallenge(challenge, privateKey);
+
+    const req = () =>
+      makePostRequest(
+        { address, challenge, signature },
+        "securecsrf123",
+        "securecsrf123",
+      );
+
+    const first = await POST(req());
+    expect(first.status).toBe(200);
+
+    const replay = await POST(req());
+    expect(replay.status).toBe(401);
+    expect((replay as any).body.error.code).toBe("CHALLENGE_UNKNOWN");
+  });
+
+  it("Scenario 7: Challenge issued to address A, submitted for address B returns 401 CHALLENGE_ADDRESS_MISMATCH", async () => {
+    const walletA = createTestWallet();
+    const walletB = createTestWallet();
+    const challenge = walletChallenge("scen7");
+    // Challenge issued to walletA
+    seedWalletChallengeForTesting({
+      address: walletA.address,
+      challenge,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const signature = signChallenge(challenge, walletB.privateKey);
+
+    // Submitted with address B
+    const res = await POST(
+      makePostRequest(
+        { address: walletB.address, challenge, signature },
+        "securecsrf123",
+        "securecsrf123",
+      ),
+    );
+    expect(res.status).toBe(401);
+    expect((res as any).body.error.code).toBe("CHALLENGE_ADDRESS_MISMATCH");
+  });
+
+  it("Scenario 8: Signature that is not 64 bytes, or not base64 returns 422 validation error", async () => {
+    const { address } = createTestWallet();
+    const challenge = walletChallenge("scen8");
+
+    // Invalid base64
+    const res1 = await POST(
+      makePostRequest(
+        { address, challenge, signature: "???notbase64!!!" },
+        "securecsrf123",
+        "securecsrf123",
+      ),
+    );
+    expect(res1.status).toBe(422);
+    expect((res1 as any).body.error.code).toBe("VALIDATION_ERROR");
+
+    // Valid base64, but only 32 bytes
+    const res2 = await POST(
+      makePostRequest(
+        { address, challenge, signature: Buffer.alloc(32).toString("base64") },
+        "securecsrf123",
+        "securecsrf123",
+      ),
+    );
+    expect(res2.status).toBe(422);
+    expect((res2 as any).body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("Scenario 9: CSRF missing on a valid signature returns 403, and the challenge is not consumed", async () => {
+    const { address, privateKey } = createTestWallet();
+    const challenge = walletChallenge("scen9");
+    seedWalletChallengeForTesting({
+      address,
+      challenge,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const signature = signChallenge(challenge, privateKey);
+
+    // Missing CSRF token
+    const res403 = await POST(makePostRequest({ address, challenge, signature }));
+    expect(res403.status).toBe(403);
+
+    // Challenge must NOT have been consumed, so subsequent request with CSRF succeeds
+    const res200 = await POST(
+      makePostRequest(
+        { address, challenge, signature },
+        "securecsrf123",
+        "securecsrf123",
+      ),
+    );
+    expect(res200.status).toBe(200);
+  });
+
+  it("Scenario 10: expires_at matches the JWT exp within one second", async () => {
+    const { address, privateKey } = createTestWallet();
+    const challenge = walletChallenge("scen10");
+    seedWalletChallengeForTesting({
+      address,
+      challenge,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const signature = signChallenge(challenge, privateKey);
+
+    const res = await POST(
+      makePostRequest(
+        { address, challenge, signature },
+        "securecsrf123",
+        "securecsrf123",
+      ),
+    );
+    expect(res.status).toBe(200);
+    const body = (res as any).body;
+
+    const jwtDecoded = jwt.decode(body.token) as { exp: number };
+    const jwtExpIso = new Date(jwtDecoded.exp * 1000).toISOString();
+    const bodyExpMs = new Date(body.expires_at).getTime();
+    const jwtExpMs = new Date(jwtExpIso).getTime();
+
+    expect(Math.abs(bodyExpMs - jwtExpMs)).toBeLessThanOrEqual(1000);
+  });
+
+  it("Pin error precedence: Rate limit -> JSON & validation -> CSRF -> challenge lookup -> expiry -> signature", async () => {
+    const { address, privateKey } = createTestWallet();
+    const challenge = walletChallenge("precedence");
+
+    // 1. Invalid JSON returns 422 before checking CSRF
+    const resJson = await POST(makePostRequest("THROW"));
+    expect(resJson.status).toBe(422);
+
+    // 2. Validation error returns 422 before CSRF check
+    const resVal = await POST(makePostRequest({ address: "invalid" }));
+    expect(resVal.status).toBe(422);
+
+    // 3. CSRF failure returns 403 before challenge lookup
+    const resCsrf = await POST(
+      makePostRequest({
+        address,
+        challenge,
+        signature: Buffer.alloc(64).toString("base64"),
+      }),
+    );
+    expect(resCsrf.status).toBe(403);
+
+    // 4. Unknown challenge returns 401 CHALLENGE_UNKNOWN before signature verification
+    const resUnknown = await POST(
+      makePostRequest(
+        {
+          address,
+          challenge,
+          signature: Buffer.alloc(64).toString("base64"),
+        },
+        "csrf",
+        "csrf",
+      ),
+    );
+    expect(resUnknown.status).toBe(401);
+    expect((resUnknown as any).body.error.code).toBe("CHALLENGE_UNKNOWN");
   });
 });

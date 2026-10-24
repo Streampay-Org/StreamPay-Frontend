@@ -1,5 +1,4 @@
 "use client";
-import "./templates.module.css";
 
 import {
   Suspense,
@@ -16,11 +15,11 @@ import { Skeleton } from "../components/Skeleton";
 import { EmptyState } from "../components/EmptyState";
 import { PageError } from "../components/PageError";
 
-interface Template {
+export interface Template {
   id: string;
   name: string;
   asset: string;
-  amountPerInterval: number;
+  amountPerInterval: string;
   intervalSeconds: number;
   memo?: string;
   createdAt: string;
@@ -116,16 +115,16 @@ function useTemplateFilters() {
   return { activeCategory, searchQuery, selectCategory, changeSearch, clearFilters };
 }
 
-function formatInterval(seconds: number): string {
-  if (seconds >= 86400) {
+export function formatInterval(seconds: number): string {
+  if (seconds >= 86400 && seconds % 86400 === 0) {
     const days = seconds / 86400;
     return days === 1 ? "Daily" : `${days} days`;
   }
-  if (seconds >= 3600) {
+  if (seconds >= 3600 && seconds % 3600 === 0) {
     const hours = seconds / 3600;
     return hours === 1 ? "Hourly" : `${hours} hours`;
   }
-  if (seconds >= 60) {
+  if (seconds >= 60 && seconds % 60 === 0) {
     const mins = seconds / 60;
     return mins === 1 ? "Minute" : `${mins} minutes`;
   }
@@ -279,7 +278,7 @@ function TemplatesContent() {
       }
     }
 
-    fetchTemplates();
+    void fetchTemplates();
     return () => controller.abort();
   }, [loadKey]);
 
@@ -308,7 +307,7 @@ function TemplatesContent() {
       const params = new URLSearchParams({
         templateId: template.id,
         asset: template.asset,
-        rate: String(template.amountPerInterval),
+        rate: template.amountPerInterval,
         interval: String(template.intervalSeconds),
         memo: template.memo ?? "",
       });

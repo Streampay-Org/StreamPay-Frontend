@@ -10,6 +10,7 @@
  */
 
 import { isValidStellarPublicKey } from "@/app/lib/wallet-link";
+import { STELLAR_MAX_I64, STROOPS_SCALE } from "@/app/lib/amount";
 import { z } from "zod";
 import type { StreamStatus } from "@/app/types/openapi";
 
@@ -37,12 +38,55 @@ const MAX_DECIMAL_PRECISION = 7;
 /** Regex for a non-negative decimal number (whole or fractional). */
 const DECIMAL_PATTERN = /^\d+(?:\.\d+)?$/;
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Normalises a decimal string to canonical form:
+ * - Trims whitespace
+ * - Strips leading zeros (preserving "0" if zero whole part)
+ * - Strips trailing fractional zeros and trailing dot
+ * E.g., "0050.5000" -> "50.5", "00.120" -> "0.12", "0100" -> "100"
+ */
+export function canonicaliseRate(rate: string): string {
+  const trimmed = rate.trim();
+  const [wholePart = "0", fractionPart] = trimmed.split(".");
+  const canonicalWhole = wholePart.replace(/^0+(?=\d)/, "");
+  if (fractionPart !== undefined) {
+    const canonicalFraction = fractionPart.replace(/0+$/, "");
+    if (canonicalFraction.length > 0) {
+      return `${canonicalWhole}.${canonicalFraction}`;
+    }
+  }
+  return canonicalWhole;
+}
+
+/**
+ * Parses a decimal string rate into stroops using bigint math.
+ * Assumes the string matches DECIMAL_PATTERN and has at most 7 fractional decimals.
+ */
+export function rateToStroops(rate: string): bigint {
+  const trimmed = rate.trim();
+  const [wholePart = "0", fractionPart = ""] = trimmed.split(".");
+  const whole = BigInt(wholePart);
+  const paddedFraction = `${fractionPart}0000000`.slice(0, 7);
+  const fraction = BigInt(paddedFraction);
+  return whole * STROOPS_SCALE + fraction;
+}
+
+export interface NormalisedCreateStreamInput {
+  recipient: string;
+  rate: string;
+  schedule: SupportedSchedule;
+  token?: string;
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export interface ValidationError {
   field: string;
   code: string;
   message: string;
+  alias?: string;
 }
 
 export interface CreateStreamBody {
@@ -85,13 +129,17 @@ export const patchStreamSchema = z
 
 function zodIssuesToErrors(error: z.ZodError): ValidationError[] {
   return error.issues.map((issue) => {
-    const params = (issue as { params?: { code?: unknown } }).params;
-    return {
+    const params = (issue as { params?: { code?: unknown; alias?: unknown } }).params;
+    const err: ValidationError = {
       field: issue.path.join(".") || "body",
       code:
         typeof params?.code === "string" ? params.code : issue.code.toUpperCase(),
       message: issue.message,
     };
+    if (typeof params?.alias === "string") {
+      err.alias = params.alias;
+    }
+    return err;
   });
 }
 
@@ -105,12 +153,12 @@ function zodIssuesToErrors(error: z.ZodError): ValidationError[] {
 export const createStreamSchema = z
   .record(z.unknown())
   .superRefine((body, ctx) => {
-    const fail = (path: string, code: string, message: string) =>
+    const fail = (path: string, code: string, message: string, alias?: string) =>
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: [path],
         message,
-        params: { code },
+        params: { code, ...(alias ? { alias } : {}) },
       });
 
     const recipient = body.recipient;
@@ -141,17 +189,24 @@ export const createStreamSchema = z
           "rate must be a positive decimal number (e.g. 100 or 50.5).",
         );
       } else {
-        if (Number(trimmed) <= 0) {
-          fail("rate", "NEGATIVE_RATE", "rate must be greater than zero.");
+        const [wholePart = "", fractionPart = ""] = trimmed.split(".");
+        const isAllZeros = /^0+$/.test(wholePart) && (fractionPart.length === 0 || /^0+$/.test(fractionPart));
+
+        if (isAllZeros) {
+          fail("rate", "RATE_NOT_POSITIVE", "rate must be greater than zero.", "NEGATIVE_RATE");
         }
 
-        const fractionPart = trimmed.split(".")[1] ?? "";
         if (fractionPart.length > MAX_DECIMAL_PRECISION) {
           fail(
             "rate",
             "DECIMAL_PRECISION_EXCEEDED",
             `rate supports at most ${MAX_DECIMAL_PRECISION} decimal places.`,
           );
+        } else if (!isAllZeros) {
+          const stroops = rateToStroops(trimmed);
+          if (stroops > STELLAR_MAX_I64) {
+            fail("rate", "RATE_TOO_LARGE", "rate exceeds Stellar int64 stroop bounds.");
+          }
         }
       }
     }
@@ -209,6 +264,42 @@ export function validateCreateStreamBody(
 ): ValidationError[] {
   const result = createStreamSchema.safeParse(body);
   return result.success ? [] : zodIssuesToErrors(result.error);
+}
+export type ParseCreateStreamResult =
+  | { success: true; data: NormalisedCreateStreamInput }
+  | { success: false; errors: ValidationError[] };
+
+/**
+ * Validates and parses the request body for stream creation.
+ * Returns normalised fields on success:
+ * - recipient: trimmed Stellar address
+ * - rate: canonical decimal form (no leading zeros, no trailing fractional zeros)
+ * - schedule: trimmed lowercased SupportedSchedule
+ * - token: optional string
+ */
+export function parseCreateStreamBody(
+  body: unknown,
+): ParseCreateStreamResult {
+  const errors = validateCreateStreamBody(body);
+  if (errors.length > 0) {
+    return { success: false, errors };
+  }
+
+  const b = body as Record<string, unknown>;
+  const recipient = String(b.recipient).trim();
+  const rate = canonicaliseRate(String(b.rate));
+  const schedule = String(b.schedule).trim().toLowerCase() as SupportedSchedule;
+  const token = typeof b.token === "string" ? b.token : undefined;
+
+  return {
+    success: true,
+    data: {
+      recipient,
+      rate,
+      schedule,
+      ...(token !== undefined ? { token } : {}),
+    },
+  };
 }
 
 // ── GET /api/streams query ─────────────────────────────────────────────────

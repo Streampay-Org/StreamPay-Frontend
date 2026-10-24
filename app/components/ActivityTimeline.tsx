@@ -1,5 +1,4 @@
 "use client";
-import "../activity/activity.module.css";
 
 import Link from "next/link";
 import React from "react";

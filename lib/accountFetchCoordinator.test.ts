@@ -69,7 +69,7 @@ describe('AccountFetchCoordinator', () => {
     coordinator.switchAccount('GA_ALICE');
 
     // 1st Alice fetch (slow)
-    const aliceFetch1 = coordinator.execute('GA_ALICE', async (signal) => {
+    const aliceFetch1 = coordinator.execute('GA_ALICE', async () => {
       await new Promise((resolve) => setTimeout(resolve, 80));
       return { generation: 1, account: 'GA_ALICE' };
     });
@@ -77,7 +77,7 @@ describe('AccountFetchCoordinator', () => {
 
     // Switch to Bob (slow)
     coordinator.switchAccount('GA_BOB');
-    const bobFetch = coordinator.execute('GA_BOB', async (signal) => {
+    const bobFetch = coordinator.execute('GA_BOB', async () => {
       await new Promise((resolve) => setTimeout(resolve, 60));
       return { generation: 2, account: 'GA_BOB' };
     });
@@ -103,7 +103,7 @@ describe('AccountFetchCoordinator', () => {
   it('aborts all in-flight requests when user disconnects (switch to null)', async () => {
     coordinator.switchAccount('GA_ALICE');
 
-    const inFlight = coordinator.execute('GA_ALICE', async (signal) => {
+    const inFlight = coordinator.execute('GA_ALICE', async () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
       return { data: 'should not resolve' };
     });
