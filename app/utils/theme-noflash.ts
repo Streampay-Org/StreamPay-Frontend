@@ -52,7 +52,7 @@ export function getTheme(): Theme {
 }
 
 /**
- * Applies the theme class to the document element.
+ * Applies the theme class to the document element without persisting OS-derived values to localStorage.
  * This should be called immediately after detecting the theme to prevent flash.
  *
  * @param theme - The theme to apply ('light' or 'dark')
@@ -67,30 +67,27 @@ export function applyTheme(theme: Theme): void {
   
   // Add the appropriate class
   root.classList.add(theme);
-  
-  // Store in localStorage for persistence
+}
+
+/**
+ * Sets the theme preference, persists explicit user choices in localStorage, and applies it.
+ * This is the main function to call when user explicitly changes theme.
+ *
+ * @param theme - The theme to set ('light' or 'dark')
+ */
+export function setTheme(theme: Theme): void {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       window.localStorage.setItem(THEME_STORAGE_KEY, theme);
     }
   } catch (e) {
     // localStorage may be unavailable or full
-    // Theme is still applied to DOM, so this is non-critical
   }
-}
-
-/**
- * Sets the theme preference and applies it.
- * This is the main function to call when user changes theme.
- *
- * @param theme - The theme to set ('light' or 'dark')
- */
-export function setTheme(theme: Theme): void {
   applyTheme(theme);
 }
 
 /**
- * Initializes the theme on page load to prevent flash.
+ * Initializes the theme on page load to prevent flash without persisting system preferences.
  * This should be called in a blocking script in the head.
  */
 export function initTheme(): void {

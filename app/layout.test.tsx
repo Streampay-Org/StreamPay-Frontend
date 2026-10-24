@@ -17,12 +17,12 @@ jest.mock("./components/ToastProvider", () => ({
   ),
 }));
 
-jest.mock("./components/CommandPaletteWrapper", () => ({
-  CommandPaletteWrapper: () => <div data-testid="command-palette" />,
+jest.mock("./components/CommandPaletteLauncher", () => ({
+  CommandPaletteLauncher: () => <div data-testid="command-palette" />,
 }));
 
-jest.mock("./components/ShortcutsOverlayWrapper", () => ({
-  ShortcutsOverlayWrapper: () => <div data-testid="shortcuts-overlay" />,
+jest.mock("./components/ShortcutsOverlayLauncher", () => ({
+  ShortcutsOverlayLauncher: () => <div data-testid="shortcuts-overlay" />,
 }));
 
 jest.mock("./components/SplashScreenWrapper", () => ({

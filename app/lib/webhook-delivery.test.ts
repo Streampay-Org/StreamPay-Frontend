@@ -19,7 +19,7 @@ import {
 } from '@/app/lib/webhook-delivery';
 import { WebhookDeliveryWorker } from '@/app/lib/webhook-delivery-worker';
 import { webhookDeliveryStore } from '@/app/lib/webhook-delivery-store';
-import { logger, setCorrelationContext } from '@/app/lib/logger';
+import { setCorrelationContext } from '@/app/lib/logger';
 
 describe('Webhook Delivery System', () => {
   beforeEach(() => {
@@ -513,7 +513,7 @@ describe('Webhook Delivery System', () => {
       const event2 = { ...event, id: 'event-456' };
 
       const result1 = await worker.processDelivery(endpoint, event, 'delivery-1');
-      const result2 = await worker.processDelivery(endpoint, event2, 'delivery-2');
+      await worker.processDelivery(endpoint, event2, 'delivery-2');
 
       // First delivery should retry and succeed
       expect(result1.success).toBe(true);

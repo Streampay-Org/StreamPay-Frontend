@@ -28,6 +28,7 @@ export interface KeyValueStore<K, V> {
   forEach(callbackfn: (value: V, key: K) => void): void;
   get(key: K): V | undefined;
   has(key: K): boolean;
+  insert(key: K, value: V): boolean;
   set(key: K, value: V): void;
   values(): IterableIterator<V>;
 }
@@ -44,6 +45,17 @@ export interface StreamRepository {
   readonly activity: KeyValueStore<string, ActivityEvent>;
   readonly streams: KeyValueStore<string, Stream>;
   readonly users: KeyValueStore<string, User>;
+  getMultiGroupStreamIds(groupId: string): string[];
+  /**
+   * Returns all streams belonging to `tenant` using the secondary index
+   * (`O(streams in tenant)` instead of `O(all streams)`).
+   */
+  listByTenant?(tenant: string): Stream[];
+  /**
+   * Returns all streams where `walletAddress` is a participant (`senderAddress`
+   * or `recipient`), optionally scoped to `tenant`.
+   */
+  listByParticipant?(walletAddress: string, tenant?: string): Stream[];
   reset(): void;
   withLock<T>(id: string, callback: () => Promise<T>): Promise<T>;
 }
@@ -383,4 +395,5 @@ export function decodeCompositeCursor(cursor: string): { timestamp: string; id: 
   return { timestamp, id };
 }
 
+export { newStreamId } from "./stream-id";
 export { createInMemoryPersistenceStore, createPostgresPersistenceStore, POSTGRES_SCHEMA_SKETCH, POSTGRES_ROLLOUT_NOTES };

@@ -32,6 +32,15 @@
 - `POST /api/webhooks` now applies strict Zod body validation. Requests must include a non-empty `eventType`; unknown top-level fields now return `400 INVALID_INPUT`.
 
 ### Fixed
+- **v2 stream projection is now faithful** (correctness fix, not a breaking rename):
+  `/api/v2/streams` responses pass `status` through unchanged, including `withdrawn`
+  and `cancelled` (previously any status outside draft/active/paused/ended was rewritten
+  to `draft`). `allowed_actions` is now derived from the stream state-machine table
+  instead of a single stale hint (`next_action` still carries the hint), and
+  `settlement` is populated as `{ tx_hash, settled_at, amount, currency }` when the
+  stream has a `settlementTxHash` (otherwise `null`). An unknown status now returns
+  `500 PROJECTION_ERROR` instead of being coerced. The SDK `StreamStatus` type already
+  includes `withdrawn` and `cancelled`.
 - **Idempotency records are now scoped to the stream id and the calling wallet** (#1720):
   `POST /api/streams/:id/settle` and `POST /api/streams/:id/withdraw` now store
   their idempotency record under a key that contains the stream id, and the

@@ -7,7 +7,7 @@
  * SECURITY: Configuration validation must happen before any network calls or wallet operations.
  */
 
-import { validateConfig, getConfig, ValidatedConfig } from './index';
+import { validateConfig, getConfig, resetConfigCache, ValidatedConfig } from './index';
 import { logger } from '../logger';
 
 let isBootstrapped = false;
@@ -64,4 +64,6 @@ export function isApplicationBootstrapped(): boolean {
 export function resetBootstrap(): void {
   isBootstrapped = false;
   delete (globalThis as any).streampayConfig;
+  // Also drop any cached config so a subsequent bootstrap re-reads process.env.
+  resetConfigCache();
 }

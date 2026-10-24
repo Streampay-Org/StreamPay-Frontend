@@ -286,39 +286,5 @@ export function vestedAmount(stream: Stream, nowMs: number): bigint {
   return (total * elapsed) / duration;
 }
 
-// ── Mock escrow resolver ──────────────────────────────────────────────────────
-
-/**
- * Resolve the current on-chain escrow state for a stream.
- *
- * In production this queries the Soroban contract storage for:
- *   - total_amount
- *   - released_amount
- *   - vested_amount (computed by the release schedule at `now`)
- *
- * The mock uses values stored on the stream record (set at creation time).
- * All amounts are i128 raw units.
- *
- * Vesting is delegated to `vestedAmount` in `escrow-state.ts`, which is a
- * bit-exact port of `release::vested_amount` in the Soroban contract. Streams
- * without `startTime`/`endTime` fail with `ESCROW_UNKNOWN` rather than
- * inventing a schedule.
- */
-export function resolveEscrowState(stream: Stream, now: Date): {
-  totalAmount:    bigint;
-  releasedAmount: bigint;
-  vestedAmount:   bigint;
-} {
-  const total    = BigInt((stream as any).totalAmount    as string ?? "0");
-  const released = BigInt((stream as any).releasedAmount as string ?? "0");
-
-  const startTime = (stream as any).startTime as string | undefined;
-  const endTime   = (stream as any).endTime   as string | undefined;
-  if (!startTime || !endTime) {
-    throw new Error(ESCROW_UNKNOWN);
-  }
-
-  const vested = vestedAmount(stream, now.getTime());
-
-  return { totalAmount: total, releasedAmount: released, vestedAmount: vested };
-}
+// Keep the withdrawal module's resolver import path stable for callers.
+export { resolveEscrowState } from "./escrow-state";

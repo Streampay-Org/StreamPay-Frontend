@@ -60,6 +60,8 @@ function setupProviderState(providerState: string) {
   if (providerState.includes("stream stream_abc123 exists")) {
     let status = "active";
     if (providerState.includes("ended")) status = "ended";
+    if (providerState.includes("withdrawn")) status = "withdrawn";
+    if (providerState.includes("cancelled")) status = "cancelled";
     if (providerState.includes("paused")) status = "paused";
     if (providerState.includes("active")) status = "active";
 
@@ -68,8 +70,8 @@ function setupProviderState(providerState: string) {
       recipient: "GABC1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234",
       rate: "120",
       schedule: "month",
-      status,
-      nextAction: status === "active" ? "pause" : status === "ended" ? "withdraw" : "start",
+      status: status as any,
+      nextAction: status === "active" ? "pause" : status === "ended" ? "withdraw" : status === "draft" || status === "paused" ? "start" : undefined,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
       token: "XLM",
@@ -118,7 +120,10 @@ describe("Pact contract verifier — /api/v2/streams", () => {
             if (expected.id !== undefined) {
               expect(typeof body.id).toBe("string");
               expect(typeof body.status).toBe("string");
-              expect(["draft","active","paused","ended"]).toContain(body.status);
+              expect(body.status).toBe(expected.status);
+              if (Array.isArray(expected.allowed_actions)) {
+                expect(body.allowed_actions).toEqual(expected.allowed_actions);
+              }
             }
           }
         });

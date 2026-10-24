@@ -9,6 +9,8 @@ import {
   initTheme,
   getThemeScript,
 } from './theme-noflash';
+import fs from 'fs';
+import path from 'path';
 
 describe('theme-noflash', () => {
   const originalMatchMedia = window.matchMedia;
@@ -80,16 +82,23 @@ describe('theme-noflash', () => {
       expect(document.documentElement.classList.contains('dark')).toBe(false);
     });
 
-    it('stores theme in localStorage', () => {
+    it('does not store theme in localStorage', () => {
       applyTheme('light');
-      expect(localStorage.getItem('streampay-theme')).toBe('light');
+      expect(localStorage.getItem('streampay-theme')).toBeNull();
     });
   });
 
   describe('setTheme', () => {
-    it('calls applyTheme with the given theme', () => {
-      setTheme('dark');
-      expect(document.documentElement.classList.contains('dark')).toBe(true);
+    it('3. Calling initTheme() without a stored preference leaves localStorage empty', () => {
+      localStorage.clear();
+      initTheme();
+      expect(localStorage.getItem('streampay-theme')).toBeNull();
+    });
+
+    it('4. Calling setTheme("light") persists the explicit choice', () => {
+      setTheme('light');
+      expect(localStorage.getItem('streampay-theme')).toBe('light');
+      expect(document.documentElement.classList.contains('light')).toBe(true);
     });
   });
 
@@ -100,11 +109,20 @@ describe('theme-noflash', () => {
       expect(document.documentElement.classList.contains('light')).toBe(true);
     });
 
-    it('applies system preference when no stored theme', () => {
+    it('applies system preference when no stored theme without writing to localStorage', () => {
       localStorage.clear();
       window.matchMedia = jest.fn().mockReturnValue({ matches: true }) as any;
       initTheme();
       expect(document.documentElement.classList.contains('dark')).toBe(true);
+      expect(localStorage.getItem('streampay-theme')).toBeNull();
+    });
+  });
+
+  describe('5. Stylesheet color-scheme rules', () => {
+    it('contains color-scheme rules for dark and light themes', () => {
+      const globalsCss = fs.readFileSync(path.join(process.cwd(), 'app/globals.css'), 'utf8');
+      expect(globalsCss).toMatch(/:root\s*\{[^}]*color-scheme:\s*dark/);
+      expect(globalsCss).toMatch(/\.light\s*\{[^}]*color-scheme:\s*light/);
     });
   });
 
@@ -131,23 +149,6 @@ describe('theme-noflash', () => {
     it('is wrapped in an IIFE', () => {
       const script = getThemeScript();
       expect(script).toMatch(/^\s*\(function\(\)/);
-    });
-  });
-
-  describe('theme persistence', () => {
-    it('persists theme choice across sessions', () => {
-      setTheme('light');
-      expect(localStorage.getItem('streampay-theme')).toBe('light');
-      const retrievedTheme = getTheme();
-      expect(retrievedTheme).toBe('light');
-    });
-
-    it('allows theme switching', () => {
-      setTheme('dark');
-      expect(document.documentElement.classList.contains('dark')).toBe(true);
-
-      setTheme('light');
-      expect(document.documentElement.classList.contains('light')).toBe(true);
     });
   });
 });

@@ -3,8 +3,19 @@
 @import "./styles/icons.css";
 @import "./styles/patterns.css" layer(patterns);
 @import "./styles/typography.css";
+@import "./activity/activity.css";
+@import "./components/Explainer.css";
+@import "./components/OnboardingManager.css";
+@import "./components/PushOptIn.css";
+@import "./components/WelcomeTour.css";
+@import "./contacts/contacts.css";
+@import "./docs/docs.css";
+@import "./help/help.css";
+@import "./templates/templates.css";
 
 :root {
+  color-scheme: dark;
+
   /* Aliases referenced by some components but never defined. */
   --text: var(--foreground);
   --card-bg: var(--panel);
@@ -161,6 +172,7 @@
 
 /* ── Light Theme ── */
 .light {
+  color-scheme: light;
   --background: #ffffff;
   --foreground: #111827;
   --accent: #16a34a;
@@ -1298,7 +1310,7 @@ a:hover {
 }
 
 .csf-skeleton__field {
-  /* Skelton items within a field group */
+  /* Skeleton items within a field group */
 }
 
 .csf-skeleton__field .skeleton--label {

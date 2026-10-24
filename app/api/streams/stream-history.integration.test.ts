@@ -27,6 +27,8 @@ beforeEach(() => {
 
 // ── start route ───────────────────────────────────────────────────────────────
 
+const AUTH_HEADERS = { "Actor-Wallet-Address": "GPAUSER75IVFB7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7G" };
+
 describe("start route", () => {
   it("appends 'started' entry when a draft stream starts", async () => {
     const res = await startStream(
@@ -45,12 +47,12 @@ describe("start route", () => {
   it("appends 'resumed' entry when a paused stream resumes", async () => {
     // Pause first
     await pauseStream(
-      new Request("http://localhost/api/streams/stream-ada/pause", { method: "POST" }),
+      new Request("http://localhost/api/streams/stream-ada/pause", { method: "POST", headers: AUTH_HEADERS }),
       ctx("stream-ada"),
     );
     // Resume
     const res = await startStream(
-      new Request("http://localhost/api/streams/stream-ada/start", { method: "POST" }),
+      new Request("http://localhost/api/streams/stream-ada/start", { method: "POST", headers: AUTH_HEADERS }),
       ctx("stream-ada"),
     );
     expect(res.status).toBe(200);
@@ -67,7 +69,7 @@ describe("start route", () => {
 describe("pause route", () => {
   it("appends 'paused' entry on success (test #1)", async () => {
     const res = await pauseStream(
-      new Request("http://localhost/api/streams/stream-ada/pause", { method: "POST" }),
+      new Request("http://localhost/api/streams/stream-ada/pause", { method: "POST", headers: AUTH_HEADERS }),
       ctx("stream-ada"),
     );
     expect(res.status).toBe(200);
@@ -85,7 +87,7 @@ describe("pause route", () => {
     await pauseStream(
       new Request("http://localhost/api/streams/stream-ada/pause", {
         method: "POST",
-        headers: { "Idempotency-Key": key },
+        headers: { "Idempotency-Key": key, ...AUTH_HEADERS },
       }),
       ctx("stream-ada"),
     );
@@ -93,7 +95,7 @@ describe("pause route", () => {
     const replay = await pauseStream(
       new Request("http://localhost/api/streams/stream-ada/pause", {
         method: "POST",
-        headers: { "Idempotency-Key": key },
+        headers: { "Idempotency-Key": key, ...AUTH_HEADERS },
       }),
       ctx("stream-ada"),
     );

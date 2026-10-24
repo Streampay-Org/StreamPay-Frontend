@@ -14,7 +14,10 @@ describe("POST /api/streams/batch/start", () => {
   it("starts multiple draft streams successfully", async () => {
     const req = new Request("http://localhost/api/streams/batch/start", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Actor-Wallet-Address": "GOWNER7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW",
+      },
       body: JSON.stringify(["stream-kemi", "stream-ada"]),
     });
 
@@ -52,7 +55,11 @@ describe("POST /api/streams/batch/start", () => {
     try {
       const req = new Request("http://localhost/api/streams/batch/start", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // stream-ada is org-owned, so the batch needs an org member identity (#1806).
+          "Actor-Wallet-Address": "GOWNER7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW",
+        },
         body: JSON.stringify(["stream-ada", "stream-kemi"]),
       });
 

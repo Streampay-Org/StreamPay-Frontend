@@ -167,6 +167,10 @@ class UnsupportedKeyValueStore<K, V> implements KeyValueStore<K, V> {
     throw unsupported(this.resourceName, "get");
   }
 
+  insert(_key: K, _value: V): boolean {
+    throw unsupported(this.resourceName, "insert");
+  }
+
   has(_key: K): boolean {
     throw unsupported(this.resourceName, "has");
   }
@@ -222,6 +226,10 @@ class PostgresStreamRepository implements StreamRepository {
 
   reset(): void {
     throw unsupported("postgres-stream-repository", "reset");
+  }
+
+  getMultiGroupStreamIds(): string[] {
+    throw unsupported("postgres-stream-repository", "getMultiGroupStreamIds");
   }
 
   async withLock<T>(_id: string, _callback: () => Promise<T>): Promise<T> {

@@ -3,17 +3,18 @@
 import { useMemo, useState } from "react";
 import { Modal } from "./Modal";
 import { STROOPS_SCALE } from "../lib/amount";
-import { computeCancellationSplit, type CancelInput } from "../lib/cancel-stream";
+import { computeCancellationSplit } from "../lib/cancel-stream";
+import { escrowNow, resolveEscrowState } from "../lib/escrow-state";
 import type { Stream } from "../types/openapi";
 
 type CancelStreamModalProps = {
   isOpen: boolean;
   onClose: () => void;
   onConfirm: () => Promise<void> | void;
-  /** Minimal stream context: only the status is needed for the cancel guard. */
-  stream: Pick<Stream, "status">;
-  /** Escrow amounts (raw i128 units) used to compute the refund split. */
-  split: CancelInput;
+  /** Persisted stream data used by the same escrow resolver as the API. */
+  stream: Stream;
+  /** Injected clock for deterministic previews and tests. */
+  now?: Date;
   tokenLabel?: string;
 };
 
@@ -38,15 +39,25 @@ export function CancelStreamModal({
   onClose,
   onConfirm,
   stream,
-  split,
+  now,
   tokenLabel = "tokens",
 }: CancelStreamModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const result = useMemo(
-    () => computeCancellationSplit(stream, split),
-    [stream, split],
-  );
+  const result = useMemo(() => {
+    const escrow = resolveEscrowState(stream, now ?? escrowNow());
+    if (!escrow.ok) {
+      return { ok: false as const, message: "Escrow state is unavailable for this stream." };
+    }
+    return computeCancellationSplit(stream, {
+      totalAmount: escrow.value.total,
+      releasedAmount: escrow.value.released,
+      vestedAmount: escrow.value.vested,
+      token: stream.token ?? "XLM",
+      senderAddress: stream.senderAddress ?? "",
+      recipientAddress: stream.recipient,
+    });
+  }, [stream, now]);
 
   const handleConfirm = async () => {
     setIsSubmitting(true);

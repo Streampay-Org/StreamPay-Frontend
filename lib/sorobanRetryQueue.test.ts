@@ -22,7 +22,6 @@ import {
   computeBackoff,
   DEFAULT_RETRY_QUEUE_CONFIG,
   type RetryQueueEntry,
-  type RetryQueueResult,
   type SorobanOperation,
 } from "./sorobanRetryQueue";
 import { SorobanError, SorobanErrorCode } from "../types";
@@ -367,11 +366,10 @@ describe("dequeue", () => {
 
   it("returns the oldest eligible entry when multiple are pending", () => {
     // Enqueue at different times by manipulating nextRetryAt
-    const r1 = sorobanRetryQueue.enqueue("fetchStream", { streamId: "first" });
-    const r2 = sorobanRetryQueue.enqueue("fetchStream", { streamId: "second" });
+    sorobanRetryQueue.enqueue("fetchStream", { streamId: "first" });
+    sorobanRetryQueue.enqueue("fetchStream", { streamId: "second" });
 
     // Set the first entry's nextRetryAt to 5000
-    const e1 = sorobanRetryQueue.getEntry(r1.data!.id);
     // We can't directly mutate — let's just rely on insertion order for FIFO
     // Both are eligible now, so first inserted should come first
     const deq = sorobanRetryQueue.dequeue();
@@ -1352,7 +1350,7 @@ describe("durability — crash recovery (processing → pending)", () => {
   it("logs recovery metric when processing entries are reset", () => {
     const capture = captureLogs();
 
-    const r = sorobanRetryQueue.enqueue("fetchStream", { streamId: "a" });
+    sorobanRetryQueue.enqueue("fetchStream", { streamId: "a" });
     sorobanRetryQueue.dequeue();
     sorobanRetryQueue._storage.clear();
     sorobanRetryQueue._hydrate();
