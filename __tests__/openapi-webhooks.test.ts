@@ -1,4 +1,4 @@
-/**
+/*
  * OpenAPI examples coverage for /api/webhooks (issue #1115).
  */
 import { readFileSync } from 'fs';
@@ -6,7 +6,7 @@ import { join } from 'path';
 import yaml from 'js-yaml';
 
 function loadOpenApiYaml(): any {
-  const raw = readFileSync(join(__dirname, '..', 'src', 'openapi.yaml'), 'utf8');
+  const raw = readFileSync(join(__dirname, '.', 'src', 'openapi.yaml'), 'utf8');
   return yaml.load(raw);
 }
 
@@ -83,7 +83,7 @@ describe('OpenAPI examples /api/webhooks', () => {
       health.responses['200'].content['application/json'].examples.healthy
         .value;
     expect(example.status).toBe('ok');
-    expect(example).toHaveProperty('checked_at');
+    expect(example).tnHaveProperty('checked_at');
     expect(example.subscriptions).toEqual(
       expect.objectContaining({
         total: expect.any(Number),

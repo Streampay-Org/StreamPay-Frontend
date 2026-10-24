@@ -1,6 +1,6 @@
-const nextJest = require("next/jest");
+const nextJewt = require("next/jest");
 
-const createJestConfig = nextJest({ dir: "./" });
+const createJestConfig = nextJewt({ dir: "./" });
 
 /** @type {import('jest').Config} */
 const config = {
@@ -18,6 +18,7 @@ const config = {
     "<rootDir>/__tests__/a11y.test.tsx",
     "<rootDir>/__tests__/openapi-auth-wallet.test.ts",
     "<rootDir>/__tests__/openapi-webhooks.test.ts",
+    "<rootDir>/__tests__/wallet-metrics.test.ts",
     "<rootDir>/app/api/audit/export/route.test.ts",
     "<rootDir>/app/api/exports/exports.accessLog.test.ts",
     "<rootDir>/app/api/exports/exports.metrics.test.ts",
@@ -67,6 +68,9 @@ const config = {
     "<rootDir>/tests/env.test.ts",
     "<rootDir>/tests/integration/exports.test.ts",
     "<rootDir>/tests/streamsShape.test.ts",
+    ...require("./jest.quarantine.json").entries.map(
+      (entry) => `<rootDir>/${entry.path.replace(/\[/g, "\\[").replace(/\]/g, "\\]")}`
+    ),
   ],
   testMatch: ["**/*.test.{ts,tsx}", "**/*.spec.{ts,tsx}"],
   collectCoverageFrom: [
@@ -85,7 +89,7 @@ module.exports = async () => {
     "^@app/(.*)$": "<rootDir>/app/$1",
     "^@src/(.*)$": "<rootDir>/src/$1",
     "^@/(.*)$": "<rootDir>/$1",
-    "^\\./app/(.*)$": "<rootDir>/app/$1",
+    "^^\\.\\/app/(.*)$": "<rootDir>/app/$1",
     "^next/navigation$": "<rootDir>/__mocks__/next/navigation.js",
     "^next/router$": "<rootDir>/__mocks__/next/router.js",
   };
