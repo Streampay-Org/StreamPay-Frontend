@@ -26,6 +26,12 @@ describe("LiveRegion", () => {
 
   it("renders assertive politeness when specified", () => {
     render(<LiveRegion message="Urgent" politeness="assertive" />);
+    const region = screen.getByRole("alert");
+    expect(region).toHaveAttribute("aria-live", "assertive");
+  });
+
+  it("supports role override when provided", () => {
+    render(<LiveRegion message="Urgent" politeness="assertive" role="status" />);
     const region = screen.getByRole("status");
     expect(region).toHaveAttribute("aria-live", "assertive");
   });

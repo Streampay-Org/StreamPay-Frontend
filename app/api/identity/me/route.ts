@@ -36,8 +36,8 @@ async function handleIdentityMeGet(request: Request) {
       email: null,
       display_name: actor.walletAddress,
       avatar_url: null,
-      created_at: new Date().toISOString(),
-      last_seen: getLastSeen(actor.actorId),
+      created_at: null,
+      last_seen: getLastSeen(actor.walletAddress),
     },
     links: { self: "/api/identity/me" },
   });

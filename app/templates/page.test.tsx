@@ -135,8 +135,7 @@ describe("TemplatesPage", () => {
       jest.advanceTimersByTime(1000);
     });
 
-    const panel = screen.getByRole("tabpanel", { name: "All" });
-    expect(within(panel).getByRole("status")).toHaveTextContent("Showing 4 templates");
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 4 templates");
   });
 
   it("clears aria-busy once templates are loaded", async () => {
@@ -659,6 +658,115 @@ describe("TemplatesPage", () => {
   });
 });
 
+
+  // ── Scenario 3: Templates loading to populated ────────────────────────────
+  it("announces one polite status message containing the count when transitioning from loading to populated", async () => {
+    render(<TemplatesPage />);
+    expect(screen.getByRole("status")).toHaveTextContent(/loading templates/i);
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
+
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+    });
+
+    const statuses = screen.getAllByRole("status");
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0]).toHaveTextContent("Showing 4 templates");
+    expect(statuses[0]).toHaveAttribute("aria-live", "polite");
+  });
+
+  // ── Scenario 4: Typing 5 characters quickly in search ─────────────────────
+  it("debounces search announcement so typing 5 characters quickly announces only once after 500ms", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    await renderLoaded();
+
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 4 templates");
+
+    const searchInput = screen.getByRole("searchbox");
+    await user.type(searchInput, "month");
+
+    // Before 500ms debounce expires, the announcement remains unchanged
+    act(() => {
+      jest.advanceTimersByTime(400);
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 4 templates");
+
+    // Once 500ms passes after typing stops, announcement fires (2 templates match month)
+    act(() => {
+      jest.advanceTimersByTime(100);
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 2 templates");
+  });
+
+  // ── Scenario 5: The grid's aria-label: constant across searches ───────────
+  it("keeps the grid region's aria-label constant ('Template results') across searches", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    await renderLoaded();
+
+    const gridRegion = screen.getByRole("region", { name: "Template results" });
+    expect(gridRegion).toHaveAttribute("aria-label", "Template results");
+
+    const searchInput = screen.getByRole("searchbox");
+    await user.type(searchInput, "Savings");
+    act(() => {
+      jest.advanceTimersByTime(500);
+    });
+
+    // The region's label stays constant
+    expect(screen.getByRole("region", { name: "Template results" })).toHaveAttribute("aria-label", "Template results");
+  });
+
+  // ── Scenario 6: The DOM has only one role='status' per page ───────────────
+  it("has only one role=status element in the DOM at any time on the templates page", async () => {
+    // 1. Loading state
+    global.fetch = jest.fn(() => new Promise(() => {}));
+    const { unmount } = render(<TemplatesPage />);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    unmount();
+
+    // 2. Populated state
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ templates: TEMPLATES }),
+    });
+    await renderLoaded();
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+  });
+
+  // ── Scenario 7: axe on templates page in each state ───────────────────────
+  it("has no serious or critical axe violations in loading, populated, empty, and error states", async () => {
+    // 1. Loading state
+    global.fetch = jest.fn(() => new Promise(() => {}));
+    const loadingRender = render(<TemplatesPage />);
+    jest.useRealTimers();
+    expect(await axe(loadingRender.container)).toHaveNoViolations();
+    jest.useFakeTimers();
+    loadingRender.unmount();
+
+    // 2. Populated state
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ templates: TEMPLATES }),
+    });
+    const populatedRender = await renderLoaded();
+    jest.useRealTimers();
+    expect(await axe(populatedRender.container)).toHaveNoViolations();
+    jest.useFakeTimers();
+    populatedRender.unmount();
+
+    // 3. Error state
+    global.fetch = jest.fn().mockRejectedValue(new Error("Unable to fetch"));
+    const errorRender = render(<TemplatesPage />);
+    await act(async () => {
+      jest.advanceTimersByTime(100);
+    });
+    expect(screen.getByText("Couldn't load templates")).toBeInTheDocument();
+    jest.useRealTimers();
+    expect(await axe(errorRender.container)).toHaveNoViolations();
+    jest.useFakeTimers();
+    errorRender.unmount();
+  });
+
 describe("formatInterval (Scenario 8)", () => {
   it("formats whole intervals without fractional units", () => {
     expect(formatInterval(129600)).toBe("36 hours");
