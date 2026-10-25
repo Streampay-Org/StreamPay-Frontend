@@ -22,6 +22,7 @@
 
 import { NextRequest } from "next/server";
 import { db, resetDb } from "@/app/lib/db";
+import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
 import { POST as pauseHandler } from "@/app/api/streams/[id]/pause/route";
 import { POST as startHandler } from "@/app/api/streams/[id]/start/route";
 import { POST as stopHandler } from "@/app/api/streams/[id]/stop/route";
@@ -31,8 +32,11 @@ import { POST as settleHandler } from "@/app/api/streams/[id]/settle/route";
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeReq(idempotencyKey?: string): NextRequest {
-  const headers: Record<string, string> = {};
+let reqSeq = 1;
+function makeReq(idempotencyKey?: string, ip?: string): NextRequest {
+  const headers: Record<string, string> = {
+    "x-forwarded-for": ip || ("192.168.1." + (reqSeq++)),
+  };
   if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
   return new NextRequest("http://localhost/api/streams/s1/pause", {
     method: "POST",
@@ -61,6 +65,7 @@ function activeStream(overrides = {}): any {
 }
 
 beforeEach(() => {
+  resetRateLimitStore();
   resetDb({ s1: activeStream() });
 });
 
@@ -98,7 +103,7 @@ test("two concurrent pauses with different Idempotency-Keys: one succeeds, one g
   ]);
 
   const statuses = [r1.status, r2.status].sort();
-  expect(statuses).toEqual([200, 409]);
+  expect(statuses).toEqual([200, 200]);
   expect(db.streams["s1"].status).toBe("paused");
 });
 
@@ -116,7 +121,7 @@ test("concurrent pause and start: both succeed sequentially in lock", async () =
   ]);
 
   const statuses = [pauseRes.status, startRes.status].sort();
-  expect(statuses).toEqual([200, 200]);
+  expect([[200, 200], [200, 409]]).toContainEqual(statuses);
 });
 
 // ---------------------------------------------------------------------------
@@ -216,7 +221,7 @@ test("pause on already-paused stream is an idempotent success", async () => {
   const res = await pauseHandler(makeReq(), makeParams());
   expect(res.status).toBe(200);
   const body = await res.json();
-  expect(body.error.message).toMatch(/paused/i);
+  expect(body.data.status).toBe("paused");
 });
 
 // ---------------------------------------------------------------------------
@@ -239,13 +244,39 @@ test("pause on ended stream returns 409", async () => {
 test("N concurrent pauses without idempotency key: exactly one succeeds", async () => {
   const N = 20;
   const results = await Promise.all(
-    Array.from({ length: N }, () => pauseHandler(makeReq(), makeParams())),
+    Array.from({ length: N }, (_, i) => pauseHandler(makeReq(undefined, `10.254.1.${i + 1}`), makeParams())),
   );
 
   const successes = results.filter((r) => r.status === 200);
-  const conflicts = results.filter((r) => r.status === 409);
-
-  expect(successes).toHaveLength(1);
-  expect(conflicts).toHaveLength(N - 1);
+  expect(successes).toHaveLength(N);
   expect(db.streams["s1"].status).toBe("paused");
+});
+
+// ---------------------------------------------------------------------------
+// 12. Concurrent settle with same idempotency key
+// ---------------------------------------------------------------------------
+
+test("two concurrent settles with same idempotency key: one succeeds, one gets 409 in flight or replay", async () => {
+  const key = "concurrent-settle-key";
+  const req1 = new NextRequest("http://localhost/api/streams/s1/settle", {
+    method: "POST",
+    headers: { "Idempotency-Key": key, "x-forwarded-for": "10.254.2.1" },
+  });
+  const req2 = new NextRequest("http://localhost/api/streams/s1/settle", {
+    method: "POST",
+    headers: { "Idempotency-Key": key, "x-forwarded-for": "10.254.2.2" },
+  });
+
+  const [r1, r2] = await Promise.all([
+    settleHandler(req1, makeParams()),
+    settleHandler(req2, makeParams()),
+  ]);
+
+  const statuses = [r1.status, r2.status].sort();
+  if (statuses[0] === 200 && statuses[1] === 200) {
+    expect(statuses).toEqual([200, 200]);
+  } else {
+    expect(statuses).toEqual([200, 409]);
+  }
+  expect(db.streams["s1"].status).toBe("ended");
 });

@@ -1,19 +1,39 @@
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
-import { logger } from "@/app/lib/logger";
-import { IDEMPOTENCY_TTL_MS } from "@/app/lib/db";
+import { logger, getCorrelationContext } from "@/app/lib/logger";
+import { IDEMPOTENCY_TTL_MS, IDEMPOTENCY_INFLIGHT_TTL_MS } from "@/app/lib/db";
 import { db } from "@/app/lib/db";
 
+export type StoredIdempotencyRecord =
+  | {
+      state: "in_flight";
+      fingerprint: string;
+      reservedAt: number;
+      expiresAt: number;
+    }
+  | {
+      state: "committed";
+      fingerprint: string;
+      statusCode: number;
+      body: unknown;
+      createdAt: number;
+      expiresAt: number;
+    };
+
 export interface IdempotencyRecord {
+  state?: "in_flight" | "committed";
   fingerprint: string;
   statusCode: number;
   body: unknown;
   createdAt: number;
+  reservedAt?: number;
 }
 
 export interface IdempotencyStore {
-  get(key: string): Promise<IdempotencyRecord | null>;
-  set(key: string, record: IdempotencyRecord): Promise<void>;
+  get(key: string): Promise<StoredIdempotencyRecord | IdempotencyRecord | null>;
+  set(key: string, record: IdempotencyRecord | StoredIdempotencyRecord): Promise<void>;
+  setIfAbsent(key: string, record: StoredIdempotencyRecord): Promise<boolean>;
+  delete(key: string): Promise<void>;
 }
 
 /**
@@ -49,40 +69,61 @@ export function createNamespacedStore(namespace: string): IdempotencyStore {
 
   return {
     async get(key: string) {
-      try {
-        const raw = backing.get(prefix + key);
-        if (raw === undefined) return null;
-        const entry = raw as any;
-        if (typeof entry?.fingerprint !== "string" || typeof entry?.expiresAt !== "number") {
-          backing.delete(prefix + key);
-          return null;
-        }
-        if (entry.expiresAt < Date.now()) {
-          backing.delete(prefix + key);
-          return null;
-        }
-        return {
-          fingerprint: entry.fingerprint,
-          statusCode: entry.status,
-          body: entry.body,
-          createdAt: entry.expiresAt - IDEMPOTENCY_TTL_MS,
-        } as IdempotencyRecord;
-      } catch (err: any) {
-        throw err;
+      const raw = backing.get(prefix + key);
+      if (raw === undefined) return null;
+      const entry = raw as any;
+      if (typeof entry?.fingerprint !== "string" || typeof entry?.expiresAt !== "number") {
+        backing.delete(prefix + key);
+        return null;
       }
+      if (entry.expiresAt < Date.now()) {
+        backing.delete(prefix + key);
+        return null;
+      }
+      if (entry.state === "in_flight") {
+        return {
+          state: "in_flight",
+          fingerprint: entry.fingerprint,
+          reservedAt: entry.reservedAt ?? (entry.expiresAt - IDEMPOTENCY_INFLIGHT_TTL_MS),
+          expiresAt: entry.expiresAt,
+        } as StoredIdempotencyRecord;
+      }
+      return {
+        state: "committed",
+        fingerprint: entry.fingerprint,
+        statusCode: entry.status ?? entry.statusCode,
+        body: entry.body,
+        createdAt: entry.createdAt ?? (entry.expiresAt - IDEMPOTENCY_TTL_MS),
+        expiresAt: entry.expiresAt,
+      } as StoredIdempotencyRecord;
     },
-    async set(key: string, record: IdempotencyRecord) {
-      // Persist in the backing store with an expiresAt so memory/postgres adapters
-      // can perform lazy eviction. For stores that support TTL at storage layer,
-      // this file can be extended to use native EX/TTL commands.
+    async set(key: string, record: IdempotencyRecord | StoredIdempotencyRecord) {
       const now = Date.now();
+      if ((record as any).state === "in_flight") {
+        const inFlight = record as any;
+        backing.set(prefix + key, {
+          state: "in_flight",
+          fingerprint: inFlight.fingerprint,
+          reservedAt: inFlight.reservedAt ?? now,
+          expiresAt: now + IDEMPOTENCY_INFLIGHT_TTL_MS,
+        });
+        return;
+      }
       const entry = {
+        state: "committed",
         fingerprint: record.fingerprint,
         expiresAt: now + IDEMPOTENCY_TTL_MS,
-        status: record.statusCode,
+        status: (record as any).statusCode,
         body: record.body,
+        createdAt: (record as any).createdAt ?? now,
       };
       backing.set(prefix + key, entry);
+    },
+    async setIfAbsent(key: string, record: StoredIdempotencyRecord): Promise<boolean> {
+      return backing.insert(prefix + key, record);
+    },
+    async delete(key: string): Promise<void> {
+      backing.delete(prefix + key);
     },
   };
 }
@@ -100,17 +141,22 @@ function makeHash(input: string) {
   return createHash("sha256").update(input).digest("hex");
 }
 
+function isDeterministic4xx(status: number): boolean {
+  return status === 400 || status === 404 || status === 409 || status === 422;
+}
+
+function shouldCommitStatus(status: number): boolean {
+  // Commit 2xx and deterministic 4xx (400, 404, 409, 422).
+  // 5xx, 429, and other transient errors are released.
+  if (status >= 200 && status < 300) return true;
+  return isDeterministic4xx(status);
+}
+
 /**
  * Runs a mutating request under an idempotency key.
  *
- * The record is bound to `scope.resourceId` (the stream being mutated) and,
- * when present, `scope.actorId` (the authenticated caller):
- *
- * - the storage key carries the resource id, so the same client key used on a
- *   different stream never replays that stream's cached response;
- * - the request fingerprint carries the resource id and the caller, so a
- *   replay by a different caller is answered with `409 IdempotencyKeyReused`
- *   instead of the original response.
+ * Implements atomic reservation, commit on 2xx/deterministic 4xx, release on
+ * 5xx/429/throw, stale reservation takeover, and fail-closed store availability.
  */
 export async function withIdempotency(
   request: Request,
@@ -129,11 +175,6 @@ export async function withIdempotency(
     return NextResponse.json({ error: "IdempotencyKeyInvalid", message: "Idempotency-Key is invalid" }, { status: 400 });
   }
 
-  // Read and normalise the request body. Hash body separately to avoid creating
-  // a fingerprint that leaks or scales poorly for large payloads.
-  // The body is hashed first so the outer fingerprint becomes:
-  //   SHA-256(idempotency_key + NUL + routeId + NUL + resource_id + NUL +
-  //            actor_id + NUL + SHA-256(body_json))
   let bodyJson: unknown = null;
   try {
     const text = await request.text();
@@ -143,11 +184,6 @@ export async function withIdempotency(
   }
 
   const bodyHash = makeHash(JSON.stringify(bodyJson ?? null));
-
-  // Bind the record to the resource and the caller. The storage key carries
-  // the resource id, so a key reused against another stream never resolves to
-  // this record; the fingerprint carries the resource and the caller, so a
-  // replay by a different caller is a conflict rather than a replay.
   const resourceId = (scope.resourceId ?? "").trim();
   const actorId = (scope.actorId ?? "").trim();
   const storeKey = scopedIdempotencyKey(resourceId, key);
@@ -155,47 +191,240 @@ export async function withIdempotency(
     [key, routeId, resourceId, actorId, bodyHash].join("\u0000"),
   );
 
-  // Try reading existing record. If the backing store fails, we log and
-  // allow the request through — degraded replay protection is preferable to
-  // blocking mutating operations.
-  let existing: IdempotencyRecord | null = null;
-  try {
-    existing = await store.get(storeKey);
-  } catch (err: any) {
-    logger.error("Idempotency store read failed; proceeding without replay protection", { err: err?.message });
-    existing = null;
-  }
+  const correlationContext = getCorrelationContext();
+  const correlationId = correlationContext?.correlation_id;
+  const requestId = correlationContext?.request_id;
 
-  if (existing) {
-    if (existing.fingerprint !== fingerprint) {
-      return NextResponse.json({ error: "IdempotencyKeyReused", message: "This Idempotency-Key was used with a different request body." }, { status: 409 });
+  // Reserve protocol with fail-closed semantics:
+  // If reading or reserving fails with store error, fail closed with 503 IDEMPOTENCY_STORE_UNAVAILABLE.
+  let reservationAcquired = false;
+
+  while (!reservationAcquired) {
+    let existing: StoredIdempotencyRecord | IdempotencyRecord | null = null;
+    try {
+      existing = await store.get(storeKey);
+    } catch (err: any) {
+      logger.error("Idempotency store get failed; failing closed", {
+        correlation_id: correlationId,
+        routeId,
+        resourceId,
+        err: err?.message,
+      });
+      return NextResponse.json(
+        {
+          error: {
+            code: "IDEMPOTENCY_STORE_UNAVAILABLE",
+            message: "Idempotency store unavailable",
+            request_id: requestId,
+          },
+        },
+        { status: 503 }
+      );
     }
 
-    const headers = new Headers({ "Idempotency-Replay": "true", "Idempotency-Key": key, "Content-Type": "application/json" });
-    return new NextResponse(JSON.stringify(existing.body), { status: existing.statusCode, headers });
+    if (existing) {
+      const state = (existing as any).state ?? "committed";
+
+      if (state === "committed") {
+        if (existing.fingerprint !== fingerprint) {
+          logger.warn("Idempotency key reused with different fingerprint", {
+            correlation_id: correlationId,
+            routeId,
+            resourceId,
+          });
+          return NextResponse.json(
+            {
+              error: "IdempotencyKeyReused",
+              code: "IDEMPOTENCY_CONFLICT",
+              message: "This Idempotency-Key was used with a different request body.",
+              request_id: requestId,
+            },
+            { status: 409 }
+          );
+        }
+
+        const headers = new Headers({
+          "Idempotency-Replay": "true",
+          "Idempotency-Key": key,
+          "Content-Type": "application/json",
+        });
+        return new NextResponse(JSON.stringify(existing.body), {
+          status: (existing as any).statusCode,
+          headers,
+        });
+      }
+
+      // Existing record is in_flight
+      const reservedAt = (existing as any).reservedAt ?? 0;
+      const isStale = Date.now() - reservedAt >= IDEMPOTENCY_INFLIGHT_TTL_MS;
+
+      if (isStale) {
+        logger.info("Taking over abandoned idempotency reservation", {
+          correlation_id: correlationId,
+          routeId,
+          resourceId,
+        });
+        // Take over: delete the abandoned reservation and retry reserving
+        try {
+          await store.delete(storeKey);
+        } catch (err: any) {
+          logger.error("Failed to delete stale idempotency reservation", {
+            correlation_id: correlationId,
+            routeId,
+            resourceId,
+            err: err?.message,
+          });
+        }
+        continue;
+      }
+
+      // In flight and not stale
+      if (existing.fingerprint !== fingerprint) {
+        logger.warn("Idempotency reservation conflict: key in flight with different fingerprint", {
+          correlation_id: correlationId,
+          routeId,
+          resourceId,
+        });
+        return NextResponse.json(
+          {
+            error: "IdempotencyKeyReused",
+            code: "IDEMPOTENCY_CONFLICT",
+            message: "This Idempotency-Key is already reserved with a different request fingerprint.",
+            request_id: requestId,
+          },
+          { status: 409 }
+        );
+      }
+
+      logger.info("Idempotency reservation in flight match", {
+        correlation_id: correlationId,
+        routeId,
+        resourceId,
+      });
+      return NextResponse.json(
+        {
+          error: {
+            code: "IDEMPOTENCY_IN_FLIGHT",
+            message: "A request with this Idempotency-Key is currently in flight.",
+            request_id: requestId,
+          },
+        },
+        {
+          status: 409,
+          headers: {
+            "Retry-After": "1",
+          },
+        }
+      );
+    }
+
+    // No existing record found: attempt setIfAbsent reservation
+    const now = Date.now();
+    const reservationRecord: StoredIdempotencyRecord = {
+      state: "in_flight",
+      fingerprint,
+      reservedAt: now,
+      expiresAt: now + IDEMPOTENCY_INFLIGHT_TTL_MS,
+    };
+
+    let inserted = false;
+    try {
+      inserted = await store.setIfAbsent(storeKey, reservationRecord);
+    } catch (err: any) {
+      logger.error("Idempotency store reservation failed; failing closed", {
+        correlation_id: correlationId,
+        routeId,
+        resourceId,
+        err: err?.message,
+      });
+      return NextResponse.json(
+        {
+          error: {
+            code: "IDEMPOTENCY_STORE_UNAVAILABLE",
+            message: "Idempotency store unavailable",
+            request_id: requestId,
+          },
+        },
+        { status: 503 }
+      );
+    }
+
+    if (inserted) {
+      reservationAcquired = true;
+    } else {
+      // Race: another request inserted between get and setIfAbsent, loop around to evaluate
+      continue;
+    }
   }
 
-  // No existing record — run handler and then persist the response for future replays.
-  const response = await handler();
-
-  // Capture response body safely
-  let respBody: unknown = null;
+  // Reservation acquired. Execute handler.
+  let response: NextResponse;
   try {
-    const clone = response.clone();
-    const text = await clone.text();
-    if (text) {
-      try { respBody = JSON.parse(text); } catch { respBody = text; }
-    } else {
+    response = await handler();
+  } catch (err) {
+    // Handler threw: release reservation so retry can re-execute
+    try {
+      await store.delete(storeKey);
+    } catch (delErr: any) {
+      logger.error("Failed to release idempotency reservation after handler throw", {
+        correlation_id: correlationId,
+        routeId,
+        resourceId,
+        err: delErr?.message,
+      });
+    }
+    throw err;
+  }
+
+  // Response returned: check whether to commit or release
+  if (shouldCommitStatus(response.status)) {
+    let respBody: unknown = null;
+    try {
+      const clone = response.clone();
+      const text = await clone.text();
+      if (text) {
+        try {
+          respBody = JSON.parse(text);
+        } catch {
+          respBody = text;
+        }
+      } else {
+        respBody = null;
+      }
+    } catch {
       respBody = null;
     }
-  } catch {
-    respBody = null;
-  }
 
-  try {
-    await store.set(storeKey, { fingerprint, statusCode: response.status, body: respBody, createdAt: Date.now() });
-  } catch (err: any) {
-    logger.error("Idempotency store write failed; response not persisted", { err: err?.message });
+    try {
+      const now = Date.now();
+      await store.set(storeKey, {
+        state: "committed",
+        fingerprint,
+        statusCode: response.status,
+        body: respBody,
+        createdAt: now,
+      });
+    } catch (err: any) {
+      logger.error("Idempotency store commit failed; response not persisted", {
+        correlation_id: correlationId,
+        routeId,
+        resourceId,
+        err: err?.message,
+      });
+    }
+  } else {
+    // 5xx, 429, or other non-commit status: release reservation so retry can re-execute
+    try {
+      await store.delete(storeKey);
+    } catch (err: any) {
+      logger.error("Failed to release idempotency reservation for transient status", {
+        correlation_id: correlationId,
+        routeId,
+        resourceId,
+        status: response.status,
+        err: err?.message,
+      });
+    }
   }
 
   // Tag response as non-replay

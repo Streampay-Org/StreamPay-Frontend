@@ -223,6 +223,10 @@ export type IdempotencyCheckResult =
 /** Default TTL: 24 hours in milliseconds. */
 export const IDEMPOTENCY_TTL_MS = 86_400_000;
 
+/** Default in-flight reservation TTL: 30 seconds in milliseconds. */
+export const IDEMPOTENCY_INFLIGHT_TTL_MS =
+  Number(process.env.IDEMPOTENCY_INFLIGHT_TTL_MS) || 30_000;
+
 /**
  * Deterministic fingerprint for a request tuple.
  * Uses the same deterministic JSON serialisation as the rest of the stack.

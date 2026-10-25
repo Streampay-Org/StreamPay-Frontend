@@ -3995,7 +3995,7 @@
       "post": {
         "operationId": "settleStream",
         "summary": "Settle a payment stream (v1, deprecated)",
-        "description": "Finalises the stream on Stellar/Soroban, transitioning it to `ended` and recording the settlement transaction. Only valid when the stream is `active` or `paused`. **Deprecated** — use `POST /api/v2/streams/{id}/settle` instead.",
+        "description": "Finalises the stream on Stellar/Soroban, transitioning it to `ended` and recording the settlement transaction. Only valid when the stream is `active` or `paused`. **Deprecated** — use `POST /api/v2/streams/{id}/settle` instead.\n\n### Retry and Idempotency Semantics\nRequests require an Idempotency-Key header. Keys are atomically reserved before executing the settlement handler.\n- **Cached & Persisted**: 2xx success responses and deterministic 4xx errors (400, 404, 409, 422) are committed with a 24-hour TTL and replayed on subsequent retries with an identical request fingerprint.\n- **Released**: Transient errors (5xx, including 502 SETTLEMENT_FAILED, and 429 Too Many Requests) or thrown execution errors release the reservation immediately so clients may retry with the same key to re-execute.",
         "deprecated": true,
         "tags": [
           "Streams v1"
@@ -4156,7 +4156,7 @@
       "post": {
         "operationId": "withdrawStream",
         "summary": "Withdraw vested funds from a payment stream",
-        "description": "Releases vested-but-unreleased funds to the stream recipient. The caller must be authenticated as the stream recipient, or be an org member with `withdraw` permission. Amounts are raw i128 units (stroops for XLM); omit `amount` to withdraw the full withdrawable balance. Auth is checked before stream state, and stream state before the amount.",
+        "description": "Releases vested-but-unreleased funds to the stream recipient. The caller must be authenticated as the stream recipient, or be an org member with `withdraw` permission. Amounts are raw i128 units (stroops for XLM); omit `amount` to withdraw the full withdrawable balance. Auth is checked before stream state, and stream state before the amount.\n\n### Retry and Idempotency Semantics\nRequests require an Idempotency-Key header. Keys are atomically reserved before executing the withdrawal handler.\n- **Cached & Persisted**: 2xx success responses and deterministic 4xx errors (400, 404, 409, 422) are committed with a 24-hour TTL and replayed on subsequent retries with an identical request fingerprint.\n- **Released**: Transient errors (5xx, 429) or thrown execution errors release the reservation immediately so clients may retry with the same key to re-execute.",
         "tags": [
           "Streams v1"
         ],
