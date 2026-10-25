@@ -108,7 +108,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
 
   const { validatePatchStreamBody } = await import("@/app/lib/stream-validation");
-  const errors = validatePatchStreamBody(body);
+  const errors = await validatePatchStreamBody(body);
   if (errors.length > 0) {
     const hasUnrecognized = errors.some((e) => e.code === "UNRECOGNIZED_KEYS");
     const status = hasUnrecognized ? 400 : 422;

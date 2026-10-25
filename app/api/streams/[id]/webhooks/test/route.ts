@@ -54,6 +54,9 @@ import {
   getClientIdentity,
   rateLimitResponse,
 } from "@/app/lib/rate-limit";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
+import { orgDb } from "@/app/lib/org-db";
+import { assertSafeOutboundUrl, UnsafeUrlError } from "@/app/lib/outbound-url";
 
 /** Allowed synthetic event types that subscribers can test against. */
 const ALLOWED_EVENT_TYPES = new Set([
@@ -95,6 +98,29 @@ export async function POST(
       ErrorCode.STREAM_NOT_FOUND,
       `Stream '${id}' not found`,
       404,
+    );
+  }
+
+  // ── Auth: stream sender or owning org member ─────────────────────────────
+  const actor = tryAuthenticateRequest(req);
+  if (!actor) {
+    return createErrorResponse(
+      "UNAUTHORIZED",
+      "Authentication required. Provide a valid Bearer token.",
+      401,
+    );
+  }
+
+  const isSender = stream.senderAddress && stream.senderAddress === actor.walletAddress;
+  const orgId = orgDb.streamOwnership.get(id);
+  const org = orgId ? orgDb.orgs.get(orgId) : undefined;
+  const isOrgMember = org?.members.some((m) => m.walletAddress === actor.walletAddress);
+
+  if (!isSender && !isOrgMember && actor.role !== "admin") {
+    return createErrorResponse(
+      "FORBIDDEN",
+      "You do not have permission to test webhooks for this stream.",
+      403,
     );
   }
 
@@ -153,6 +179,17 @@ export async function POST(
               400,
             );
           }
+
+          try {
+            await assertSafeOutboundUrl(parsed.endpoint_url);
+          } catch (err) {
+            return createErrorResponse(
+              "UNSAFE_ENDPOINT_URL",
+              err instanceof Error ? err.message : "Unsafe endpoint URL.",
+              400,
+            );
+          }
+
           endpointUrl = parsed.endpoint_url;
         }
       }
@@ -196,25 +233,61 @@ export async function POST(
     };
 
     try {
-      const result = await webhookDeliveryClient.attemptDelivery(
-        endpoint,
-        syntheticEvent,
-        deliveryId,
-        1,
-      );
-      delivery = {
-        success: result.success,
-        status_code: result.statusCode,
-        error: result.error,
-      };
+      const safeCheck = await assertSafeOutboundUrl(endpointUrl);
+      const targetUrl = new URL(endpointUrl);
+      const isHttps = targetUrl.protocol === "https:";
+      const port = targetUrl.port || (isHttps ? "443" : "80");
+      const pinnedUrl = `${targetUrl.protocol}//${safeCheck.pinnedAddress}:${port}${targetUrl.pathname}${targetUrl.search}`;
 
-      if (result.success) {
+      const payload = JSON.stringify(syntheticEvent);
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10_000);
+
+      try {
+        const response = await fetch(pinnedUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "User-Agent": "StreamPay-Webhook-Client/1.0",
+            "Host": targetUrl.host,
+            "X-StreamPay-Delivery-Id": deliveryId,
+            "X-StreamPay-Event-Id": syntheticEvent.id,
+            "X-StreamPay-Event-Type": syntheticEvent.eventType,
+            "X-StreamPay-Timestamp": timestamp,
+          },
+          body: payload,
+          signal: controller.signal,
+          redirect: "manual",
+        });
+        clearTimeout(timeoutId);
+
+        const statusCode = response.status;
+        const success = statusCode >= 200 && statusCode < 300;
+
+        delivery = {
+          success,
+          status_code: statusCode,
+          error: success ? undefined : "non_2xx",
+        };
+      } catch (err: unknown) {
+        clearTimeout(timeoutId);
+        const isTimeout =
+          err instanceof Error &&
+          (err.name === "AbortError" || err.message.toLowerCase().includes("timeout"));
+        delivery = {
+          success: false,
+          error: isTimeout ? "timeout" : "connection_failed",
+        };
+      }
+
+      if (delivery.success) {
         logger.info("Synthetic webhook dispatched successfully", {
           action: "webhooks.test",
           delivery_id: deliveryId,
           endpoint_url: endpointUrl,
           event_type: eventType,
-          status_code: result.statusCode,
+          status_code: delivery.status_code,
           stream_id: id,
         });
       } else {
@@ -222,15 +295,15 @@ export async function POST(
           action: "webhooks.test",
           delivery_id: deliveryId,
           endpoint_url: endpointUrl,
-          error: result.error,
-          status_code: result.statusCode,
+          error: delivery.error,
+          status_code: delivery.status_code,
           stream_id: id,
         });
       }
     } catch (err) {
       delivery = {
         success: false,
-        error: err instanceof Error ? err.message : "Unknown dispatch error",
+        error: "connection_failed",
       };
       logger.warn("Synthetic webhook dispatch threw", {
         action: "webhooks.test",

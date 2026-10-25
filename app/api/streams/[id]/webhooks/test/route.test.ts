@@ -21,6 +21,12 @@
 
 import { POST } from "./route";
 import { db, resetDb } from "@/app/lib/db";
+import { signToken } from "@/app/lib/auth";
+import { orgDb, _resetOrgDbForTesting } from "@/app/lib/org-db";
+import { PATCH } from "@/app/api/v2/streams/[id]/route";
+
+const ORG_MEMBER_TOKEN = signToken("GOWNER7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW");
+const UNRELATED_TOKEN = signToken("GUNRELATED9999999999999999999999999999999999999999999999");
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -73,10 +79,18 @@ function ctx(id: string): Ctx {
 function testReq(
   streamId: string,
   body?: Record<string, unknown>,
+  token: string | null = ORG_MEMBER_TOKEN,
 ): Request {
+  const headers: Record<string, string> = {};
+  if (body) {
+    headers["Content-Type"] = "application/json";
+  }
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
   return new Request(`http://localhost/api/streams/${streamId}/webhooks/test`, {
     method: "POST",
-    headers: body ? { "Content-Type": "application/json" } : {},
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
 }
@@ -86,6 +100,7 @@ const ACTIVE_STREAM = "stream-ada"; // status: active
 
 beforeEach(() => {
   resetDb();
+  _resetOrgDbForTesting();
   mockDeliveryResult = { success: true, statusCode: 200, shouldRetry: false };
   mockDeliveryCallCount = 0;
   mockDeliveryArgs = [];
@@ -209,6 +224,7 @@ describe("input validation", () => {
         headers: {
           "Content-Type": "application/json",
           "content-length": "10",
+          Authorization: `Bearer ${ORG_MEMBER_TOKEN}`,
         },
         body: "{ not json",
       },
@@ -501,5 +517,104 @@ describe("rate limiting", () => {
 
     const res = await POST(testReq(ACTIVE_STREAM), ctx(ACTIVE_STREAM));
     expect(res.status).toBe(202);
+  });
+});
+
+// ─── Test Plan Requirements (Rows 7, 8, 9, 10, 11) ──────────────────────────
+
+describe("Test Plan SSRF and Auth scenarios", () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it("Row 7: Redirect from a public host to a private one is not followed and reported as non_2xx", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      status: 302,
+      headers: new Headers({ Location: "http://169.254.169.254/latest/meta-data/" }),
+    });
+
+    const res = await POST(
+      testReq(ACTIVE_STREAM, { endpoint_url: "https://example.com/redirect" }),
+      ctx(ACTIVE_STREAM),
+    );
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.data.delivery).toEqual({
+      success: false,
+      status_code: 302,
+      error: "non_2xx",
+    });
+  });
+
+  it("Row 8: Test route with an unsafe URL returns 400 UNSAFE_ENDPOINT_URL without dispatching", async () => {
+    const fetchSpy = jest.fn();
+    global.fetch = fetchSpy;
+
+    const res = await POST(
+      testReq(ACTIVE_STREAM, { endpoint_url: "http://169.254.169.254/latest/meta-data/" }),
+      ctx(ACTIVE_STREAM),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("UNSAFE_ENDPOINT_URL");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("Row 9: PATCH webhook_url to a private host returns 422 field error", async () => {
+    const patchReq = new Request(`http://localhost/api/v2/streams/${ACTIVE_STREAM}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        webhook_url: "http://127.0.0.1:8080/webhook",
+      }),
+    });
+
+    const res = await PATCH(patchReq, ctx(ACTIVE_STREAM));
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "webhook_url",
+          code: "UNSAFE_ENDPOINT_URL",
+        }),
+      ]),
+    );
+  });
+
+  it("Row 10: Test route response on a connection failure has no raw error text in the body", async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:5432 / internal db error"));
+
+    const res = await POST(
+      testReq(ACTIVE_STREAM, { endpoint_url: "https://example.com/test-fail" }),
+      ctx(ACTIVE_STREAM),
+    );
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.data.delivery).toEqual({
+      success: false,
+      error: "connection_failed",
+    });
+    expect(JSON.stringify(body)).not.toContain("ECONNREFUSED");
+    expect(JSON.stringify(body)).not.toContain("127.0.0.1");
+  });
+
+  it("Row 11: Unauthenticated caller returns 401", async () => {
+    const res = await POST(testReq(ACTIVE_STREAM, {}, null), ctx(ACTIVE_STREAM));
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error.code).toBe("UNAUTHORIZED");
+  });
+
+  it("Non-member non-sender caller returns 403 FORBIDDEN", async () => {
+    const res = await POST(testReq(ACTIVE_STREAM, {}, UNRELATED_TOKEN), ctx(ACTIVE_STREAM));
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error.code).toBe("FORBIDDEN");
   });
 });

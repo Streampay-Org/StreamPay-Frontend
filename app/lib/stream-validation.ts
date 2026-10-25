@@ -13,6 +13,7 @@ import { isValidStellarPublicKey } from "@/app/lib/wallet-link";
 import { STELLAR_MAX_I64, STROOPS_SCALE } from "@/app/lib/amount";
 import { z } from "zod";
 import type { StreamStatus } from "@/app/types/openapi";
+import { assertSafeOutboundUrl, UnsafeUrlError } from "@/app/lib/outbound-url";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -392,18 +393,33 @@ export function validateListStreamsQuery(query: Record<string, unknown>): {
  * @param body The raw request body.
  * @returns An array of `ValidationError`. An empty array means success.
  */
-export function validatePatchStreamBody(
+export async function validatePatchStreamBody(
   body: unknown,
-): ValidationError[] {
+): Promise<ValidationError[]> {
   const result = patchStreamSchema.safeParse(body);
 
-  if (result.success) {
-    return [];
+  if (!result.success) {
+    return result.error.issues.map((issue) => ({
+      field: issue.path.join(".") || "body",
+      code: issue.code.toUpperCase(),
+      message: issue.message,
+    }));
   }
 
-  return result.error.issues.map((issue) => ({
-    field: issue.path.join(".") || "body",
-    code: issue.code.toUpperCase(),
-    message: issue.message,
-  }));
+  const patchData = result.data as { webhook_url?: string };
+  if (patchData.webhook_url) {
+    try {
+      await assertSafeOutboundUrl(patchData.webhook_url);
+    } catch (err) {
+      return [
+        {
+          field: "webhook_url",
+          code: err instanceof UnsafeUrlError ? err.code : "UNSAFE_ENDPOINT_URL",
+          message: err instanceof Error ? err.message : "Webhook URL is not safe.",
+        },
+      ];
+    }
+  }
+
+  return [];
 }
