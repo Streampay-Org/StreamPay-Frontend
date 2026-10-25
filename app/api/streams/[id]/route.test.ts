@@ -179,14 +179,19 @@ describe("Stream Details Route - GET /api/streams/:id and mutations", () => {
       liveCache.set(tenantId, streamId, stream, "testnet");
 
       // DELETE deletes stream and invalidates cache
-      // Make stream deletable (not active/paused)
-      const nonActiveStream = { ...stream, status: "ended" as const };
-      db.streams.set(streamId, nonActiveStream);
-      liveCache.set(tenantId, streamId, nonActiveStream, "testnet");
+      // Make stream deletable: draft or cancelled or withdrawn with succeeded withdrawal
+      const sender = "GD7H...3J4K";
+      const deletableStream = {
+        ...stream,
+        status: "draft" as const,
+        senderAddress: sender,
+      };
+      db.streams.set(streamId, deletableStream);
+      liveCache.set(tenantId, streamId, deletableStream, "testnet");
 
       const reqDELETE = new Request(`http://localhost/api/streams/${streamId}`, {
         method: "DELETE",
-        headers: { "x-tenant-id": tenantId },
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
       });
       const resDELETE = await DELETE(reqDELETE, { params: Promise.resolve({ id: streamId }) });
       expect(resDELETE.status).toBe(204);
@@ -491,6 +496,281 @@ describe("Stream Details Route - GET /api/streams/:id ETag + 304 short-circuit",
     expect(res.headers.get("ETag")).toBeNull();
     expect(res.headers.get("X-Cache")).toBeNull();
     expect(res.headers.get("Cache-Control")).toBeNull();
+  });
+
+  describe("Stream Deletion Guards and Audit (Test Plan)", () => {
+    const sender = "GSENDER_STREAM_OWNER_12345";
+    const nonSender = "GSTRANGER_NON_OWNER_99999";
+    const orgOwner = "GOWNER7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW"; // from org-acme seed
+
+    it("1. Delete an ended stream with withdrawal.state: 'pending' -> 409 FUNDS_PENDING_WITHDRAWAL", async () => {
+      const targetId = "stream-ended-pending";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: tenantId,
+        senderAddress: sender,
+        recipient: "GRECIPIENT",
+        status: "ended",
+        withdrawal: { state: "pending", requestedAt: new Date().toISOString(), lastCheckedAt: new Date().toISOString(), attempts: 1 },
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      const req = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+      });
+      const res = await DELETE(req, { params: Promise.resolve({ id: targetId }) });
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.error.code).toBe("FUNDS_PENDING_WITHDRAWAL");
+    });
+
+    it("2. Delete draft as the sender -> 204; GET -> 404; not in the list", async () => {
+      const targetId = "stream-draft-sender";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: tenantId,
+        senderAddress: sender,
+        recipient: "GRECIPIENT",
+        status: "draft",
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      const req = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+      });
+      const res = await DELETE(req, { params: Promise.resolve({ id: targetId }) });
+      expect(res.status).toBe(204);
+
+      // GET -> 404
+      const getReq = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "GET",
+        headers: { "x-tenant-id": tenantId },
+      });
+      const getRes = await GET(getReq, { params: Promise.resolve({ id: targetId }) });
+      expect(getRes.status).toBe(404);
+
+      // Check streamRepository list or findOne excludes it
+      expect(db.streams.findOne(tenantId, targetId)).toBeNull();
+
+      // Check GET /api/streams list excludes soft-deleted stream before pagination
+      const { GET: listGET } = await import("../route");
+      const listRes = await listGET(
+        new Request(`http://localhost/api/streams?limit=50`, {
+          method: "GET",
+          headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+        })
+      );
+      expect(listRes.status).toBe(200);
+      const listBody = await listRes.json();
+      expect(listBody.data.some((s: any) => s.id === targetId)).toBe(false);
+    });
+
+    it("3. Delete draft as a non-sender -> 403", async () => {
+      const targetId = "stream-draft-non-sender";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: tenantId,
+        senderAddress: sender,
+        recipient: "GRECIPIENT",
+        status: "draft",
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      const req = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": nonSender },
+      });
+      const res = await DELETE(req, { params: Promise.resolve({ id: targetId }) });
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.code).toBe("FORBIDDEN");
+    });
+
+    it("4. Delete withdrawn with a succeeded withdrawal -> 204", async () => {
+      const targetId = "stream-withdrawn-succeeded";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: tenantId,
+        senderAddress: sender,
+        recipient: "GRECIPIENT",
+        status: "withdrawn",
+        withdrawal: { state: "succeeded", requestedAt: new Date().toISOString(), lastCheckedAt: new Date().toISOString(), attempts: 1 },
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      const req = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+      });
+      const res = await DELETE(req, { params: Promise.resolve({ id: targetId }) });
+      expect(res.status).toBe(204);
+    });
+
+    it("5. Delete twice -> 204 then 204", async () => {
+      const targetId = "stream-delete-twice";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: tenantId,
+        senderAddress: sender,
+        recipient: "GRECIPIENT",
+        status: "cancelled",
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      const req1 = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+      });
+      const res1 = await DELETE(req1, { params: Promise.resolve({ id: targetId }) });
+      expect(res1.status).toBe(204);
+
+      const req2 = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+      });
+      const res2 = await DELETE(req2, { params: Promise.resolve({ id: targetId }) });
+      expect(res2.status).toBe(204);
+    });
+
+    it("6. Delete an unknown id -> 404", async () => {
+      const req = new Request(`http://localhost/api/streams/non-existent-stream-999`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+      });
+      const res = await DELETE(req, { params: Promise.resolve({ id: "non-existent-stream-999" }) });
+      expect(res.status).toBe(404);
+    });
+
+    it("7. Audit: One stream.delete record with a before snapshot", async () => {
+      const { auditLogStore, resetAuditLogStore } = await import("@/app/lib/audit-log");
+      resetAuditLogStore();
+
+      const targetId = "stream-audit-check";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: tenantId,
+        senderAddress: sender,
+        recipient: "GRECIPIENT",
+        status: "draft",
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      const req = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: {
+          "x-tenant-id": tenantId,
+          "Actor-Wallet-Address": sender,
+          "x-request-id": "req-delete-audit-test",
+        },
+      });
+      const res = await DELETE(req, { params: Promise.resolve({ id: targetId }) });
+      expect(res.status).toBe(204);
+
+      const entries = auditLogStore.list({ requestId: "req-delete-audit-test" });
+      expect(entries.length).toBe(1);
+      expect(entries[0].action).toBe("stream.delete");
+      expect(entries[0].before).toBeDefined();
+      expect((entries[0].before as any).id).toBe(targetId);
+      expect((entries[0].before as any).status).toBe("draft");
+      expect((entries[0].before as any).deletedAt).toBeUndefined();
+    });
+
+    it("8. GET with a stale If-None-Match after delete -> 404, not 304", async () => {
+      const targetId = "stream-stale-etag";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: tenantId,
+        senderAddress: sender,
+        recipient: "GRECIPIENT",
+        status: "draft",
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      // Initial GET to get tag
+      const initialRes = await GET(
+        new Request(`http://localhost/api/streams/${targetId}`, {
+          method: "GET",
+          headers: { "x-tenant-id": tenantId },
+        }),
+        { params: Promise.resolve({ id: targetId }) }
+      );
+      expect(initialRes.status).toBe(200);
+      const tag = initialRes.headers.get("ETag")!;
+
+      // DELETE
+      const delRes = await DELETE(
+        new Request(`http://localhost/api/streams/${targetId}`, {
+          method: "DELETE",
+          headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+        }),
+        { params: Promise.resolve({ id: targetId }) }
+      );
+      expect(delRes.status).toBe(204);
+
+      // Replay with If-None-Match
+      const replayRes = await GET(
+        new Request(`http://localhost/api/streams/${targetId}`, {
+          method: "GET",
+          headers: { "x-tenant-id": tenantId, "If-None-Match": tag },
+        }),
+        { params: Promise.resolve({ id: targetId }) }
+      );
+      expect(replayRes.status).toBe(404);
+      expect(replayRes.status).not.toBe(304);
+    });
+
+    it("allows deletion by an organization owner", async () => {
+      const targetId = "stream-org-owner-del";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: "org-acme",
+        senderAddress: "SOME_OTHER_SENDER",
+        recipient: "GRECIPIENT",
+        status: "draft",
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      const req = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": "org-acme", "Actor-Wallet-Address": orgOwner },
+      });
+      const res = await DELETE(req, { params: Promise.resolve({ id: targetId }) });
+      expect(res.status).toBe(204);
+    });
   });
 
   async function getEtag(id: string, tenant: string): Promise<string> {

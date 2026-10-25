@@ -189,6 +189,7 @@ export const db = {
         const store = getStore().streamRepository.streams;
         const row = store.get(id);
         if (!row) return null;
+        if ((row as any).deletedAt) return null;
         return (row as any).tenant === tenant ? row : null;
       }
     });

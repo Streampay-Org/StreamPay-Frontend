@@ -190,7 +190,7 @@ async function handleStreamsGet(request: Request) {
       : Array.from(streamRepository.streams.values());
 
     const sortedStreams = tenantCandidates
-      .filter(isVisible)
+      .filter((stream: any) => !stream.deletedAt && isVisible(stream))
       .sort((left, right) => {
         const timeCompare = left.createdAt.localeCompare(right.createdAt);
         return timeCompare !== 0 ? timeCompare : left.id.localeCompare(right.id);

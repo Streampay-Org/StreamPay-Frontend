@@ -3273,14 +3273,14 @@
       "delete": {
         "operationId": "deleteStream",
         "summary": "Delete a payment stream (v1, deprecated)",
-        "description": "Permanently deletes a stream. **Deprecated** — use `DELETE /api/v2/streams/{id}` instead.\n\nA stream must be in `draft` or `ended` status before it can be deleted. Attempting to delete an `active` or `paused` stream returns 409. Cache is invalidated on success.",
+        "description": "Soft deletes a stream and marks it deletedAt. **Deprecated** \u2014 use `DELETE /api/v2/streams/{id}` instead.\n\nOnly streams in `draft`, `cancelled`, or `withdrawn` with a succeeded withdrawal can be deleted. Attempting to delete an `ended` stream returns 409 `FUNDS_PENDING_WITHDRAWAL`. Deleting an `active` or `paused` stream returns 409 `STREAM_INACTIVE_STATE`. Deleting requires the actor to be the senderAddress or an organization owner (returns 403 otherwise). Already-deleted streams return 204 idempotently.",
         "deprecated": true,
         "tags": [
           "Streams v1"
         ],
         "responses": {
           "204": {
-            "description": "Stream deleted. No response body."
+            "description": "Stream deleted or already deleted. No response body."
           },
           "400": {
             "description": "Missing or empty `x-tenant-id` header.",
@@ -3298,6 +3298,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
           },
           "404": {
             "$ref": "#/components/responses/404"
@@ -4882,7 +4885,7 @@
       "delete": {
         "operationId": "deleteStreamV2",
         "summary": "Delete a payment stream (v2)",
-        "description": "Permanently deletes a stream. The stream must be in `draft` or `ended` status; attempting to delete an `active` or `paused` stream returns 409.",
+        "description": "Soft deletes a stream and marks it deletedAt. Only streams in `draft`, `cancelled`, or `withdrawn` with a succeeded withdrawal can be deleted. Attempting to delete an `ended` stream returns 409 `FUNDS_PENDING_WITHDRAWAL`. Deleting an `active` or `paused` stream returns 409 `STREAM_INACTIVE_STATE`. When a verified actor is provided, deletion requires the actor to be the senderAddress or an organization owner (returns 403 otherwise). Already-deleted streams return 204 idempotently.",
         "tags": [
           "Streams"
         ],
@@ -4893,10 +4896,13 @@
         ],
         "responses": {
           "204": {
-            "description": "Stream deleted. No response body."
+            "description": "Stream deleted or already deleted. No response body."
           },
           "401": {
             "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
           },
           "404": {
             "$ref": "#/components/responses/404"

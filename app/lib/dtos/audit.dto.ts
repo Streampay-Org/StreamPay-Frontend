@@ -33,6 +33,8 @@ export const AuditEntrySchema = z.object({
   actor: AuditActorSchema,
   target: AuditTargetSchema,
   action: z.string(),
+  before: z.record(z.unknown()).nullable().optional(),
+  after: z.record(z.unknown()).nullable().optional(),
   beforeHash: z.string().nullable(),
   afterHash: z.string().nullable(),
   diffHash: z.string().nullable(),

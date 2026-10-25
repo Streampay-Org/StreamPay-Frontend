@@ -6,6 +6,8 @@ import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { streamCache } from "@/app/lib/cache";
+import { deleteStream } from "@/app/lib/stream-delete";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { inferStreamChangeAction, publishStreamChange } from "@/app/lib/stream-publish";
 import type { Stream } from "@/app/types/openapi";
 
@@ -196,24 +198,23 @@ export async function DELETE(request: Request, { params }: Context) {
     return errorResponse("MISSING_TENANT", "Tenant ID header is required", 400);
   }
 
-  const stream = db.streams.findOne ? db.streams.findOne(tenant, id) : null;
-  if (!stream) {
-    return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
+  // Resolve actor identity:
+  // 1. Bearer JWT
+  // 2. Actor-Wallet-Address header
+  // 3. x-streampay-actor-id header
+  const authActor = tryAuthenticateRequest(request);
+  const actorWalletHeader =
+    request.headers.get("Actor-Wallet-Address") ||
+    request.headers.get("actor-wallet-address") ||
+    request.headers.get("x-streampay-actor-id") ||
+    null;
+
+  const actor = authActor || (actorWalletHeader ? { walletAddress: actorWalletHeader } : { walletAddress: "" });
+
+  const result = await deleteStream(id, actor, tenant, request);
+  if (!result.success) {
+    return errorResponse(result.code, result.message, result.status);
   }
-
-  if (stream.status === "active" || stream.status === "paused") {
-    return errorResponse(
-      "STREAM_INACTIVE_STATE",
-      "Cannot delete a stream that is active or paused. Stop it first.",
-      409
-    );
-  }
-
-  db.streams.delete(id);
-
-  // Invalidate the network-scoped cache entry BEFORE returning so the ETag
-  // for this id cannot be matched after the resource is gone.
-  streamCache.invalidate(tenant, id, currentNetwork());
 
   return new NextResponse(null, { status: 204 });
 }

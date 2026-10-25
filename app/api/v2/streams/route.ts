@@ -92,8 +92,8 @@ async function handleV2StreamsGet(request: Request) {
     ? streamRepository.listByTenant(tenant)
     : Array.from(streamRepository.streams.values() as Iterable<Stream>);
 
-  const sortedStreams = tenantCandidates
-    .filter(isVisible)
+  const sortedStreams = (tenantCandidates as any[])
+    .filter((stream: any) => !stream.deletedAt && isVisible(stream))
     .sort((a, b) => {
       const timeCompare = a.createdAt.localeCompare(b.createdAt);
       return timeCompare !== 0 ? timeCompare : a.id.localeCompare(b.id);
