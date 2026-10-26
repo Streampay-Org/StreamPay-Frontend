@@ -9,10 +9,12 @@ import { NextResponse } from "next/server";
 import { orgDb, getActiveApprovalsForStream } from "@/app/lib/org-db";
 import { checkStreamOrgPolicy, initiateApproval } from "@/app/lib/org-policy";
 import { ApprovalAction } from "@/app/lib/org-types";
+import { getCorrelationContext } from "@/app/lib/logger";
 
 function errorResponse(code: string, message: string, status: number) {
+  const context = getCorrelationContext();
   return NextResponse.json(
-    { error: { code, message, request_id: "mock-request-id" } },
+    { error: { code, message, request_id: context?.request_id } },
     { status },
   );
 }

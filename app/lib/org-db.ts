@@ -122,7 +122,12 @@ export function getActiveApprovalsForStream(streamId: string): PendingApproval[]
 
   for (const approval of orgDb.approvals.values()) {
     if (approval.streamId !== streamId) continue;
-    if (approval.status === "approved" || approval.status === "rejected") continue;
+    if (
+      approval.status === "approved" ||
+      approval.status === "rejected" ||
+      approval.status === "executed" ||
+      approval.status === "failed"
+    ) continue;
 
     if (new Date(approval.expiresAt) <= now) {
       // Lazy expiry — mark and skip

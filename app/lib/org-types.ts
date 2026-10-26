@@ -124,7 +124,7 @@ export type OrgRecord = {
 /** Actions that may be gated behind a two-step approval when requireApprovals > 1 */
 export type ApprovalAction = "settle" | "stop";
 
-export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
+export type ApprovalStatus = "pending" | "approved" | "executed" | "failed" | "rejected" | "expired";
 
 /**
  * A pending multi-step approval for a stream action.
@@ -148,6 +148,10 @@ export type PendingApproval = {
   createdAt: string;
   /** ISO-8601 UTC — lazy-checked; no background job enforces expiry */
   expiresAt: string;
+  /** ISO-8601 UTC timestamp when the action was executed */
+  executedAt?: string;
+  /** Reason description or code when approval execution failed */
+  failureReason?: string;
 };
 
 // ─── Org-stream link ──────────────────────────────────────────────────────────

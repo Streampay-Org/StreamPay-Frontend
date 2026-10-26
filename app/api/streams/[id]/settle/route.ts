@@ -162,6 +162,8 @@ export async function POST(
       } catch {
         return errorResponse("SETTLEMENT_FAILED", "Failed to settle stream on Stellar/Soroban", 502);
       }
+
+      return NextResponse.json({ data: execResult.data });
     });
   }, { resourceId: id, actorId: actorAddress ?? undefined });
 }

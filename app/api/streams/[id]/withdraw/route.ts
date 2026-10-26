@@ -303,16 +303,8 @@ export async function POST(
         fetch,
       );
 
-      if (feeBump.bumped) {
-        logger.info("Fee-bump transaction submitted successfully", {
-          streamId: id,
-          newTxHash: feeBump.newTxHash,
-        });
-      } else if (feeBump.error) {
-        logger.warn("Fee-bump attempt failed", {
-          streamId: id,
-          error: feeBump.error,
-        });
+      if (!execResult.ok) {
+        return createErrorResponse(execResult.code, execResult.error, execResult.status);
       }
 
       const updated = finalResult.stream;
@@ -335,10 +327,8 @@ export async function POST(
       });
 
       const payload = {
-        alert: finalResult.alert,
-        data: updated,
-        withdrawal: updated.withdrawal,
-        ...(feeBump.bumped ? { feeBump: { bumped: true, newTxHash: feeBump.newTxHash } } : {}),
+        data: execResult.data,
+        ...(execResult.extra || {}),
       };
 
       recordPrivilegedStreamAuditEvent({

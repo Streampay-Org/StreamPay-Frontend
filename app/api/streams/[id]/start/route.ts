@@ -172,12 +172,6 @@ export async function POST(
       setIdempotency(db.idempotency, token, fingerprint, 200, payload);
     }
 
-    logger.info(isResume ? "Stream resumed successfully" : "Stream started successfully", {
-      streamId: id,
-      action: isResume ? "resume" : "start",
-      status: "success",
-    });
-
     return NextResponse.json(payload);
   });
 }
