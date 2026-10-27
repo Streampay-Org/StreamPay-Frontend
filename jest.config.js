@@ -47,8 +47,6 @@ const config = {
     "<rootDir>/app/components/StreamViz.test.tsx",
     "<rootDir>/app/dashboard/IndexerStatus.test.tsx",
     "<rootDir>/app/lib/config/config.test.ts",
-    "<rootDir>/app/lib/dtos/audit.dto.test.ts",
-    "<rootDir>/app/lib/errors/index.test.ts",
     "<rootDir>/app/ReceiptCard.test.tsx",
     "<rootDir>/app/streams/new/components/StepIndicator.test.tsx",
     "<rootDir>/app/streams/new/multi.test.tsx",
