@@ -136,7 +136,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     ...patchData,
     updatedAt: new Date().toISOString(),
   };
-  streamRepository.streams.set(id, updated as any);
+  streamRepository.streams.set(id, updated as unknown as Stream);
 
   publishStreamChange({
     action: inferStreamChangeAction(stream, updated as Stream),
@@ -146,7 +146,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     correlationId: getCorrelationContext()?.correlation_id,
   });
 
-  const streamV2 = toV2Stream(dbStreamToV1(updated as any));
+  const streamV2 = toV2Stream(dbStreamToV1(updated as unknown as Stream));
   return NextResponse.json({
     ...streamV2,
     data: streamV2,
