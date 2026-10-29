@@ -3,7 +3,10 @@
 import jwt from "jsonwebtoken";
 import { GET, POST, PUT, PATCH, DELETE, OPTIONS } from "./route";
 import { getJwtSecret } from "@/app/lib/auth";
-import { auditLogStore, resetAuditLogStore } from "@/app/lib/audit-log";
+import { AppendOnlyAuditLogStore } from "@/app/lib/audit-log";
+
+const auditLogStore = new AppendOnlyAuditLogStore();
+const resetAuditLogStore = () => auditLogStore.reset();
 
 function signAccessToken(
   role: string,

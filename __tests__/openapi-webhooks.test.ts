@@ -5,9 +5,11 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import yaml from 'js-yaml';
 
-function loadOpenApiYaml(): any {
+type OpenApiSpec = Record<string, any>;
+
+function loadOpenApiYaml(): OpenApiSpec {
   const raw = readFileSync(join(__dirname, '..', 'src', 'openapi.yaml'), 'utf8');
-  return yaml.load(raw);
+  return yaml.load(raw) as OpenApiSpec;
 }
 
 describe('OpenAPI examples /api/webhooks', () => {

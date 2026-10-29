@@ -3,8 +3,9 @@
 import jwt from "jsonwebtoken";
 import { GET } from "./route";
 import { getJwtSecret } from "@/app/lib/auth";
-import { auditLogStore, resetAuditLogStore } from "@/app/lib/audit-log";
 import { AuditResponseSchema } from "@/app/lib/dtos/audit.dto";
+import { resetAuditLogStore } from "@/app/lib/audit-log";
+import { auditLogStore } from "@/app/lib/audit-log";
 
 function signAccessToken(role: string, actorId: string) {
   return jwt.sign({ sub: `${actorId}-wallet`, role, actorId, iss: "streampay", aud: "streampay-api" }, getJwtSecret(), {
