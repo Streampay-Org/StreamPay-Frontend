@@ -83,13 +83,16 @@ export interface PendingUpgrade {
 
 const DEV_ADMIN_PLACEHOLDER = "GADMIN_DEV_PLACEHOLDER_DO_NOT_USE_IN_PROD";
 
+let _warnedAdminUnset = false;
+
 function resolveAdminAddress(): string {
   const addr = process.env.STREAMPAY_ADMIN_ADDRESS?.trim();
   const env  = process.env.NODE_ENV ?? "development";
   const isDev = env === "development" || env === "test";
 
   if (!addr) {
-    if (isDev) {
+    if (isDev && !_warnedAdminUnset && env !== "test") {
+      _warnedAdminUnset = true;
       console.warn(
         "[admin-guard] STREAMPAY_ADMIN_ADDRESS is not set. " +
         "Using dev placeholder — set this in production.",
@@ -399,102 +402,4 @@ export function executeUpgrade(
 // ── Circuit-breaker guard ─────────────────────────────────────────────────────
 
 /**
- * Returns a 503 ContractPaused NextResponse when the global pause is active,
- * or null when the operation is allowed.
- *
- * Usage in route handlers:
- *
- *   const pauseError = checkNotPaused("create_stream");
- *   if (pauseError) return pauseError;
- */
-export function checkNotPaused(operation: string): NextResponse | null {
-  if (!_state.paused) return null;
-  return NextResponse.json(
-    {
-      error: {
-        code: "ContractPaused",
-        message:
-          `The contract is globally paused. '${operation}' is not allowed during an incident. ` +
-          "Cancel and settle operations remain available. Contact the admin to lift the pause.",
-      },
-    },
-    { status: 503 },
-  );
-}
-
-// ── Circuit-breaker per-component toggle ──────────────────────────────────────
-
-/** Recognized circuit breaker targets. */
-const VALID_TARGETS = new Set<CircuitBreakerTarget>(["indexer", "webhook"]);
-
-/**
- * Toggle a named circuit breaker (indexer or webhook).
- *
- * Gated by admin auth. When open=true the consuming service should stop
- * dispatching events for that subsystem; when open=false it resumes.
- *
- * @param request  Incoming HTTP request (used to verify admin identity).
- * @param target   "indexer" | "webhook"
- * @param open     true = trip the breaker; false = reset it.
- * @returns        Updated AdminState or a NextResponse error.
- */
-export function setCircuitBreaker(
-  request: Request,
-  target: string,
-  open: boolean,
-): AdminState | NextResponse {
-  const authResult = requireAdmin(request);
-  if (authResult instanceof NextResponse) return authResult;
-
-  if (!VALID_TARGETS.has(target as CircuitBreakerTarget)) {
-    return NextResponse.json(
-      {
-        error: {
-          code: "VALIDATION_ERROR",
-          message: `Invalid target '${target}'. Must be one of: ${[...VALID_TARGETS].join(", ")}.`,
-        },
-      },
-      { status: 422 },
-    );
-  }
-
-  const t = target as CircuitBreakerTarget;
-  _state.circuitBreakers[t] = {
-    open,
-    updatedAt: new Date().toISOString(),
-    updatedBy: authResult,
-  };
-
-  return { ..._state };
-}
-
-/**
- * Returns the current state of all circuit breakers.
- */
-export function getCircuitBreakers(): Readonly<Record<CircuitBreakerTarget, CircuitBreakerState>> {
-  return { ..._state.circuitBreakers };
-}
-
-/**
- * Returns true when the named circuit breaker is open (tripped).
- */
-export function isCircuitBreakerOpen(target: CircuitBreakerTarget): boolean {
-  return _state.circuitBreakers[target]?.open ?? false;
-}
-
-// ── Test helpers ──────────────────────────────────────────────────────────────
-
-/**
- * Reset admin state to defaults. For use in tests only.
- */
-export function _resetAdminStateForTesting(adminAddress = DEV_ADMIN_PLACEHOLDER): void {
-  _state.adminAddress   = adminAddress;
-  _state.paused         = false;
-  _state.pausedAt       = null;
-  _state.adminRotatedAt = null;
-  _state.pendingUpgrade = null;
-  _state.circuitBreakers = {
-    indexer: { open: false, updatedAt: null, updatedBy: null },
-    webhook: { open: false, updatedAt: null, updatedBy: null },
-  };
-}
+ * Returns a 503 */

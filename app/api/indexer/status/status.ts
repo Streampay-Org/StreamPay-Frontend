@@ -58,7 +58,7 @@ export function getIndexerStatus(): IndexerStatus {
   const stallThresholdMs = Number(process.env.STALL_THRESHOLD_MS ?? 300_000);
   // The status endpoint reports for a live poller; the circuit breaker is the
   // authoritative operator override for "stopped".
-  const breakerOpen = isCircuitBreakerOpen("indexer");
+  const breakerOpen = isCircuitBreakerOpen();
 
   const status = deriveIndexerStatus({
     running: !breakerOpen,

@@ -52,7 +52,6 @@
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-import { isCircuitBreakerOpen } from "@/app/lib/admin-guard";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
@@ -67,6 +66,7 @@ import {
   sseMetricsLog,
 } from "@/lib/sseBackpressure";
 import type { SseOverflowPolicy } from "@/lib/sseBackpressure";
+import { isCircuitBreakerOpen } from "@/app/lib/admin-guard";
 
 import crypto from "crypto";
 
