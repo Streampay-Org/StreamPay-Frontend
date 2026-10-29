@@ -1,12 +1,12 @@
 import {
   checkIdempotency,
   computeFingerprint,
-  createInMemoryPersistenceStore,
   IdempotencyEntry,
   IDEMPOTENCY_TTL_MS,
   idempotencyToken,
   setIdempotency,
 } from "@/app/lib/db";
+import { createInMemoryPersistenceStore } from "@/app/lib/repositories/in-memory";
 
 function createStore() {
   return createInMemoryPersistenceStore().idempotencyStore;

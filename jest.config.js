@@ -3,17 +3,6 @@ const nextJest = require("next/jest");
 const createJestConfig = nextJest({ dir: "./" });
 
 /** @type {import('jest').Config} */
-function nextJest(options) {
-  return function () {
-    return Promise.resolve({
-      transform: {},
-      moduleNameMapper: {},
-      ...options,
-    });
-  };
-}
-
-/** @type {import('jest').Config} */
 const config = {
   testEnvironment: "jsdom",
   setupFiles: ["<rootDir>/jest.polyfills.js"],
@@ -58,7 +47,6 @@ const config = {
     "<rootDir>/app/components/EmptyState.test.tsx",
     "<rootDir>/app/components/ReceiptShareCard.test.tsx",
     "<rootDir>/app/components/StreamViz.test.tsx",
-    "<rootDir>/app/dashboard/IndexerStatus.test.tsx",
     "<rootDir>/app/lib/config/config.test.ts",
     "<rootDir>/app/lib/dtos/audit.dto.test.ts",
     "<rootDir>/app/lib/errors/index.test.ts",

@@ -24,14 +24,15 @@ export class LocalKmsSigner implements KmsSigner {
   }
 
   async sign(payload: Buffer, options?: SignOptions): Promise<Buffer> {
-    // In a real local implementation, we would use ed25519 signing
-    // For this prototype/mock, we'll simulate the latency and return a dummy signature
-    // or use Node's crypto if we have a valid private key format.
-    
     // Simulate KMS latency (usually 50-200ms)
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise<void>(resolve => {
+      const timer = setTimeout(resolve, 50);
+      timer.unref?.();
+    });
 
-    console.log(`[LocalKmsSigner] Signing payload of size ${payload.length}`, options?.auditContext);
+    if (process.env.NODE_ENV !== 'test') {
+      console.log(`[LocalKmsSigner] Signing payload of size ${payload.length}`, options?.auditContext);
+    }
 
     // Mock signature for prototyping
     return Buffer.alloc(64, 'a');

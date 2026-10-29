@@ -170,7 +170,6 @@ describe("Quarantine Ratchet", () => {
   });
 
   test("Scenario 7: fallback when git show origin/main is unavailable", () => {
-    // When git show fails or origin/main:jest.quarantine.json doesn't exist, it falls back to in-file max
     const fallbackMax = getBaselineMax("invalid-non-repo-dir", 42);
     expect(fallbackMax).toBe(42);
   });

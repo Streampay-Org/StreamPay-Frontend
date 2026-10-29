@@ -1,17 +1,19 @@
 import {
-  createInMemoryPersistenceStore,
-  createPostgresPersistenceStore,
   db,
   decodeCursor,
   createDefaultStore,
   encodeCursor,
   idempotencyToken,
-  POSTGRES_ROLLOUT_NOTES,
-  POSTGRES_SCHEMA_SKETCH,
   setStore,
   getStore,
   resetDb,
 } from "@/app/lib/db";
+import {
+  createInMemoryPersistenceStore,
+  createPostgresPersistenceStore,
+  POSTGRES_SCHEMA_SKETCH,
+  POSTGRES_ROLLOUT_NOTES,
+} from "@/app/lib/repositories/in-memory";
 
 function deferred() {
   let resolve!: () => void;

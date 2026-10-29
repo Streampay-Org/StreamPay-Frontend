@@ -1,4 +1,6 @@
 import { makeDemoDateShifter } from "@/app/lib/demo-dates";
+import { DEFAULT_STREAM_TENANT_ID } from "@/app/lib/stream-tenant";
+import { resolveStreamTenant, visibleTo } from "@/app/lib/stream-visibility";
 import type {
   AppendOnlyStore,
   ExportAuditRecord,
@@ -262,9 +264,6 @@ class InMemoryAppendOnlyStore<T> implements AppendOnlyStore<T> {
     return [...this.backing];
   }
 }
-
-import { DEFAULT_STREAM_TENANT_ID } from "@/app/lib/stream-tenant";
-import { resolveStreamTenant, visibleTo } from "@/app/lib/stream-visibility";
 
 export { visibleTo, resolveStreamTenant };
 

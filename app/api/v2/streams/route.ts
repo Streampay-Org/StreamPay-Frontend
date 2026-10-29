@@ -19,7 +19,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { db, idempotencyToken, getStore, newStreamId } from "@/app/lib/db";
+import { db, idempotencyToken, getStore } from "@/app/lib/db";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { getClientIdentity } from "@/app/lib/rate-limit";
 import { checkOrgDailyQuota, orgQuotaResponse } from "@/app/lib/org-quota";
@@ -43,6 +43,11 @@ import {
 
 /** Attempts at drawing a fresh stream id before giving up on a collision. */
 const MAX_ID_ATTEMPTS = 3;
+
+/** Draws a fresh stream identifier for create-only inserts. */
+function newStreamId(): string {
+  return `str_${crypto.randomUUID()}`;
+}
 
 
 function errorResponse(code: string, message: string, status: number) {
