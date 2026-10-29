@@ -13,6 +13,15 @@ import { getThemeScript } from "./utils/theme-noflash";
 export const metadata: Metadata = {
   title: "StreamPay - Payment Streaming",
   description: "Real-time payment streaming on Stellar",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "StreamPay",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#22c55e",
 };
 
 export const viewport: Viewport = {
@@ -39,6 +48,7 @@ export default function RootLayout({
         <ThemeController />
         <ClientErrorReporter />
         <ToastProvider>
+          <ServiceWorkerRegistrar />
           <SplashScreenWrapper />
           <CommandPaletteLauncher />
           <ShortcutsOverlayLauncher />
