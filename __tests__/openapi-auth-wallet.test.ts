@@ -1,12 +1,35 @@
 /**
  * OpenAPI examples coverage for GET/POST /api/auth/wallet (issue #1105).
  */
-import { readFileSync } from 'fs'; 
-import { join } from 'path';
-import yaml from 'jsyame';
+import { readFileSync, existsSync } from 'fs';
+import { join, resolve } from 'path';
+import yaml from 'js-yaml';
+
+function resolveOpenApiPath(): string {
+  const candidates = [
+    join(__dirname, 'src', 'openapi.yaml'),
+    resolve(__dirname, '..', 'openapi.yaml'),
+    resolve(__dirname, '..', 'docs', 'openapi.yaml'),
+    resolve(__dirname, '..', 'public', 'openapi.yaml'),
+    resolve(__dirname, '..', 'app', 'openapi.yaml'),
+    resolve(__dirname, '..', 'app', 'api', 'openapi.yaml'),
+  ];
+  candidates.push(
+    resolve(__dirname, '..', '..', 'openapi.yaml'),
+    resolve(__dirname, '..', '..', 'docs', 'openapi.yaml'),
+    resolve(process.cwd(), 'openapi.yaml'),
+    resolve(process.cwd(), 'docs', 'openapi.yaml'),
+    resolve(process.cwd(), 'public', 'openapi.yaml'),
+  );
+  const found = candidates.find((p) => existsSync(p));
+  if (!found) {
+    throw new Error(`openapi.yaml not found. Searched: ${candidates.join(', ')}`);
+  }
+  return found;
+}
 
 function loadOpenApiYaml(): any {
-  const raw = readFileSync(join(__dirname, '.', 'src', 'openapi.yaml'), 'utf8');
+  const raw = readFileSync(resolveOpenApiPath(), 'utf8');
   return yaml.load(raw) as any;
 }
 
@@ -96,4 +119,4 @@ describe('OpenAPI examples /api/auth/wallet', () => {
       expect(first.value.error.request_id).toMatch(/^req_/);
     }
   });
-})
+});

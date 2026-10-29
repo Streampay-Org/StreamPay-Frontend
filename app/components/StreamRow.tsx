@@ -377,37 +377,20 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
       <div className="stream-row__action-wrap">
         <button
           ref={actionButtonRef}
-          className={`button button--secondary stream-row__action ${isProcessing ? "button--busy" : ""}`}
           type="button"
+          className="stream-row__action"
           onClick={handleAction}
-          disabled={isProcessing || isIncidentMode}
-          aria-busy={isProcessing}
-          aria-live="assertive"
+          disabled={isProcessing}
         >
-          {isProcessing ? (
-            <>
-              <span className="spinner" aria-hidden="true" />
-              <span>Processing...</span>
-            </>
-          ) : (
-            <span>{stream.nextAction}</span>
-          )}
+          {isProcessing ? "Processing…" : stream.nextAction}
         </button>
-        <KbdHint keys={["Enter"]} label={stream.nextAction} aria-hidden />
-        {errorMsg && (
-          <p className="detail-incident-warning" role="alert">
-            {errorMsg}
-          </p>
-        )}
       </div>
 
       {error && (
         <ErrorToast
           error={error}
           onDismiss={handleDismissError}
-          onRetry={error.retry.retryable ? handleRetry : undefined}
-          autoDismiss={!error.retry.retryable}
-          autoDismissDelayMs={5000}
+          onRetry={handleRetry}
         />
       )}
     </article>

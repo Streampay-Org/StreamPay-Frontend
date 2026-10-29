@@ -126,19 +126,9 @@ export interface LogEntry {
   [key: string]: unknown;
 }
 
-// Internal logger function.
-//
-// SECURITY NOTE: This `log()` function is intentionally distinct from the
-// `logger` exported below. The previous version of this module also
-// exported an ad-hoc `logger` at the top with the same name (raw
-// `console.log` calls, no correlation propagation, no `debug`). Both
-// declarations had the same exported identifier, which Node parses as a
-// `SyntaxError: Identifier 'logger' has already been declared` at module
-// load and blocks any consumer from statically importing `logger`.
-// The structured logger below is the one used by the rest of the
-// codebase (webhook delivery, queue, worker, the rate-anomaly detector);
-// the ad-hoc version was shadowed on import regardless, so it has been
-// removed here.
+// Internal structured logger function. This is the single logger exported
+// below; the module previously declared `logger` twice, which caused a
+// SyntaxError at load time ("Identifier 'logger' has already been declared").
 function log(level: 'info' | 'warn' | 'error' | 'debug', message: string, meta: Record<string, unknown> = {}) {
   const context = getCorrelationContext();
   
