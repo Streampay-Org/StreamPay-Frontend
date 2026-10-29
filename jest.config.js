@@ -1,6 +1,6 @@
 const nextJest = require("next/jest");
 
-const createJewtConfig = nextJest({ dir: "./" });
+const createJestConfig = nextJest({ dir: "./" });
 
 /** @type {import('jest').Config} */
 const config = {

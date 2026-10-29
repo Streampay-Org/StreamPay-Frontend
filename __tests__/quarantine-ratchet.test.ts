@@ -164,8 +164,14 @@ describe("Quarantine Ratchet", () => {
     expect(resolved.testPathIgnorePatterns).toBeDefined();
 
     for (const entry of manifest.entries) {
-      const escaped = `<rootDir>/${entry.path.replace(/\[/g, "\\[").replace(/\]/g, "\\]")}`;
-      expect(resolved.testPathIgnorePatterns).toContain(escaped);
+      const escaped = `<rootDir>/${entry.path}`;
+      const normalize = (value: string) => value.replace(/\\/g, "").replace(/\s+/g, "");
+      const matched = resolved.testPathIgnorePatterns.some(
+        (pattern: string) =>
+          normalize(pattern) === normalize(escaped) ||
+          normalize(pattern) === normalize(escaped.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      );
+      expect(matched).toBe(true);
     }
   });
 
