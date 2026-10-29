@@ -2,8 +2,6 @@ node_modules/
 .next/
 out/
 coverage/
-.env
-.env.local
 .env.*.local
 .codex
 *.log
@@ -13,7 +11,6 @@ contracts/.contracts/
 
 # Editor / IDE state
 .idea/
-.vscode/
 *.swp
 *.swo
 *~
@@ -35,3 +32,4 @@ branch_structure.json
 temp_auto_push.bat
 temp_interactive_push.bat
 .vercel
+config.bat
