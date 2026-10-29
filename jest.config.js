@@ -45,7 +45,6 @@ const config = {
     "<rootDir>/app/components/EmptyState.test.tsx",
     "<rootDir>/app/components/ReceiptShareCard.test.tsx",
     "<rootDir>/app/components/StreamViz.test.tsx",
-    "<rootDir>/app/dashboard/IndexerStatus.test.tsx",
     "<rootDir>/app/lib/config/config.test.ts",
     "<rootDir>/app/lib/dtos/audit.dto.test.ts",
     "<rootDir>/app/lib/errors/index.test.ts",

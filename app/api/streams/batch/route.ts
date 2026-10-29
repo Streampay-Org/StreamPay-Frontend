@@ -5,7 +5,6 @@ import {
   getStore,
   idempotencyToken,
   setIdempotency,
-  newStreamId,
 } from "@/app/lib/db";
 import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
@@ -36,6 +35,10 @@ interface BatchStreamInput {
 
 function getHeader(request: Request, name: string): string | null {
   return request.headers?.get?.(name) ?? null;
+}
+
+function newStreamId(): string {
+  return `stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function getRequestUrl(request: Request, fallbackPath: string): URL {
