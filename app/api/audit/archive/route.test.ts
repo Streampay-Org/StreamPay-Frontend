@@ -3,7 +3,13 @@
 import jwt from "jsonwebtoken";
 import { GET, POST, PUT, PATCH, DELETE, OPTIONS } from "./route";
 import { getJwtSecret } from "@/app/lib/auth";
-import { auditLogStore, resetAuditLogStore } from "@/app/lib/audit-log";
+import * as auditLogModule from "@/app/lib/audit-log";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const auditLogStore = (auditLogModule as any).auditLogStore;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const resetAuditLogStore = (auditLogModule as any).resetAuditLogStore as () => void;
+
 
 function signAccessToken(role: string, actorId: string) {
   return jwt.sign(

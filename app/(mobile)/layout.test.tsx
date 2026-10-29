@@ -3,8 +3,7 @@
  */
 
 import React from "react";
-import { render } from "@testing-library/react";
-const { screen } = require("@testing-library/react") as any;
+import { render, screen } from "@testing-library/react";
 import MobileLayout from "./layout";
 
 // Mock next/navigation

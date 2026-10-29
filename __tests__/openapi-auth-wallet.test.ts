@@ -5,9 +5,13 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import yaml from 'js-yaml';
 
-function loadOpenApiYaml(): any {
+interface OpenApiExample {
+  value: Record<string, unknown> & { error?: { request_id?: string } };
+}
+
+function loadOpenApiYaml(): Record<string, any> {
   const raw = readFileSync(join(__dirname, '.', 'src', 'openapi.yaml'), 'utf8');
-  return yaml.load(raw);
+  return yaml.load(raw) as Record<string, any>;
 }
 
 describe('OpenAPI examples /api/auth/wallet', () => {
@@ -36,7 +40,7 @@ describe('OpenAPI examples /api/auth/wallet', () => {
     for (const code of ['400', '422', '429'] as const) {
       const examples =
         wallet.get.responses[code].content['application/json'].examples;
-      const first = Object.values(examples)[0] as { value: any };
+      const first = Object.values(examples)[0] as OpenApiExample;
       expect(first.value.error).toEqual(
         expect.objectContaining({
           code: expect.any(String),
@@ -74,8 +78,8 @@ describe('OpenAPI examples /api/auth/wallet', () => {
     for (const code of ['400', '401', '422', '429'] as const) {
       const examples =
         wallet.post.responses[code].content['application/json'].examples;
-      const first = Object.values(examples)[0] as { value: any };
-      expect(first.value.error.request_id).toMatch(/^req_/);
+      const first = Object.values(examples)[0] as OpenApiExample;
+      expect(first.value.error?.request_id).toMatch(/^req_/);
     }
   });
 });
