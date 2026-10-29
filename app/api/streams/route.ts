@@ -191,6 +191,7 @@ async function handleStreamsGet(request: Request) {
 
     const sortedStreams = tenantCandidates
       .filter(isVisible)
+      .filter((stream) => !(stream as typeof stream & { deletedAt?: string | null }).deletedAt)
       .sort((left, right) => {
         const timeCompare = left.createdAt.localeCompare(right.createdAt);
         return timeCompare !== 0 ? timeCompare : left.id.localeCompare(right.id);

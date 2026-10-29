@@ -210,7 +210,6 @@ export function CreateStreamForm({
     }
   };
 
-
   // ── Render skeleton ────────────────────────────────────────────────────────
 
   if (isLoading) {
@@ -334,46 +333,36 @@ export function CreateStreamForm({
         </div>
 
         {/* ── Actions ────────────────────────────────────────────────── */}
-        {/*
-         * .csf-actions → `display: flex; justify-content: flex-end;
-         *                 align-items: center; gap: var(--space-4)`
-         */}
         <div className="csf-actions">
-          {/* Cancel button with Esc hint */}
           <button
             type="button"
-            className="button button--secondary csf-field"
             onClick={handleCancel}
-            aria-label="Cancel stream creation"
+            className="csf-button csf-button--secondary"
           >
             Cancel
             <KbdHint
               keys={shortcutKeys("create-stream-form.cancel")}
-              label="Cancel and go back"
-              className="button__kbd"
+              label="Cancel stream creation"
               aria-hidden
             />
           </button>
-
-          {/* Submit button with Ctrl+Enter hint */}
           <button
             type="submit"
-            className={`button button--primary csf-field${isSubmitting ? " button--busy" : ""}`}
             disabled={isSubmitting}
-            aria-label={isSubmitting ? "Creating stream, please wait" : "Create stream"}
+            aria-busy={isSubmitting}
+            className="csf-button csf-button--primary"
           >
             {isSubmitting ? "Creating…" : "Create Stream"}
-            {!isSubmitting && (
-              <KbdHint
-                keys={shortcutKeys("create-stream-form.submit")}
-                label="Submit with keyboard"
-                className="button__kbd"
-                aria-hidden
-              />
-            )}
+            <KbdHint
+              keys={shortcutKeys("create-stream-form.submit")}
+              label="Submit stream"
+              aria-hidden
+            />
           </button>
         </div>
       </form>
     </div>
   );
 }
+
+export default CreateStreamForm;

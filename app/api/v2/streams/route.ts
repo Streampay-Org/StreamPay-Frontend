@@ -33,6 +33,7 @@ import {
 } from "@/app/lib/stream-cursor";
 import type { Stream } from "@/app/types/openapi";
 import { withRouteTimeout } from "@/src/middleware/timeout";
+import { deleteStream } from "@/app/lib/stream-delete";
 import { createCacheHeaders, createStrongEtag, isIfNoneMatchMatch } from "@/src/middleware/etag";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 import {
@@ -93,6 +94,7 @@ async function handleV2StreamsGet(request: Request) {
     : Array.from(streamRepository.streams.values() as Iterable<Stream>);
 
   const sortedStreams = tenantCandidates
+    .filter((stream) => !(stream as Stream & { deletedAt?: string }).deletedAt)
     .filter(isVisible)
     .sort((a, b) => {
       const timeCompare = a.createdAt.localeCompare(b.createdAt);
@@ -286,4 +288,12 @@ async function handleV2StreamsPost(request: Request) {
 
 export async function POST(request: Request) {
   return withRouteTimeout(request, () => handleV2StreamsPost(request));
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  return deleteStream(request, id, "v2");
 }

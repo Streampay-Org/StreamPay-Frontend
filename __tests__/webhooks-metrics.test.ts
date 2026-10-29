@@ -1,5 +1,5 @@
 import { GET, POST } from '@/app/api/webhooks/route';
-import { registry, webhookCounter, webhookDuration } from '@/src/metrics/registry';
+import { registry, webhookCounter } from '@/src/metrics/registry';
 import { NextRequest } from 'next/server';
 import { resetRateLimitStore } from '@/app/lib/rate-limit-store';
 

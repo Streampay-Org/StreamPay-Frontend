@@ -6,6 +6,7 @@ import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { streamCache } from "@/app/lib/cache";
+import { deleteStream, type DeleteActor } from "@/app/lib/stream-delete";
 import { inferStreamChangeAction, publishStreamChange } from "@/app/lib/stream-publish";
 import type { Stream } from "@/app/types/openapi";
 
@@ -76,6 +77,14 @@ async function enforceRateLimit(request: Request, method: "GET" | "POST" | "DELE
   return null;
 }
 
+function resolveV1Actor(request: Request): DeleteActor | null {
+  const address = request.headers.get("x-actor-address") ?? request.headers.get("x-stellar-address");
+  if (!address || address.trim().length === 0) return null;
+  const isOrgOwner = request.headers.get("x-org-owner") === "true";
+  const orgId = request.headers.get("x-org-id") ?? undefined;
+  return { address: address.trim(), isOrgOwner: orgId ? isOrgOwner : undefined, orgId };
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -96,13 +105,13 @@ export async function GET(
   let stream: any | null = null;
   let cacheStatus: "HIT" | "MISS" = "MISS";
 
-  if (cachedStream) {
+  if (cachedStream && !cachedStream.deletedAt) {
     stream = cachedStream;
     cacheStatus = "HIT";
   } else {
     // Fetch from DB using findOne (tenant-scoped, returns null on wrong tenant).
     stream = db.streams.findOne ? db.streams.findOne(tenant, id) : null;
-    if (!stream) {
+    if (!stream || stream.deletedAt) {
       return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
     }
     // Populate the network-scoped cache so the next request on the same
@@ -149,7 +158,7 @@ export async function POST(
   }
 
   const stream = db.streams.findOne ? db.streams.findOne(tenant, id) : null;
-  if (!stream) {
+  if (!stream || stream.deletedAt) {
     return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
   }
 
@@ -192,28 +201,10 @@ export async function DELETE(request: Request, { params }: Context) {
   }
 
   const tenant = request.headers.get("x-tenant-id");
-  if (!tenant || tenant.trim() === "") {
-    return errorResponse("MISSING_TENANT", "Tenant ID header is required", 400);
+  const actor = resolveV1Actor(request);
+  const result = await deleteStream(id, actor, tenant);
+  if (result.kind === "ok") {
+    return new NextResponse(null, { status: 204 });
   }
-
-  const stream = db.streams.findOne ? db.streams.findOne(tenant, id) : null;
-  if (!stream) {
-    return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
-  }
-
-  if (stream.status === "active" || stream.status === "paused") {
-    return errorResponse(
-      "STREAM_INACTIVE_STATE",
-      "Cannot delete a stream that is active or paused. Stop it first.",
-      409
-    );
-  }
-
-  db.streams.delete(id);
-
-  // Invalidate the network-scoped cache entry BEFORE returning so the ETag
-  // for this id cannot be matched after the resource is gone.
-  streamCache.invalidate(tenant, id, currentNetwork());
-
-  return new NextResponse(null, { status: 204 });
+  return errorResponse(result.code, result.message, result.status);
 }
