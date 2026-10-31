@@ -112,7 +112,7 @@ export interface CreateStreamBody {
 export const patchStreamSchema = z
   .object({
     description: z.string().min(1, "Description cannot be empty.").max(280).optional(),
-    webhook_url: z.string().url("Must be a valid URL.").refine(isSafePublicHttpUrl, "Must be a public http(s) URL.").optional(),
+    webhook_url: z.string().url("Must be a valid URL.").refine(value => !z.string().url().safeParse(value).success || isSafePublicHttpUrl(value), "Must be a public http(s) URL.").optional(),
     tags: z
       .array(
         z
