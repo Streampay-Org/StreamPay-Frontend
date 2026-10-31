@@ -358,14 +358,14 @@ const SENSITIVE_KEY_RE =
 const SENSITIVE_KEY_SUBSTR_RE =
   /secret|password|passwd|token|api_?key|private_?key|signature|authorization|auth_?token|cookie|ssn|card_?number|cvv|secret_?key/i;
 
-/** Well-formed email address. */
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Email address embedded anywhere in a string (e.g. an exception message). */
+const EMAIL_RE = /[^\s@]+@[^\s@]+\.[^\s@]+/;
 
 /** Stellar account ID (public key) — `G` followed by 55 base32 chars. */
-const STELLAR_ACCOUNT_RE = /^G[0-9A-Z]{55}$/;
+const STELLAR_ACCOUNT_RE = /(?:^|[^0-9A-Z])G[0-9A-Z]{55}(?![0-9A-Z])/;
 
 /** Stellar secret seed — `S` followed by 55 base32 chars. */
-const STELLAR_SECRET_RE = /^S[0-9A-Z]{55}$/;
+const STELLAR_SECRET_RE = /(?:^|[^0-9A-Z])S[0-9A-Z]{55}(?![0-9A-Z])/;
 
 /** Mask used for redacted values. */
 const REDACTED = '[REDACTED]';

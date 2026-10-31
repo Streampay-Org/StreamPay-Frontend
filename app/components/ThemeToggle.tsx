@@ -18,7 +18,7 @@ export function ThemeToggle() {
       } else {
         setMode('system');
       }
-    } catch (e) {
+    } catch {
       setMode('system');
     }
   }, []);
@@ -33,7 +33,7 @@ export function ThemeToggle() {
     if (newMode === 'system') {
       try {
         window.localStorage.removeItem('streampay-theme');
-      } catch (e) {}
+      } catch {}
       updateThemeState();
     } else {
       setTheme(newMode);
