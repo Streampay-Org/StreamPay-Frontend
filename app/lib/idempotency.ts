@@ -81,13 +81,13 @@ export function createNamespacedStore(namespace: string): IdempotencyStore {
       return backing.insert(prefix + key, encode(record));
     },
     async commit(key, owner, record) {
-      const current = read(key);
+      const current = backing.get(prefix + key) as Stored | undefined;
       if (current?.reservationId !== owner || current.status !== 0) return false;
       backing.set(prefix + key, encode(record));
       return true;
     },
     async release(key, owner) {
-      const current = read(key);
+      const current = backing.get(prefix + key) as Stored | undefined;
       if (current?.reservationId === owner && current.status === 0) backing.delete(prefix + key);
     },
   };

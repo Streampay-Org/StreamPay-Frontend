@@ -1,7 +1,7 @@
 /** @jest-environment node */
 import { NextResponse } from "next/server";
 import { resetDb } from "@/app/lib/db";
-import { createNamespacedStore, withIdempotency } from "./idempotency";
+import { createNamespacedStore, scopedIdempotencyKey, withIdempotency } from "./idempotency";
 const scope = { resourceId: "reservation-test" };
 function request() {
   return new Request("https://example.test/api/settle", { method: "POST",
@@ -55,4 +55,27 @@ test("deterministic state conflicts are replayed", async () => {
   expect(response.status).toBe(409);
   expect(response.headers.get("Idempotency-Replay")).toBe("true");
   expect(handler).toHaveBeenCalledTimes(1);
+});
+
+test("an abandoned reservation expires and a later request can execute", async () => {
+  const clock = jest.spyOn(Date, "now").mockReturnValue(1000);
+  try {
+    const store = createNamespacedStore("reservation-test");
+    await store.setIfAbsent!(scopedIdempotencyKey(scope.resourceId, "same-key"), {
+      fingerprint: "abandoned", statusCode: 0, body: null, createdAt: 1000, reservationId: "old",
+    });
+    clock.mockReturnValue(32_000);
+    const handler = jest.fn(async () => NextResponse.json({ ok: true }));
+    expect((await withIdempotency(request(), "settle", store, handler, scope)).status).toBe(200);
+    expect(handler).toHaveBeenCalledTimes(1);
+  } finally { clock.mockRestore(); }
+});
+test("an expired owner cannot overwrite a replacement reservation", async () => {
+  const store = createNamespacedStore("reservation-test");
+  const record = { fingerprint: "fp", statusCode: 0, body: null, createdAt: Date.now(), reservationId: "old" };
+  await store.setIfAbsent!("key", record);
+  await store.release!("key", "old");
+  await store.setIfAbsent!("key", { ...record, reservationId: "new" });
+  expect(await store.commit!("key", "old", { ...record, statusCode: 200 })).toBe(false);
+  expect((await store.get("key"))?.reservationId).toBe("new");
 });
