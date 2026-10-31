@@ -32,6 +32,8 @@ function publicAddress(address: string): boolean {
   }
   // Accept global unicast only; reject documentation and transition ranges.
   const first = Number.parseInt(value.split(":")[0], 16);
+  const second = Number.parseInt(value.split(":")[1] || "0", 16);
+  if (first === 0x2001 && second < 0x200) return false;
   return first >= 0x2000 && first <= 0x3fff &&
     !value.startsWith("2001:db8:") && !value.startsWith("2001:0:") &&
     !value.startsWith("2002:");

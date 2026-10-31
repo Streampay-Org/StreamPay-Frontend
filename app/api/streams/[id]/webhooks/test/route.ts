@@ -1,3 +1,4 @@
+import { resolveRequestId, generateRequestId } from "@/lib/requestId";
 import { assertSafeOutboundUrl, pinnedWebhookFetch } from "@/app/lib/outbound-url";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { orgDb } from "@/app/lib/org-db";
@@ -74,7 +75,7 @@ const ALLOWED_EVENT_TYPES = new Set([
 function createErrorResponse(code: string, message: string, status: number) {
   const context = getCorrelationContext();
   return NextResponse.json(
-    { error: { code, message, request_id: context?.request_id } },
+    { error: { code, message, request_id: context?.request_id ?? generateRequestId() } },
     { status },
   );
 }
@@ -168,7 +169,7 @@ export async function POST(
           }
           if (!isSafePublicHttpUrl(parsed.endpoint_url)) {
             return createErrorResponse(
-              ErrorCode.BAD_REQUEST,
+              "UNSAFE_ENDPOINT_URL",
               "'endpoint_url' must be a public http(s) URL (private, loopback and metadata hosts are blocked).",
               400,
             );
@@ -209,7 +210,7 @@ export async function POST(
     | undefined;
 
   if (endpointUrl) {
-    let target;
+    let target: Awaited<ReturnType<typeof assertSafeOutboundUrl>>;
     try {
       target = await assertSafeOutboundUrl(endpointUrl, { allowHttp: process.env.NODE_ENV !== "production" });
     } catch {
@@ -277,7 +278,7 @@ export async function POST(
     event_type: eventType,
     dispatched_at: dispatchedAt,
     synthetic: true,
-    request_id: correlationCtx?.request_id,
+    request_id: correlationCtx?.request_id ?? resolveRequestId(req.headers),
     data: {
       stream_id: id,
       status: stream.status,
@@ -291,7 +292,7 @@ export async function POST(
     event_type: eventType,
     has_endpoint: !!endpointUrl,
     stream_id: id,
-    request_id: correlationCtx?.request_id,
+    request_id: correlationCtx?.request_id ?? resolveRequestId(req.headers),
   });
 
   return NextResponse.json({ data: syntheticPayload }, { status: 202 });
