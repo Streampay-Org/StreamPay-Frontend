@@ -6,7 +6,7 @@ import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import TemplatesPage, { formatInterval } from "./page";
+import TemplatesPage, { formatInterval } from "./templates-client";
 
 const mockPush = jest.fn();
 const mockReplace = jest.fn();
