@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "crypto";
+import { createHmac, randomUUID } from "crypto";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { attachRequestFingerprintMetadata } from "@/lib/fingerprint";
 import type {
@@ -10,9 +10,10 @@ import type {
   AuditListFilters,
   AuditMetadataValue,
   AuditPurgeResult,
+  AuditCheckpoint,
 } from "@/app/types/audit";
 import type { DeepArchiveEntry, DeepArchiveResult } from "@/app/types/audit";
-export type { DeepArchiveEntry, DeepArchiveResult };
+export type { DeepArchiveEntry, DeepArchiveResult, AuditCheckpoint };
 
 export const AUDIT_LOG_RETENTION_DAYS = 30;
 
@@ -46,8 +47,25 @@ function sortKeys(value: unknown): unknown {
   return value;
 }
 
+/**
+ * Fixed test key used in dev/test when AUDIT_CHAIN_KEY is not set.
+ * Never used in production — validateConfig() throws if missing.
+ */
+const TEST_AUDIT_CHAIN_KEY = "test-audit-chain-key-do-not-use-in-prod";
+
+function getAuditChainKey(): string {
+  const key = process.env.AUDIT_CHAIN_KEY;
+  if (key) return key;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("AUDIT_CHAIN_KEY is required in production");
+  }
+  // Dev/test fallback
+  return TEST_AUDIT_CHAIN_KEY;
+}
+
 function hashValue(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(sortKeys(value))).digest("hex");
+  const key = getAuditChainKey();
+  return createHmac("sha256", key).update(JSON.stringify(sortKeys(value))).digest("hex");
 }
 
 function cloneValue<T>(value: T): T {
@@ -91,6 +109,7 @@ export class AppendOnlyAuditLogStore {
   private readonly entries: AuditEntry[] = [];
   private readonly archivedEntries: AuditEntry[] = [];
   private readonly deepArchivedEntries: DeepArchiveEntry[] = [];
+  private readonly checkpoints: AuditCheckpoint[] = [];
 
   append(input: AuditEntryInput): AuditEntry {
     const lastEntry = this.entries[this.entries.length - 1];
@@ -189,7 +208,7 @@ export class AppendOnlyAuditLogStore {
           cursorTimestamp = parts[0];
           cursorId = parts[1];
         }
-      } catch (e) {
+      } catch {
         // Invalid cursor format handled by returning no results or ignoring?
         // We'll throw an error and let the caller handle it or just return empty
       }
@@ -300,7 +319,18 @@ export class AppendOnlyAuditLogStore {
 
   assertIntegrity(): boolean {
     const chain = [...this.archivedEntries, ...this.entries];
-    let previousHash: string | null = null;
+    if (chain.length === 0) return true;
+
+    // The first entry's prevHash must be null (genesis) or match a checkpoint's
+    // lastPurgedHash (the chain was truncated at a checkpoint).
+    const firstPrev = chain[0].prevHash;
+    const validGenesis = firstPrev === null;
+    const validCheckpoint = this.checkpoints.some(
+      (cp) => cp.lastPurgedHash === firstPrev,
+    );
+    if (!validGenesis && !validCheckpoint) return false;
+
+    let previousHash: string | null = chain[0].prevHash;
 
     for (const entry of chain) {
       const recalculatedHash = hashValue({
@@ -348,19 +378,59 @@ export class AppendOnlyAuditLogStore {
     const purged = this.entries.filter((entry) => Date.parse(entry.timestamp) < cutoffMs);
     const retained = this.entries.filter((entry) => Date.parse(entry.timestamp) >= cutoffMs);
 
-    if (execute && purged.length > 0) {
-      const rebased = this.rebaseChain(retained);
-      this.entries.splice(0, this.entries.length, ...rebased);
+    if (!execute) {
+      // Dry run: no checkpoint, no mutation
+      return {
+        chainIntactAfter: chainIntactBefore,
+        chainIntactBefore,
+        cutoffTimestamp: new Date(cutoffMs).toISOString(),
+        executed: false,
+        purgedEntries: purged.length,
+        purgedIds: purged.map((entry) => entry.id),
+        retainedEntries: retained.length,
+        checkpointId: null,
+      };
     }
 
+    if (purged.length === 0) {
+      return {
+        chainIntactAfter: chainIntactBefore,
+        chainIntactBefore,
+        cutoffTimestamp: new Date(cutoffMs).toISOString(),
+        executed: true,
+        purgedEntries: 0,
+        purgedIds: [],
+        retainedEntries: retained.length,
+        checkpointId: null,
+      };
+    }
+
+    // Create a checkpoint recording what was removed
+    const lastPurged = purged[purged.length - 1];
+    const checkpointId = `audit-checkpoint-${randomUUID()}`;
+    const checkpoint: AuditCheckpoint = {
+      checkpointId,
+      purgedCount: purged.length,
+      firstPurgedId: purged[0].id,
+      lastPurgedId: lastPurged.id,
+      lastPurgedHash: lastPurged.entryHash,
+      cutoff: new Date(cutoffMs).toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+    this.checkpoints.push(checkpoint);
+
+    // Retained entries keep their original prevHash — no rebasing.
+    this.entries.splice(0, this.entries.length, ...retained);
+
     return {
-      chainIntactAfter: execute ? this.assertIntegrity() : chainIntactBefore,
+      chainIntactAfter: this.assertIntegrity(),
       chainIntactBefore,
       cutoffTimestamp: new Date(cutoffMs).toISOString(),
-      executed: execute,
+      executed: true,
       purgedEntries: purged.length,
       purgedIds: purged.map((entry) => entry.id),
       retainedEntries: retained.length,
+      checkpointId,
     };
   }
 
@@ -401,21 +471,27 @@ export class AppendOnlyAuditLogStore {
         chainIntactAfter: chainIntactBefore,
         cutoffTimestamp: new Date(cutoffMs).toISOString(),
         archivedAt,
+        checkpointId: null,
       };
     }
 
-    const rebased = this.rebaseChain([...remainingArchived, ...remainingEntries]);
+    // Create a checkpoint recording what was archived
+    const lastArchived = toArchive[toArchive.length - 1];
+    const checkpointId = `audit-checkpoint-${randomUUID()}`;
+    const checkpoint: AuditCheckpoint = {
+      checkpointId,
+      purgedCount: toArchive.length,
+      firstPurgedId: toArchive[0].id,
+      lastPurgedId: lastArchived.id,
+      lastPurgedHash: lastArchived.entryHash,
+      cutoff: new Date(cutoffMs).toISOString(),
+      createdAt: archivedAt,
+    };
+    this.checkpoints.push(checkpoint);
 
-    this.archivedEntries.splice(
-      0,
-      this.archivedEntries.length,
-      ...rebased.slice(0, remainingArchived.length),
-    );
-    this.entries.splice(
-      0,
-      this.entries.length,
-      ...rebased.slice(remainingArchived.length),
-    );
+    // Retained entries keep their original prevHash — no rebasing.
+    this.archivedEntries.splice(0, this.archivedEntries.length, ...remainingArchived);
+    this.entries.splice(0, this.entries.length, ...remainingEntries);
 
     this.deepArchivedEntries.push(
       ...toArchive.map((entry) => ({
@@ -433,6 +509,7 @@ export class AppendOnlyAuditLogStore {
       chainIntactAfter,
       cutoffTimestamp: new Date(cutoffMs).toISOString(),
       archivedAt,
+      checkpointId,
     };
   }
 
@@ -447,9 +524,14 @@ export class AppendOnlyAuditLogStore {
     this.entries.splice(0, this.entries.length);
     this.archivedEntries.splice(0, this.archivedEntries.length);
     this.deepArchivedEntries.splice(0, this.deepArchivedEntries.length);
+    this.checkpoints.splice(0, this.checkpoints.length);
     for (const entry of seedEntries) {
       this.append(entry);
     }
+  }
+
+  getCheckpoints(): AuditCheckpoint[] {
+    return this.checkpoints.map((cp) => ({ ...cp }));
   }
 
   private toExportRow(entry: AuditEntry): AuditExportRow {
@@ -474,28 +556,6 @@ export class AppendOnlyAuditLogStore {
     };
   }
 
-  private rebaseChain(entries: AuditEntry[]): AuditEntry[] {
-    let previousHash: string | null = null;
-
-    return entries.map((entry) => {
-      const nextEntry = cloneValue(entry);
-      nextEntry.prevHash = previousHash;
-      nextEntry.entryHash = hashValue({
-        action: nextEntry.action,
-        actor: nextEntry.actor,
-        afterHash: nextEntry.afterHash,
-        beforeHash: nextEntry.beforeHash,
-        diffHash: nextEntry.diffHash,
-        metadata: nextEntry.metadata ?? null,
-        prevHash: nextEntry.prevHash,
-        requestId: nextEntry.requestId,
-        target: nextEntry.target,
-        timestamp: nextEntry.timestamp,
-      });
-      previousHash = nextEntry.entryHash;
-      return deepFreeze(nextEntry);
-    });
-  }
 }
 
 function normalizeRole(role: string | null): AuditActorRole | null {

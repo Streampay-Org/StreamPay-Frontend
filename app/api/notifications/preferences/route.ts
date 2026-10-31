@@ -328,11 +328,11 @@ async function handleNotificationPreferencesPut(request: Request) {
 export async function GET(request: Request) {
   return withRouteSpan("/api/notifications/preferences", () =>
     handleNotificationPreferencesGet(request),
-  );
+  )(request);
 }
 
 export async function PUT(request: Request) {
   return withRouteSpan("/api/notifications/preferences", () =>
     handleNotificationPreferencesPut(request),
-  );
+  )(request);
 }

@@ -1,5 +1,5 @@
 /* Extracted from globals.css; selectors stay global to preserve markup and tests. */
-:global(.push-optin) {
+.push-optin {
 
   background: linear-gradient(
     135deg,
@@ -14,7 +14,7 @@
   padding: 1.5rem;
 }
 
-:global(.push-optin--success) {
+.push-optin--success {
 
   background: linear-gradient(
     135deg,
@@ -23,7 +23,7 @@
   );
 }
 
-:global(.push-optin--warning) {
+.push-optin--warning {
 
   background: linear-gradient(
     135deg,
@@ -32,14 +32,14 @@
   );
 }
 
-:global(.push-optin__copy),
-:global(.push-optin__actions) {
+.push-optin__copy,
+.push-optin__actions {
 
   display: grid;
   gap: 0.75rem;
 }
 
-:global(.push-optin__eyebrow) {
+.push-optin__eyebrow {
 
   color: var(--accent-strong);
   font-size: 0.75rem;
@@ -48,25 +48,25 @@
   text-transform: uppercase;
 }
 
-:global(.push-optin__title) {
+.push-optin__title {
 
   font-size: 1.35rem;
 }
 
-:global(.push-optin__description),
-:global(.push-optin__security-note),
-:global(.push-optin__message) {
+.push-optin__description,
+.push-optin__security-note,
+.push-optin__message {
 
   color: var(--muted-light);
   line-height: 1.6;
 }
 
-:global(.push-optin__security-note) {
+.push-optin__security-note {
 
   font-size: 0.875rem;
 }
 
-:global(.push-optin__fallback) {
+.push-optin__fallback {
 
   align-items: center;
   display: flex;
@@ -74,7 +74,7 @@
   min-height: var(--touch-target);
 }
 
-:global(.push-optin__fallback) input {
+.push-optin__fallback input {
 
   accent-color: var(--accent);
   height: 1rem;
@@ -82,17 +82,17 @@
 }
 
 
-:global(.push-optin) {
+.push-optin {
  margin-bottom: 1.5rem; }
 
-:global(.light) :global(.push-optin__eyebrow) {
+.light .push-optin__eyebrow {
  color: var(--system-success-text); }
 
-:global(.light) :global(.push-optin) {
+.light .push-optin {
  background: linear-gradient(135deg, rgba(14, 165, 233, 0.1), var(--panel)); }
 
-:global(.light) :global(.push-optin--success) {
+.light .push-optin--success {
  background: linear-gradient(135deg, rgba(34, 197, 94, 0.12), var(--panel)); }
 
-:global(.light) :global(.push-optin--warning) {
+.light .push-optin--warning {
  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), var(--panel)); }

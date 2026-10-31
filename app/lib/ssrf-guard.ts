@@ -18,6 +18,7 @@ function v4Blocked(host: string): boolean {
   const parts = host.split(".").map(Number);
   if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
   const [a] = parts;
+  if (a >= 224 || (a === 192 && parts[1] === 0) || (a === 198 && (parts[1] === 18 || parts[1] === 19))) return true;
   return a === 0 || a === 10 || a === 127 || parts[0] === 169 && parts[1] === 254 ||
     (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
     (parts[0] === 192 && parts[1] === 168) ||
@@ -26,6 +27,17 @@ function v4Blocked(host: string): boolean {
 
 function v6Blocked(host: string): boolean {
   const h = host.replace(/%.*$/, "").toLowerCase();
+  // WHATWG URL canonicalizes IPv4-mapped addresses to hexadecimal hextets.
+  if (h.startsWith("::ffff:")) {
+    const mapped = h.slice(7);
+    if (mapped.includes(".")) return v4Blocked(mapped);
+    const words = mapped.split(":");
+    if (words.length !== 2) return true;
+    const high = Number.parseInt(words[0], 16), low = Number.parseInt(words[1], 16);
+    if (!Number.isFinite(high) || !Number.isFinite(low)) return true;
+    return v4Blocked([high >> 8, high & 255, low >> 8, low & 255].join("."));
+  }
+  if (h.startsWith("ff")) return true;
   return (
     h === "::" || h === "::1" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe8") ||
     h.startsWith("fe9") || h.startsWith("fea") || h.startsWith("feb") ||
@@ -44,7 +56,7 @@ export function isSafePublicHttpUrl(raw: string): boolean {
   if (url.protocol !== "https:" && url.protocol !== "http:") return false;
   if (url.username || url.password) return false;
 
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
   if (!host) return false;
   if (BLOCKED_HOSTS.has(host)) return false;
   if (BLOCKED_HOST_SUFFIXES.some((suffix) => host === suffix.slice(1) || host.endsWith(suffix))) return false;
