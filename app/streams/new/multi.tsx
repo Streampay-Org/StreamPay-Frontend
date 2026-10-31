@@ -45,10 +45,12 @@ export const MULTI_STREAM_ENDPOINT = "/api/v2/streams/multi";
 
 /** Name of the double-submit CSRF cookie/header pair enforced by `middleware.ts`. */
 const CSRF_COOKIE_NAME = "csrf-token";
+/** Production uses the `__Host-` prefixed cookie name. */
+const CSRF_HOST_COOKIE_NAME = "__Host-csrf-token";
 const CSRF_HEADER_NAME = "x-csrf-token";
 
 /**
- * Read the CSRF token minted by the middleware's `csrf-token` cookie.
+ * Read the CSRF token minted by the middleware's CSRF cookie.
  *
  * Every state-changing `/api/*` request is rejected with 403
  * `CSRF_TOKEN_INVALID` unless the same value is echoed in the
@@ -56,10 +58,16 @@ const CSRF_HEADER_NAME = "x-csrf-token";
  */
 function readCsrfToken(): string | null {
   if (typeof document === "undefined") return null;
-  const match = document.cookie.match(
-    new RegExp(`(?:^|;\\s*)${CSRF_COOKIE_NAME}=([^;]+)`),
-  );
-  return match?.[1] ?? null;
+
+  for (const cookieName of [CSRF_HOST_COOKIE_NAME, CSRF_COOKIE_NAME]) {
+    const match = document.cookie.match(
+      new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`),
+    );
+    const value = match?.[1];
+    if (value) return value;
+  }
+
+  return null;
 }
 
 /** Wizard steps shown in the StepIndicator. */

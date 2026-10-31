@@ -65,7 +65,7 @@ class StreamEventBus extends EventEmitter {
         const store = getStore();
         const entry = activityEventToTimelineEntry(event);
         store.activityTimeline.append(entry);
-      } catch (err) {
+      } catch {
         // If the store is not available (e.g. postgres adapter not wired),
         // silently skip. The projection is best-effort for the in-memory store.
       }

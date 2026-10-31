@@ -6,10 +6,12 @@
  * ## Stream lifecycle
  * ```
  * draft ──start──► active ──pause──► paused ──start──► active
- *   │                │                  │
- *   └──stop──►       └──stop/settle──►  └──stop/settle──►
- *                                                        ended ──withdraw──► withdrawn
+ *   └──stop──► ended ◄──stop/settle── active/paused
+ *              └──withdraw──► withdrawn
+ * active/paused ──cancel──► cancelled
  * ```
+ * Draft streams cannot be cancelled because they have no escrowed funds;
+ * their existing `STREAM_NOT_CANCELLABLE` response is preserved.
  *
  * ## Idempotent transitions
  * Certain actions are idempotent when the stream is already in the target
@@ -52,15 +54,18 @@ const TRANSITIONS: Partial<Record<StreamStatus, Partial<Record<StreamAction, Str
     stop:  "ended",
   },
   active: {
-    pause:  "paused",
+    start:  "active",
     stop:   "ended",
     settle: "ended",
+    cancel: "cancelled",
+    pause:  "paused",
   },
   paused: {
     start:  "active",
-    pause:  "paused",  // idempotent
     stop:   "ended",
     settle: "ended",
+    cancel: "cancelled",
+    pause:  "paused",
   },
   ended: {
     stop:     "ended",     // idempotent
@@ -70,20 +75,28 @@ const TRANSITIONS: Partial<Record<StreamStatus, Partial<Record<StreamAction, Str
   withdrawn: {
     withdraw: "withdrawn", // idempotent
   },
+  cancelled: {},
 };
 
-/**
- * Actions that are idempotent when the stream is already in the implied
- * target state. These return `ok: true` with the current status unchanged.
- */
-const IDEMPOTENT_ACTIONS: Partial<Record<StreamStatus, StreamAction[]>> = {
-  active:    ["start"],
-  paused:    ["pause"],
-  ended:     ["stop", "settle"],
-  withdrawn: ["withdraw"],
+const NEXT_ACTION_PREFERENCE: Partial<Record<StreamStatus, StreamAction>> = {
+  draft: "start",
+  active: "pause",
+  paused: "start",
+  ended: "withdraw",
 };
 
 // ── Core function ─────────────────────────────────────────────────────────────
+
+/** Return the valid actions for a status, preserving transition-table order. */
+export function allowedActions(status: StreamStatus): StreamAction[] {
+  return Object.keys(TRANSITIONS[status] ?? {}) as StreamAction[];
+}
+
+/** Return the preferred client action when that action is allowed by the table. */
+export function nextActionFor(status: StreamStatus): StreamAction | undefined {
+  const preferred = NEXT_ACTION_PREFERENCE[status];
+  return preferred && allowedActions(status).includes(preferred) ? preferred : undefined;
+}
 
 /**
  * Compute the next stream status for a given action.
@@ -116,16 +129,11 @@ export function transition(
   currentStatus: StreamStatus,
   action: StreamAction,
 ): TransitionResult {
-  // 1. Explicit transition
+  // A transition to the same status is an idempotent success.
   const nextStatus = TRANSITIONS[currentStatus]?.[action];
-  if (nextStatus) return { ok: true, nextStatus };
+  if (nextStatus !== undefined) return { ok: true, nextStatus };
 
-  // 2. Idempotent action (no state change)
-  if (IDEMPOTENT_ACTIONS[currentStatus]?.includes(action)) {
-    return { ok: true, nextStatus: currentStatus };
-  }
-
-  // 3. Illegal transition
+  // Illegal transition
   return {
     ok: false,
     error: `Action '${action}' is illegal for a stream in '${currentStatus}' state.`,

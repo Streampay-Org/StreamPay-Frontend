@@ -1,25 +1,20 @@
-import { Suspense } from "react";
+import type { Metadata } from "next";
+import { unstable_cache } from "next/cache";
+import { listTemplates } from "@/app/lib/repositories/templates";
 import TemplatesPageClient from "./templates-client";
 
-/**
- * Server Component shell for /templates (#1691).
- *
- * The interactive gallery is a client component that relies on the URL query
- * (useSearchParams); it is streamed inside a route-level Suspense boundary so
- * the shell renders without client JS and the grid can warm on the server.
- */
-export default function TemplatesPage() {
-  return (
-    <Suspense fallback={<TemplatesPageShellFallback />}>
-      <TemplatesPageClient />
-    </Suspense>
-  );
-}
+export const metadata: Metadata = {
+  title: "Stream templates | StreamPay",
+  description: "Browse reusable payment-stream templates.",
+};
+export const revalidate = 60;
+const cachedTemplates = unstable_cache(async () => listTemplates(), ["stream-templates"], { revalidate: 60 });
 
-function TemplatesPageShellFallback() {
-  return (
-    <main className="page-shell" aria-busy="true">
-      <section className="page-hero" />
-    </main>
-  );
+export default async function TemplatesPage(
+  { searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {},
+) {
+  // Request-bound query state keeps the filter island server-renderable.
+  await searchParams;
+  const initialTemplates = await cachedTemplates();
+  return <TemplatesPageClient initialTemplates={initialTemplates} />;
 }

@@ -1,5 +1,4 @@
 "use client";
-import "./templates.module.css";
 
 import {
   Suspense,
@@ -15,12 +14,13 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Skeleton } from "../components/Skeleton";
 import { EmptyState } from "../components/EmptyState";
 import { PageError } from "../components/PageError";
+import { LiveRegion, type AriaLive } from "../components/LiveRegion";
 
-interface Template {
+export interface Template {
   id: string;
   name: string;
   asset: string;
-  amountPerInterval: number;
+  amountPerInterval: string;
   intervalSeconds: number;
   memo?: string;
   createdAt: string;
@@ -116,16 +116,16 @@ function useTemplateFilters() {
   return { activeCategory, searchQuery, selectCategory, changeSearch, clearFilters };
 }
 
-function formatInterval(seconds: number): string {
-  if (seconds >= 86400) {
+export function formatInterval(seconds: number): string {
+  if (seconds >= 86400 && seconds % 86400 === 0) {
     const days = seconds / 86400;
     return days === 1 ? "Daily" : `${days} days`;
   }
-  if (seconds >= 3600) {
+  if (seconds >= 3600 && seconds % 3600 === 0) {
     const hours = seconds / 3600;
     return hours === 1 ? "Hourly" : `${hours} hours`;
   }
-  if (seconds >= 60) {
+  if (seconds >= 60 && seconds % 60 === 0) {
     const mins = seconds / 60;
     return mins === 1 ? "Minute" : `${mins} minutes`;
   }
@@ -216,7 +216,7 @@ function TemplateCardSkeleton() {
   );
 }
 
-function TemplateGridSkeleton() {
+export function TemplateGridSkeleton() {
   return (
     <div className="template-grid">
       {Array.from({ length: 6 }).map((_, i) => (
@@ -226,13 +226,17 @@ function TemplateGridSkeleton() {
   );
 }
 
-function TemplatesContent() {
+function TemplatesContent({ initialTemplates }: { initialTemplates?: Template[] }) {
   const router = useRouter();
-  const [pageState, setPageState] = useState<TemplatesPageState>("loading");
-  const [templates, setTemplates] = useState<Template[]>([]);
+  const [pageState, setPageState] = useState<TemplatesPageState>(initialTemplates === undefined ? "loading" : initialTemplates.length ? "populated" : "empty");
+  const [templates, setTemplates] = useState<Template[]>(initialTemplates ?? []);
   const { activeCategory, searchQuery, selectCategory, changeSearch, clearFilters } = useTemplateFilters();
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [loadKey, setLoadKey] = useState(0);
+
+  const [announcedCount, setAnnouncedCount] = useState<number | null>(null);
+  const prevCategoryRef = useRef(activeCategory);
+  const isInitialLoad = useRef(true);
 
   const handleRetry = useCallback(() => {
     setLoadKey((k) => k + 1);
@@ -261,6 +265,11 @@ function TemplatesContent() {
   };
 
   useEffect(() => {
+    if (initialTemplates !== undefined && loadKey === 0) {
+      setTemplates(initialTemplates);
+      setPageState(initialTemplates.length ? "populated" : "empty");
+      return;
+    }
     setPageState("loading");
 
     const controller = new AbortController();
@@ -279,9 +288,9 @@ function TemplatesContent() {
       }
     }
 
-    fetchTemplates();
+    void fetchTemplates();
     return () => controller.abort();
-  }, [loadKey]);
+  }, [loadKey, initialTemplates]);
 
   const filtered = useMemo(() => {
     let result = templates;
@@ -303,12 +312,40 @@ function TemplatesContent() {
     return result;
   }, [templates, activeCategory, searchQuery]);
 
+  useEffect(() => {
+    if (pageState !== "populated" && pageState !== "empty") {
+      return;
+    }
+
+    // Initial load announcement without debounce delay
+    if (isInitialLoad.current) {
+      isInitialLoad.current = false;
+      setAnnouncedCount(filtered.length);
+      prevCategoryRef.current = activeCategory;
+      return;
+    }
+
+    // Category tab change or clearing search announces immediately
+    if (searchQuery === "" || prevCategoryRef.current !== activeCategory) {
+      prevCategoryRef.current = activeCategory;
+      setAnnouncedCount(filtered.length);
+      return;
+    }
+
+    // Typing in search: debounce announcement by 500ms
+    const timer = setTimeout(() => {
+      setAnnouncedCount(filtered.length);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [pageState, activeCategory, searchQuery, filtered.length]);
+
   const handleApply = useCallback(
     (template: Template) => {
       const params = new URLSearchParams({
         templateId: template.id,
         asset: template.asset,
-        rate: String(template.amountPerInterval),
+        rate: template.amountPerInterval,
         interval: String(template.intervalSeconds),
         memo: template.memo ?? "",
       });
@@ -317,8 +354,27 @@ function TemplatesContent() {
     [router],
   );
 
+  const currentCount = announcedCount ?? filtered.length;
+  let announcement = "";
+  let politeness: AriaLive = "polite";
+
+  if (pageState === "loading") {
+    announcement = "Loading templates…";
+    politeness = "polite";
+  } else if (pageState === "error") {
+    announcement = "Failed to load templates.";
+    politeness = "assertive";
+  } else {
+    announcement = `Showing ${currentCount} template${currentCount === 1 ? "" : "s"}`;
+    politeness = "polite";
+  }
+
   return (
-    <TemplatesPageShell pageState={pageState}>
+    <TemplatesPageShell
+      pageState={pageState}
+      announcement={announcement}
+      politeness={politeness}
+    >
       {pageState === "loading" ? (
         <TemplateGridSkeleton />
       ) : pageState === "error" ? (
@@ -372,32 +428,34 @@ function TemplatesContent() {
 
           <div
             aria-labelledby={`template-tab-${activeCategory}`}
-            className={filtered.length > 0 ? "template-grid" : undefined}
             id="template-panel"
             role="tabpanel"
             tabIndex={0}
           >
-            <span className="sr-only" role="status">
-              {`Showing ${filtered.length} template${filtered.length === 1 ? "" : "s"}`}
-            </span>
-            {filtered.length > 0 ? filtered.map((template) => (
-              <TemplateCard
-                key={template.id}
-                onApply={handleApply}
-                template={template}
-              />
-            )) : (
-              <EmptyState
-                actionLabel="Clear filters"
-                description="No templates match your current filters. Try a different category or search term."
-                eyebrow="No results"
-                onAction={() => {
-                  clearFilters();
-                  tabRefs.current[0]?.focus();
-                }}
-                title="No templates found"
-              />
-            )}
+            <div
+              className={filtered.length > 0 ? "template-grid" : undefined}
+              role="region"
+              aria-label="Template results"
+            >
+              {filtered.length > 0 ? filtered.map((template) => (
+                <TemplateCard
+                  key={template.id}
+                  onApply={handleApply}
+                  template={template}
+                />
+              )) : (
+                <EmptyState
+                  actionLabel="Clear filters"
+                  description="No templates match your current filters. Try a different category or search term."
+                  eyebrow="No results"
+                  onAction={() => {
+                    clearFilters();
+                    tabRefs.current[0]?.focus();
+                  }}
+                  title="No templates found"
+                />
+              )}
+            </div>
           </div>
         </>
       )}
@@ -405,12 +463,34 @@ function TemplatesContent() {
   );
 }
 
-function TemplatesPageShell({ pageState, children }: {
+function TemplatesPageShell({
+  pageState,
+  announcement,
+  politeness = "polite",
+  children,
+}: {
   pageState: TemplatesPageState;
+  announcement?: string;
+  politeness?: AriaLive;
   children: ReactNode;
 }) {
+  const fallbackAnnouncement =
+    pageState === "loading"
+      ? "Loading templates…"
+      : pageState === "error"
+        ? "Failed to load templates."
+        : "";
+  const effectiveAnnouncement = announcement ?? fallbackAnnouncement;
+  const effectivePoliteness =
+    pageState === "error" ? "assertive" : politeness;
+
   return (
     <main className="page-shell templates-page">
+      <LiveRegion
+        message={effectiveAnnouncement}
+        politeness={effectivePoliteness}
+      />
+
       <section className="page-hero">
         <div>
           <p className="page-hero__eyebrow">Templates</p>
@@ -438,14 +518,6 @@ function TemplatesPageShell({ pageState, children }: {
           </div>
         </div>
 
-        <span aria-live="polite" className="sr-only" role="status">
-          {pageState === "loading"
-            ? "Loading templates…"
-            : pageState === "error"
-              ? "Failed to load templates."
-              : ""}
-        </span>
-
         {children}
       </section>
     </main>
@@ -453,14 +525,14 @@ function TemplatesPageShell({ pageState, children }: {
 }
 
 /** Templates gallery with URL-backed filters inside the App Router's Suspense boundary. */
-export default function TemplatesPage() {
+export default function TemplatesPageClient({ initialTemplates }: { initialTemplates?: Template[] } = {}) {
   return (
     <Suspense fallback={
       <TemplatesPageShell pageState="loading">
         <TemplateGridSkeleton />
       </TemplatesPageShell>
     }>
-      <TemplatesContent />
+      <TemplatesContent initialTemplates={initialTemplates} />
     </Suspense>
   );
 }
