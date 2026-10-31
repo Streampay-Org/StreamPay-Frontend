@@ -4,14 +4,11 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-
-const SESSION_STORAGE_KEY = "streampay.auth.jwt";
 
 export interface AuthSessionValue {
   /** Raw bearer token, or null when signed out. */
@@ -28,24 +25,11 @@ const AuthSessionContext = createContext<AuthSessionValue | null>(null);
 export function AuthSessionProvider({ children }: { children: ReactNode }) {
   const [token, setTokenState] = useState<string | null>(null);
   const recoveryRef = useRef<(() => Promise<void>) | null>(null);
+  const pendingRecovery = useRef<Promise<void> | null>(null);
 
-  useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem(SESSION_STORAGE_KEY);
-      if (stored) setTokenState(stored);
-    } catch {
-      // Storage can be unavailable (private mode); stay signed out.
-    }
-  }, []);
-
+  // Bearer tokens intentionally remain in memory only.
   const setToken = useCallback((next: string | null) => {
     setTokenState(next);
-    try {
-      if (next) sessionStorage.setItem(SESSION_STORAGE_KEY, next);
-      else sessionStorage.removeItem(SESSION_STORAGE_KEY);
-    } catch {
-      // Ignore write failures; in-memory state remains authoritative.
-    }
   }, []);
 
   const registerRecovery = useCallback((handler: (() => Promise<void>) | null) => {
@@ -55,7 +39,10 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   const recover = useCallback(async () => {
     const handler = recoveryRef.current;
     if (!handler) return;
-    await handler();
+    if (!pendingRecovery.current) {
+      pendingRecovery.current = Promise.resolve().then(handler).finally(() => { pendingRecovery.current = null; });
+    }
+    await pendingRecovery.current;
   }, []);
 
   const value = useMemo(
@@ -88,11 +75,14 @@ export function useAuthFetch() {
       const headers = new Headers(
         input instanceof Request ? (init.headers ?? input.headers) : init.headers,
       );
-      if (token && !headers.has("Authorization")) {
+      const target = input instanceof Request ? input.url : String(input);
+      const origin = typeof window === "undefined" ? null : window.location.origin;
+      const sameOrigin = origin !== null && new URL(target, origin).origin === origin;
+      if (token && sameOrigin && !headers.has("Authorization")) {
         headers.set("Authorization", `Bearer ${token}`);
       }
       const response = await fetch(input, { ...init, headers });
-      if (response.status === 401) {
+      if (sameOrigin && response.status === 401) {
         setToken(null);
         await recover();
       }

@@ -235,19 +235,17 @@ export function getZonedTimeComponents(
     Sat: 6,
   };
 
-  const rawHour = parseInt(map.hour, 10);
-  // Some ICU builds return "24" for midnight of the next day. When that happens,
-  // the hour wraps to 0 and the day must advance by 1.
-  const hour = rawHour % 24;
-  const dayRollover = rawHour === 24 ? 1 : 0;
+  // With `hour12: false` some ICU builds render the first hour of the day as
+  // "24" (h24 cycle). The date and weekday parts already describe that same
+  // calendar day, so only the hour is normalised; advancing the day here would
+  // shift every after-midnight instant forward by 24 hours.
+  const hour = parseInt(map.hour, 10) % 24;
   const minute = parseInt(map.minute, 10);
   const second = parseInt(map.second, 10);
-  const day = parseInt(map.day, 10) + dayRollover;
+  const day = parseInt(map.day, 10);
   const month = parseInt(map.month, 10);
   const year = parseInt(map.year, 10);
-  const dayOfWeek = dayRollover === 1
-    ? (weekdayMap[map.weekday] !== undefined ? (weekdayMap[map.weekday]! + 1) % 7 : 1)
-    : weekdayMap[map.weekday] ?? 0;
+  const dayOfWeek = weekdayMap[map.weekday] ?? 0;
 
   return { year, month, day, hour, minute, second, dayOfWeek };
 }

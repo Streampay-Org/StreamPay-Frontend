@@ -1,4 +1,4 @@
-import { CorrelationContext, withCorrelationContext, getCorrelationContext, logger } from './logger';
+import { CorrelationContext, getCorrelationContext, logger } from './logger';
 
 // Mock job interface
 export interface Job<T = unknown> {
