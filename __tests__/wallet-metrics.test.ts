@@ -1,4 +1,11 @@
-import { GET, POST } from '@/app/api/auth/wallet/route';
+import crypto from 'crypto';
+import {
+  GET,
+  POST,
+  resetWalletChallengeStoreForTesting,
+  seedWalletChallengeForTesting,
+} from '@/app/api/auth/wallet/route';
+import { encodeStellarPublicKey } from '@/app/lib/stellar-address';
 import {
   registry,
   walletAuthCounter,
@@ -7,7 +14,6 @@ import {
 import { resetRateLimitStore } from '@/app/lib/rate-limit-store';
 
 const VALID_ADDRESS = 'GCLH2SNM5MTV4TGNNOADLYOZJYIFBXTIDVSNW4XP3LEI2UQV2MZ46OD7';
-const VALID_CHALLENGE = 'streampay-auth:v1:nKlQNln6SV4hJ6pm6jNMSBVlcqo7r8Pjcj9mqLA_oRg|http://localhost|2024-01-15T10:05:00.000Z';
 
 /**
  * Helper: search a Prometheus text-exposition string for a sample line whose
@@ -66,12 +72,30 @@ function makeGetRequest(params: Record<string, string> = {}, headers: Record<str
   } as unknown as import('next/server').NextRequest;
 }
 
+function streamFromText(text: string): ReadableStream<Uint8Array> {
+  const encoded = new TextEncoder().encode(text);
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (encoded.byteLength > 0) controller.enqueue(encoded);
+      controller.close();
+    },
+  });
+}
+
 function makePostRequest(
   body: unknown,
   csrfCookie?: string,
   csrfHeader?: string,
 ) {
+  const text =
+    body === 'THROW'
+      ? '{'
+      : typeof body === 'string'
+        ? body
+        : (JSON.stringify(body) ?? '');
+
   return {
+    body: streamFromText(text),
     json: async () => {
       if (body === 'THROW') throw new Error('parse error');
       return body;
@@ -95,17 +119,34 @@ function makePostRequest(
   } as unknown as import('next/server').NextRequest;
 }
 
+let challengeSeq = 0;
+
+/**
+ * A verify body that passes validation, challenge lookup and ed25519
+ * signature verification: a fresh wallet signs a freshly seeded challenge.
+ */
 function validPostBody() {
-  return {
-    address: VALID_ADDRESS,
-    challenge: VALID_CHALLENGE,
-    signature: 'validbase64sig==',
-  };
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  const address = encodeStellarPublicKey(
+    publicKey.export({ type: 'spki', format: 'der' }).subarray(12),
+  );
+  const nonce = `metrics${++challengeSeq}_`.padEnd(43, 'A');
+  const challenge = `streampay-auth:v1:${nonce}|http://localhost|2099-01-01T00:00:00.000Z`;
+  seedWalletChallengeForTesting({
+    address,
+    challenge,
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+  });
+  const signature = crypto
+    .sign(null, Buffer.from(challenge, 'utf-8'), privateKey)
+    .toString('base64');
+  return { address, challenge, signature };
 }
 
 beforeEach(() => {
   registry.resetMetrics();
   resetRateLimitStore();
+  resetWalletChallengeStoreForTesting();
 });
 
 describe('Per-endpoint metrics on /api/auth/wallet', () => {

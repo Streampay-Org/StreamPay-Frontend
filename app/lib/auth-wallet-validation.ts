@@ -34,6 +34,8 @@ export const walletChallengeQuerySchema = z.object({
   address: stellarAddress,
 });
 
+const base64Regex = /^[A-Za-z0-9+/]+={0,2}$/;
+
 export const walletVerifyBodySchema = z.object({
   address: stellarAddress,
   challenge: z
@@ -52,7 +54,31 @@ export const walletVerifyBodySchema = z.object({
     .max(
       MAX_SIGNATURE_LENGTH,
       `must be at most ${MAX_SIGNATURE_LENGTH} characters.`,
-    ),
+    )
+    .superRefine((val, ctx) => {
+      if (!val || val.length > MAX_SIGNATURE_LENGTH) return;
+      if (val.length % 4 !== 0 || !base64Regex.test(val)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "must be a valid 64-byte base64-encoded Ed25519 signature.",
+        });
+        return;
+      }
+      try {
+        const buf = Buffer.from(val, "base64");
+        if (buf.length !== 64) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "must be a valid 64-byte base64-encoded Ed25519 signature.",
+          });
+        }
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "must be a valid 64-byte base64-encoded Ed25519 signature.",
+        });
+      }
+    }),
 });
 
 function toValidationErrors(error: z.ZodError): ValidationError[] {

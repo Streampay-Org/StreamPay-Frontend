@@ -353,3 +353,8 @@ export function buildCsvExport(contacts: ContactRow[]): string {
   );
   return [header, ...lines].join("\r\n");
 }
+
+export const buildExportJson = buildJsonExport;
+export const buildExportCsv = buildCsvExport;
+export const classifyImport = classifyRows;
+

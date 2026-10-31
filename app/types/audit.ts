@@ -62,6 +62,16 @@ export interface AuditExportRow {
   redactionPolicy: "mask-target-account";
 }
 
+export interface AuditCheckpoint {
+  checkpointId: string;
+  purgedCount: number;
+  firstPurgedId: string;
+  lastPurgedId: string;
+  lastPurgedHash: string;
+  cutoff: string;
+  createdAt: string;
+}
+
 export interface AuditPurgeResult {
   chainIntactAfter: boolean;
   chainIntactBefore: boolean;
@@ -70,6 +80,7 @@ export interface AuditPurgeResult {
   purgedEntries: number;
   purgedIds: string[];
   retainedEntries: number;
+  checkpointId: string | null;
 }
 
 export interface DeepArchiveEntry {
@@ -84,4 +95,5 @@ export interface DeepArchiveResult {
   chainIntactAfter: boolean;
   cutoffTimestamp: string;
   archivedAt: string;
+  checkpointId: string | null;
 }

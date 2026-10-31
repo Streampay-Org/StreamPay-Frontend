@@ -504,26 +504,6 @@ function validateRecipient(
     return;
   }
 
-  // Ledgers carry stroop units: fan-out legs must be integers (#1743).
-  if (recipient.amount !== undefined && recipient.amount !== null && !Number.isInteger(recipient.amount)) {
-    fail(`${field}.amount`, "NON_INTEGER_AMOUNT", "amount must be an integer number of stroops when provided.");
-    return;
-  }
-
-  // Schema-valid the optional per-leg rate / schedule fields (#1743).
-  const legExtra = raw as Record<string, unknown>;
-  if (legExtra.rate !== undefined && legExtra.rate !== null) {
-    if (typeof legExtra.rate !== "string" || !/^[1-9][0-9]*$/.test(legExtra.rate.trim())) {
-      fail(`${field}.rate`, "INVALID_RATE", "rate must be a positive integer-stroop string.");
-    }
-  }
-  const SCHEDULES = ["second", "minute", "hour", "day", "week", "month", "year"];
-  if (legExtra.schedule !== undefined && legExtra.schedule !== null) {
-    if (typeof legExtra.schedule !== "string" || !SCHEDULES.includes(legExtra.schedule)) {
-      fail(`${field}.schedule`, "INVALID_SCHEDULE", `schedule must be one of: ${SCHEDULES.join(", ")}.`);
-    }
-  }
-
   if (totalAmount === null || totalAmount <= 0) return;
 
   const derived = deriveSingleAmount(totalAmount, percentage);
@@ -534,4 +514,27 @@ function validateRecipient(
       `amount must equal percentage x totalAmount (${formatAmount(derived)}); the server recomputes this value.`,
     );
   }
+}
+
+/** Exact raw-unit allocation. Display amounts remain separate from ledger units. */
+export function deriveRawAllocationAmounts(totalRaw: string, percentages: readonly number[]): bigint[] {
+  if (!/^\d+$/.test(totalRaw) || BigInt(totalRaw) <= 0n || BigInt(totalRaw) > 9_223_372_036_854_775_807n) {
+    throw new Error("totalRaw must be a positive Stellar i64 amount");
+  }
+  if (percentages.length < 1 || percentages.length > MAX_RECIPIENTS) throw new Error("Invalid recipient count");
+  const weights = percentages.map(percentage => {
+    if (!Number.isFinite(percentage) || percentage < 0 || percentage > 100 ||
+      Number(percentage.toFixed(4)) !== percentage) throw new Error("Invalid allocation percentage");
+    return BigInt(percentage.toFixed(4).replace(".", ""));
+  });
+  const sum = weights.reduce((value, weight) => value + weight, 0n);
+  if (sum < 999_990n || sum > 1_000_010n) throw new Error("Percentages must total 100");
+  const total = BigInt(totalRaw);
+  let allocated = 0n;
+  return weights.map((weight, index) => {
+    const amount = index === weights.length - 1 ? total - allocated : total * weight / 1_000_000n;
+    if (amount < 0n) throw new Error("Allocation exceeds the requested amount");
+    allocated += amount;
+    return amount;
+  });
 }

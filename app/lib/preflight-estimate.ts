@@ -3,7 +3,7 @@
  * Returns min XLM balance and estimated fees for proposed streams.
  */
 
-import { Amount, STROOPS_SCALE, type ValidationResult, type SupportedAsset } from "./amount";
+import { Amount, type ValidationResult, type SupportedAsset } from "./amount";
 
 export type PreflightEstimate = {
   min_balance_xlm: string;

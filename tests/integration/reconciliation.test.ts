@@ -401,29 +401,40 @@ describe("GET /api/reconciliation – integration", () => {
     });
 
     it("different identities get independent rate-limit buckets", async () => {
-      // Each identity gets exactly 1 request.
-      setRateLimitStore(makeExhaustedStore(1));
+      // API keys only count as an identity once they are registered (their
+      // SHA-256 hashes are listed in STREAMPAY_API_KEYS).
+      const sha256 = (value: string) =>
+        require("crypto").createHash("sha256").update(value, "utf8").digest("hex");
+      const previousKeys = process.env.STREAMPAY_API_KEYS;
+      process.env.STREAMPAY_API_KEYS = [sha256("key-alice"), sha256("key-bob")].join(",");
+      try {
+        // Each identity gets exactly 1 request.
+        setRateLimitStore(makeExhaustedStore(1));
 
-      const resA1 = await GET(
-        makeRequest({ headers: { "X-API-Key": "key-alice" } }),
-      );
-      const resB1 = await GET(
-        makeRequest({ headers: { "X-API-Key": "key-bob" } }),
-      );
-      expect(resA1.status).toBe(200);
-      expect(resB1.status).toBe(200);
+        const resA1 = await GET(
+          makeRequest({ headers: { "X-API-Key": "key-alice" } }),
+        );
+        const resB1 = await GET(
+          makeRequest({ headers: { "X-API-Key": "key-bob" } }),
+        );
+        expect(resA1.status).toBe(200);
+        expect(resB1.status).toBe(200);
 
-      // Second request from Alice — should be throttled.
-      const resA2 = await GET(
-        makeRequest({ headers: { "X-API-Key": "key-alice" } }),
-      );
-      expect(resA2.status).toBe(429);
+        // Second request from Alice — should be throttled.
+        const resA2 = await GET(
+          makeRequest({ headers: { "X-API-Key": "key-alice" } }),
+        );
+        expect(resA2.status).toBe(429);
 
-      // Bob should also be throttled on his second request.
-      const resB2 = await GET(
-        makeRequest({ headers: { "X-API-Key": "key-bob" } }),
-      );
-      expect(resB2.status).toBe(429);
+        // Bob should also be throttled on his second request.
+        const resB2 = await GET(
+          makeRequest({ headers: { "X-API-Key": "key-bob" } }),
+        );
+        expect(resB2.status).toBe(429);
+      } finally {
+        if (previousKeys === undefined) delete process.env.STREAMPAY_API_KEYS;
+        else process.env.STREAMPAY_API_KEYS = previousKeys;
+      }
     });
 
     it("uses IP-based identity when no auth headers are present", async () => {
