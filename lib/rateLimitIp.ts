@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRateLimitStore, RateLimitStore } from "@/app/lib/rate-limit-store";
 import { recordThrottle, recordRequest, redactRateLimitIdentity } from "@/app/lib/rate-limit-metrics";
-import { resolveRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
+import { generateRequestId, isValidRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
+import { resolveClientIp } from "@/lib/clientIp";
 
 /**
  * Wallet auth IP rate limits (independent of the general API rate limiter).
@@ -26,13 +27,17 @@ export interface WalletRateLimitResult {
  * Prefers gateway-forwarded headers; falls back to a generated id.
  */
 export function resolveCorrelationId(req: NextRequest): string {
-  return resolveRequestId(req.headers);
-}
-    req.headers.get("x-request-id") ?? req.headers.get("x-correlation-id");
-  if (forwarded && forwarded.trim().length > 0) {
-    return forwarded.trim();
+  const forwarded = (
+    req.headers.get(REQUEST_ID_HEADER) ?? req.headers.get("x-correlation-id")
+  )?.trim();
+
+  // Only echo forwarded ids that pass the shared allowlist so untrusted
+  // header values cannot be injected into logs or error envelopes.
+  if (forwarded && isValidRequestId(forwarded)) {
+    return forwarded;
   }
-  return `req_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 10)}`;
+
+  return generateRequestId();
 }
 
 /**
@@ -40,16 +45,7 @@ export function resolveCorrelationId(req: NextRequest): string {
  * Prefer the leftmost X-Forwarded-For entry (original client).
  */
 function extractIp(req: NextRequest): string {
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  const realIp = req.headers.get("x-real-ip");
-  if (realIp && realIp.trim().length > 0) {
-    return realIp.trim();
-  }
-  return "unknown";
+  return resolveClientIp(req.headers);
 }
 
 /**

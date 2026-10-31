@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { logger } from "@/app/lib/logger";
 import { IDEMPOTENCY_TTL_MS } from "@/app/lib/db";
@@ -9,11 +9,15 @@ export interface IdempotencyRecord {
   statusCode: number;
   body: unknown;
   createdAt: number;
+  reservationId?: string;
 }
 
 export interface IdempotencyStore {
   get(key: string): Promise<IdempotencyRecord | null>;
   set(key: string, record: IdempotencyRecord): Promise<void>;
+  setIfAbsent?(key: string, record: IdempotencyRecord): Promise<boolean>;
+  commit?(key: string, reservationId: string, record: IdempotencyRecord): Promise<boolean>;
+  release?(key: string, reservationId: string): Promise<void>;
 }
 
 /**
@@ -43,49 +47,53 @@ export function scopedIdempotencyKey(resourceId: string, key: string): string {
 }
 
 // Helper to create a namespaced store backed by the existing persistence layer
-export function createNamespacedStore(namespace: string): IdempotencyStore {
-  const backing = db.idempotency as any;
-  const prefix = `idempotency:${namespace}:`;
+function inflightTtl() {
+  const value = Number(process.env.IDEMPOTENCY_INFLIGHT_TTL_MS);
+  return Number.isFinite(value) && value > 0 ? value : 30_000;
+}
 
+export function createNamespacedStore(namespace: string): IdempotencyStore {
+  const backing = db.idempotency;
+  const prefix = "idempotency:" + namespace + ":";
+  type Stored = IdempotencyRecord & { expiresAt: number; status: number };
+  function read(key: string): Stored | null {
+    const value = backing.get(prefix + key) as Stored | undefined;
+    if (!value) return null;
+    if (typeof value.fingerprint !== "string" || value.expiresAt <= Date.now()) {
+      backing.delete(prefix + key);
+      return null;
+    }
+    return value;
+  }
+  function encode(record: IdempotencyRecord): Stored {
+    return { ...record, status: record.statusCode,
+      expiresAt: Date.now() + (record.statusCode === 0 ? inflightTtl() : IDEMPOTENCY_TTL_MS) };
+  }
   return {
-    async get(key: string) {
-      try {
-        const raw = backing.get(prefix + key);
-        if (raw === undefined) return null;
-        const entry = raw as any;
-        if (typeof entry?.fingerprint !== "string" || typeof entry?.expiresAt !== "number") {
-          backing.delete(prefix + key);
-          return null;
-        }
-        if (entry.expiresAt < Date.now()) {
-          backing.delete(prefix + key);
-          return null;
-        }
-        return {
-          fingerprint: entry.fingerprint,
-          statusCode: entry.status,
-          body: entry.body,
-          createdAt: entry.expiresAt - IDEMPOTENCY_TTL_MS,
-        } as IdempotencyRecord;
-      } catch (err: any) {
-        throw err;
-      }
+    async get(key) {
+      const record = read(key);
+      return record ? { ...record, statusCode: record.status,
+        createdAt: record.createdAt ?? record.expiresAt - IDEMPOTENCY_TTL_MS } : null;
     },
-    async set(key: string, record: IdempotencyRecord) {
-      // Persist in the backing store with an expiresAt so memory/postgres adapters
-      // can perform lazy eviction. For stores that support TTL at storage layer,
-      // this file can be extended to use native EX/TTL commands.
-      const now = Date.now();
-      const entry = {
-        fingerprint: record.fingerprint,
-        expiresAt: now + IDEMPOTENCY_TTL_MS,
-        status: record.statusCode,
-        body: record.body,
-      };
-      backing.set(prefix + key, entry);
+    async set(key, record) { backing.set(prefix + key, encode(record)); },
+    async setIfAbsent(key, record) {
+      read(key); // Expire abandoned reservations before the atomic create-only insert.
+      return backing.insert(prefix + key, encode(record));
+    },
+    async commit(key, owner, record) {
+      const current = read(key);
+      if (current?.reservationId !== owner || current.status !== 0) return false;
+      backing.set(prefix + key, encode(record));
+      return true;
+    },
+    async release(key, owner) {
+      const current = read(key);
+      if (current?.reservationId === owner && current.status === 0) backing.delete(prefix + key);
     },
   };
 }
+
+const activeRequests = new WeakMap<IdempotencyStore, Map<string, string>>();
 
 // Default route-scoped stores exported for callers to import.
 export const settleStore = createNamespacedStore("settle");
@@ -136,7 +144,7 @@ export async function withIdempotency(
   //            actor_id + NUL + SHA-256(body_json))
   let bodyJson: unknown = null;
   try {
-    const text = await request.text();
+    const text = await request.clone().text();
     bodyJson = text ? JSON.parse(text) : null;
   } catch {
     bodyJson = null;
@@ -155,74 +163,71 @@ export async function withIdempotency(
     [key, routeId, resourceId, actorId, bodyHash].join("\u0000"),
   );
 
-  // Try reading existing record. If the backing store fails, we log and
-  // allow the request through — degraded replay protection is preferable to
-  // blocking mutating operations.
-  let existing: IdempotencyRecord | null = null;
-  try {
-    existing = await store.get(storeKey);
-  } catch (err: any) {
-    logger.error("Idempotency store read failed; proceeding without replay protection", { err: err?.message });
-    existing = null;
-  }
-
-  if (existing) {
-    if (existing.fingerprint !== fingerprint) {
-      return NextResponse.json({ error: "IdempotencyKeyReused", message: "This Idempotency-Key was used with a different request body." }, { status: 409 });
+  const unavailable = () => NextResponse.json({
+    error: "IDEMPOTENCY_STORE_UNAVAILABLE", message: "Retry when replay protection is available.",
+  }, { status: 503 });
+  const occupied = (record: IdempotencyRecord | null) => {
+    if (record && record.fingerprint !== fingerprint) {
+      return NextResponse.json({
+        error: "IdempotencyKeyReused", code: "IDEMPOTENCY_CONFLICT",
+        message: "This Idempotency-Key was used with a different request body.",
+      }, { status: 409 });
     }
-
-    // A statusCode-0 record is the in-flight reservation written before the
-    // handler runs (#1721): a concurrent duplicate must be refused instead of
-    // double-executing the mutation.
-    if (existing.statusCode === 0) {
-      return NextResponse.json(
-        { error: "IdempotencyKeyInFlight", message: "This Idempotency-Key is currently being processed." },
-        { status: 409 },
-      );
+    if (!record || record.statusCode === 0) {
+      return NextResponse.json({
+        error: "IDEMPOTENCY_IN_FLIGHT", message: "This request is still being processed.",
+      }, { status: 409, headers: { "Retry-After": "1" } });
     }
+    return new NextResponse(JSON.stringify(record.body), {
+      status: record.statusCode,
+      headers: { "Idempotency-Replay": "true", "Idempotency-Key": key, "Content-Type": "application/json" },
+    });
+  };
+  const active = activeRequests.get(store) ?? new Map<string, string>();
+  activeRequests.set(store, active);
+  const running = active.get(storeKey);
+  if (running) return occupied({ fingerprint: running, statusCode: 0, body: null, createdAt: Date.now() });
 
-    const headers = new Headers({ "Idempotency-Replay": "true", "Idempotency-Key": key, "Content-Type": "application/json" });
-    return new NextResponse(JSON.stringify(existing.body), { status: existing.statusCode, headers });
+  const owner = randomUUID();
+  try {
+    const existing = await store.get(storeKey);
+    if (existing) return occupied(existing);
+    if (!store.setIfAbsent || !store.commit || !store.release) return unavailable();
+    const reserved = await store.setIfAbsent(storeKey, {
+      fingerprint, statusCode: 0, body: null, createdAt: Date.now(), reservationId: owner,
+    });
+    if (!reserved) return occupied(await store.get(storeKey));
+  } catch {
+    logger.error("Idempotency store unavailable; mutation refused");
+    return unavailable();
   }
 
-  // Reserve the key before executing the handler (#1721): the reservation is
-  // overwritten by the final response below, so it is safe to write here.
+  active.set(storeKey, fingerprint);
   try {
-    await store.set(storeKey, { fingerprint, statusCode: 0, body: { __idempotencyInflight: true }, createdAt: Date.now() });
-  } catch (err: any) {
-    logger.warn("Idempotency reservation failed; proceeding without in-flight guard", { err: err?.message });
-  }
-
-  // No existing record — run handler and then persist the response for future replays.
-  const response = await handler();
-
-  // Capture response body safely
-  let respBody: unknown = null;
-  try {
-    const clone = response.clone();
-    const text = await clone.text();
-    if (text) {
-      try { respBody = JSON.parse(text); } catch { respBody = text; }
+    const response = await handler();
+    const cacheable = (response.status >= 200 && response.status < 300) ||
+      [400, 404, 409, 422].includes(response.status);
+    if (!cacheable) {
+      await store.release!(storeKey, owner);
     } else {
-      respBody = null;
+      const text = await response.clone().text();
+      let body: unknown = null;
+      if (text) {
+        try { body = JSON.parse(text); } catch { body = text; }
+      }
+      const committed = await store.commit!(storeKey, owner, {
+        fingerprint, statusCode: response.status, body, createdAt: Date.now(),
+      });
+      if (!committed) return unavailable();
     }
-  } catch (err) {
-    respBody = null;
-  }
-
-  if (response.status < 500) {
-    try {
-      await store.set(storeKey, { fingerprint, statusCode: response.status, body: respBody, createdAt: Date.now() });
-    } catch (err: any) {
-      logger.error("Idempotency store write failed; response not persisted", { err: err?.message });
+    response.headers.set("Idempotency-Replay", "false");
+    return response;
+  } catch (error) {
+    try { await store.release!(storeKey, owner); } catch {
+      logger.error("Idempotency reservation release failed");
     }
-  } else {
-    // 5xx responses are transient — caching them for 24h would turn a blip
-    // into a 24h outage for replays of this key (#1721).
-    logger.warn("Idempotency response not cached because the request failed with a 5xx", { status: response.status });
+    throw error;
+  } finally {
+    active.delete(storeKey);
   }
-
-  // Tag response as non-replay
-  response.headers.set("Idempotency-Replay", "false");
-  return response;
 }

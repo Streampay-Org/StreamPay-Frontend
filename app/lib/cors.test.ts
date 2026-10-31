@@ -1,6 +1,28 @@
 /** @jest-environment node */
 
-import { buildAllowedOriginSet, isOriginAllowed, parseAllowedOrigins, normalizeOrigin, WILDCARD_ORIGIN } from './cors';
+import {
+  buildAllowedOriginSet,
+  buildCorsDecision,
+  isNullOrigin,
+  isOriginAllowed,
+  isSameOrigin,
+  parseAllowedOrigins,
+  normalizeOrigin,
+  NULL_ORIGIN,
+  WILDCARD_ORIGIN,
+} from './cors';
+
+function makeRequest(origin: string | null, requestOrigin = 'https://app.example') {
+  const headers = new Headers();
+  if (origin !== null) {
+    headers.set('origin', origin);
+  }
+
+  return {
+    headers,
+    nextUrl: { origin: requestOrigin },
+  };
+}
 
 describe('CORS helpers', () => {
   describe('parseAllowedOrigins', () => {
@@ -59,6 +81,79 @@ describe('CORS helpers', () => {
     it('rejects invalid origin header', () => {
       const allowed = ['https://allowed.example.com'];
       expect(isOriginAllowed('not a url', allowed)).toBe(false);
+    });
+  });
+
+  describe('isNullOrigin', () => {
+    it('detects the opaque null origin', () => {
+      expect(isNullOrigin(NULL_ORIGIN)).toBe(true);
+      expect(isNullOrigin(' NULL ')).toBe(true);
+      expect(isNullOrigin('https://app.example')).toBe(false);
+      expect(isNullOrigin(null)).toBe(false);
+    });
+  });
+
+  describe('isSameOrigin', () => {
+    it('compares normalised origins', () => {
+      expect(isSameOrigin('https://app.example', 'https://app.example')).toBe(true);
+      expect(isSameOrigin('https://APP.example:443', 'https://app.example')).toBe(true);
+      expect(isSameOrigin('https://other.example', 'https://app.example')).toBe(false);
+      expect(isSameOrigin(NULL_ORIGIN, 'https://app.example')).toBe(false);
+      expect(isSameOrigin(null, 'https://app.example')).toBe(false);
+    });
+  });
+
+  describe('buildCorsDecision', () => {
+    const allowed = buildAllowedOriginSet('https://partner.example');
+
+    it('reports "none" when no Origin header is present', () => {
+      expect(buildCorsDecision(makeRequest(null), allowed)).toEqual({
+        kind: 'none',
+        origin: null,
+      });
+    });
+
+    it('treats a same-origin request as same-origin even when it is not allowlisted', () => {
+      expect(buildCorsDecision(makeRequest('https://app.example'), allowed)).toEqual({
+        kind: 'same-origin',
+        origin: 'https://app.example',
+      });
+    });
+
+    it('treats a default-port, differently cased origin as same-origin', () => {
+      expect(buildCorsDecision(makeRequest('https://APP.example:443'), allowed).kind).toBe(
+        'same-origin',
+      );
+    });
+
+    it('allows an allowlisted cross-origin request', () => {
+      expect(buildCorsDecision(makeRequest('https://partner.example'), allowed)).toEqual({
+        kind: 'allowed',
+        origin: 'https://partner.example',
+      });
+    });
+
+    it('denies an unknown cross-origin request', () => {
+      expect(buildCorsDecision(makeRequest('https://evil.example'), allowed)).toEqual({
+        kind: 'denied',
+        origin: 'https://evil.example',
+      });
+    });
+
+    it('rejects the opaque null origin explicitly', () => {
+      expect(buildCorsDecision(makeRequest(NULL_ORIGIN), allowed)).toEqual({
+        kind: 'null-origin',
+        origin: NULL_ORIGIN,
+      });
+    });
+
+    it('does not treat a spoofed forwarded host as same-origin', () => {
+      const request = {
+        headers: new Headers({ origin: 'https://evil.example' }),
+        nextUrl: { origin: 'https://app.example' },
+      };
+
+      expect(buildCorsDecision(request, allowed).kind).toBe('denied');
     });
   });
 });
