@@ -13,7 +13,6 @@ import {
   checkRequestBodySize,
   buildLimitsConfig,
 } from './bodySize';
-import { NextRequest } from 'next/server';
 
 describe('bodySize', () => {
   // ---------------------------------------------------------------------------

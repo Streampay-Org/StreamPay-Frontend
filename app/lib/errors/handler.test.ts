@@ -87,9 +87,7 @@ describe('GlobalErrorHandler', () => {
       const handler = new GlobalErrorHandler({
         maxConcurrentErrors: 2,
       });
-      const dismissedErrors: StreamPayError[] = [];
-
-      handler.registerHandler((error) => {
+      handler.registerHandler(() => {
         // Track when errors are dismissed (handled: false means new, handled: true means dismissed)
       });
 
@@ -166,12 +164,12 @@ describe('GlobalErrorHandler', () => {
   describe('dismissError', () => {
     it('dismisses error by ID', () => {
       const handler = new GlobalErrorHandler();
-      let dismissedError: StreamPayError | null = null;
+      let _dismissedError: StreamPayError | null = null;
 
       handler.registerHandler((error) => {
         // Track when errors change (dismissed errors won't appear in active list)
         if (!handler.getActiveErrors().find(e => e.error === error)) {
-          dismissedError = error;
+          _dismissedError = error;
         }
       });
 

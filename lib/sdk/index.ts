@@ -391,7 +391,7 @@ export class StreamPayClient {
         let stream: StreamPayStream;
         try {
           stream = this.parseStreamEvent(event);
-        } catch (err) {
+        } catch {
           for (const sub of subscribers) {
             try {
               sub.onError?.(event);
@@ -418,7 +418,7 @@ export class StreamPayClient {
         let stream: StreamPayStream;
         try {
           stream = this.parseStreamEvent(event);
-        } catch (err) {
+        } catch {
           for (const sub of subscribers) {
             try {
               sub.onError?.(event);

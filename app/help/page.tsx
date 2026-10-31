@@ -1,4 +1,3 @@
-import "./help.module.css";
 
 /**
  * Help & FAQ page for StreamPay.
@@ -9,10 +8,11 @@ import "./help.module.css";
  * Stellar network, and troubleshooting local-dev issues.
  */
 
+import { Suspense } from "react";
 import { SHORTCUT_GROUPS, formatShortcutKeys, getShortcut } from "@/lib/shortcuts";
-import { FAQ_SECTIONS } from "./faq-data";
 import FaqSearch from "./FaqSearch";
-import type { FaqItem, FaqSection } from "./faq-data";
+import CopyLinkButton from "./CopyLinkButton";
+import type { FaqSection } from "./faq-data";
 
 /** Keys for a single shortcut id, e.g. "⌘/Ctrl + K". */
 function keysFor(id: string): string {
@@ -223,12 +223,16 @@ export default function HelpPage() {
         </div>
       </header>
 
-      <FaqSearch sections={FAQ_SECTIONS} />
+      <Suspense fallback={null}>
+        {/* Search island: the full list below is server-rendered, so the
+            island only renders matches once the visitor types a query. */}
+        <FaqSearch sections={FAQ_SECTIONS} showAllWhenEmpty={false} />
+      </Suspense>
 
       <div className="help-layout">
         {/* Quick-jump nav */}
         <nav aria-label="FAQ sections" className="help-nav">
-          <ul className="help-nav__list" role="list">
+          <ul className="help-nav__list">
             {FAQ_SECTIONS.map((section) => (
               <li key={section.id} className="help-nav__item">
                 <a href={`#${section.id}`} className="help-nav__link" data-help-nav-link data-help-section={section.id}>
@@ -258,7 +262,10 @@ export default function HelpPage() {
               <dl className="faq-list">
                 {section.items.map((item) => (
                   <div key={item.id} id={item.id} className="faq-item">
-                    <dt id={`${item.id}-question`} className="faq-item__question" tabIndex={-1}>{item.question}</dt>
+                    <dt id={`${item.id}-question`} className="faq-item__question">
+                      {item.question}{" "}
+                      <CopyLinkButton id={item.id} question={item.question} />
+                    </dt>
                     <dd className="faq-item__answer">{item.answer}</dd>
                   </div>
                 ))}
