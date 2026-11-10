@@ -77,3 +77,24 @@ it("cancelling a cancelled stream is rejected by the transition table", async ()
     code: "ALREADY_TERMINAL",
   });
 });
+
+it("chain failure leaves the stored stream untouched", async () => {
+  const active = { ...stream("ended"), status: "active" as const, nextAction: undefined };
+  db.streams.set(STREAM_ID, active);
+  const before = structuredClone(active);
+  settleStream.mockRejectedValueOnce(new Error("chain unavailable"));
+  const response = await settlePOST(new Request("http://localhost/api/streams/" + STREAM_ID + "/settle", {
+    method: "POST", headers: { "Idempotency-Key": "failed-chain", Authorization: "Bearer " + signToken(ACTOR) },
+  }), context);
+  expect(response.status).toBe(502);
+  expect(db.streams.get(STREAM_ID)).toEqual(before);
+});
+it("stores the actual chain receipt hash after successful settlement", async () => {
+  db.streams.set(STREAM_ID, { ...stream("ended"), status: "active", nextAction: undefined });
+  settleStream.mockResolvedValueOnce({ txHash: "real-chain-receipt" });
+  const response = await settlePOST(new Request("http://localhost/api/streams/" + STREAM_ID + "/settle", {
+    method: "POST", headers: { "Idempotency-Key": "successful-chain", Authorization: "Bearer " + signToken(ACTOR) },
+  }), context);
+  expect(response.status).toBe(200);
+  expect(db.streams.get(STREAM_ID)?.settlementTxHash).toBe("real-chain-receipt");
+});
