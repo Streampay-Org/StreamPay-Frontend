@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { AuthSessionProvider } from "./lib/auth-session";
 import { ToastProvider } from "./components/ToastProvider";
 import { CommandPaletteLauncher } from "./components/CommandPaletteLauncher";
 import { ShortcutsOverlayLauncher } from "./components/ShortcutsOverlayLauncher";
@@ -38,6 +39,7 @@ export default function RootLayout({
       <body>
         <ThemeController />
         <ClientErrorReporter />
+        <AuthSessionProvider>
         <ToastProvider>
           <SplashScreenWrapper />
           <CommandPaletteLauncher />
@@ -46,6 +48,7 @@ export default function RootLayout({
           {children}
           <AppBottomNav />
         </ToastProvider>
+        </AuthSessionProvider>
       </body>
     </html>
   );
