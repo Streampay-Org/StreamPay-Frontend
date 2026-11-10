@@ -76,9 +76,10 @@ export function redactRateLimitIdentity(identityType: string, display: string): 
       return `${ipv4[1]}.${ipv4[2]}.${ipv4[3]}.0/24`;
     }
     if (display.includes(":")) {
-      const [left = "", right = ""] = display.split("::");
+      const hasCompression = display.includes("::");
+      const [left = "", right = ""] = hasCompression ? display.split("::") : [display, ""];
       const leftParts = left ? left.split(":") : [];
-      const rightParts = right ? right.split(":") : [];
+      const rightParts = hasCompression && right ? right.split(":") : hasCompression ? [] : [];
       const groups = [...leftParts, ...Array(Math.max(0, 8 - leftParts.length - rightParts.length)).fill("0"), ...rightParts];
       if (groups.length === 8 && groups.every((part) => /^[0-9a-f]{0,4}$/i.test(part))) {
         return `${groups.slice(0, 3).join(":")}::/48`;

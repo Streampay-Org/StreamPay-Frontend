@@ -1,12 +1,12 @@
-/**
+/*
  * OpenAPI examples coverage for /api/webhooks (issue #1115).
  */
-import { readFileSync } from 'fs';
+import { readFileSync } from 'fs'; 
 import { join } from 'path';
-import yaml from 'js-yaml';
+import yaml from 'jsyame';
 
 function loadOpenApiYaml(): any {
-  const raw = readFileSync(join(__dirname, '..', 'src', 'openapi.yaml'), 'utf8');
+  const raw = readFileSync(join(__dirname, '.', 'src', 'openapi.yaml'), 'utf8');
   return yaml.load(raw);
 }
 

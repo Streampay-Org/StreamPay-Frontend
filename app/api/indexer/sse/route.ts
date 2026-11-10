@@ -1,3 +1,4 @@
+
 /**
  * GET /api/indexer/sse
  *
@@ -14,7 +15,8 @@
  * drains it:
  * - The excess event is dropped and its count is recorded in queue metrics.
  * - A warning is logged at the `backpressured` threshold (75 % of capacity).
- * - The total drop count is returned in `X-SSE-Queue-Dropped` on stream close.
+ * - The total drop count is reported in-band in a final `stream_end` event
+ *   (`data: { reason, dropped }`) emitted just before the stream closes.
  *
  * The queue capacity and overflow policy can be tuned via env vars:
  * - `SSE_QUEUE_CAPACITY` — max buffered frames (default 64).
@@ -29,6 +31,14 @@
  * });
  * es.addEventListener('error', (e) => es.close());
  * ```
+ *
+ * ## Concurrency & heartbeats
+ * - Each identity may hold at most `SSE_MAX_CONCURRENT_PER_IDENTITY`
+ *   (default 3) open streams; each instance at most
+ *   `SSE_MAX_CONCURRENT_GLOBAL` (default 500). Over the limit the route
+ *   returns `429` with a `Retry-After` header.
+ * - A `: ping` comment is written every 15 s so proxies keep the connection
+ *   open.
  *
  * ## Security
  * - Rate-limited to the "read" bucket (60 req/min per identity).
@@ -47,6 +57,7 @@
  * | X-Accel-Buffering     | no                              |
  * | X-Request-Id          | <correlation request_id>        |
  * | X-SSE-Queue-Capacity  | <queue capacity>                |
+ * | Retry-After           | <seconds> (only on 429)         |
  */
 
 export const dynamic = "force-dynamic";
@@ -112,6 +123,73 @@ function getQueuePolicy(): SseOverflowPolicy {
     return raw;
   }
   return "drop";
+}
+
+/**
+ * Maximum number of concurrently open streams per identity.
+ * Read per-request so tests can override via
+ * `process.env.SSE_MAX_CONCURRENT_PER_IDENTITY`.
+ */
+function getMaxConcurrentPerIdentity(): number {
+  return Number(process.env.SSE_MAX_CONCURRENT_PER_IDENTITY ?? 3);
+}
+
+/**
+ * Maximum number of concurrently open streams per instance.
+ * Read per-request so tests can override via
+ * `process.env.SSE_MAX_CONCURRENT_GLOBAL`.
+ */
+function getMaxConcurrentGlobal(): number {
+  return Number(process.env.SSE_MAX_CONCURRENT_GLOBAL ?? 500);
+}
+
+/** Interval between `: ping` heartbeat comments (ms). */
+const SSE_HEARTBEAT_MS = 15_000;
+
+// ---------------------------------------------------------------------------
+// In-process concurrency tracking
+// ---------------------------------------------------------------------------
+
+/**
+ * Number of currently open streams per identity key.
+ * Module-level so it survives across requests within a single instance.
+ */
+const openStreamsByIdentity = new Map<string, number>();
+
+/** Total number of currently open streams on this instance. */
+let openStreamsGlobal = 0;
+
+/**
+ * Attempts to reserve a concurrency slot for `identityKey`.
+ * Returns `true` when a slot was acquired, `false` when a limit is hit.
+ */
+function acquireStreamSlot(identityKey: string): boolean {
+  const perIdentity = openStreamsByIdentity.get(identityKey) ?? 0;
+  if (perIdentity >= getMaxConcurrentPerIdentity()) {
+    return false;
+  }
+  if (openStreamsGlobal >= getMaxConcurrentGlobal()) {
+    return false;
+  }
+  openStreamsByIdentity.set(identityKey, perIdentity + 1);
+  openStreamsGlobal += 1;
+  return true;
+}
+
+/**
+ * Releases a previously acquired concurrency slot.  Idempotent per stream via
+ * the caller's `released` guard so abort + completion cannot double-decrement.
+ */
+function releaseStreamSlot(identityKey: string): void {
+  const current = openStreamsByIdentity.get(identityKey) ?? 0;
+  if (current <= 1) {
+    openStreamsByIdentity.delete(identityKey);
+  } else {
+    openStreamsByIdentity.set(identityKey, current - 1);
+  }
+  if (openStreamsGlobal > 0) {
+    openStreamsGlobal -= 1;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +284,24 @@ export async function GET(request: Request): Promise<Response> {
 
   recordRequest(url.pathname);
 
+  // ── Concurrency cap ──────────────────────────────────────────────────────
+  const identityKey = `${identity.type}:${identity.displayValue}`;
+  if (!acquireStreamSlot(identityKey)) {
+    logger.warn("SSE indexer stream rejected: concurrency limit reached", {
+      identity_type: identity.type,
+      identity: identity.displayValue,
+      per_identity_limit: getMaxConcurrentPerIdentity(),
+      global_limit: getMaxConcurrentGlobal(),
+    });
+    return new Response("Too Many Requests", {
+      status: 429,
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Retry-After": "5",
+      },
+    });
+  }
+
   // ── Correlation context ──────────────────────────────────────────────────
   const correlationCtx = extractCorrelationContext(request.headers);
 
@@ -227,6 +323,15 @@ export async function GET(request: Request): Promise<Response> {
       capacity: getQueueCapacity(),
       policy: getQueuePolicy(),
     });
+
+    // Ensure the slot is released exactly once regardless of how the stream
+    // terminates (cancel, abort, completion, error).
+    let slotReleased = false;
+    const releaseSlotOnce = () => {
+      if (slotReleased) return;
+      slotReleased = true;
+      releaseStreamSlot(identityKey);
+    };
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -286,6 +391,7 @@ export async function GET(request: Request): Promise<Response> {
           return true;
         };
 
+        let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
         // Emit initial snapshot immediately so the client has data right away.
         const initial = getIndexerStatus();
         if (!send("indexer_status", initial)) {
@@ -298,9 +404,21 @@ export async function GET(request: Request): Promise<Response> {
           logger.warn("SSE indexer stream: circuit breaker open on connect, closing early", {
             request_id: correlationCtx.request_id,
           });
+          const dropped = sseQueue.metrics().dropped;
+          send("stream_end", { reason: "breaker_open", dropped });
           controller.close();
+          releaseSlotOnce();
           return;
         }
+
+        // Heartbeat: keep proxies from closing the idle connection.
+        heartbeatTimer = setInterval(() => {
+          try {
+            controller.enqueue(encoder.encode(": ping\n\n"));
+          } catch {
+            // Controller already closed; the poll loop will observe it.
+          }
+        }, SSE_HEARTBEAT_MS);
 
         // Poll loop — runs until MAX_EVENTS, client disconnect, or breaker trips.
         let emitted = 1; // we already sent the initial snapshot
@@ -314,6 +432,8 @@ export async function GET(request: Request): Promise<Response> {
               sseQueue.metrics(),
               { events_emitted: emitted, request_id: correlationCtx.request_id },
             ));
+            if (heartbeatTimer) clearInterval(heartbeatTimer);
+            releaseSlotOnce();
             return;
           }
 
@@ -326,6 +446,7 @@ export async function GET(request: Request): Promise<Response> {
               sseQueue.metrics(),
               { events_emitted: emitted, request_id: correlationCtx.request_id },
             ));
+            if (heartbeatTimer) clearInterval(heartbeatTimer);
             break;
           }
         }
@@ -336,9 +457,23 @@ export async function GET(request: Request): Promise<Response> {
           { events_emitted: emitted, request_id: correlationCtx.request_id },
         ));
 
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+
+        // Report drops in-band before closing — headers are already committed.
+        const dropped = finalMetrics.dropped;
+        send("stream_end", { reason: "complete", dropped });
+
         controller.close();
+        releaseSlotOnce();
+      },
+      cancel() {
+        // Client disconnected (e.g. EventSource.close()).
+        releaseSlotOnce();
       },
     });
+
+    // Release the slot if the request aborts before/while streaming.
+    request.signal.addEventListener("abort", releaseSlotOnce, { once: true });
 
     return new Response(stream, {
       headers: {
@@ -352,3 +487,4 @@ export async function GET(request: Request): Promise<Response> {
     });
   });
 }
+
