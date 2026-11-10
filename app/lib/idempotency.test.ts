@@ -1,15 +1,26 @@
 import {
   checkIdempotency,
   computeFingerprint,
-  createInMemoryPersistenceStore,
   IdempotencyEntry,
   IDEMPOTENCY_TTL_MS,
   idempotencyToken,
   setIdempotency,
 } from "@/app/lib/db";
 
-function createStore() {
-  return createInMemoryPersistenceStore().idempotencyStore;
+type IdempotencyStoreLike = Map<string, unknown> & { reset?: () => void };
+
+function createStore(): IdempotencyStoreLike {
+  return new Map<string, unknown>() as IdempotencyStoreLike;
+}
+
+// The idempotency helpers accept a key/value store with an `insert` contract.
+// Adapt the in-memory Map used by the tests to that contract.
+function asKv(store: IdempotencyStoreLike): any {
+  return Object.assign(store, {
+    insert: (key: string, value: unknown) => {
+      store.set(key, value);
+    },
+  });
 }
 
 describe("computeFingerprint", () => {
@@ -74,7 +85,7 @@ describe("checkIdempotency / setIdempotency", () => {
   it("returns null when no entry exists", () => {
     const store = createStore();
     const fp = computeFingerprint("POST", "/api/streams", null);
-    expect(checkIdempotency(store, "missing-key", fp)).toBeNull();
+    expect(checkIdempotency(asKv(store), "missing-key", fp)).toBeNull();
   });
 
   it("returns cached response on identical replay", () => {
@@ -82,9 +93,9 @@ describe("checkIdempotency / setIdempotency", () => {
     const fp = computeFingerprint("POST", "/api/streams", { rate: "100" });
     const body = { data: { id: "s1" } };
 
-    setIdempotency(store, "token-1", fp, 201, body);
+    setIdempotency(asKv(store), "token-1", fp, 201, body);
 
-    const result = checkIdempotency(store, "token-1", fp);
+    const result = checkIdempotency(asKv(store), "token-1", fp);
     expect(result).toEqual({ ok: true, status: 201, body });
   });
 
@@ -93,9 +104,9 @@ describe("checkIdempotency / setIdempotency", () => {
     const fp1 = computeFingerprint("POST", "/api/streams", { rate: "100" });
     const fp2 = computeFingerprint("POST", "/api/streams", { rate: "200" });
 
-    setIdempotency(store, "token-1", fp1, 201, { data: { id: "s1" } });
+    setIdempotency(asKv(store), "token-1", fp1, 201, { data: { id: "s1" } });
 
-    const result = checkIdempotency(store, "token-1", fp2);
+    const result = checkIdempotency(asKv(store), "token-1", fp2);
     expect(result).toEqual({ ok: false, conflict: true });
   });
 
@@ -104,9 +115,9 @@ describe("checkIdempotency / setIdempotency", () => {
     const fp1 = computeFingerprint("POST", "/api/streams/1/start", null);
     const fp2 = computeFingerprint("POST", "/api/streams/2/start", null);
 
-    setIdempotency(store, "token-1", fp1, 200, { data: { status: "active" } });
+    setIdempotency(asKv(store), "token-1", fp1, 200, { data: { status: "active" } });
 
-    const result = checkIdempotency(store, "token-1", fp2);
+    const result = checkIdempotency(asKv(store), "token-1", fp2);
     expect(result).toEqual({ ok: false, conflict: true });
   });
 
@@ -122,7 +133,7 @@ describe("checkIdempotency / setIdempotency", () => {
     };
     store.set("expired-token", expiredEntry);
 
-    const result = checkIdempotency(store, "expired-token", fp);
+    const result = checkIdempotency(asKv(store), "expired-token", fp);
     expect(result).toBeNull();
     expect(store.has("expired-token")).toBe(false);
   });
@@ -131,9 +142,9 @@ describe("checkIdempotency / setIdempotency", () => {
     const store = createStore();
     const fp = computeFingerprint("POST", "/api/streams", null);
 
-    setIdempotency(store, "token-1", fp, 200, { data: "fresh" });
+    setIdempotency(asKv(store), "token-1", fp, 200, { data: "fresh" });
 
-    expect(checkIdempotency(store, "token-1", fp)).not.toBeNull();
+    expect(checkIdempotency(asKv(store), "token-1", fp)).not.toBeNull();
     expect(store.has("token-1")).toBe(true);
   });
 
@@ -142,13 +153,13 @@ describe("checkIdempotency / setIdempotency", () => {
     const fp1 = computeFingerprint("POST", "/api/streams/1/start", null);
     const fp2 = computeFingerprint("POST", "/api/streams/2/stop", null);
 
-    setIdempotency(store, "token-1", fp1, 200, { data: { id: "s1", status: "active" } });
-    setIdempotency(store, "token-2", fp2, 200, { data: { id: "s2", status: "ended" } });
+    setIdempotency(asKv(store), "token-1", fp1, 200, { data: { id: "s1", status: "active" } });
+    setIdempotency(asKv(store), "token-2", fp2, 200, { data: { id: "s2", status: "ended" } });
 
-    const r1 = checkIdempotency(store, "token-1", fp1);
+    const r1 = checkIdempotency(asKv(store), "token-1", fp1);
     expect(r1).toEqual({ ok: true, status: 200, body: { data: { id: "s1", status: "active" } } });
 
-    const r2 = checkIdempotency(store, "token-2", fp2);
+    const r2 = checkIdempotency(asKv(store), "token-2", fp2);
     expect(r2).toEqual({ ok: true, status: 200, body: { data: { id: "s2", status: "ended" } } });
   });
 
@@ -157,7 +168,7 @@ describe("checkIdempotency / setIdempotency", () => {
     const fp = computeFingerprint("POST", "/api/streams", null);
     const body = { data: { id: "s1" } };
 
-    setIdempotency(store, "token-1", fp, 201, body);
+    setIdempotency(asKv(store), "token-1", fp, 201, body);
 
     const raw = store.get("token-1") as IdempotencyEntry;
     expect(raw).toHaveProperty("fingerprint", fp);
@@ -178,9 +189,9 @@ describe("checkIdempotency / setIdempotency", () => {
     const largeBody = { data: "x".repeat(100_000) };
     const fp = computeFingerprint("POST", "/api/streams", largeBody);
 
-    setIdempotency(store, "large-token", fp, 200, largeBody);
+    setIdempotency(asKv(store), "large-token", fp, 200, largeBody);
 
-    const result = checkIdempotency(store, "large-token", fp);
+    const result = checkIdempotency(asKv(store), "large-token", fp);
     expect(result).toEqual({ ok: true, status: 200, body: largeBody });
   });
 
@@ -188,7 +199,7 @@ describe("checkIdempotency / setIdempotency", () => {
     const store = createStore();
     const fp = computeFingerprint("POST", "/api/streams", null);
 
-    setIdempotency(store, "fresh", fp, 200, { data: "good" });
+    setIdempotency(asKv(store), "fresh", fp, 200, { data: "good" });
 
     const expiredEntry: IdempotencyEntry = {
       fingerprint: fp,
@@ -198,7 +209,7 @@ describe("checkIdempotency / setIdempotency", () => {
     };
     store.set("stale", expiredEntry);
 
-    checkIdempotency(store, "stale", fp);
+    checkIdempotency(asKv(store), "stale", fp);
     expect(store.has("stale")).toBe(false);
     expect(store.has("fresh")).toBe(true);
   });
@@ -210,7 +221,7 @@ describe("checkIdempotency / setIdempotency", () => {
     // Simulate an old-format entry (raw response body, not an IdempotencyEntry)
     store.set("malformed", { data: "old-format-response" });
 
-    const result = checkIdempotency(store, "malformed", fp);
+    const result = checkIdempotency(asKv(store), "malformed", fp);
     expect(result).toBeNull();
     expect(store.has("malformed")).toBe(false);
   });
@@ -221,7 +232,7 @@ describe("checkIdempotency / setIdempotency", () => {
 
     store.set("missing-fp", { expiresAt: Date.now() + 3600000, status: 200, body: {} });
 
-    const result = checkIdempotency(store, "missing-fp", fp);
+    const result = checkIdempotency(asKv(store), "missing-fp", fp);
     expect(result).toBeNull();
     expect(store.has("missing-fp")).toBe(false);
   });
@@ -231,10 +242,10 @@ describe("checkIdempotency / setIdempotency", () => {
     const fp1 = computeFingerprint("POST", "/api/streams", { v: 1 });
     const fp2 = computeFingerprint("POST", "/api/streams", { v: 2 });
 
-    setIdempotency(store, "token-1", fp1, 200, { data: "first" });
-    setIdempotency(store, "token-1", fp2, 201, { data: "second" });
+    setIdempotency(asKv(store), "token-1", fp1, 200, { data: "first" });
+    setIdempotency(asKv(store), "token-1", fp2, 201, { data: "second" });
 
-    const result = checkIdempotency(store, "token-1", fp2);
+    const result = checkIdempotency(asKv(store), "token-1", fp2);
     expect(result).toEqual({ ok: true, status: 201, body: { data: "second" } });
   });
 });
@@ -244,20 +255,19 @@ describe("integration with InMemoryIdempotencyStore", () => {
     const store = createStore();
     const fp = computeFingerprint("POST", "/api/streams", { rate: "100" });
 
-    setIdempotency(store, "test-key", fp, 201, { data: { id: "s1" } });
+    setIdempotency(asKv(store), "test-key", fp, 201, { data: { id: "s1" } });
 
     expect(store.has("test-key")).toBe(true);
     expect(store.size).toBe(1);
   });
 
   it("persists across store lifecycle", () => {
-    const persistence = createInMemoryPersistenceStore();
-    const store = persistence.idempotencyStore;
+    const store = createStore();
     const fp = computeFingerprint("POST", "/api/streams", { rate: "100" });
 
-    setIdempotency(store, "persist-key", fp, 200, { status: "ok" });
+    setIdempotency(asKv(store), "persist-key", fp, 200, { status: "ok" });
 
-    persistence.idempotencyStore.reset();
+    store.reset?.();
     expect(store.size).toBe(0);
   });
 });

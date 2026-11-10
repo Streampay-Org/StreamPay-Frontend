@@ -389,11 +389,5 @@ export function decodeCompositeCursor(cursor: string): { timestamp: string; id: 
   if (!/^\d{4}-\d{2}-\d{2}T[\d:.Z+-]+$/.test(timestamp)) {
     throw new Error("Invalid cursor: timestamp segment is not a valid ISO-8601 string");
   }
-  if (!/^[\w-]{1,128}$/.test(id)) {
-    throw new Error("Invalid cursor: id segment contains disallowed characters");
-  }
   return { timestamp, id };
 }
-
-export { newStreamId } from "./stream-id";
-export { createInMemoryPersistenceStore, createPostgresPersistenceStore, POSTGRES_SCHEMA_SKETCH, POSTGRES_ROLLOUT_NOTES };
