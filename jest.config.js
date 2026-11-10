@@ -30,7 +30,6 @@ const config = {
     "<rootDir>/app/api/reconciliation/route.test.ts",
     "<rootDir>/app/api/streams/__tests__/rateLimiterConsistency.test.ts",
     "<rootDir>/app/api/streams/\\[id\\]/start/route.test.ts",
-    "<rootDir>/app/api/streams/\\[id\\]/webhooks/test/route.test.ts",
     "<rootDir>/app/api/streams/concurrency.test.ts",
     "<rootDir>/app/api/streams/route.timeout.test.ts",
     "<rootDir>/app/api/streams/stream-lifecycle.e2e.test.ts",

@@ -1,3 +1,7 @@
+import { resolveRequestId, generateRequestId } from "@/lib/requestId";
+import { assertSafeOutboundUrl, pinnedWebhookFetch } from "@/app/lib/outbound-url";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
+import { orgDb } from "@/app/lib/org-db";
 /**
  * POST /api/streams/:id/webhooks/test
  *
@@ -49,6 +53,7 @@ import {
   type WebhookEndpoint,
   type WebhookEvent,
 } from "@/app/lib/webhook-delivery";
+import { isSafePublicHttpUrl } from "@/app/lib/ssrf-guard";
 import {
   checkRateLimit,
   getClientIdentity,
@@ -70,7 +75,7 @@ const ALLOWED_EVENT_TYPES = new Set([
 function createErrorResponse(code: string, message: string, status: number) {
   const context = getCorrelationContext();
   return NextResponse.json(
-    { error: { code, message, request_id: context?.request_id } },
+    { error: { code, message, request_id: context?.request_id ?? generateRequestId() } },
     { status },
   );
 }
@@ -88,6 +93,9 @@ export async function POST(
     return rateLimitResponse(rlResult.retryAfter!);
   }
 
+  const actor = tryAuthenticateRequest(req);
+  if (!actor) return createErrorResponse("UNAUTHORIZED", "A verified session is required.", 401);
+
   // ── Validate stream exists ────────────────────────────────────────────────
   const stream = db.streams.get(id);
   if (!stream) {
@@ -96,6 +104,12 @@ export async function POST(
       `Stream '${id}' not found`,
       404,
     );
+  }
+
+  const orgId = orgDb.streamOwnership.get(id);
+  const member = orgId ? orgDb.orgs.get(orgId)?.members.some(value => value.walletAddress === actor.walletAddress) : false;
+  if (stream.senderAddress !== actor.walletAddress && !member) {
+    return createErrorResponse("FORBIDDEN", "Only the stream sender or an organization member can test webhooks.", 403);
   }
 
   // ── Parse optional body ───────────────────────────────────────────────────
@@ -153,6 +167,13 @@ export async function POST(
               400,
             );
           }
+          if (!isSafePublicHttpUrl(parsed.endpoint_url)) {
+            return createErrorResponse(
+              "UNSAFE_ENDPOINT_URL",
+              "'endpoint_url' must be a public http(s) URL (private, loopback and metadata hosts are blocked).",
+              400,
+            );
+          }
           endpointUrl = parsed.endpoint_url;
         }
       }
@@ -185,10 +206,16 @@ export async function POST(
 
   // ── Dispatch (only when an endpoint_url is provided) ──────────────────────
   let delivery:
-    | { success: boolean; status_code?: number; error?: string }
+    | { success: boolean; category?: "timeout" | "non_2xx" | "connection_failed" }
     | undefined;
 
   if (endpointUrl) {
+    let target: Awaited<ReturnType<typeof assertSafeOutboundUrl>>;
+    try {
+      target = await assertSafeOutboundUrl(endpointUrl, { allowHttp: process.env.NODE_ENV !== "production" });
+    } catch {
+      return createErrorResponse("UNSAFE_ENDPOINT_URL", "The endpoint is not an approved public destination.", 400);
+    }
     const endpoint: WebhookEndpoint = {
       id: `wh_test_endpoint_${deliveryId}`,
       url: endpointUrl,
@@ -201,11 +228,13 @@ export async function POST(
         syntheticEvent,
         deliveryId,
         1,
+        [],
+        (_input, init) => pinnedWebhookFetch(target, init),
       );
       delivery = {
         success: result.success,
-        status_code: result.statusCode,
-        error: result.error,
+        ...(result.success ? {} : { category: result.statusCode ? "non_2xx" as const :
+          /timeout|abort/i.test(result.error ?? "") ? "timeout" as const : "connection_failed" as const }),
       };
 
       if (result.success) {
@@ -230,13 +259,13 @@ export async function POST(
     } catch (err) {
       delivery = {
         success: false,
-        error: err instanceof Error ? err.message : "Unknown dispatch error",
+        category: err instanceof Error && /timeout|abort/i.test(err.message) ? "timeout" : "connection_failed",
       };
       logger.warn("Synthetic webhook dispatch threw", {
         action: "webhooks.test",
         delivery_id: deliveryId,
         endpoint_url: endpointUrl,
-        error: delivery.error,
+        error: delivery.category,
         stream_id: id,
       });
     }
@@ -249,7 +278,7 @@ export async function POST(
     event_type: eventType,
     dispatched_at: dispatchedAt,
     synthetic: true,
-    request_id: correlationCtx?.request_id,
+    request_id: correlationCtx?.request_id ?? resolveRequestId(req.headers),
     data: {
       stream_id: id,
       status: stream.status,
@@ -263,7 +292,7 @@ export async function POST(
     event_type: eventType,
     has_endpoint: !!endpointUrl,
     stream_id: id,
-    request_id: correlationCtx?.request_id,
+    request_id: correlationCtx?.request_id ?? resolveRequestId(req.headers),
   });
 
   return NextResponse.json({ data: syntheticPayload }, { status: 202 });

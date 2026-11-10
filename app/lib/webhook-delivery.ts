@@ -400,6 +400,7 @@ export class WebhookDeliveryClient {
     deliveryId: string,
     attemptNumber: number,
     _previousAttempts: WebhookDeliveryAttempt[] = [],
+    transport: typeof fetch = fetch,
   ): Promise<{
     success: boolean;
     statusCode?: number;
@@ -482,7 +483,7 @@ export class WebhookDeliveryClient {
         correlation_id: context?.correlation_id,
       });
 
-      const response = await fetch(endpoint.url, {
+      const response = await transport(endpoint.url, {
         method: 'POST',
         headers,
         body: payload,

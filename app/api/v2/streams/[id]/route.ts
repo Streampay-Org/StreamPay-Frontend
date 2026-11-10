@@ -1,3 +1,4 @@
+import { assertSafeOutboundUrl } from "@/app/lib/outbound-url";
 import { NextResponse } from "next/server";
 import { getStore } from "@/app/lib/db";
 import { getCorrelationContext } from "@/app/lib/logger";
@@ -125,6 +126,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
 
   const patchData = body as Record<string, unknown>;
+  if (typeof patchData.webhook_url === "string") {
+    try {
+      await assertSafeOutboundUrl(patchData.webhook_url, { allowHttp: process.env.NODE_ENV !== "production" });
+    } catch {
+      return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Unsafe webhook URL.",
+        details: [{ field: "webhook_url", code: "UNSAFE_ENDPOINT_URL", message: "Use an approved public destination." }] } }, { status: 422 });
+    }
+  }
+
   const updated = {
     ...stream,
     ...patchData,

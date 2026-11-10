@@ -21,6 +21,16 @@
 
 import { POST } from "./route";
 import { db, resetDb } from "@/app/lib/db";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
+import { assertSafeOutboundUrl, pinnedWebhookFetch } from "@/app/lib/outbound-url";
+import { webhookDeliveryClient } from "@/app/lib/webhook-delivery";
+jest.mock("@/app/lib/auth", () => ({
+  tryAuthenticateRequest: jest.fn(() => ({ walletAddress: "GTEST_OWNER" })),
+}));
+jest.mock("@/app/lib/outbound-url", () => ({
+  assertSafeOutboundUrl: jest.fn(async (raw: string) => ({ url: new URL(raw), address: "93.184.216.34", family: 4 })),
+  pinnedWebhookFetch: jest.fn(async () => new Response(null, { status: 200 })),
+}));
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -86,6 +96,8 @@ const ACTIVE_STREAM = "stream-ada"; // status: active
 
 beforeEach(() => {
   resetDb();
+  const current = db.streams.get(ACTIVE_STREAM)!;
+  db.streams.set(ACTIVE_STREAM, { ...current, senderAddress: "GTEST_OWNER" });
   mockDeliveryResult = { success: true, statusCode: 200, shouldRetry: false };
   mockDeliveryCallCount = 0;
   mockDeliveryArgs = [];
@@ -359,8 +371,6 @@ describe("webhook dispatch", () => {
     const { data } = await res.json();
     expect(data.delivery).toEqual({
       success: true,
-      status_code: 200,
-      error: undefined,
     });
   });
 
@@ -381,8 +391,7 @@ describe("webhook dispatch", () => {
     const { data } = await res.json();
     expect(data.delivery).toEqual({
       success: false,
-      status_code: 500,
-      error: "Internal Server Error",
+      category: "non_2xx",
     });
   });
 
@@ -420,8 +429,9 @@ describe("webhook dispatch", () => {
     const { data } = await res.json();
     expect(data.delivery).toEqual({
       success: false,
-      error: "Network timeout",
+      category: "timeout",
     });
+    expect(JSON.stringify(data)).not.toContain("Network timeout");
   });
 });
 
@@ -501,5 +511,35 @@ describe("rate limiting", () => {
 
     const res = await POST(testReq(ACTIVE_STREAM), ctx(ACTIVE_STREAM));
     expect(res.status).toBe(202);
+  });
+});
+
+describe("verified access and outbound boundary", () => {
+  it("rejects an unauthenticated caller before dispatch", async () => {
+    jest.mocked(tryAuthenticateRequest).mockReturnValueOnce(null);
+    const response = await POST(testReq(ACTIVE_STREAM), ctx(ACTIVE_STREAM));
+    expect(response.status).toBe(401);
+    expect(mockDeliveryCallCount).toBe(0);
+  });
+  it("rejects a verified non-owner who is not an org member", async () => {
+    jest.mocked(tryAuthenticateRequest).mockReturnValueOnce({ walletAddress: "GOTHER", actorId: "other", role: "viewer" });
+    const response = await POST(testReq(ACTIVE_STREAM), ctx(ACTIVE_STREAM));
+    expect(response.status).toBe(403);
+    expect(mockDeliveryCallCount).toBe(0);
+  });
+  it("fails closed on an unsafe DNS result without contacting the endpoint", async () => {
+    jest.mocked(assertSafeOutboundUrl).mockRejectedValueOnce(new Error("private address"));
+    const response = await POST(testReq(ACTIVE_STREAM, { endpoint_url: "https://hooks.example.com" }), ctx(ACTIVE_STREAM));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe("UNSAFE_ENDPOINT_URL");
+    expect(mockDeliveryCallCount).toBe(0);
+  });
+  it("passes a transport bound to the validated destination", async () => {
+    await POST(testReq(ACTIVE_STREAM, { endpoint_url: "https://hooks.example.com" }), ctx(ACTIVE_STREAM));
+    const call = jest.mocked(webhookDeliveryClient.attemptDelivery).mock.calls.at(-1)!;
+    expect(typeof call[5]).toBe("function");
+    const init = { method: "POST", body: "{}" };
+    await call[5]!("https://ignored.example", init);
+    expect(pinnedWebhookFetch).toHaveBeenCalledWith(expect.objectContaining({ address: "93.184.216.34" }), init);
   });
 });

@@ -11,6 +11,7 @@
 
 import { isValidStellarPublicKey } from "@/app/lib/wallet-link";
 import { STELLAR_MAX_I64, STROOPS_SCALE } from "@/app/lib/amount";
+import { isSafePublicHttpUrl } from "@/app/lib/ssrf-guard";
 import { z } from "zod";
 import type { StreamStatus } from "@/app/types/openapi";
 
@@ -111,7 +112,7 @@ export interface CreateStreamBody {
 export const patchStreamSchema = z
   .object({
     description: z.string().min(1, "Description cannot be empty.").max(280).optional(),
-    webhook_url: z.string().url("Must be a valid URL.").optional(),
+    webhook_url: z.string().url("Must be a valid URL.").refine(value => !z.string().url().safeParse(value).success || isSafePublicHttpUrl(value), "Must be a public http(s) URL.").optional(),
     tags: z
       .array(
         z
