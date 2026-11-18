@@ -43,6 +43,9 @@ for (const entry of entries) {
         NODE_ENV: "test",
       },
       encoding: "utf8",
+      // Hung suites previously ran the nightly job into the 6h Actions limit.
+      timeout: 5 * 60 * 1000,
+      killSignal: "SIGKILL",
     }
   );
 
