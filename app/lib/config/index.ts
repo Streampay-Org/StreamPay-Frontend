@@ -63,10 +63,10 @@ interface OptionalEnvVars {
   ANOMALY_SETTLE_THRESHOLD?: string;
   /** Anomaly detection threshold for stream cancel burst */
   ANOMALY_CANCEL_THRESHOLD?: string;
-  /** Event bus transport: memory (default) or redis */
-  EVENT_BUS_TRANSPORT?: string;
-  /** Redis connection URL (required when EVENT_BUS_TRANSPORT=redis) */
-  EVENT_BUS_REDIS_URL?: string;
+  /** Audit log persistence backend: memory (default) or postgres */
+  AUDIT_LOG_STORE?: string;
+  /** Postgres connection URL (required when AUDIT_LOG_STORE=postgres) */
+  DATABASE_URL?: string;
 }
 
 export type EventBusTransportType = 'memory' | 'redis';
@@ -91,9 +91,9 @@ export interface ValidatedConfig {
     keys: Record<string, string>;
     allowedClockSkewSeconds: number;
   };
-  eventBus: {
-    transport: EventBusTransportType;
-    redisUrl?: string;
+  auditLog: {
+    store: 'memory' | 'postgres';
+    databaseUrl?: string;
   };
 }
 
@@ -478,6 +478,56 @@ export function validateEventBusConfig(
 }
 
 /**
+ * Validate audit log storage configuration
+ */
+function validateAuditLogConfig(
+  storeRaw?: string,
+  databaseUrl?: string
+): ValidatedConfig['auditLog'] {
+  const store = (storeRaw?.trim() || 'memory').toLowerCase();
+
+  if (store !== 'memory' && store !== 'postgres') {
+    throw new ConfigValidationError(
+      `Invalid AUDIT_LOG_STORE: ${storeRaw}. Supported values: memory, postgres`
+    );
+  }
+
+  if (store === 'postgres') {
+    const trimmedUrl = databaseUrl?.trim();
+    if (!trimmedUrl) {
+      throw new ConfigValidationError(
+        'DATABASE_URL environment variable is required when AUDIT_LOG_STORE=postgres'
+      );
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmedUrl);
+    } catch {
+      throw new ConfigValidationError(
+        'DATABASE_URL must be a valid Postgres connection URL (postgres:// or postgresql://)'
+      );
+    }
+
+    if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') {
+      throw new ConfigValidationError(
+        'DATABASE_URL must use the postgres:// or postgresql:// protocol'
+      );
+    }
+
+    return {
+      store: 'postgres',
+      databaseUrl: trimmedUrl,
+    };
+  }
+
+  return {
+    store: 'memory',
+    databaseUrl: databaseUrl?.trim() || undefined,
+  };
+}
+
+/**
  * Main configuration validation function
  * Call this at application boot to fail-fast on invalid configuration
  * 
@@ -510,10 +560,7 @@ export function validateConfig(): ValidatedConfig {
   );
 
   const internalServiceAuth = validateInternalServiceAuth(env);
-  const eventBus = validateEventBusConfig(
-    env.EVENT_BUS_TRANSPORT,
-    env.EVENT_BUS_REDIS_URL
-  );
+  const auditLog = validateAuditLogConfig(env.AUDIT_LOG_STORE, env.DATABASE_URL);
   
   const config: ValidatedConfig = {
     network: networkProfile,
@@ -524,7 +571,7 @@ export function validateConfig(): ValidatedConfig {
     allowedOrigins,
     anomalyThresholds,
     internalServiceAuth,
-    eventBus,
+    auditLog,
   };
   
   return config;

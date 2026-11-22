@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import type { StellarNetwork } from "../lib/config/stellar";
+import { explorerAccountUrl, explorerTxUrl } from "../lib/explorer";
 
 interface CopyAddressProps {
   /** The address or hash to copy */
@@ -13,6 +15,14 @@ interface CopyAddressProps {
   showCopyButton?: boolean;
   /** Whether to hide the truncated version and show full address (for print) */
   printOnly?: boolean;
+  /**
+    * Optional Stellar explorer link configuration.
+    * When omitted, no explorer link is rendered.
+  */
+  explorer?: {
+    kind: "account" | "tx";
+    network: StellarNetwork;
+  }
 }
 
 /**
@@ -77,10 +87,17 @@ export function CopyAddress({
   className = "",
   showCopyButton = true,
   printOnly = false,
+  explorer,
 }: CopyAddressProps) {
   if (printOnly) {
     return <span className={className}>{value}</span>;
   }
+
+  const explorerUrl = explorer
+    ? explorer.kind === "account"
+      ? explorerAccountUrl(value, explorer.network)
+      : explorerTxUrl(value, explorer.network)
+    : null;
 
   return (
     <span className={`receipt-address-wrap ${className}`}>
@@ -89,6 +106,17 @@ export function CopyAddress({
       </span>
       <span className="print-only">{value}</span>
       {showCopyButton && <CopyButton value={value} />}
+      {explorerUrl && (
+        <a
+          aria-label="View on explorer"
+          className="receipt-copy-btn no-print"
+          href={explorerUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          View on explorer
+        </a>
+      )}
     </span>
   );
 }

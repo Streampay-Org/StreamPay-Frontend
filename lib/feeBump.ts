@@ -21,7 +21,7 @@
  *
  *   - `FEE_BUMP_SECRET_KEY`  — Stellar secret key of the fee-bump payer.
  *                               Must start with 'S' (strkey format).
- *   - `HORIZON_URL`          — Horizon endpoint (defaults to testnet).
+ *   - `HORIZON_URL`          — Horizon endpoint (defaults to the network profile).
  *   - `FEE_BUMP_MAX_FEE`     — Maximum base fee (in stroops) for the
  *                               bumped transaction. Default: 100_000.
  *                               Must be a positive integer ≤ 10_000_000.
@@ -35,13 +35,12 @@
  *   - Input is validated at the boundary before any network calls.
  */
 
+import "server-only";
+import { getNetworkProfile } from "@/app/lib/config/stellar";
 import type { Stream } from "@/app/types/openapi";
 import { logger } from "@/app/lib/logger";
 
 // ── Constants ──────────────────────────────────────────────────────────────
-
-/** Default Horizon URL when HORIZON_URL is not configured. */
-const DEFAULT_HORIZON_URL = "https://horizon-testnet.stellar.org";
 
 /** Default max fee in stroops (0.01 XLM). */
 const DEFAULT_MAX_FEE = 100_000;
@@ -70,10 +69,11 @@ type EvaluationResult = {
 };
 
 /** Validated, safe config for a single fee-bump attempt. */
-type FeeBumpConfig = {
+export type FeeBumpConfig = {
   secretKey: string;
   horizonUrl: string;
   maxFee: number;
+  networkPassphrase: string;
 };
 
 // ── Input validation ────────────────────────────────────────────────────────
@@ -104,15 +104,20 @@ export function resolveFeeBumpConfig(): { ok: true; config: FeeBumpConfig } | { 
 
   // Validate HORIZON_URL when explicitly set
   const rawHorizon = process.env.HORIZON_URL;
-  const horizonUrl = rawHorizon ?? DEFAULT_HORIZON_URL;
+  const network = process.env.STELLAR_NETWORK;
+  if (network !== "testnet" && network !== "mainnet") {
+    return { ok: false, error: "STELLAR_NETWORK must be testnet or mainnet" };
+  }
+  const profile = getNetworkProfile(network);
+  const horizonUrl = rawHorizon ?? profile.horizonUrl;
   if (rawHorizon !== undefined) {
     try {
       const parsed = new URL(rawHorizon);
       if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-        return { ok: false, error: `HORIZON_URL must use http(s) protocol, got '${parsed.protocol}'` };
+        return { ok: false, error: "HORIZON_URL must use http(s) protocol" };
       }
     } catch {
-      return { ok: false, error: `HORIZON_URL is not a valid URL: '${rawHorizon}'` };
+      return { ok: false, error: "HORIZON_URL is not a valid URL" };
     }
   }
 
@@ -122,7 +127,7 @@ export function resolveFeeBumpConfig(): { ok: true; config: FeeBumpConfig } | { 
   if (rawMaxFee !== undefined) {
     const parsed = Number(rawMaxFee);
     if (!Number.isInteger(parsed) || parsed <= 0) {
-      return { ok: false, error: `FEE_BUMP_MAX_FEE must be a positive integer, got '${rawMaxFee}'` };
+      return { ok: false, error: "FEE_BUMP_MAX_FEE must be a positive integer" };
     }
     if (parsed > MAX_FEE_UPPER_BOUND) {
       return {
@@ -133,7 +138,7 @@ export function resolveFeeBumpConfig(): { ok: true; config: FeeBumpConfig } | { 
     maxFee = parsed;
   }
 
-  return { ok: true, config: { secretKey, horizonUrl, maxFee } };
+  return { ok: true, config: { secretKey, horizonUrl: horizonUrl.replace(/\/$/, ""), maxFee, networkPassphrase: profile.passphrase } };
 }
 
 // ── Fee-error detection ────────────────────────────────────────────────────
@@ -221,7 +226,7 @@ export async function maybeFeeBump(
     };
   }
 
-  const { secretKey, horizonUrl, maxFee } = configResult.config;
+  const { secretKey, horizonUrl, maxFee, networkPassphrase } = configResult.config;
 
   // ── Guard: must have a tx hash to look up ─────────────────────────────
   const txHash =
@@ -244,7 +249,7 @@ export async function maybeFeeBump(
   logger.info("fee-bump: attempting fee-bump", {
     stream_id: streamId,
     original_tx_hash: txHash,
-    horizon_url: horizonUrl,
+    horizon_url: safeError(horizonUrl, secretKey),
     max_fee: maxFee,
     // Do NOT log secretKey — note only its presence
     fee_payer_configured: true,
@@ -279,18 +284,22 @@ export async function maybeFeeBump(
 
     originalEnvelopeXdr = txData.envelope_xdr;
   } catch (err) {
-    const errorMsg = `Error fetching original tx: ${err instanceof Error ? err.message : String(err)}`;
+    const errorMsg = `Error fetching original tx: ${safeError(err, secretKey)}`;
     logger.error("fee-bump: unexpected error fetching original tx", {
       stream_id: streamId,
       original_tx_hash: txHash,
-      error: err instanceof Error ? err.message : String(err),
+      error: safeError(err, secretKey),
     });
     return { result, feeBump: { bumped: false, error: errorMsg } };
   }
 
   // ── Step 2: Build and submit the fee-bump transaction ─────────────────
   try {
-    const feeBumpXdr = buildFeeBumpEnvelope(originalEnvelopeXdr, secretKey, maxFee);
+    const built = await buildFeeBumpEnvelope(originalEnvelopeXdr, secretKey, maxFee, networkPassphrase, txHash);
+    if (!built.ok) {
+      return { result, feeBump: { bumped: false, error: built.error.message } };
+    }
+    const feeBumpXdr = built.xdr;
 
     const submitRes = await fetcher(`${horizonUrl}/transactions`, {
       method: "POST",
@@ -299,7 +308,7 @@ export async function maybeFeeBump(
     });
 
     if (!submitRes.ok) {
-      const errorBody = await submitRes.text().catch(() => "unknown");
+      const errorBody = safeError(await submitRes.text().catch(() => "unknown"), secretKey);
       const errorMsg = `Fee-bump submission failed: HTTP ${submitRes.status} — ${errorBody}`;
       logger.error("fee-bump: submission rejected by Horizon", {
         stream_id: streamId,
@@ -335,16 +344,16 @@ export async function maybeFeeBump(
     logger.info("fee-bump: successfully submitted fee-bump transaction", {
       stream_id: streamId,
       original_tx_hash: txHash,
-      new_tx_hash: newHash,
+      new_tx_hash: safeError(newHash, secretKey),
     });
 
     return { result, feeBump: { bumped: true, newTxHash: newHash } };
   } catch (err) {
-    const errorMsg = `Fee-bump submission error: ${err instanceof Error ? err.message : String(err)}`;
+    const errorMsg = `Fee-bump submission error: ${safeError(err, secretKey)}`;
     logger.error("fee-bump: unexpected error during submission", {
       stream_id: streamId,
       original_tx_hash: txHash,
-      error: err instanceof Error ? err.message : String(err),
+      error: safeError(err, secretKey),
     });
     return { result, feeBump: { bumped: false, error: errorMsg } };
   }
@@ -352,37 +361,79 @@ export async function maybeFeeBump(
 
 // ── Envelope builder ───────────────────────────────────────────────────────
 
+/** Typed, secret-safe envelope construction failure. */
+export type FeeBumpBuildError = {
+  code: "SERVER_ONLY" | "INVALID_XDR" | "ALREADY_FEE_BUMPED" | "INVALID_KEY" |
+    "INVALID_FEE" | "UNSIGNED_INNER" | "NETWORK_MISMATCH" | "BUILD_FAILED";
+  message: string;
+};
+
+/** Result of constructing a signed outer fee-bump envelope. */
+export type FeeBumpBuildResult =
+  | { ok: true; xdr: string }
+  | { ok: false; error: FeeBumpBuildError };
+
+function safeError(error: unknown, secretKey: string): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return secretKey ? message.split(secretKey).join("[REDACTED]") : message;
+}
+
 /**
- * Build a fee-bump transaction envelope XDR string.
- *
- * In a production deployment this would use `@stellar/stellar-sdk` to:
- *   1. Parse `innerEnvelopeXdr` into a `Transaction` object.
- *   2. Construct a `FeeBumpTransaction` that wraps it, signed by the
- *      `secretKey` keypair, with `baseFee` set to `maxFee`.
- *   3. Return the serialised XDR string.
- *
- * This placeholder implementation encodes the intent in a deterministic,
- * human-readable form so the module can be unit-tested end-to-end without
- * pulling in the full SDK at import time.
- *
- * **TODO**: Replace with real `@stellar/stellar-sdk` calls once the SDK
- * is added to `dependencies` (tracked in GrantFox issue #sdk-integration).
- *
- * @param innerEnvelopeXdr  Base64-encoded XDR of the original transaction.
- * @param secretKey         Stellar secret key of the fee-bump payer (not logged).
- * @param maxFee            Maximum base fee in stroops.
- * @returns                 XDR string of the fee-bump envelope.
- *
- * @internal Exported only to allow direct unit-testing of the envelope format.
+ * Wrap an existing signed transaction while preserving its transaction hash.
+ * maxFee caps the per-operation base fee; total outer fee includes the extra
+ * fee-bump operation and any Soroban resource fee. expectedInnerHash is the
+ * Horizon transaction hash: XDR itself does not encode its signing network.
+ * The SDK loads only on the server, when a bump is actually attempted.
  */
-export function buildFeeBumpEnvelope(
+export async function buildFeeBumpEnvelope(
   innerEnvelopeXdr: string,
   secretKey: string,
   maxFee: number,
-): string {
-  // Tag: fee_bump:<maxFee>:<innerXdr>
-  // The secretKey is intentionally not embedded in the tag; it would be used
-  // by the real SDK to sign the outer transaction.
-  void secretKey; // acknowledged — will be used by real SDK implementation
-  return `fee_bump:${maxFee}:${innerEnvelopeXdr}`;
+  networkPassphrase: string,
+  expectedInnerHash: string,
+): Promise<FeeBumpBuildResult> {
+  const fail = (code: FeeBumpBuildError["code"], message: string): FeeBumpBuildResult =>
+    ({ ok: false, error: { code, message } });
+  if (typeof window !== "undefined") {
+    return fail("SERVER_ONLY", "Fee-bump signing is server-only");
+  }
+  if (!Number.isSafeInteger(maxFee) || maxFee <= 0 || maxFee > MAX_FEE_UPPER_BOUND) {
+    return fail("INVALID_FEE", "Fee-bump base fee must be between 1 and 10000000 stroops");
+  }
+  try {
+    const { TransactionBuilder, FeeBumpTransaction, Keypair } = await import("@stellar/stellar-sdk");
+    let inner;
+    try {
+      inner = TransactionBuilder.fromXDR(innerEnvelopeXdr, networkPassphrase);
+    } catch {
+      return fail("INVALID_XDR", "Malformed inner transaction XDR");
+    }
+    if (inner instanceof FeeBumpTransaction) {
+      return fail("ALREADY_FEE_BUMPED", "Inner transaction is already fee-bumped");
+    }
+    if (inner.signatures.length === 0) {
+      return fail("UNSIGNED_INNER", "Inner transaction must already be signed");
+    }
+    if (!/^[a-f0-9]{64}$/i.test(expectedInnerHash) ||
+        inner.hash().toString("hex") !== expectedInnerHash.toLowerCase()) {
+      return fail("NETWORK_MISMATCH", "Inner transaction hash does not match the configured network or original transaction");
+    }
+    let feeSource;
+    try {
+      feeSource = Keypair.fromSecret(secretKey);
+    } catch {
+      return fail("INVALID_KEY", "Invalid fee-bump secret key");
+    }
+    // Let the SDK account for operation count and Soroban resource fees when
+    // enforcing outer base fee >= inner base fee; never lower the inner bid.
+    try {
+      const outer = TransactionBuilder.buildFeeBumpTransaction(feeSource, String(maxFee), inner, networkPassphrase);
+      outer.sign(feeSource);
+      return { ok: true, xdr: outer.toXDR() };
+    } catch {
+      return fail("INVALID_FEE", "Fee-bump base fee is below the inner base fee or cannot represent a valid outer fee");
+    }
+  } catch {
+    return fail("BUILD_FAILED", "Unable to build fee-bump envelope");
+  }
 }

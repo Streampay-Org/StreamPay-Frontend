@@ -576,4 +576,37 @@ describe("TotalsBar", () => {
     fireEvent.click(screen.getByRole("button", { name: /next: review/i }));
     expect(screen.getByText(/total stream amount/i)).toBeInTheDocument();
   });
+
+  it("passes updated total amount and recipientCount after adding and removing recipients", async () => {
+    render(<MultiRecipientStreamPage />);
+
+    const amountLabel = screen.getByText("Total Stream Amount:");
+    const recipientsLabel = screen.getByText("Recipients:");
+
+    // Initial state: 1,000 XLM and 1 recipient
+    expect(amountLabel.nextElementSibling).toHaveTextContent("1,000 XLM");
+    expect(recipientsLabel.nextElementSibling).toHaveTextContent("1");
+
+    // Update total amount to 2500 and advance to Step 1 (Recipients)
+    const amountInput = screen.getByLabelText(/total amount/i);
+    fireEvent.change(amountInput, { target: { value: "2500" } });
+    expect(amountLabel.nextElementSibling).toHaveTextContent("2,500 XLM");
+
+    await fillDetailsStep();
+    fireEvent.click(screen.getByRole("button", { name: /next: recipients/i }));
+
+    // Add two recipients -> recipientCount becomes 3
+    const addButton = screen.getByRole("button", { name: /\+ add recipient/i });
+    fireEvent.click(addButton);
+    expect(recipientsLabel.nextElementSibling).toHaveTextContent("2");
+    fireEvent.click(addButton);
+    expect(recipientsLabel.nextElementSibling).toHaveTextContent("3");
+    expect(amountLabel.nextElementSibling).toHaveTextContent("2,500 XLM");
+
+    // Remove one recipient -> recipientCount becomes 2
+    const removeButtons = screen.getAllByRole("button", { name: /remove recipient/i });
+    fireEvent.click(removeButtons[removeButtons.length - 1]);
+    expect(recipientsLabel.nextElementSibling).toHaveTextContent("2");
+    expect(amountLabel.nextElementSibling).toHaveTextContent("2,500 XLM");
+  });
 });
