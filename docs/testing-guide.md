@@ -71,6 +71,21 @@ npx jest tests/streamsShape.test.ts --updateSnapshot
 > Only run `--updateSnapshot` after confirming the change is
 > backwards-compatible with wallet partners still on v1 (sunset: 2026-12-31).
 
+## Event topic catalogue (issue #2042)
+
+`docs/__tests__/event-topics-doc.test.ts` reads `events.rs`, `multi.rs` and
+`recurring.rs`, extracts every `#[contractevent(topics = [...])]` pair, and
+checks it against the tables in `docs/EVENT_TOPICS.md`. It also keeps an
+explicit allowlist for topics emitted with `symbol_short!` in `events.rs`.
+
+Adding a contract event therefore requires a matching row in
+`docs/EVENT_TOPICS.md`. A new `symbol_short!` pair must also be added to
+`SYMBOL_SHORT_ALLOWLIST` in the test.
+
+```bash
+npm test -- docs/__tests__/event-topics-doc.test.ts
+```
+
 ## See also
 
 - `jest.config.js` and `jest.setup.ts` for the runtime configuration.
