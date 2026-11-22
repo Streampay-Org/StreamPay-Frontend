@@ -93,7 +93,7 @@ export async function GET(
 
   // Network-scoped cache check: a testnet entry cannot leak into a mainnet request.
   const cachedStream = streamCache.get(tenant, id, currentNetwork());
-  let stream: any | null = null;
+  let stream: Stream | null = null;
   let cacheStatus: "HIT" | "MISS" = "MISS";
 
   if (cachedStream) {

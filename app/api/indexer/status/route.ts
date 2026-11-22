@@ -22,12 +22,12 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 import { withRouteSpan } from "@/lib/routeSpan";
-import { applyRateLimit } from "@/src/middleware/rateLimit";
+import { applyRateLimit, withRateLimitHeaders } from "@/src/middleware/rateLimit";
 import { getIndexerStatus } from "./status";
 
 async function handleIndexerStatusGet(request: Request) {
-  const rateLimited = await applyRateLimit(request, "indexer/status", "GET");
-  if (rateLimited) return rateLimited;
+  const rateLimitResult = await applyRateLimit(request, "indexer/status", "GET");
+  if (!rateLimitResult.allowed) return rateLimitResult.response;
 
   const encoder = new TextEncoder();
 
@@ -56,14 +56,17 @@ async function handleIndexerStatusGet(request: Request) {
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
-  });
+  return withRateLimitHeaders(
+    new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      },
+    }),
+    rateLimitResult.headers,
+  );
 }
 
 export async function GET(request: Request) {

@@ -87,6 +87,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke the presented bearer token
+         * @description Adds the token's `jti` to the access-token denylist until the token's own `exp`. Every route that authenticates with `tryAuthenticateRequest` rejects the token afterwards. Repeated logout calls with the same token are safe. Tokens issued before revocation existed carry no `jti` and simply expire on their own.
+         */
+        post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/streams": {
         parameters: {
             query?: never;
@@ -599,6 +619,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieve Prometheus metrics for webhook processing
+         * @description Returns Prometheus text-format metrics for webhook requests and durations.
+         */
+        get: operations["getWebhookMetrics"];
+        put?: never;
+        /**
+         * Receive an incoming webhook event
+         * @description Validates and accepts an incoming webhook event payload.
+         */
+        post: operations["receiveWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/webhooks/dlq": {
         parameters: {
             query?: never;
@@ -630,6 +674,46 @@ export interface paths {
         get: operations["listWebhookDeliveries"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/webhooks/dlq/{dlqId}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay a dead-lettered webhook delivery
+         * @description Idempotently re-enqueues a dead-lettered webhook delivery through the delivery worker. Requires internal-service HMAC authentication or an admin JWT.
+         */
+        post: operations["replayDlqWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/webhooks/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate the active webhook signing secret
+         * @description Rotates the active webhook signing secret. Requires admin authentication.
+         */
+        post: operations["rotateWebhookSecret"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1049,6 +1133,108 @@ export interface paths {
         head?: never;
         patch?: never;
         trace?: never;
+    };
+    "/api/streams/{id}/cancel/preview": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Preview cancellation payout split for a stream
+         * @description Read-only preview of cancelling an active or paused stream. Returns the exact recipient payout and sender refund without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.
+         */
+        get: operations["previewCancelStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/{id}/settle/preview": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Preview settlement outcome for a stream
+         * @description Read-only preview of settling an active or paused stream. Returns the resulting status and escrow amounts without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.
+         */
+        get: operations["previewSettleStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/{id}/withdraw/preview": {
+        parameters: {
+            query?: {
+                /** @description Optional withdrawal amount in raw i128 units. Omit to preview withdrawing the full withdrawable balance. */
+                amount?: string;
+            };
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Preview withdrawal outcome for a stream
+         * @description Read-only preview of withdrawing from an ended stream. Computes the exact payout and updated released amount without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.
+         */
+        get: operations["previewWithdrawStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/policy": {
+            header?: never;
+            path?: never;
+        };
+        /**
+         * Get organization stream policy
+         * @description Returns the current StreamPolicy for the specified organization along with a strong ETag header.
+         */
+        get: operations["getOrgPolicy"];
+        /**
+         * Replace organization stream policy
+         * @description Replaces the StreamPolicy for an organization. Restricted to organization owners. Supports optimistic concurrency via the If-Match header and records an audit log entry.
+         */
+        put: operations["updateOrgPolicy"];
     };
 }
 export type webhooks = Record<string, never>;
@@ -1483,6 +1669,106 @@ export interface components {
              * @example 2026-01-15T00:00:00.000Z
              */
             createdAt: string;
+        };
+        CancelOutcomePreview: {
+            /** @enum {string} */
+            action: "cancel";
+            allowed: boolean;
+            /** @enum {string} */
+            currentStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            /** @enum {string} */
+            nextStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            token: string;
+            /** @description Raw i128 units as string. */
+            totalAmount: string;
+            /** @description Raw i128 units as string. */
+            releasedAmount: string;
+            /** @description Raw i128 units as string. */
+            vestedAmount: string;
+            /** @description Raw i128 units as string. */
+            recipientPayout: string;
+            /** @description Raw i128 units as string. */
+            senderRefund: string;
+            /** @description Raw i128 units as string. */
+            escrowDrained: string;
+            /** Format: date-time */
+            asOf: string;
+        };
+        SettleOutcomePreview: {
+            /** @enum {string} */
+            action: "settle";
+            allowed: boolean;
+            /** @enum {string} */
+            currentStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            /** @enum {string} */
+            nextStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            token: string;
+            /** @description Raw i128 units as string. */
+            totalAmount: string;
+            /** @description Raw i128 units as string. */
+            releasedAmount: string;
+            /** @description Raw i128 units as string. */
+            vestedAmount: string;
+            /** @description Raw i128 units as string. */
+            withdrawableAmount: string;
+            /** @description Raw i128 units as string. */
+            unvestedAmount: string;
+            /** Format: date-time */
+            asOf: string;
+        };
+        WithdrawOutcomePreview: {
+            /** @enum {string} */
+            action: "withdraw";
+            allowed: boolean;
+            /** @enum {string} */
+            currentStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            /** @enum {string} */
+            nextStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            token: string;
+            /** @description Raw i128 units as string. */
+            totalAmount: string;
+            /** @description Raw i128 units as string. */
+            releasedAmount: string;
+            /** @description Raw i128 units as string. */
+            vestedAmount: string;
+            /** @description Raw i128 units as string. */
+            withdrawableAmount: string;
+            /** @description Raw i128 units as string. */
+            amountPaidOut: string;
+            /** @description Raw i128 units as string. */
+            newReleasedAmount: string;
+            /** @description Raw i128 units as string. */
+            remainingEscrow: string;
+            /** Format: date-time */
+            asOf: string;
+        };
+        /** @enum {string} */
+        OrgRole: "owner" | "pauser" | "settler" | "viewer";
+        StreamPolicy: {
+            /** @enum {integer} */
+            policyVersion: 1;
+            canStart: components["schemas"]["OrgRole"][];
+            canPause: components["schemas"]["OrgRole"][];
+            canResume: components["schemas"]["OrgRole"][];
+            canSettle: components["schemas"]["OrgRole"][];
+            canStop: components["schemas"]["OrgRole"][];
+            canWithdraw: components["schemas"]["OrgRole"][];
+            /** @enum {integer} */
+            requireApprovals: 1 | 2;
+        };
+        UpdateOrgPolicyRequest: {
+            policy: components["schemas"]["StreamPolicy"];
+        };
+        OrgPolicyResponse: {
+            data: {
+                orgId: string;
+                policy: components["schemas"]["StreamPolicy"];
+                /** Format: date-time */
+                updatedAt: string;
+            };
+            links: {
+                self: string;
+            };
         };
     };
     responses: {
@@ -1981,6 +2267,63 @@ export interface operations {
                     "Retry-After"?: number;
                     /** @description Correlation ID for this response. */
                     "x-request-id"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "rate_limit_exceeded",
+                     *         "message": "Too many requests. Please try again later.",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Token revoked, or already revoked (idempotent). */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing, malformed, or expired bearer token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "UNAUTHORIZED",
+                     *         "message": "Missing or invalid authorization header",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description IP rate limit exceeded for logout (5 req/min per IP). */
+            429: {
+                headers: {
+                    /** @description Seconds until the client may retry. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -3648,6 +3991,78 @@ export interface operations {
             500: components["responses"]["500"];
         };
     };
+    getWebhookMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Prometheus metrics payload. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Too many requests — rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    receiveWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example payment.received */
+                    eventType: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Webhook event accepted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["400"];
+            413: components["responses"]["413"];
+            /** @description Too many requests — rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
     receiveDlqWebhook: {
         parameters: {
             query?: never;
@@ -3705,7 +4120,90 @@ export interface operations {
                 };
             };
             400: components["responses"]["400"];
+            422: components["responses"]["422"];
             500: components["responses"]["500"];
+        };
+    };
+    replayDlqWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Identifier of the dead-letter queue entry to replay. */
+                dlqId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description DLQ entry replayed (or already replayed). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            dlqId: string;
+                            deliveryId: string;
+                            alreadyReplayed: boolean;
+                            endpointId: string;
+                            endpointUrl: string;
+                            eventId: string;
+                            eventType: string;
+                            /** Format: date-time */
+                            replayedAt: string;
+                        };
+                        links: {
+                            dlq?: string;
+                            delivery?: string;
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            404: components["responses"]["404"];
+            /** @description Bad gateway — worker failed to enqueue the replay. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    rotateWebhookSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description New webhook signing secret. */
+                    secret: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Webhook signing secret rotated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: Record<string, never>;
+                    };
+                };
+            };
+            400: components["responses"]["400"];
+            403: components["responses"]["403"];
+            422: components["responses"]["422"];
         };
     };
     getWebhookHealth: {
@@ -3732,7 +4230,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -4310,6 +4808,252 @@ export interface operations {
                 };
             };
             401: components["responses"]["401"];
+        };
+    };
+    previewCancelStream: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cancellation outcome preview computed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CancelOutcomePreview"];
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Forbidden: caller is not authorized to preview this stream action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["404"];
+            /** @description Conflict: illegal state transition or terminal stream state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            422: components["responses"]["422"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    previewSettleStream: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settlement outcome preview computed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SettleOutcomePreview"];
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Forbidden: caller is not authorized to preview this stream action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["404"];
+            /** @description Conflict: illegal state transition or terminal stream state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            422: components["responses"]["422"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    previewWithdrawStream: {
+        parameters: {
+            query?: {
+                /** @description Optional withdrawal amount in raw i128 units. Omit to preview withdrawing the full withdrawable balance. */
+                amount?: string;
+            };
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Withdrawal outcome preview computed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WithdrawOutcomePreview"];
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Forbidden: caller is not authorized to preview this stream action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["404"];
+            /** @description Conflict: illegal state transition or terminal stream state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            422: components["responses"]["422"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    getOrgPolicy: {
+            header?: never;
+                /** @description Organization identifier */
+                orgId: string;
+            };
+        };
+            /** @description Organization stream policy */
+                    /** @description Strong entity tag for optimistic concurrency control */
+                    ETag?: string;
+                };
+                    "application/json": components["schemas"]["OrgPolicyResponse"];
+                };
+            };
+            /** @description Organization not found */
+            404: {
+                };
+                };
+            };
+        };
+    };
+    updateOrgPolicy: {
+                /** @description ETag returned by GET /api/orgs/{orgId}/policy for optimistic concurrency control */
+                "If-Match"?: string;
+            };
+                /** @description Organization identifier */
+                orgId: string;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateOrgPolicyRequest"];
+            };
+        };
+            /** @description Updated organization stream policy */
+                    /** @description Updated strong entity tag */
+                    ETag?: string;
+                };
+                    "application/json": components["schemas"]["OrgPolicyResponse"];
+                };
+            };
+            /** @description Invalid policy payload */
+            400: {
+                };
+                };
+            };
+            /** @description Caller is not an authenticated owner of the organization */
+                };
+                };
+            };
+            /** @description Organization not found */
+            404: {
+                };
+                };
+            };
+            /** @description Optimistic concurrency conflict (If-Match ETag mismatch) */
+                };
+                };
+            };
         };
     };
 }

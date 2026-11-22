@@ -967,6 +967,362 @@
             "example": "2026-01-15T00:00:00.000Z"
           }
         }
+      },
+      "CancelOutcomePreview": {
+        "type": "object",
+        "required": [
+          "action",
+          "allowed",
+          "currentStatus",
+          "nextStatus",
+          "token",
+          "totalAmount",
+          "releasedAmount",
+          "vestedAmount",
+          "recipientPayout",
+          "senderRefund",
+          "escrowDrained",
+          "asOf"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "cancel"
+            ]
+          },
+          "allowed": {
+            "type": "boolean"
+          },
+          "currentStatus": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn",
+              "cancelled"
+            ]
+          },
+          "nextStatus": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn",
+              "cancelled"
+            ]
+          },
+          "token": {
+            "type": "string"
+          },
+          "totalAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "releasedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "vestedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "recipientPayout": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "senderRefund": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "escrowDrained": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SettleOutcomePreview": {
+        "type": "object",
+        "required": [
+          "action",
+          "allowed",
+          "currentStatus",
+          "nextStatus",
+          "token",
+          "totalAmount",
+          "releasedAmount",
+          "vestedAmount",
+          "withdrawableAmount",
+          "unvestedAmount",
+          "asOf"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "settle"
+            ]
+          },
+          "allowed": {
+            "type": "boolean"
+          },
+          "currentStatus": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn",
+              "cancelled"
+            ]
+          },
+          "nextStatus": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn",
+              "cancelled"
+            ]
+          },
+          "token": {
+            "type": "string"
+          },
+          "totalAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "releasedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "vestedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "withdrawableAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "unvestedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WithdrawOutcomePreview": {
+        "type": "object",
+        "required": [
+          "action",
+          "allowed",
+          "currentStatus",
+          "nextStatus",
+          "token",
+          "totalAmount",
+          "releasedAmount",
+          "vestedAmount",
+          "withdrawableAmount",
+          "amountPaidOut",
+          "newReleasedAmount",
+          "remainingEscrow",
+          "asOf"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "withdraw"
+            ]
+          },
+          "allowed": {
+            "type": "boolean"
+          },
+          "currentStatus": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn",
+              "cancelled"
+            ]
+          },
+          "nextStatus": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn",
+              "cancelled"
+            ]
+          },
+          "token": {
+            "type": "string"
+          },
+          "totalAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "releasedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "vestedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "withdrawableAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "amountPaidOut": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "newReleasedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "remainingEscrow": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OrgRole": {
+        "type": "string",
+        "enum": [
+          "owner",
+          "pauser",
+          "settler",
+          "viewer"
+        ]
+      },
+      "StreamPolicy": {
+          "policyVersion",
+          "canStart",
+          "canPause",
+          "canResume",
+          "canSettle",
+          "canStop",
+          "canWithdraw",
+          "requireApprovals"
+        ],
+          "policyVersion": {
+            "type": "integer",
+              1
+            ]
+          },
+          "canStart": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canPause": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canResume": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canSettle": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canStop": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canWithdraw": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "requireApprovals": {
+            "type": "integer",
+              1,
+              2
+            ]
+          }
+        }
+      },
+      "UpdateOrgPolicyRequest": {
+          "policy"
+        ],
+          "policy": {
+            "$ref": "#/components/schemas/StreamPolicy"
+          }
+        }
+      },
+      "OrgPolicyResponse": {
+          "data",
+          "links"
+        ],
+          "data": {
+            "type": "object",
+            "required": [
+              "orgId",
+              "policy",
+              "updatedAt"
+            ],
+            "properties": {
+              "orgId": {
+                "type": "string"
+              },
+              "policy": {
+                "$ref": "#/components/schemas/StreamPolicy"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "links": {
+            "type": "object",
+            "required": [
+              "self"
+            ],
+            "properties": {
+              "self": {
+                "type": "string"
+              }
+            }
+          }
+        }
       }
     },
     "responses": {
@@ -1799,6 +2155,71 @@
                         "request_id": "req_01HZ9ABCDEF"
                       }
                     }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "summary": "Revoke the presented bearer token",
+        "description": "Adds the token's `jti` to the access-token denylist until the token's own `exp`. Every route that authenticates with `tryAuthenticateRequest` rejects the token afterwards. Repeated logout calls with the same token are safe. Tokens issued before revocation existed carry no `jti` and simply expire on their own.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "204": {
+            "description": "Token revoked, or already revoked (idempotent)."
+          },
+          "401": {
+            "description": "Missing, malformed, or expired bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "Missing or invalid authorization header",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "IP rate limit exceeded for logout (5 req/min per IP).",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the client may retry.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "rate_limit_exceeded",
+                    "message": "Too many requests. Please try again later.",
+                    "request_id": "req_01HZ9ABCDEF"
                   }
                 }
               }
@@ -5309,6 +5730,110 @@
         }
       }
     },
+    "/api/webhooks": {
+      "get": {
+        "operationId": "getWebhookMetrics",
+        "summary": "Retrieve Prometheus metrics for webhook processing",
+        "description": "Returns Prometheus text-format metrics for webhook requests and durations.",
+        "security": [],
+        "tags": [
+          "Webhooks"
+        ],
+        "responses": {
+          "200": {
+            "description": "Prometheus metrics payload.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests — rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
+      "post": {
+        "operationId": "receiveWebhook",
+        "summary": "Receive an incoming webhook event",
+        "description": "Validates and accepts an incoming webhook event payload.",
+        "security": [],
+        "tags": [
+          "Webhooks"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "eventType"
+                ],
+                "properties": {
+                  "eventType": {
+                    "type": "string",
+                    "example": "payment.received"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook event accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "429": {
+            "description": "Too many requests — rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
     "/api/webhooks/dlq": {
       "post": {
         "operationId": "receiveDlqWebhook",
@@ -5427,8 +5952,175 @@
           "400": {
             "$ref": "#/components/responses/400"
           },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
           "500": {
             "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/webhooks/dlq/{dlqId}/replay": {
+      "post": {
+        "operationId": "replayDlqWebhook",
+        "summary": "Replay a dead-lettered webhook delivery",
+        "description": "Idempotently re-enqueues a dead-lettered webhook delivery through the delivery worker. Requires internal-service HMAC authentication or an admin JWT.",
+        "tags": [
+          "Webhooks"
+        ],
+        "parameters": [
+          {
+            "name": "dlqId",
+            "in": "path",
+            "required": true,
+            "description": "Identifier of the dead-letter queue entry to replay.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "DLQ entry replayed (or already replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "links"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "dlqId",
+                        "deliveryId",
+                        "alreadyReplayed",
+                        "endpointId",
+                        "endpointUrl",
+                        "eventId",
+                        "eventType",
+                        "replayedAt"
+                      ],
+                      "properties": {
+                        "dlqId": {
+                          "type": "string"
+                        },
+                        "deliveryId": {
+                          "type": "string"
+                        },
+                        "alreadyReplayed": {
+                          "type": "boolean"
+                        },
+                        "endpointId": {
+                          "type": "string"
+                        },
+                        "endpointUrl": {
+                          "type": "string"
+                        },
+                        "eventId": {
+                          "type": "string"
+                        },
+                        "eventType": {
+                          "type": "string"
+                        },
+                        "replayedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "links": {
+                      "type": "object",
+                      "properties": {
+                        "dlq": {
+                          "type": "string"
+                        },
+                        "delivery": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "502": {
+            "description": "Bad gateway — worker failed to enqueue the replay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhooks/rotate": {
+      "post": {
+        "operationId": "rotateWebhookSecret",
+        "summary": "Rotate the active webhook signing secret",
+        "description": "Rotates the active webhook signing secret. Requires admin authentication.",
+        "tags": [
+          "Webhooks"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "secret"
+                ],
+                "properties": {
+                  "secret": {
+                    "type": "string",
+                    "description": "New webhook signing secret."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook signing secret rotated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
           }
         }
       }
@@ -5519,6 +6211,9 @@
             "description": "Failed to retrieve health stats",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
                 "examples": {
                   "internalError": {
                     "summary": "Unexpected error retrieving health",
@@ -6395,6 +7090,431 @@
           },
           "401": {
             "$ref": "#/components/responses/401"
+          }
+        }
+      }
+    },
+    "/api/streams/{id}/cancel/preview": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "x-tenant-id",
+          "in": "header",
+          "required": false,
+          "description": "Optional tenant identifier for tenant-scoped stream visibility.",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "Actor-Wallet-Address",
+          "in": "header",
+          "required": false,
+          "description": "Caller wallet address (fallback when allowed for org policy evaluation).",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "previewCancelStream",
+        "summary": "Preview cancellation payout split for a stream",
+        "description": "Read-only preview of cancelling an active or paused stream. Returns the exact recipient payout and sender refund without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.",
+        "tags": [
+          "Streams v1"
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancellation outcome preview computed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CancelOutcomePreview"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "description": "Forbidden: caller is not authorized to preview this stream action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict: illegal state transition or terminal stream state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/streams/{id}/settle/preview": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "x-tenant-id",
+          "in": "header",
+          "required": false,
+          "description": "Optional tenant identifier for tenant-scoped stream visibility.",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "Actor-Wallet-Address",
+          "in": "header",
+          "required": false,
+          "description": "Caller wallet address (fallback when allowed for org policy evaluation).",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "previewSettleStream",
+        "summary": "Preview settlement outcome for a stream",
+        "description": "Read-only preview of settling an active or paused stream. Returns the resulting status and escrow amounts without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.",
+        "tags": [
+          "Streams v1"
+        ],
+        "responses": {
+          "200": {
+            "description": "Settlement outcome preview computed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SettleOutcomePreview"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "description": "Forbidden: caller is not authorized to preview this stream action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict: illegal state transition or terminal stream state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/streams/{id}/withdraw/preview": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "x-tenant-id",
+          "in": "header",
+          "required": false,
+          "description": "Optional tenant identifier for tenant-scoped stream visibility.",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "Actor-Wallet-Address",
+          "in": "header",
+          "required": false,
+          "description": "Caller wallet address (fallback when allowed for org policy evaluation).",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "amount",
+          "in": "query",
+          "required": false,
+          "description": "Optional withdrawal amount in raw i128 units. Omit to preview withdrawing the full withdrawable balance.",
+          "schema": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "previewWithdrawStream",
+        "summary": "Preview withdrawal outcome for a stream",
+        "description": "Read-only preview of withdrawing from an ended stream. Computes the exact payout and updated released amount without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.",
+        "tags": [
+          "Streams v1"
+        ],
+        "responses": {
+          "200": {
+            "description": "Withdrawal outcome preview computed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WithdrawOutcomePreview"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "description": "Forbidden: caller is not authorized to preview this stream action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict: illegal state transition or terminal stream state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/policy": {
+        "summary": "Get organization stream policy",
+        "description": "Returns the current StreamPolicy for the specified organization along with a strong ETag header.",
+        "operationId": "getOrgPolicy",
+          "Organizations"
+        ],
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization identifier"
+          }
+        ],
+            "description": "Organization stream policy",
+            "headers": {
+              "ETag": {
+                "description": "Strong entity tag for optimistic concurrency control",
+                  "type": "string"
+                }
+              }
+            },
+                  "$ref": "#/components/schemas/OrgPolicyResponse"
+                }
+              }
+            }
+          },
+            "description": "Organization not found",
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace organization stream policy",
+        "description": "Replaces the StreamPolicy for an organization. Restricted to organization owners. Supports optimistic concurrency via the If-Match header and records an audit log entry.",
+        "operationId": "updateOrgPolicy",
+          "Organizations"
+        ],
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization identifier"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ETag returned by GET /api/orgs/{orgId}/policy for optimistic concurrency control"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrgPolicyRequest"
+              }
+            }
+          }
+        },
+            "description": "Updated organization stream policy",
+            "headers": {
+              "ETag": {
+                "description": "Updated strong entity tag",
+                  "type": "string"
+                }
+              }
+            },
+                  "$ref": "#/components/schemas/OrgPolicyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid policy payload",
+                }
+              }
+            }
+          },
+            "description": "Caller is not an authenticated owner of the organization",
+                }
+              }
+            }
+          },
+            "description": "Organization not found",
+                }
+              }
+            }
+          },
+            "description": "Optimistic concurrency conflict (If-Match ETag mismatch)",
+                }
+              }
+            }
           }
         }
       }
