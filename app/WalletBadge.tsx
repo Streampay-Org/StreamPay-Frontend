@@ -223,7 +223,7 @@ export function WalletBadge({
     return (
       <EmptyState
         title="Wallet Disconnected"
-        description="Connect your Stellar wallet to participate in the GrantFox campaign."
+        description="Connect your Stellar wallet to create and manage payment streams."
         illustration={
           <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />

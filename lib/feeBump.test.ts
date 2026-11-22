@@ -26,7 +26,6 @@ import {
   maybeFeeBump,
   resolveFeeBumpConfig,
   buildFeeBumpEnvelope,
-  type FeeBumpResult,
 } from "./feeBump";
 import type { Stream, WithdrawalStatus } from "@/app/types/openapi";
 
@@ -328,7 +327,7 @@ describe("maybeFeeBump", () => {
   it("does not call fetcher when failure is not fee-related", async () => {
     const stream = makeFeeFailedStream("REORG_DETECTED");
     const mockFetch = jest.fn();
-    await maybeFeeBump({ stream, alert: false }, mockFetch as unknown as typeof fetch);
+    await maybeFeeBump({ stream, alert: false }, mockFetch);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -403,7 +402,7 @@ describe("maybeFeeBump", () => {
     );
     const { feeBump } = await maybeFeeBump(
       { stream, alert: true },
-      mockFetch as unknown as typeof fetch,
+      mockFetch,
     );
     expect(feeBump.bumped).toBe(true);
   });
@@ -418,7 +417,7 @@ describe("maybeFeeBump", () => {
     );
     const { feeBump } = await maybeFeeBump(
       { stream, alert: true },
-      mockFetch as unknown as typeof fetch,
+      mockFetch,
     );
     expect(feeBump.bumped).toBe(false);
     expect(feeBump.error).toContain("Failed to fetch original tx");
@@ -431,7 +430,7 @@ describe("maybeFeeBump", () => {
     const mockFetch = jest.fn().mockResolvedValueOnce(
       new Response(null, { status: 500 }),
     );
-    await maybeFeeBump({ stream, alert: true }, mockFetch as unknown as typeof fetch);
+    await maybeFeeBump({ stream, alert: true }, mockFetch);
     expect(mockLogger.error).toHaveBeenCalledWith(
       expect.stringContaining("horizon fetch failed"),
       expect.objectContaining({ stream_id: stream.id }),
@@ -446,7 +445,7 @@ describe("maybeFeeBump", () => {
     );
     const { feeBump } = await maybeFeeBump(
       { stream, alert: true },
-      mockFetch as unknown as typeof fetch,
+      mockFetch,
     );
     expect(feeBump.bumped).toBe(false);
     expect(feeBump.error).toContain("envelope_xdr");
@@ -458,7 +457,7 @@ describe("maybeFeeBump", () => {
     const mockFetch = jest.fn().mockRejectedValueOnce(new Error("DNS failure"));
     const { feeBump } = await maybeFeeBump(
       { stream, alert: true },
-      mockFetch as unknown as typeof fetch,
+      mockFetch,
     );
     expect(feeBump.bumped).toBe(false);
     expect(feeBump.error).toContain("DNS failure");
@@ -478,7 +477,7 @@ describe("maybeFeeBump", () => {
       );
     const { feeBump } = await maybeFeeBump(
       { stream, alert: true },
-      mockFetch as unknown as typeof fetch,
+      mockFetch,
     );
     expect(feeBump.bumped).toBe(false);
     expect(feeBump.error).toContain("Fee-bump submission failed");
@@ -495,7 +494,7 @@ describe("maybeFeeBump", () => {
       .mockResolvedValueOnce(
         new Response("tx_bad_seq", { status: 400 }),
       );
-    await maybeFeeBump({ stream, alert: true }, mockFetch as unknown as typeof fetch);
+    await maybeFeeBump({ stream, alert: true }, mockFetch);
     expect(mockLogger.error).toHaveBeenCalledWith(
       expect.stringContaining("submission rejected"),
       expect.objectContaining({ stream_id: stream.id }),
@@ -514,7 +513,7 @@ describe("maybeFeeBump", () => {
       );
     const { feeBump } = await maybeFeeBump(
       { stream, alert: true },
-      mockFetch as unknown as typeof fetch,
+      mockFetch,
     );
     expect(feeBump.bumped).toBe(false);
     expect(feeBump.error).toContain("no hash");
@@ -530,7 +529,7 @@ describe("maybeFeeBump", () => {
       .mockRejectedValueOnce(new Error("Network unreachable"));
     const { feeBump } = await maybeFeeBump(
       { stream, alert: true },
-      mockFetch as unknown as typeof fetch,
+      mockFetch,
     );
     expect(feeBump.bumped).toBe(false);
     expect(feeBump.error).toContain("Network unreachable");
@@ -550,7 +549,7 @@ describe("maybeFeeBump", () => {
       );
     const { feeBump, result } = await maybeFeeBump(
       { stream, alert: true },
-      mockFetch as unknown as typeof fetch,
+      mockFetch,
     );
     expect(feeBump.bumped).toBe(true);
     expect(feeBump.newTxHash).toBe("bumped_hash_abc");
@@ -569,7 +568,7 @@ describe("maybeFeeBump", () => {
       );
     const { result } = await maybeFeeBump(
       { stream, alert: true },
-      mockFetch as unknown as typeof fetch,
+      mockFetch,
     );
     expect(result.stream.withdrawal?.state).toBe("pending");
     expect(result.stream.withdrawal?.failureCode).toBeUndefined();
@@ -587,7 +586,7 @@ describe("maybeFeeBump", () => {
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ hash: "bumped_hash" }), { status: 200 }),
       );
-    await maybeFeeBump({ stream, alert: true }, mockFetch as unknown as typeof fetch);
+    await maybeFeeBump({ stream, alert: true }, mockFetch);
     expect(mockLogger.info).toHaveBeenCalledWith(
       expect.stringContaining("successfully submitted"),
       expect.objectContaining({ stream_id: stream.id, new_tx_hash: "bumped_hash" }),
@@ -604,7 +603,7 @@ describe("maybeFeeBump", () => {
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ hash: "h1" }), { status: 200 }),
       );
-    await maybeFeeBump({ stream, alert: true }, mockFetch as unknown as typeof fetch);
+    await maybeFeeBump({ stream, alert: true }, mockFetch);
     const allCalls = [
       ...mockLogger.info.mock.calls,
       ...mockLogger.warn.mock.calls,
@@ -627,7 +626,7 @@ describe("maybeFeeBump", () => {
         capturedBody = (init?.body as string) ?? "";
         return new Response(JSON.stringify({ hash: "h2" }), { status: 200 });
       });
-    await maybeFeeBump({ stream, alert: true }, mockFetch as unknown as typeof fetch);
+    await maybeFeeBump({ stream, alert: true }, mockFetch);
     expect(capturedBody).toContain("TESTENVELOPE");
   });
 
@@ -643,7 +642,7 @@ describe("maybeFeeBump", () => {
       }
       return new Response(JSON.stringify({ hash: "h3" }), { status: 200 });
     });
-    await maybeFeeBump({ stream, alert: true }, mockFetch as unknown as typeof fetch);
+    await maybeFeeBump({ stream, alert: true }, mockFetch);
     expect(calledUrls[0]).toContain("custom-horizon.example.com");
   });
 
@@ -655,7 +654,7 @@ describe("maybeFeeBump", () => {
     const mockFetch = jest.fn().mockRejectedValueOnce("raw string error");
     const { feeBump } = await maybeFeeBump(
       { stream, alert: true },
-      mockFetch as unknown as typeof fetch,
+      mockFetch,
     );
     expect(feeBump.bumped).toBe(false);
     expect(feeBump.error).toContain("raw string error");
@@ -671,7 +670,7 @@ describe("maybeFeeBump", () => {
       .mockRejectedValueOnce({ code: 42, reason: "unknown object thrown" });
     const { feeBump } = await maybeFeeBump(
       { stream, alert: true },
-      mockFetch as unknown as typeof fetch,
+      mockFetch,
     );
     expect(feeBump.bumped).toBe(false);
     expect(feeBump.error).toContain("Fee-bump submission error");

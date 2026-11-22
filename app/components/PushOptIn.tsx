@@ -44,7 +44,7 @@ export function PushOptIn({
           tone: "success",
           title: "Push notifications are on",
           description:
-            "GrantFox updates can reach this browser instantly when stream activity changes.",
+            "StreamPay updates can reach this browser instantly when stream activity changes.",
           cta: null,
         };
       case "denied":
@@ -117,7 +117,7 @@ export function PushOptIn({
       className={`push-optin push-optin--${details.tone}`}
     >
       <div className="push-optin__copy">
-        <p className="push-optin__eyebrow">GrantFox Campaign</p>
+        <p className="push-optin__eyebrow">Instant alerts</p>
         <h2 className="push-optin__title" id="push-opt-in-title">
           {details.title}
         </h2>

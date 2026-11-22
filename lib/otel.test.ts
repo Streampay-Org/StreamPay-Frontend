@@ -1,3 +1,4 @@
+/** @jest-environment node */
 /**
  * Tests for `lib/otel.ts` — OpenTelemetry auto-instrumentation
  *
@@ -30,12 +31,14 @@ jest.mock('../app/lib/logger', () => {
 import * as LoggerMock from '../app/lib/logger';
 
 // Typed accessors into the internal mock state
+// The Jest logger factory adds these test-only state accessors, absent from the production module type.
 const _store  = (LoggerMock as unknown as { __store: Record<string, unknown> }).__store;
+// The Jest logger factory adds these test-only state accessors, absent from the production module type.
 const _getStore = (LoggerMock as unknown as { __getStore: jest.Mock }).__getStore;
 
 // ── Mock fetch ────────────────────────────────────────────────────────────────
 const mockFetch = jest.fn().mockResolvedValue({ ok: true } as Response);
-global.fetch = mockFetch as unknown as typeof fetch;
+global.fetch = mockFetch;
 
 // ── Import under test ─────────────────────────────────────────────────────────
 import {
@@ -49,6 +52,10 @@ import {
   tracer,
   injectTraceHeaders,
   extractTraceHeaders,
+  setTelemetryConsent,
+  resetTelemetryConsent,
+  redactAttributes,
+  redactSpanRecord,
   type TraceContext,
   type SpanRecord,
 } from './otel';
@@ -66,7 +73,7 @@ function makeCtx(overrides: Partial<TraceContext> = {}): TraceContext {
 
 function freshTracer(): [Tracer, SpanRecord[]] {
   const records: SpanRecord[] = [];
-  return [new Tracer(r => records.push(r)), records];
+  return [new Tracer(r => { records.push(r); }), records];
 }
 
 // ── randomHex ─────────────────────────────────────────────────────────────────
@@ -157,6 +164,12 @@ describe('parseTraceparent', () => {
   });
   it('returns null for non-hex spanId', () => {
     expect(parseTraceparent(`00-${traceId}-${'z'.repeat(16)}-01`)).toBeNull();
+  });
+  it('returns null for all-zero traceId per W3C', () => {
+    expect(parseTraceparent(`00-${'0'.repeat(32)}-${spanId}-01`)).toBeNull();
+  });
+  it('returns null for all-zero spanId per W3C', () => {
+    expect(parseTraceparent(`00-${traceId}-${'0'.repeat(16)}-01`)).toBeNull();
   });
   it('round-trips with formatTraceparent', () => {
     const tp  = formatTraceparent(traceId, spanId);
@@ -463,9 +476,10 @@ describe('otlpHttpExport', () => {
     jest.resetModules();
     process.env = { ...OLD_ENV };
     mockFetch.mockClear();
+    resetTelemetryConsent();
   });
 
-  afterEach(() => { process.env = OLD_ENV; });
+  afterEach(() => { process.env = OLD_ENV; resetTelemetryConsent(); });
 
   it('does nothing when OTLP endpoint is not set', async () => {
     delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
@@ -479,24 +493,44 @@ describe('otlpHttpExport', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('never throws even when fetch rejects', async () => {
-    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://bad';
-    jest.resetModules();
-    const { otlpHttpExport: fresh } = await import('./otel');
-    mockFetch.mockRejectedValueOnce(new Error('network'));
-    const span: SpanRecord = {
-      traceId: 'a'.repeat(32), spanId: 'b'.repeat(16),
-      name: 'x', kind: 'INTERNAL', startTime: 0, endTime: 0,
-      durationMs: 0, status: 'UNSET', attributes: {}, events: [],
-      service: 'svc', traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
-    };
-    await expect(fresh(span)).resolves.toBeUndefined();
-  });
-
-  it('POSTs to /v1/traces with OTLP payload when endpoint is set', async () => {
+  it('does NOT POST when consent has not been granted, even if endpoint is set', async () => {
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://otel:4318';
     jest.resetModules();
     const { otlpHttpExport: fresh } = await import('./otel');
+    setTelemetryConsent(false);
+    const span: SpanRecord = {
+      traceId: 'a'.repeat(32), spanId: 'b'.repeat(16),
+      name: 'pay', kind: 'SERVER', startTime: 1000, endTime: 1050,
+      durationMs: 50, status: 'OK', attributes: { email: 'a@b.com', k: 'v' }, events: [],
+      service: 'svc', traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
+    };
+    await fresh(span);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('honours consent toggled at runtime via setTelemetryConsent', async () => {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://otel:4318';
+    jest.resetModules();
+    const { otlpHttpExport: fresh, setTelemetryConsent: grant } = await import('./otel');
+    grant(false);
+    const span: SpanRecord = {
+      traceId: 'a'.repeat(32), spanId: 'b'.repeat(16),
+      name: 'pay', kind: 'SERVER', startTime: 1000, endTime: 1050,
+      durationMs: 50, status: 'OK', attributes: {}, events: [],
+      service: 'svc', traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
+    };
+    await fresh(span);
+    expect(mockFetch).not.toHaveBeenCalled();
+    grant(true);
+    await fresh(span);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('POSTs when endpoint is set AND consent is granted', async () => {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://otel:4318';
+    jest.resetModules();
+    const { otlpHttpExport: fresh, setTelemetryConsent: grant } = await import('./otel');
+    grant(true);
     const span: SpanRecord = {
       traceId: 'a'.repeat(32), spanId: 'b'.repeat(16),
       name: 'pay', kind: 'SERVER', startTime: 1000, endTime: 1050,
@@ -511,6 +545,189 @@ describe('otlpHttpExport', () => {
     const body = JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string);
     expect(body).toHaveProperty('resourceSpans');
     expect(body.resourceSpans[0].scopeSpans[0].spans[0].name).toBe('pay');
+  });
+
+  it('redacts sensitive attributes before export when consent is granted', async () => {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://otel:4318';
+    jest.resetModules();
+    const { otlpHttpExport: fresh, setTelemetryConsent: grant } = await import('./otel');
+    grant(true);
+    const span: SpanRecord = {
+      traceId: 'a'.repeat(32), spanId: 'b'.repeat(16),
+      name: 'pay', kind: 'SERVER', startTime: 1000, endTime: 1050,
+      durationMs: 50, status: 'OK',
+      attributes: {
+        email: 'user@corp.io',
+        recipient: 'GABCDEF0000000000000000000000000000000000000000000001234',
+        safe_metric: 42,
+      },
+      events: [{ name: 'exception', timestamp: 1001, attributes: { 'exception.message': 'bad for user@corp.io' } }],
+      service: 'svc', traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
+    };
+    await fresh(span);
+    const body = JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string);
+    const outAttrs = body.resourceSpans[0].scopeSpans[0].spans[0].attributes;
+    const byKey = Object.fromEntries(
+      outAttrs.map((a: any) => [a.key, a.value.stringValue ?? a.value.doubleValue]),
+    );
+    expect(byKey.email).toBe('[REDACTED]');
+    expect(byKey.recipient).toBe('[REDACTED]');
+    expect(byKey.safe_metric).toBe(42);
+    const outEventAttrs = body.resourceSpans[0].scopeSpans[0].spans[0].events[0].attributes;
+    const evtByKey = Object.fromEntries(outEventAttrs.map((a: any) => [a.key, a.value.stringValue]));
+    expect(evtByKey['exception.message']).toBe('[REDACTED]');
+  });
+
+  it('never throws even when fetch rejects', async () => {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://bad';
+    jest.resetModules();
+    const { otlpHttpExport: fresh, setTelemetryConsent: grant } = await import('./otel');
+    grant(true);
+    mockFetch.mockRejectedValueOnce(new Error('network'));
+    const span: SpanRecord = {
+      traceId: 'a'.repeat(32), spanId: 'b'.repeat(16),
+      name: 'x', kind: 'INTERNAL', startTime: 0, endTime: 0,
+      durationMs: 0, status: 'UNSET', attributes: {}, events: [],
+      service: 'svc', traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
+    };
+    await expect(fresh(span)).resolves.toBeUndefined();
+  });
+
+  it('honours OTEL_EXPORTER_OTLP_ENDPOINT changed after import (lazy getter)', async () => {
+    delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+    jest.resetModules();
+    const { otlpHttpExport: fresh, setTelemetryConsent: grant } = await import('./otel');
+    grant(true);
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://late:4318';
+    const span: SpanRecord = {
+      traceId: 'a'.repeat(32), spanId: 'b'.repeat(16),
+      name: 'late', kind: 'INTERNAL', startTime: 0, endTime: 0,
+      durationMs: 0, status: 'UNSET', attributes: {}, events: [],
+      service: 'svc', traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
+    };
+    await fresh(span);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://late:4318/v1/traces',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('does not mutate the original span record (safe for retries/concurrency)', async () => {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://otel:4318';
+    jest.resetModules();
+    const { otlpHttpExport: fresh, setTelemetryConsent: grant } = await import('./otel');
+    grant(true);
+    const original: SpanRecord = {
+      traceId: 'a'.repeat(32), spanId: 'b'.repeat(16),
+      name: 'pay', kind: 'SERVER', startTime: 1000, endTime: 1050,
+      durationMs: 50, status: 'OK', attributes: { email: 'a@b.com' }, events: [],
+      service: 'svc', traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
+    };
+    const snapshot = JSON.stringify(original);
+    await fresh(original);
+    expect(JSON.stringify(original)).toBe(snapshot);
+  });
+});
+
+// ── Consent API ───────────────────────────────────────────────────────────────
+
+describe('telemetry consent API', () => {
+  const OLD_ENV = process.env;
+  beforeEach(() => { process.env = { ...OLD_ENV }; jest.resetModules(); });
+  afterEach(() => { process.env = OLD_ENV; });
+
+  it('defaults to denied (least privilege) when env is unset', async () => {
+    delete process.env.STREAMPAY_TELEMETRY_CONSENT;
+    const { isTelemetryConsented } = await import('./otel');
+    expect(isTelemetryConsented()).toBe(false);
+  });
+
+  it('honors env opt-in (STREAMPAY_TELEMETRY_CONSENT=true)', async () => {
+    process.env.STREAMPAY_TELEMETRY_CONSENT = 'true';
+    const { isTelemetryConsented } = await import('./otel');
+    expect(isTelemetryConsented()).toBe(true);
+  });
+
+  it('runtime set/clear toggles consent and reset restores default', async () => {
+    const mod = await import('./otel');
+    const envWas = mod.isTelemetryConsented();
+    mod.setTelemetryConsent(true);
+    expect(mod.isTelemetryConsented()).toBe(true);
+    mod.setTelemetryConsent(false);
+    expect(mod.isTelemetryConsented()).toBe(false);
+    mod.resetTelemetryConsent();
+    expect(mod.isTelemetryConsented()).toBe(envWas);
+  });
+});
+
+// ── Redaction ─────────────────────────────────────────────────────────────────
+
+describe('redactAttributes', () => {
+  it('masks sensitive keys regardless of value', () => {
+    const out = redactAttributes({ email: 'keep@me.io', token: 'abc', label: 'x' });
+    expect(out.email).toBe('[REDACTED]');
+    expect(out.token).toBe('[REDACTED]');
+    expect(out.label).toBe('[REDACTED]');
+  });
+
+  it('masks PII-shaped values even on non-sensitive keys', () => {
+    const out = redactAttributes({ actor: 'user@corp.io', account: 'GABCDEF0000000000000000000000000000000000000000000001234' });
+    expect(out.actor).toBe('[REDACTED]');
+    expect(out.account).toBe('[REDACTED]');
+  });
+
+  it('preserves non-sensitive data verbatim', () => {
+    const out = redactAttributes({ duration_ms: 12, ok: true, path: '/api/x' });
+    expect(out).toEqual({ duration_ms: 12, ok: true, path: '/api/x' });
+  });
+
+  it('redacts PII within array attribute values', () => {
+    const out = redactAttributes({ recipients: ['user@corp.io', 'GABCDEF0000000000000000000000000000000000000000000001234', 'pub'] });
+    expect(out.recipients).toEqual(['[REDACTED]', '[REDACTED]', 'pub']);
+  });
+
+  it('returns empty object for null/undefined/non-object input', () => {
+    expect(redactAttributes(null)).toEqual({});
+    expect(redactAttributes(undefined)).toEqual({});
+    expect(redactAttributes('oops' as any)).toEqual({});
+  });
+
+  it('is pure and never mutates the input', () => {
+    const input = { email: 'a@b.com', ok: 1 };
+    const snapshot = JSON.stringify(input);
+    redactAttributes(input);
+    expect(JSON.stringify(input)).toBe(snapshot);
+  });
+});
+
+describe('redactSpanRecord', () => {
+  const base: SpanRecord = {
+    traceId: 'a'.repeat(32), spanId: 'b'.repeat(16),
+    name: 's', kind: 'INTERNAL', startTime: 1, endTime: 2, durationMs: 1,
+    status: 'OK', attributes: { email: 'a@b.com', ok: 1 },
+    events: [{ name: 'e', timestamp: 1, attributes: { memo: 'secret', n: 2 } }],
+    service: 'svc', traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
+  };
+
+  it('redacts attributes and event attributes', () => {
+    const out = redactSpanRecord(base);
+    expect(out.attributes.email).toBe('[REDACTED]');
+    expect(out.attributes.ok).toBe(1);
+    expect(out.events[0].attributes.memo).toBe('[REDACTED]');
+    expect(out.events[0].attributes.n).toBe(2);
+  });
+
+  it('does not mutate the original record (concurrent/retry-safe)', () => {
+    const snapshot = JSON.stringify(base);
+    redactSpanRecord(base);
+    expect(JSON.stringify(base)).toBe(snapshot);
+  });
+
+  it('preserves structural fields (trace/status/service)', () => {
+    const out = redactSpanRecord(base);
+    expect(out.traceId).toBe(base.traceId);
+    expect(out.status).toBe(base.status);
+    expect(out.service).toBe(base.service);
   });
 });
 

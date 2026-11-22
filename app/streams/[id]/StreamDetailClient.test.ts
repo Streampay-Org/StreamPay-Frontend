@@ -2,20 +2,10 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { axe } from "jest-axe";
 import React from "react";
 import type { Stream } from "../../types/openapi";
-
-jest.mock("../../../lib/apiClient", () => ({
-  fetchWithIdempotency: jest.fn().mockResolvedValue({ ok: true }),
-}));
-
-const RequestCtor = globalThis.Request ?? class Request {};
-const ResponseCtor = globalThis.Response ?? class Response {};
-const HeadersCtor = globalThis.Headers ?? class Headers {};
-(global as typeof globalThis & { Request: typeof RequestCtor }).Request = RequestCtor;
-(global as typeof globalThis & { Response: typeof ResponseCtor }).Response = ResponseCtor;
-(global as typeof globalThis & { Headers: typeof HeadersCtor }).Headers = HeadersCtor;
 
 const { StreamDetailClient } = require("./StreamDetailClient") as typeof import("./StreamDetailClient");
 
@@ -58,7 +48,47 @@ const endedStream: Stream = {
   },
 };
 
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+const mockFetch = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
+
+function idempotencyKeyForCall(index: number): string | null {
+  const init = mockFetch.mock.calls[index]?.[1];
+  return new Headers(init?.headers).get("Idempotency-Key");
+}
+
+function pausedStream(): Stream {
+  return {
+    ...activeStream,
+    status: "paused",
+    updatedAt: "2026-06-27T10:05:00.000Z",
+  };
+}
+
+function cancelledStream(): Stream {
+  return {
+    ...activeStream,
+    status: "cancelled",
+    updatedAt: "2026-06-27T10:10:00.000Z",
+  };
+}
+
 describe("StreamDetailClient", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    global.fetch = mockFetch as unknown as typeof fetch;
+    jest.spyOn(window, "alert").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it("links to the contract events panel for the current stream", () => {
     render(React.createElement(StreamDetailClient, { stream: activeStream }));
 
@@ -123,5 +153,224 @@ describe("StreamDetailClient", () => {
     render(React.createElement(StreamDetailClient, { stream: endedStream }));
 
     expect(screen.getByRole("button", { name: /withdraw funds/i })).toBeInTheDocument();
+  });
+
+  it("reuses the same Idempotency-Key when the user retries a retryable failure", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: {
+              code: "GATEWAY_TIMEOUT",
+              message: "Upstream timed out",
+              request_id: "req-504",
+            },
+          },
+          504,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ data: pausedStream() }));
+
+    render(React.createElement(StreamDetailClient, { stream: activeStream }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
+
+    const retry = await screen.findByRole("button", { name: /^retry$/i });
+    fireEvent.click(retry);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("action-status")).toHaveTextContent(/pause successful/i);
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(idempotencyKeyForCall(0)).toEqual(expect.any(String));
+    expect(idempotencyKeyForCall(0)).toBe(idempotencyKeyForCall(1));
+  });
+
+  it("updates the badge and next action from the mutation response", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: pausedStream() }));
+
+    render(React.createElement(StreamDetailClient, { stream: activeStream }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Stream status: Paused")).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("button", { name: /^Resume$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Pause$/i })).not.toBeInTheDocument();
+  });
+
+  it("clears the key after a non-retryable error so the next click uses a new key", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: {
+              code: "INVALID_STREAM_STATE",
+              message: "Cannot pause a stream in 'paused' status.",
+              request_id: "req-409",
+            },
+          },
+          409,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ data: pausedStream() }));
+
+    render(React.createElement(StreamDetailClient, { stream: activeStream }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
+
+    await screen.findByTestId("error-toast");
+    expect(screen.queryByRole("button", { name: /^retry$/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    expect(idempotencyKeyForCall(0)).toEqual(expect.any(String));
+    expect(idempotencyKeyForCall(1)).toEqual(expect.any(String));
+    expect(idempotencyKeyForCall(0)).not.toBe(idempotencyKeyForCall(1));
+  });
+
+  it("uses different keys for a pause followed by a cancel", async () => {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ data: pausedStream() }))
+      .mockResolvedValueOnce(jsonResponse({ data: cancelledStream() }));
+
+    render(React.createElement(StreamDetailClient, { stream: activeStream }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Stream status: Paused")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /cancel stream/i }));
+    fireEvent.click(screen.getByRole("button", { name: /confirm cancellation/i }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Stream status: Cancelled")).toBeInTheDocument();
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(idempotencyKeyForCall(0)).toEqual(expect.any(String));
+    expect(idempotencyKeyForCall(1)).toEqual(expect.any(String));
+    expect(idempotencyKeyForCall(0)).not.toBe(idempotencyKeyForCall(1));
+  });
+
+  it("ignores a second click while the first request is in flight", async () => {
+    let resolveRequest: ((response: Response) => void) | undefined;
+
+    mockFetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveRequest = resolve;
+        }),
+    );
+
+    render(React.createElement(StreamDetailClient, { stream: activeStream }));
+
+    const actionButton = screen.getByRole("button", { name: /^Pause$/i });
+    fireEvent.click(actionButton);
+    fireEvent.click(actionButton);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(actionButton).toBeDisabled();
+
+    await act(async () => {
+      resolveRequest?.(jsonResponse({ data: pausedStream() }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Stream status: Paused")).toBeInTheDocument();
+    });
+  });
+
+  it("announces success in a live status region and moves focus there", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: pausedStream() }));
+
+    render(React.createElement(StreamDetailClient, { stream: activeStream }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
+
+    const status = await screen.findByTestId("action-status");
+
+    await waitFor(() => {
+      expect(status).toHaveTextContent(/pause successful/i);
+    });
+
+    expect(status).toHaveAttribute("role", "status");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(status).toHaveFocus();
+  });
+
+  it("has no accessibility violations after a successful action", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: pausedStream() }));
+
+    const { container } = render(
+      React.createElement(StreamDetailClient, { stream: activeStream }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("action-status")).toHaveTextContent(/pause successful/i);
+    });
+
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it("confirms a destructive withdraw with its own idempotency key", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ data: { ...endedStream, status: "withdrawn" } }),
+    );
+
+    render(React.createElement(StreamDetailClient, { stream: endedStream }));
+
+    fireEvent.click(screen.getByRole("button", { name: /withdraw funds/i }));
+
+    const dialog = screen.getByRole("dialog", { name: /withdraw funds/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^continue$/i }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /^withdraw funds$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("action-status")).toHaveTextContent(/withdraw successful/i);
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(idempotencyKeyForCall(0)).toEqual(expect.any(String));
+    expect(String(mockFetch.mock.calls[0][1]?.body)).toContain("18 XLM");
+  });
+
+  it("reports calendar export failures inline without calling alert", () => {
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+    render(React.createElement(StreamDetailClient, { stream: activeStream }));
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /export vesting calendar as ics file/i }),
+    );
+
+    expect(screen.getByTestId("action-status")).toHaveTextContent(
+      /failed to export vesting calendar/i,
+    );
+    expect(window.alert).not.toHaveBeenCalled();
+  });
+
+  it("does not call window.alert on a successful action", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: pausedStream() }));
+
+    render(React.createElement(StreamDetailClient, { stream: activeStream }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("action-status")).toHaveTextContent(/pause successful/i);
+    });
+
+    expect(window.alert).not.toHaveBeenCalled();
   });
 });

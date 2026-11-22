@@ -5,6 +5,7 @@
 
 import { NextResponse } from "next/server";
 import { orgDb } from "@/app/lib/org-db";
+import { withRouteTimeout } from "@/src/middleware/timeout";
 import { OrgRecord, OrgMember, DEFAULT_STREAM_POLICY } from "@/app/lib/org-types";
 
 function errorResponse(code: string, message: string, status: number) {
@@ -14,7 +15,7 @@ function errorResponse(code: string, message: string, status: number) {
   );
 }
 
-export async function GET() {
+async function handleOrgsGet(_request: Request) {
   const orgs = Array.from(orgDb.orgs.values()).map((org) => ({
     id: org.id,
     name: org.name,
@@ -30,7 +31,11 @@ export async function GET() {
   });
 }
 
-export async function POST(request: Request) {
+export async function GET(request: Request) {
+  return withRouteTimeout(request, () => handleOrgsGet(request));
+}
+
+async function handleOrgsPost(request: Request) {
   let body: unknown;
   try {
     body = await request.json();
@@ -78,4 +83,8 @@ export async function POST(request: Request) {
     { data: newOrg, links: { self: `/api/orgs/${id}` } },
     { status: 201 },
   );
+}
+
+export async function POST(request: Request) {
+  return withRouteTimeout(request, () => handleOrgsPost(request));
 }

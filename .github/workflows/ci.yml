@@ -14,26 +14,45 @@ env:
   CI: true
 
 jobs:
-  build-test:
+  typecheck:
+    name: Strict core typecheck
     runs-on: ubuntu-latest
-    continue-on-error: true
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@v4
-        continue-on-error: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Restore incremental typecheck cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/typecheck-core.tsbuildinfo
+          key: types-core-${{ runner.os }}-node20-${{ hashFiles('package-lock.json', 'tsconfig*.json') }}-${{ github.sha }}
+          restore-keys: |
+            types-core-${{ runner.os }}-node20-${{ hashFiles('package-lock.json', 'tsconfig*.json') }}-
+      - name: Test typecheck report
+        run: node --test scripts/typecheck-report.test.mjs
+      - name: Check strict core (blocking)
+        run: npm run typecheck:core
+
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js
-        continue-on-error: true
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
 
       - name: Install dependencies
-        continue-on-error: true
         run: npm ci
 
       - name: Validate environment configuration
-        continue-on-error: true
         run: |
           echo "=== CI Environment Validation ==="
           echo "STELLAR_NETWORK: $STELLAR_NETWORK"
@@ -53,22 +72,27 @@ jobs:
           
           echo "✅ CI environment validation passed - testnet only"
 
-      - name: Build
+      - name: Report full-project type debt (informational)
+        if: always()
         continue-on-error: true
+        run: node scripts/typecheck-report.mjs
+
+      - name: Build
         run: npm run build
         env:
           STELLAR_NETWORK: testnet
           JWT_SECRET: streampay-dev-secret-do-not-use-in-prod
           STREAMPAY_ADMIN_ADDRESS: GADMIN_DEV_PLACEHOLDER_DO_NOT_USE_IN_PROD
           WEBHOOK_SECRET: dev-webhook-secret-do-not-use-in-prod-1234567890
+          # The audit hash chain is HMAC-keyed and refuses to run in production
+          # without a key; CI builds use a dev-only placeholder.
+          AUDIT_CHAIN_KEY: dev-audit-chain-key-do-not-use-in-prod
           NODE_ENV: production
 
       - name: Run tests
-        continue-on-error: true
         run: npm test
 
       - name: Run smoke tests
-        continue-on-error: true
         run: npm run smoke
 
 

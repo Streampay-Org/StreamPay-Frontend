@@ -20,6 +20,8 @@
  */
 
 import { NextRequest } from "next/server";
+import crypto from "crypto";
+import { encodeStellarPublicKey } from "@/app/lib/stellar-address";
 import { GET, POST, resetWalletChallengeStoreForTesting } from "./route";
 import { resetRateLimitStore, setRateLimitStore } from "@/app/lib/rate-limit-store";
 
@@ -75,8 +77,19 @@ jest.mock("@/src/middleware/timeout", () => {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+function createTestWallet() {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  const rawPub = publicKey.export({ type: "spki", format: "der" }).subarray(12);
+  const address = encodeStellarPublicKey(rawPub);
+  return { address, privateKey };
+}
+
+function signChallenge(challenge: string, privateKey: crypto.KeyObject): string {
+  return crypto.sign(null, Buffer.from(challenge, "utf-8"), privateKey).toString("base64");
+}
+
 const VALID_ADDRESS = "GCLH2SNM5MTV4TGNNOADLYOZJYIFBXTIDVSNW4XP3LEI2UQV2MZ46OD7";
-const VALID_CHALLENGE = "streampay_auth_1721800000000_abc123def";
+const VALID_CHALLENGE = "streampay-auth:v1:nKlQNln6SV4hJ6pm6jNMSBVlcqo7r8Pjcj9mqLA_oRg|http://localhost|2024-01-15T10:05:00.000Z";
 
 function makeGetRequest(search = "") {
   return new NextRequest(
@@ -157,7 +170,7 @@ describe("GET /api/auth/wallet — timeout", () => {
     const res = await GET(makeGetRequest(`?address=${VALID_ADDRESS}`));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.challenge).toMatch(/^streampay_auth_/);
+    expect(body.challenge).toMatch(/^streampay-auth:v1:/);
   });
 
   it("invokes withTimeout with the challenge deadline constant", async () => {
@@ -217,16 +230,22 @@ describe("POST /api/auth/wallet — timeout", () => {
   });
 
   it("returns 200 normally when within the deadline", async () => {
+    const wallet = createTestWallet();
+    const getRes = await GET(makeGetRequest(`?address=${wallet.address}`));
+    const { challenge } = await getRes.json();
+    const signature = signChallenge(challenge, wallet.privateKey);
     const res = await POST(
       makePostRequest({
-        address: VALID_ADDRESS,
-        challenge: VALID_CHALLENGE,
-        signature: "valid-sig",
+        address: wallet.address,
+        challenge,
+        signature,
       }),
     );
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.token).toMatch(/^tok_/);
+    expect(typeof body.token).toBe("string");
+    expect(body.token_type).toBe("Bearer");
+    expect(typeof body.expires_at).toBe("string");
   });
 
   it("invokes withTimeout with the verify deadline constant", async () => {

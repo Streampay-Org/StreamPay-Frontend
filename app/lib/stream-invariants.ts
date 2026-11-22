@@ -36,6 +36,11 @@ export interface StreamState {
   escrow: number;
 }
 
+export interface VestedState {
+  vestedAmount: number;
+  totalAmount: number;
+}
+
 /**
  * Invariant: Sum of vested = principal.
  * Conservation of value: deposited = withdrawn + escrow

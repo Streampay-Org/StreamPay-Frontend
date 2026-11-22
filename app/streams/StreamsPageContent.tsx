@@ -18,6 +18,7 @@ import { PageError } from "../components/PageError";
 import { EmptyState } from "../components/EmptyState";
 import { DensityToggle, type Density } from "../components/DensityToggle";
 import { TagChips } from "../components/TagChips";
+import { mockStreams } from "./fixtures";
 
 export type StreamsViewState = "loading" | "populated" | "empty" | "error";
 export type DensityMode = "comfortable" | "compact";
@@ -51,11 +52,6 @@ const streamListCopy = {
   primaryCta: "Create Stream",
   exportCta: "Export History",
 } as const;
-
-import { mockStreams } from "./fixtures";
-
-export { mockStreams };
-
 
 type StreamsPageContentProps = {
   /** Page-level view state. */

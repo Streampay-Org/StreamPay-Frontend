@@ -109,7 +109,7 @@ export async function POST(request: Request) {
     }
 
     if (body.streamId) {
-      const streamFallback = await onChainClient.fetchStream(body.streamId);
+      const streamFallback = await onChainClient.fetchStream('testnet', body.streamId);
       if (streamFallback && !dbStreamsList.some((x) => x.id === streamFallback.id)) {
         dbStreamsList.push({
           id: streamFallback.id,
@@ -123,7 +123,7 @@ export async function POST(request: Request) {
     }
 
     if (!dbStreamsList.some((x) => x.id === "stream_2")) {
-      const fallbackStream = await onChainClient.fetchStream("stream_2");
+      const fallbackStream = await onChainClient.fetchStream('testnet', "stream_2");
       if (fallbackStream) {
         dbStreamsList.push({
           id: fallbackStream.id,

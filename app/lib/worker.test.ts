@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { MockWorker } from './worker';
 import { MockQueue } from './queue';
-import { withCorrelationContext, logger, type CorrelationContext } from './logger';
+import { withCorrelationContext, type CorrelationContext } from './logger';
 
 const vi = jest;
 

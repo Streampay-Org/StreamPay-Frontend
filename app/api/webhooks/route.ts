@@ -2,9 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { registry, webhookCounter, webhookDuration } from "@/src/metrics/registry";
 import { logger } from "@/app/lib/logger";
 import { webhookPayloadSchema } from "@/src/validators/webhooks";
+import { withRouteTimeout } from "@/src/middleware/timeout";
+import { applyRateLimit } from "@/src/middleware/rateLimit";
+import {
+  buildLimitsConfig,
+  createBodySizeTooLargeResponse,
+  extractPathname,
+  getBodySizeLimit,
+} from "@/lib/bodySize";
+import {
+  BodyTooLargeError,
+  InvalidJsonError,
+  readJsonBody,
+} from "@/lib/readJsonBody";
+import { resolveRequestId } from "@/lib/requestId";
 
 // Prometheus metrics endpoint
-export async function GET(request: Request) {
+async function handleWebhooksGet(request: Request) {
   // Per-user rate limit — identity: API key > JWT wallet sub > IP.
   const rateLimited = await applyRateLimit(request, 'webhooks', 'GET');
   if (rateLimited) return rateLimited;
@@ -23,8 +37,12 @@ export async function GET(request: Request) {
   }
 }
 
+export async function GET(request: Request) {
+  return withRouteTimeout(request, () => handleWebhooksGet(request));
+}
+
 // Webhook receiver endpoint
-export async function POST(req: NextRequest) {
+async function handleWebhooksPost(req: NextRequest) {
   // Per-user rate limit before body parse / processing so exhausted callers
   // cannot spend CPU on validation or metrics work.
   const rateLimited = await applyRateLimit(req, 'webhooks', 'POST');
@@ -38,19 +56,36 @@ export async function POST(req: NextRequest) {
     let body: unknown;
 
     try {
-      body = await req.json();
+      const limits = buildLimitsConfig();
+      const maxBytes =
+        getBodySizeLimit(extractPathname(req), limits) ?? limits.webhook;
+      body = await readJsonBody(req, { maxBytes });
     } catch (error) {
-      status = 400;
-      logger.info("Rejected webhook request with invalid JSON", { error });
-      return NextResponse.json(
-        {
-          error: {
-            code: "INVALID_INPUT",
-            message: "Request body must be valid JSON.",
+      if (error instanceof BodyTooLargeError) {
+        status = 413;
+        return createBodySizeTooLargeResponse(
+          error.receivedBytes,
+          error.maxBytes,
+          resolveRequestId(req.headers ?? new Headers()),
+        );
+      }
+      if (error instanceof InvalidJsonError) {
+        status = 400;
+        logger.info("Rejected webhook request with invalid JSON", { error });
+        return NextResponse.json(
+          {
+            error: {
+              code: error.code === "EMPTY_BODY" ? "EMPTY_BODY" : "INVALID_INPUT",
+              message:
+                error.code === "EMPTY_BODY"
+                  ? "Request body is required."
+                  : "Request body must be valid JSON.",
+            },
           },
-        },
-        { status },
-      );
+          { status },
+        );
+      }
+      throw error;
     }
 
     const parsed = webhookPayloadSchema.safeParse(body);
@@ -93,4 +128,8 @@ export async function POST(req: NextRequest) {
       durationSeconds,
     );
   }
+}
+
+export async function POST(req: NextRequest) {
+  return withRouteTimeout(req, () => handleWebhooksPost(req));
 }

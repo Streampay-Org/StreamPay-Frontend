@@ -6,8 +6,6 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { StreamsPageContent } from "./StreamsPageContent";
 import { mockStreams } from "./fixtures";
 
-
-
 // Mock the StreamRow component
 jest.mock("../components/StreamRow", () => ({
   StreamRow: ({ stream, density }: { stream: any; density?: string }) => (

@@ -45,7 +45,6 @@ function errorEnvelope(
 interface LogCtx { correlationId: string; route: string }
 function makeChild(ctx: LogCtx) {
   const emit = (level: string, event: string, data: Record<string, unknown>) =>
-    // eslint-disable-next-line no-console
     console.log(JSON.stringify({ level, event, ...ctx, ts: new Date().toISOString(), ...data }));
   return {
     info:  (e: string, d: Record<string, unknown> = {}) => emit("info",  e, d),
@@ -218,4 +217,3 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 }
-

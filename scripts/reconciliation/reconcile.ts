@@ -140,7 +140,7 @@ export class ReconciliationService {
   private async reconcileSingleStream(dbStream: DbStream, report: ReconciliationReport): Promise<void> {
     let onChainStream: OnChainStream | null = null;
     try {
-      onChainStream = await onChainClient.fetchStream(dbStream.id);
+      onChainStream = await onChainClient.fetchStream('testnet', dbStream.id);
     } catch (err) {
       if (
         (err && typeof err === "object" && "variant" in err && (err as any).variant === "StreamNotFound") ||

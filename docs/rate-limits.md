@@ -135,6 +135,111 @@ Rate limiting emits structured logs for monitoring:
 
 Monitor these events to tune rate limits and detect potential abuse.
 
+## Shared Redis Rate-Limit Store
+
+On Vercel and other serverless platforms, multiple instances serve traffic
+concurrently.  Using the in-memory store on those platforms means each instance
+maintains its own independent bucket, so a client that hits N instances can
+make up to `limit × N` requests before being throttled.
+
+The Redis-backed store fixes this by keeping a single, globally-shared token
+bucket per identifier, advanced atomically with a Lua `EVAL` script so no two
+instances can double-spend a token.
+
+### Configuration
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `RATE_LIMIT_REDIS_URL` | When using Redis | Upstash REST endpoint, e.g. `https://your-db.upstash.io` |
+| `RATE_LIMIT_REDIS_TOKEN` | When `RATE_LIMIT_REDIS_URL` is set | Upstash REST API bearer token |
+| `RATE_LIMIT_FAIL_MODE` | No (default `open`) | `open` or `closed` (see below) |
+
+When both `RATE_LIMIT_REDIS_URL` and `RATE_LIMIT_REDIS_TOKEN` are set,
+`getRateLimitStore()` automatically returns a `RedisRateLimitStore`.
+Otherwise it falls back to `InMemoryRateLimitStore`.
+
+### Key format
+
+```
+streampay:rl:v1:{limitType}:{identifierValue}
+```
+
+Keys are stored as Redis hashes (`HMGET`/`HMSET`) and given a TTL of
+`2 × windowMs` seconds so stale buckets expire automatically.
+
+### Failure policy
+
+Each call to the store has a hard timeout of **150 ms**.  If Redis is
+unreachable or returns an error, the configured fail mode takes over:
+
+| Mode | Behaviour | Recommended for |
+|------|-----------|-----------------|
+| `open` | Allow the request; return remaining=limit−1 | Read tiers, export |
+| `closed` | Consult a local shadow bucket (cap=10 tokens per identifier); deny if shadow is also empty | Login (`POST /api/auth/wallet`), write tiers |
+
+The local shadow bucket ensures that a full Redis outage in `closed` mode does
+not hard-lock every caller.  Because the shadow bucket is per-process and
+capped, an attacker cannot exploit an outage to exceed the shadow cap ×
+instances, which is substantially lower than `limit × instances`.
+
+### Metrics
+
+Every Redis error increments the Prometheus counter
+`rate_limit_store_unavailable_total` (no labels).  Scrape it from
+`GET /api/metrics` and alert when the rate is non-zero.
+
+```promql
+# Alert if more than 1% of requests in 5-min window hit an unavailable store
+rate(rate_limit_store_unavailable_total[5m]) > 0.01
+```
+
+### Choosing a fail mode per tier
+
+| Tier | Default fail mode | Rationale |
+|------|-------------------|-----------|
+| `read` | `open` | Throughput matters more than strict enforcement for read traffic |
+| `write` | `open` | A single Vercel instance can still enforce the limit locally |
+| `login` | **`closed`** | Brute-force protection must hold even under Redis outage |
+| `export` | `open` | Exports are slow by design; throughput should not be blocked |
+
+To override globally, set `RATE_LIMIT_FAIL_MODE=closed`.  The same variable
+applies to all tiers; per-tier override is a future enhancement.
+
+### Upstash setup
+
+1. Create a database at [console.upstash.com](https://console.upstash.com).
+2. Copy the **REST URL** and **REST Token** from the database page.
+3. Add them to your Vercel environment:
+   ```
+   RATE_LIMIT_REDIS_URL=https://your-db.upstash.io
+   RATE_LIMIT_REDIS_TOKEN=AXxxxxxx...
+   RATE_LIMIT_FAIL_MODE=open
+   ```
+4. Redeploy.  `GET /api/metrics` should show
+   `rate_limit_store_unavailable_total 0` in healthy state.
+
+### Load test (verifying global limit)
+
+Run two local instances sharing the same Redis to confirm the global limit
+holds:
+
+```bash
+# Terminal 1
+PORT=3000 npm start
+
+# Terminal 2
+PORT=3001 npm start
+
+# Terminal 3 — drive 120 concurrent requests split across both instances
+npx autocannon -c 60 -d 5 http://localhost:3000/api/streams \
+  & npx autocannon -c 60 -d 5 http://localhost:3001/api/streams
+```
+
+With `RATE_LIMIT_STORE_TYPE=in-memory`, both instances independently honour
+the 60 req/min read limit, so up to ~120 requests succeed before a 429.
+With the Redis store, the combined total across both instances should not
+exceed 60 (the global limit) in any 60-second window.
+
 ## Implementation Details
 
 ### Token Bucket Algorithm

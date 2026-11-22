@@ -22,7 +22,7 @@ export function PageError({
   message,
   onRetry,
   retryLabel = "Try again",
-  supportHref = "/settings",
+  supportHref = "/help",
 }: PageErrorProps) {
   return (
     <section

@@ -11,7 +11,7 @@ export function redact(data: any): any {
   }
   return redacted;
 }
-import { Stream, User } from "@/app/types/openapi";
+import { Stream } from "@/app/types/openapi";
 import { getStore } from "./db";
 
 /**

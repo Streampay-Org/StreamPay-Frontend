@@ -254,7 +254,7 @@ export function StreamProgress({
 
   // ── ARIA live announcements ────────────────────────────────────────────────
   const [srAnnouncement, setSrAnnouncement] = useState("");
-  const prevStatusRef = useRef<StreamStatus | null>(null);
+  const prevStatusRef = useRef<StreamStatus | "empty" | null>(null);
   const prevPercentRef = useRef<number | null>(null);
 
   useEffect(() => {

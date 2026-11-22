@@ -53,6 +53,48 @@ const data = await get<Page>('/api/exports/large.csv', {}, {
 Retries only fire on errors the normaliser marks as retryable
 (network errors, 408, 429, 502, 503, 504). 4xx client errors short-
 circuit immediately.
+
+## One idempotency key per user intent
+
+`fetchWithIdempotency` mints a random `Idempotency-Key` only when the
+caller does not supply one. For an operation the user can retry (a button
+that shows a “Retry” action after a timeout), generate the key once when
+the intent starts and pass the **same** key on every retry:
+
+```ts
+type PendingAction = { action: string; key: string };
+
+const pending: PendingAction = {
+  action: 'pause',
+  key: crypto.randomUUID(),
+};
+
+// First attempt and every retry of this intent use `pending.key`.
+await fetchWithIdempotency(`/api/streams/${id}/pause`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Idempotency-Key': pending.key,
+  },
+  body: JSON.stringify({ action: 'pause' }),
+});
+```
+
+Rules:
+
+- **One key per user intent.** Starting an action creates the key; retrying
+  that same action reuses it so the server can replay the stored response
+  instead of executing the action twice.
+- **Never share a key across different actions.** A pause and a cancel are
+  separate intents and get separate keys, even when they target the same
+  stream.
+- **Clear the key on success or a non-retryable error.** The next click is a
+  new intent and must use a new key. Keep it only while the failure is
+  retryable.
+- When the response returns the updated resource (for example
+  `{ data: stream }`), update local state from it so the UI reflects the new
+  status without a full reload.
+
 ## Notification preferences
 
 The authenticated notification preferences endpoint is available at

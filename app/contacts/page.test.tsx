@@ -6,7 +6,12 @@ import React from "react";
 import { render, waitFor } from "@testing-library/react";
 const { screen, fireEvent, within } = require("@testing-library/react") as typeof import("@testing-library/react");
 
-import ContactsPage, { type Contact } from "./page";
+import userEvent from "@testing-library/user-event";
+import axe from "axe-core";
+
+import ContactsPage, { type Contact, getContactPaymentTarget } from "./page";
+
+const VALID_STELLAR_ADDRESS = "GCLH2SNM5MTV4TGNNOADLYOZJYIFBXTIDVSNW4XP3LEI2UQV2MZ46OD7";
 import * as federation from "../utils/federation";
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
@@ -346,8 +351,8 @@ describe("ContactsPage — add contact modal", () => {
     const addressInput = within(dialog).getByLabelText(
       /stellar address or federation address/i,
     );
-    // Use a valid 56-char Stellar address (G + 55 chars from A-Z,2-7)
-    const validAddress = `G${'A'.repeat(55)}`;
+    // A checksum-valid Stellar account ID (addresses are CRC-16 verified).
+    const validAddress = "GCLH2SNM5MTV4TGNNOADLYOZJYIFBXTIDVSNW4XP3LEI2UQV2MZ46OD7";
     fireEvent.change(addressInput, {
       target: { value: validAddress },
     });
@@ -539,5 +544,376 @@ describe("ContactsPage — delete contact", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: /cancel/i }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByText("Alice Design")).toBeInTheDocument();
+  });
+});
+
+// ─── Submit-time normalisation & accessible errors ───────────────────────────
+
+describe("ContactForm — normalise on submit and accessible errors", () => {
+  // Checksum-valid account ID (the validator verifies the strkey CRC-16).
+  const VALID_UPPER = "GCLH2SNM5MTV4TGNNOADLYOZJYIFBXTIDVSNW4XP3LEI2UQV2MZ46OD7";
+  const RESOLVED_ID = `G${"B".repeat(55)}`;
+
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  function openAddForm() {
+    render(<ContactsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /\+ add contact/i }));
+    const dialog = screen.getByRole("dialog");
+    return {
+      dialog,
+      labelInput: within(dialog).getByLabelText(/^label$/i),
+      addressInput: within(dialog).getByLabelText(
+        /stellar address or federation address/i,
+      ),
+      saveButton: within(dialog).getByRole("button", { name: /add contact/i }),
+    };
+  }
+
+  function savedContacts(): Contact[] {
+    return JSON.parse(store["streampay_contacts"] ?? "[]") as Contact[];
+  }
+
+  function contactWrites() {
+    return localStorageMock.setItem.mock.calls.filter(
+      ([key]) => key === "streampay_contacts",
+    );
+  }
+
+  beforeEach(() => {
+    (federation.isFederationAddress as jest.Mock).mockImplementation(
+      (v: string) => /^[^*\s]+\*[^*\s]+\.[^*\s]+$/.test(v),
+    );
+  });
+
+  it("1. stores an uppercase address when a lowercase G-address is submitted with Enter", async () => {
+    const user = userEvent.setup();
+    const { labelInput, addressInput } = openAddForm();
+
+    await user.type(labelInput, "Carol");
+    await user.type(addressInput, `${VALID_UPPER.toLowerCase()}{Enter}`);
+
+    await waitFor(() => expect(savedContacts()).toHaveLength(1));
+    expect(savedContacts()[0].address).toBe(VALID_UPPER);
+  });
+
+  it("2. resolves a federation address on Enter and saves the resolved id", async () => {
+    const user = userEvent.setup();
+    (federation.resolveFederationAddress as jest.Mock).mockResolvedValue({
+      stellar_address: "carol*example.com",
+      account_id: RESOLVED_ID,
+    });
+    const { labelInput, addressInput } = openAddForm();
+
+    await user.type(labelInput, "Carol");
+    await user.type(addressInput, "carol*example.com{Enter}");
+
+    await waitFor(() => expect(savedContacts()).toHaveLength(1));
+    expect(federation.resolveFederationAddress).toHaveBeenCalledWith(
+      "carol*example.com",
+    );
+    expect(savedContacts()[0]).toMatchObject({
+      address: RESOLVED_ID,
+      federationAddress: "carol*example.com",
+    });
+  });
+
+  it("3. shows an error and focuses the address input when the resolver rejects on submit", async () => {
+    const user = userEvent.setup();
+    const { FederationError } = jest.requireMock("../utils/federation") as {
+      FederationError: new (msg: string, code: string) => Error;
+    };
+    (federation.resolveFederationAddress as jest.Mock).mockRejectedValue(
+      new FederationError("Federation address not found", "NOT_FOUND"),
+    );
+    const { labelInput, addressInput } = openAddForm();
+
+    await user.type(labelInput, "Carol");
+    await user.type(addressInput, "nobody*example.com{Enter}");
+
+    expect(
+      await screen.findByText(/federation address not found/i),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(addressInput).toHaveFocus());
+    expect(addressInput).toHaveAttribute("aria-invalid", "true");
+    expect(savedContacts()).toHaveLength(0);
+  });
+
+  it("4. applies only the latest resolution when an earlier blur resolves late", async () => {
+    const user = userEvent.setup();
+    const a = deferred<{ stellar_address: string; account_id: string }>();
+    const b = deferred<{ stellar_address: string; account_id: string }>();
+    (federation.resolveFederationAddress as jest.Mock).mockImplementation(
+      (addr: string) => (addr.startsWith("a*") ? a.promise : b.promise),
+    );
+    const { labelInput, addressInput } = openAddForm();
+
+    await user.type(addressInput, "a*example.com");
+    await user.click(labelInput); // blur A → resolving
+    await user.clear(addressInput);
+    await user.type(addressInput, "b*example.com");
+    await user.click(labelInput); // blur B → resolving
+
+    b.resolve({ stellar_address: "b*example.com", account_id: RESOLVED_ID });
+    expect(
+      await screen.findByText(`Resolved: ${RESOLVED_ID}`),
+    ).toBeInTheDocument();
+
+    a.resolve({ stellar_address: "a*example.com", account_id: VALID_UPPER });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(screen.getByText(`Resolved: ${RESOLVED_ID}`)).toBeInTheDocument();
+    expect(
+      screen.queryByText(`Resolved: ${VALID_UPPER}`),
+    ).not.toBeInTheDocument();
+  });
+
+  it("5. renders one alert summary and focuses the label input on an empty submit", async () => {
+    const user = userEvent.setup();
+    const { labelInput, saveButton } = openAddForm();
+
+    await user.click(saveButton);
+
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toHaveTextContent(/2 fields need attention/i);
+    expect(within(alerts[0]).getAllByRole("link")).toHaveLength(2);
+    expect(labelInput).toHaveFocus();
+
+    // Field errors are plain text wired up via aria-describedby.
+    const errId = labelInput
+      .getAttribute("aria-describedby")!
+      .split(" ")
+      .find((id) => id.endsWith("-err"))!;
+    expect(document.getElementById(errId)).toHaveTextContent(
+      /label is required/i,
+    );
+  });
+
+  it("6. caps the label at 64 characters with a live counter", async () => {
+    const user = userEvent.setup();
+    const { dialog, labelInput } = openAddForm();
+
+    expect(labelInput).toHaveAttribute("maxLength", "64");
+    expect(within(dialog).getByText("0/64")).toBeInTheDocument();
+
+    await user.type(labelInput, "x".repeat(70));
+
+    expect(labelInput).toHaveValue("x".repeat(64));
+    expect(within(dialog).getByText("64/64")).toBeInTheDocument();
+  });
+
+  it("7. calls onSubmit once when save is double-clicked while resolving", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<{ stellar_address: string; account_id: string }>();
+    (federation.resolveFederationAddress as jest.Mock).mockReturnValue(
+      pending.promise,
+    );
+    const { labelInput, addressInput, saveButton } = openAddForm();
+
+    await user.type(labelInput, "Carol");
+    await user.type(addressInput, "carol*example.com");
+    await user.dblClick(saveButton);
+
+    expect(saveButton).toHaveTextContent("Resolving…");
+    expect(saveButton).toHaveAttribute("aria-busy", "true");
+
+    pending.resolve({
+      stellar_address: "carol*example.com",
+      account_id: RESOLVED_ID,
+    });
+
+    await waitFor(() => expect(savedContacts()).toHaveLength(1));
+    expect(contactWrites()).toHaveLength(1);
+    expect(federation.resolveFederationAddress).toHaveBeenCalledTimes(1);
+  });
+
+  it("8. has no serious axe violations in the error state", async () => {
+    const user = userEvent.setup();
+    const { dialog, saveButton } = openAddForm();
+
+    await user.click(saveButton);
+    await screen.findByRole("alert");
+
+    const results = await axe.run(dialog, {
+      rules: { "color-contrast": { enabled: false } },
+    });
+    const serious = results.violations.filter(
+      (v) => v.impact === "serious" || v.impact === "critical",
+    );
+    expect(serious).toEqual([]);
+  });
+});
+
+describe("ContactsPage — Federation Required Memo and Checksum Validation", () => {
+  it("Scenario 1: Federation returns memo_type: 'id', memo: '12345' -> saved contact has requiredMemo, locked field is displayed with badge", async () => {
+    (federation.isFederationAddress as jest.Mock).mockReturnValue(true);
+    (federation.resolveFederationAddress as jest.Mock).mockResolvedValue({
+      stellar_address: "alice*example.com",
+      account_id: VALID_STELLAR_ADDRESS,
+      memo_type: "id",
+      memo: "12345",
+    });
+
+    render(<ContactsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /\+ add contact/i }));
+    const dialog = screen.getByRole("dialog");
+
+    fireEvent.change(within(dialog).getByLabelText(/^label$/i), {
+      target: { value: "Alice Fed" },
+    });
+    const addressInput = within(dialog).getByLabelText(
+      /stellar address or federation address/i,
+    );
+    fireEvent.change(addressInput, { target: { value: "alice*example.com" } });
+    fireEvent.blur(addressInput);
+
+    // Required memo field appears and is read-only
+    const memoField = await within(dialog).findByLabelText(/required memo/i);
+    expect(memoField).toHaveValue("12345");
+    expect(memoField).toHaveAttribute("aria-readonly", "true");
+    expect(within(dialog).getByText(/required by alice\*example\.com/i)).toBeInTheDocument();
+
+    // Submit form
+    fireEvent.click(within(dialog).getByRole("button", { name: /add contact/i }));
+
+    await waitFor(() => {
+      expect(localStorageMock.setItem).toHaveBeenCalledWith(
+        "streampay_contacts",
+        expect.stringContaining('"requiredMemo":{"type":"id","value":"12345"}'),
+      );
+    });
+  });
+
+  it("Scenario 2: Federation returns an account_id with a bad checksum -> INVALID_RESPONSE, nothing saved and an error is shown", async () => {
+    (federation.isFederationAddress as jest.Mock).mockReturnValue(true);
+    const { FederationError } = jest.requireMock("../utils/federation") as {
+      FederationError: new (msg: string, code: string) => Error;
+    };
+    (federation.resolveFederationAddress as jest.Mock).mockRejectedValue(
+      new FederationError(
+        "Federation response contains invalid or checksum-failing account_id",
+        "INVALID_RESPONSE",
+      ),
+    );
+
+    render(<ContactsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /\+ add contact/i }));
+    const dialog = screen.getByRole("dialog");
+    const addressInput = within(dialog).getByLabelText(
+      /stellar address or federation address/i,
+    );
+
+    fireEvent.change(addressInput, { target: { value: "bad*example.com" } });
+    fireEvent.blur(addressInput);
+
+    expect(
+      await screen.findByText(/invalid or checksum-failing account_id/i),
+    ).toBeInTheDocument();
+    expect(localStorageMock.setItem).not.toHaveBeenCalled();
+  });
+
+  it("Scenario 6: G-address that passes the regex but fails CRC16 -> the form error 'Invalid Stellar address'", async () => {
+    render(<ContactsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /\+ add contact/i }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/^label$/i), {
+      target: { value: "Checksum Fail" },
+    });
+    const addressInput = within(dialog).getByLabelText(
+      /stellar address or federation address/i,
+    );
+    // 56 chars, matches ^G[A-Z2-7]{55}$ but fails CRC16
+    const badChecksumG = "GBVZZ5QKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2ZQK";
+    fireEvent.change(addressInput, { target: { value: badChecksumG } });
+    fireEvent.blur(addressInput);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: /add contact/i }));
+
+    expect(await screen.findByText("Invalid Stellar address")).toBeInTheDocument();
+    expect(localStorageMock.setItem).not.toHaveBeenCalled();
+  });
+
+  it("Scenario 7: Legacy contact with memo loads as note, with no data loss", () => {
+    const legacy: Contact = {
+      id: "legacy-contact-1",
+      label: "Legacy Partner",
+      address: VALID_STELLAR_ADDRESS,
+      memo: "Legacy note retainer",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    seedContacts([legacy]);
+    render(<ContactsPage />);
+
+    expect(screen.getByText("Legacy Partner")).toBeInTheDocument();
+    expect(screen.getByText("Legacy note retainer")).toBeInTheDocument();
+
+    // Open edit modal and verify Note field is populated with the legacy memo
+    fireEvent.click(screen.getByRole("button", { name: /edit contact legacy partner/i }));
+    const dialog = screen.getByRole("dialog");
+    const noteInput = within(dialog).getByLabelText(/^note/i);
+    expect(noteInput).toHaveValue("Legacy note retainer");
+  });
+
+  it("Scenario 8: getContactPaymentTarget returns the memo when one is required and omits private note", () => {
+    const withReqMemo: Contact = {
+      id: "c-1",
+      label: "Exchange User",
+      address: VALID_STELLAR_ADDRESS,
+      memo: "Private retainer note",
+      requiredMemo: { type: "id", value: "987654" },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    const targetWith = getContactPaymentTarget(withReqMemo);
+    expect(targetWith.address).toBe(VALID_STELLAR_ADDRESS);
+    expect(targetWith.memo).toEqual({ type: "id", value: "987654" });
+
+    const withoutReqMemo: Contact = {
+      id: "c-2",
+      label: "Individual",
+      address: VALID_STELLAR_ADDRESS,
+      memo: "Private note only",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    const targetWithout = getContactPaymentTarget(withoutReqMemo);
+    expect(targetWithout.address).toBe(VALID_STELLAR_ADDRESS);
+    expect(targetWithout.memo).toBeUndefined();
+  });
+
+  it("Scenario 9: axe on the form with the locked required memo badge has no serious violations", async () => {
+    (federation.isFederationAddress as jest.Mock).mockReturnValue(true);
+    (federation.resolveFederationAddress as jest.Mock).mockResolvedValue({
+      stellar_address: "alice*example.com",
+      account_id: VALID_STELLAR_ADDRESS,
+      memo_type: "id",
+      memo: "12345",
+    });
+
+    render(<ContactsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /\+ add contact/i }));
+    const dialog = screen.getByRole("dialog");
+    const addressInput = within(dialog).getByLabelText(
+      /stellar address or federation address/i,
+    );
+    fireEvent.change(addressInput, { target: { value: "alice*example.com" } });
+    fireEvent.blur(addressInput);
+
+    await within(dialog).findByLabelText(/required memo/i);
+
+    const results = await axe.run(dialog, {
+      rules: { "color-contrast": { enabled: false } },
+    });
+    const serious = results.violations.filter(
+      (v) => v.impact === "serious" || v.impact === "critical",
+    );
+    expect(serious).toEqual([]);
   });
 });

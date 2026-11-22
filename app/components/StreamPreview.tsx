@@ -156,12 +156,13 @@ export function StreamPreview({ data, className = "" }: StreamPreviewProps) {
           gap: 0.35rem;
           padding: 1rem;
           border-radius: 0.75rem;
-          background: var(--accent-strong, rgba(34, 197, 94, 0.12));
+          background: var(--system-success-bg, rgba(34, 197, 94, 0.12));
+          border: 1px solid var(--system-success-border, #22c55e);
           color: var(--foreground, inherit);
         }
         .stream-preview__totals-label {
           font-size: 0.8rem;
-          color: var(--muted);
+          color: var(--muted-light, var(--muted));
         }
         .stream-preview__totals-value {
           font-size: 1.4rem;

@@ -67,6 +67,7 @@ export const Skeleton = ({
         height:
           typeof finalHeight === "number" ? `${finalHeight}px` : finalHeight,
         borderRadius: circle ? "50%" : undefined,
+        maxWidth: "100%",
       }}
     />
   );

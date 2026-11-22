@@ -17,8 +17,6 @@ import { render, screen } from "@testing-library/react";
 import { StreamsPageContent } from "./StreamsPageContent";
 import { mockStreams } from "./fixtures";
 
-
-
 // Minimal StreamRow mock — we only need the article element to be present.
 jest.mock("../components/StreamRow", () => ({
   StreamRow: ({

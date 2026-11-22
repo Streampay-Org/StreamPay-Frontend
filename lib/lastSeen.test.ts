@@ -71,6 +71,38 @@ describe('touchLastSeen', () => {
     expect(getLastSeen(ACTOR_A)).toBe('2026-06-28T12:00:00.000Z');
   });
 
+  it('does NOT move last-seen backward when a stale (earlier) timestamp arrives', () => {
+    touchLastSeen(ACTOR_A, '2026-06-28T12:00:00.000Z');
+    touchLastSeen(ACTOR_A, '2026-01-01T00:00:00.000Z');
+    expect(getLastSeen(ACTOR_A)).toBe('2026-06-28T12:00:00.000Z');
+  });
+
+  it('keeps the newer value when an equal timestamp arrives (idempotent)', () => {
+    touchLastSeen(ACTOR_A, '2026-03-10T08:00:00.000Z');
+    touchLastSeen(ACTOR_A, '2026-03-10T08:00:00.000Z');
+    expect(getLastSeen(ACTOR_A)).toBe('2026-03-10T08:00:00.000Z');
+  });
+
+  it('ignores an unparseable timestamp rather than clobbering a good value', () => {
+    touchLastSeen(ACTOR_A, '2026-06-28T12:00:00.000Z');
+    touchLastSeen(ACTOR_A, 'not-a-real-timestamp');
+    expect(getLastSeen(ACTOR_A)).toBe('2026-06-28T12:00:00.000Z');
+  });
+
+  it('advances again after a rejected stale write (recovery)', () => {
+    touchLastSeen(ACTOR_A, '2026-06-28T12:00:00.000Z');
+    touchLastSeen(ACTOR_A, '2026-01-01T00:00:00.000Z'); // stale — ignored
+    touchLastSeen(ACTOR_A, '2026-12-31T23:59:59.000Z'); // newer — accepted
+    expect(getLastSeen(ACTOR_A)).toBe('2026-12-31T23:59:59.000Z');
+  });
+
+  it('isolates stale-write rejection per actor', () => {
+    touchLastSeen(ACTOR_A, '2026-06-28T12:00:00.000Z');
+    touchLastSeen(ACTOR_B, '2026-01-01T00:00:00.000Z');
+    expect(getLastSeen(ACTOR_A)).toBe('2026-06-28T12:00:00.000Z');
+    expect(getLastSeen(ACTOR_B)).toBe('2026-01-01T00:00:00.000Z');
+  });
+
   it('tracks multiple actors independently', () => {
     touchLastSeen(ACTOR_A, '2026-01-01T00:00:00.000Z');
     touchLastSeen(ACTOR_B, '2026-06-01T00:00:00.000Z');

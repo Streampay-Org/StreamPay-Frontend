@@ -30,7 +30,7 @@ export function Explainer() {
           Three steps from setup to payout clarity.
         </h2>
         <p className="explainer__description">
-          This onboarding panel gives new GrantFox users a quick mental model before they create their first stream.
+          This onboarding panel gives new StreamPay users a quick mental model before they create their first stream.
         </p>
       </div>
 

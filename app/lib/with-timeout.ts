@@ -20,15 +20,20 @@ export async function runWithTimeout<T>(
 ): Promise<T> {
   const controller = new AbortController();
 
-  // Registered before work() so on abort the race rejects with TimeoutError
-  // even when the work promise settles from its own abort listener.
+  let timedOutReject: ((reason?: any) => void) | undefined;
   const timedOut = new Promise<never>((_, reject) => {
-    controller.signal.addEventListener(
-      "abort",
-      () => reject(new TimeoutError(timeoutMs)),
-      { once: true },
-    );
+    timedOutReject = reject;
   });
+
+  const onAbort = () => {
+    if (timedOutReject) {
+      const rejectFn = timedOutReject;
+      timedOutReject = undefined;
+      rejectFn(new TimeoutError(timeoutMs));
+    }
+  };
+
+  controller.signal.addEventListener("abort", onAbort, { once: true });
 
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -38,7 +43,9 @@ export async function runWithTimeout<T>(
     return await Promise.race([workPromise, timedOut]);
   } finally {
     clearTimeout(timer);
-    // Neither race loser may surface as an unhandled rejection.
+    controller.signal.removeEventListener("abort", onAbort);
+    timedOutReject = undefined;
+    // Suppress unhandled rejections on race loss
     workPromise?.catch(() => undefined);
     timedOut.catch(() => undefined);
   }

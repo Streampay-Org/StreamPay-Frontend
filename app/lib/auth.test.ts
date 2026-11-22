@@ -55,6 +55,19 @@ describe("auth JWKS and rotation helpers", () => {
     });
   });
 
+  it("never exposes symmetric key material in the JWKS document", () => {
+    process.env.JWT_PREVIOUS_SECRET = PREVIOUS_SECRET;
+    process.env.JWT_PREVIOUS_KEY_ID = "streampay-previous";
+
+    const serialized = JSON.stringify(getJwtJwks());
+
+    for (const entry of getJwtJwks().keys) {
+      expect(entry).not.toHaveProperty("k");
+    }
+    expect(serialized).not.toContain(Buffer.from(TEST_SECRET).toString("base64url"));
+    expect(serialized).not.toContain(Buffer.from(PREVIOUS_SECRET).toString("base64url"));
+  });
+
   it("includes a previous key when a rotated secret is configured", () => {
     process.env.JWT_PREVIOUS_SECRET = PREVIOUS_SECRET;
     process.env.JWT_PREVIOUS_KEY_ID = "streampay-previous";
@@ -82,7 +95,7 @@ describe("auth JWKS and rotation helpers", () => {
     const token = jwt.sign(
       { sub: WALLET_ADDRESS, iss: "streampay", aud: "streampay-api" },
       PREVIOUS_SECRET,
-      { algorithm: "HS256", expiresIn: "15m", header: { kid: "streampay-previous" } },
+      { algorithm: "HS256", expiresIn: "15m", header: { alg: "HS256", kid: "streampay-previous" } },
     );
     const request = new Request("http://localhost", {
       headers: { authorization: `Bearer ${token}` },

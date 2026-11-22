@@ -26,6 +26,12 @@ describe("LiveRegion", () => {
 
   it("renders assertive politeness when specified", () => {
     render(<LiveRegion message="Urgent" politeness="assertive" />);
+    const region = screen.getByRole("alert");
+    expect(region).toHaveAttribute("aria-live", "assertive");
+  });
+
+  it("supports role override when provided", () => {
+    render(<LiveRegion message="Urgent" politeness="assertive" role="status" />);
     const region = screen.getByRole("status");
     expect(region).toHaveAttribute("aria-live", "assertive");
   });
@@ -59,5 +65,41 @@ describe("LiveRegion", () => {
   it("forwards data-testid when provided", () => {
     render(<LiveRegion message="Test" data-testid="my-region" />);
     expect(screen.getByTestId("my-region")).toBeInTheDocument();
+  });
+
+  it("avoids redundant state updates and announcements for repeated identical messages", () => {
+    const { rerender } = render(
+      <LiveRegion message="Stream saved successfully" />,
+    );
+    const region = screen.getByRole("status");
+    expect(region).toHaveTextContent("Stream saved successfully");
+
+    // Re-render with the exact same message
+    rerender(<LiveRegion message="Stream saved successfully" />);
+    expect(region).toHaveTextContent("Stream saved successfully");
+
+    // Re-render with trimmed whitespace equivalent
+    rerender(<LiveRegion message="  Stream saved successfully  " />);
+    expect(region).toHaveTextContent("Stream saved successfully");
+  });
+
+  it("allows duplicate announcements when allowDuplicates is true", () => {
+    const { rerender } = render(
+      <LiveRegion message="Action completed" allowDuplicates={true} />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Action completed");
+
+    rerender(<LiveRegion message="Action completed" allowDuplicates={true} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Action completed");
+  });
+
+  it("allows duplicate announcements when deduplicate is false", () => {
+    const { rerender } = render(
+      <LiveRegion message="Count: 1" deduplicate={false} />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Count: 1");
+
+    rerender(<LiveRegion message="Count: 1" deduplicate={false} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Count: 1");
   });
 });

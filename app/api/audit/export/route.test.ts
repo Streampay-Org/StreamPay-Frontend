@@ -2,18 +2,27 @@
 
 import jwt from "jsonwebtoken";
 import { GET, POST, PUT, PATCH, DELETE, OPTIONS } from "./route";
-import { JWT_SECRET } from "@/app/lib/auth";
+import { getJwtSecret } from "@/app/lib/auth";
 import { auditLogStore, resetAuditLogStore } from "@/app/lib/audit-log";
 
-function signAccessToken(role: string, actorId: string) {
+function signAccessToken(
+  role: string,
+  actorId: string,
+  secret: string = getJwtSecret(),
+) {
   return jwt.sign(
     { sub: `${actorId}-wallet`, role, actorId, iss: "streampay", aud: "streampay-api" },
-    JWT_SECRET,
+    secret,
     { expiresIn: "15m" },
   );
 }
 
-function makeRequest(path: string, role: string, actorId: string, extraHeaders?: Record<string, string>) {
+function makeRequest(
+  path: string,
+  role: string,
+  actorId: string,
+  extraHeaders?: Record<string, string>,
+) {
   return new Request(`http://localhost${path}`, {
     headers: {
       authorization: `Bearer ${signAccessToken(role, actorId)}`,
@@ -61,6 +70,9 @@ describe("GET /api/audit/export", () => {
     const body = await response.json();
     expect(response.status).toBe(401);
     expect(body.error.code).toBe("UNAUTHORIZED");
+    expect(body.error.request_id).toBeTruthy();
+    expect(body.error.request_id).not.toBe("mock-request-id");
+    expect(response.headers.get("x-request-id")).toBe(body.error.request_id);
   });
 
   it("returns 403 when a non-export role (support) calls the endpoint", async () => {
@@ -68,6 +80,8 @@ describe("GET /api/audit/export", () => {
     const body = await response.json();
     expect(response.status).toBe(403);
     expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.request_id).toBeTruthy();
+    expect(body.error.request_id).not.toBe("mock-request-id");
   });
 
   it("returns 403 for user role", async () => {
@@ -125,7 +139,7 @@ describe("GET /api/audit/export", () => {
     expect(response.headers.get("x-request-id")).toBe("corr-fallback");
   });
 
-  it("allows compliance role to export", async () => {
+  it("allows compliance role to export and masks target accounts", async () => {
     const response = await GET(
       makeRequest("/api/audit/export?actorId=compliance-1", "compliance", "compliance-1"),
     );
@@ -135,6 +149,9 @@ describe("GET /api/audit/export", () => {
     expect(lines.length).toBeGreaterThanOrEqual(1);
     const rows = lines.map((l) => JSON.parse(l));
     expect(rows[0].actorRole).toBe("compliance");
+    expect(rows[0].redactedTargetAccount).toBe("acct***ance");
+    expect(rows[0].redactedTargetAccount).not.toBe("acct_compliance");
+    expect(rows[0].redactionPolicy).toBe("mask-target-account");
   });
 
   it("allows security role to export", async () => {
@@ -154,38 +171,60 @@ describe("GET /api/audit/export", () => {
     expect(lines).toHaveLength(1);
   });
 
-  it("clamps limit to minimum of 1", async () => {
+  it("accepts the maximum limit of 250", async () => {
     const response = await GET(
-      makeRequest("/api/audit/export?limit=0", "admin", "admin-1"),
+      makeRequest("/api/audit/export?limit=250", "admin", "admin-1"),
     );
     expect(response.status).toBe(200);
     const text = await response.text();
-    const lines = text.trim().split("\n");
-    expect(lines).toHaveLength(1);
-  });
-
-  it("clamps limit to maximum of 250", async () => {
-    const response = await GET(
-      makeRequest("/api/audit/export?limit=9999", "admin", "admin-1"),
-    );
-    expect(response.status).toBe(200);
-    const text = await response.text();
-    const lines = text.trim().split("\n");
+    const lines = text.trim().split("\n").filter(Boolean);
     expect(lines.length).toBeLessThanOrEqual(250);
   });
 
-  it("uses default limit when limit is non-numeric", async () => {
+  it("rejects limit=0 with 422", async () => {
+    const response = await GET(
+      makeRequest("/api/audit/export?limit=0", "admin", "admin-1"),
+    );
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body.error.code).toBe("INVALID_LIMIT");
+  });
+
+  it("rejects limit=251 with 422", async () => {
+    const response = await GET(
+      makeRequest("/api/audit/export?limit=251", "admin", "admin-1"),
+    );
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body.error.code).toBe("INVALID_LIMIT");
+  });
+
+  it("rejects an over-limit value instead of clamping", async () => {
+    const response = await GET(
+      makeRequest("/api/audit/export?limit=9999", "admin", "admin-1"),
+    );
+    expect(response.status).toBe(422);
+  });
+
+  it("rejects a non-numeric limit with 422", async () => {
     const response = await GET(
       makeRequest("/api/audit/export?limit=abc", "admin", "admin-1"),
     );
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(422);
   });
 
-  it("uses default limit when limit is empty string", async () => {
+  it("rejects an empty limit with 422", async () => {
     const response = await GET(
       makeRequest("/api/audit/export?limit=", "admin", "admin-1"),
     );
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(422);
+  });
+
+  it("rejects a fractional limit with 422", async () => {
+    const response = await GET(
+      makeRequest("/api/audit/export?limit=1.5", "admin", "admin-1"),
+    );
+    expect(response.status).toBe(422);
   });
 
   it("filters by action", async () => {
@@ -205,6 +244,15 @@ describe("GET /api/audit/export", () => {
     const rows = text.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
     expect(rows.length).toBeGreaterThanOrEqual(1);
     expect(rows.every((r: { actorRole: string }) => r.actorRole === "compliance")).toBe(true);
+  });
+
+  it("rejects an invalid role filter with 422", async () => {
+    const response = await GET(
+      makeRequest("/api/audit/export?role=superadmin", "admin", "admin-1"),
+    );
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body.error.code).toBe("INVALID_ROLE_FILTER");
   });
 
   it("filters by targetId", async () => {
@@ -244,11 +292,11 @@ describe("GET /api/audit/export", () => {
     expect(text.trim()).toBe("");
   });
 
-  it("handles negative limit by defaulting to 1", async () => {
+  it("rejects a negative limit with 422", async () => {
     const response = await GET(
       makeRequest("/api/audit/export?limit=-5", "admin", "admin-1"),
     );
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(422);
   });
 
   it("streams NDJSON with multiple rows", async () => {
@@ -306,18 +354,35 @@ describe("GET /api/audit/export", () => {
     expect(row.action).toBe("stream.create");
   });
 
-  it("ignores invalid startDate gracefully", async () => {
+  it("rejects an invalid startDate with 422", async () => {
     const response = await GET(
       makeRequest("/api/audit/export?startDate=not-a-date", "admin", "admin-1"),
     );
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body.error.code).toBe("INVALID_DATE_FILTER");
   });
 
-  it("ignores invalid endDate gracefully", async () => {
+  it("rejects an invalid endDate with 422", async () => {
     const response = await GET(
       makeRequest("/api/audit/export?endDate=not-a-date", "admin", "admin-1"),
     );
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body.error.code).toBe("INVALID_DATE_FILTER");
+  });
+
+  it("rejects a reversed date range with 422", async () => {
+    const response = await GET(
+      makeRequest(
+        "/api/audit/export?startDate=2026-04-29T00:00:00.000Z&endDate=2026-04-28T00:00:00.000Z",
+        "admin",
+        "admin-1",
+      ),
+    );
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body.error.code).toBe("INVALID_DATE_RANGE");
   });
 
   it("ignores whitespace-only date parameter", async () => {
@@ -329,6 +394,99 @@ describe("GET /api/audit/export", () => {
     const lines = text.trim().split("\n").filter(Boolean);
     expect(lines.length).toBeGreaterThanOrEqual(3);
   });
+
+  it("streams CSV with formula-safe metadata and redacted accounts", async () => {
+    auditLogStore.append({
+      action: "stream.settle",
+      actor: { id: "admin-formula", role: "admin" },
+      after: { status: "ended" },
+      before: null,
+      requestId: "req-formula-001",
+      target: { account: "acct_formula", id: "stream-formula", type: "stream" },
+      timestamp: "2026-04-28T15:00:00.000Z",
+      metadata: {
+        note: "=SUM(A1:A2)",
+        plus: "+cmd",
+        minus: "-1+1",
+        at: "@user",
+      },
+    });
+
+    const response = await GET(
+      makeRequest(
+        "/api/audit/export?requestId=req-formula-001&format=csv",
+        "admin",
+        "admin-1",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/csv");
+
+    const text = await response.text();
+    const lines = text.trim().split("\n");
+    expect(lines[0]).toContain("redactionPolicy");
+    expect(lines[0]).toContain("metadata");
+
+    const row = lines.find((line) => line.includes("req-formula-001"));
+    expect(row).toBeDefined();
+    expect(row).toContain("'=SUM(A1:A2)");
+    expect(row).toContain("'+cmd");
+    expect(row).toContain("'-1+1");
+    expect(row).toContain("'@user");
+    expect(row).not.toContain("acct_formula");
+    expect(row).toContain("acct***mula");
+  });
+
+  it("rejects an unsupported export format with 422", async () => {
+    const response = await GET(
+      makeRequest("/api/audit/export?format=xml", "admin", "admin-1"),
+    );
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body.error.code).toBe("INVALID_EXPORT_FORMAT");
+  });
+});
+
+describe("JWT secret resolution", () => {
+  const originalJwtSecret = process.env.JWT_SECRET;
+
+  afterEach(() => {
+    if (originalJwtSecret === undefined) {
+      delete process.env.JWT_SECRET;
+    } else {
+      process.env.JWT_SECRET = originalJwtSecret;
+    }
+  });
+
+  it("honours JWT_SECRET changes made after module import", async () => {
+    const rotatedSecret = "rotated-secret-at-least-32-characters-long";
+    process.env.JWT_SECRET = rotatedSecret;
+
+    const response = await GET(
+      makeRequest("/api/audit/export", "admin", "admin-1"),
+    );
+    expect(response.status).toBe(200);
+
+    const staleSecret = originalJwtSecret ?? "streampay-dev-secret-do-not-use-in-prod";
+    const staleToken = jwt.sign(
+      {
+        sub: "admin-1-wallet",
+        role: "admin",
+        actorId: "admin-1",
+        iss: "streampay",
+        aud: "streampay-api",
+      },
+      staleSecret,
+      { expiresIn: "15m" },
+    );
+    const staleResponse = await GET(
+      new Request("http://localhost/api/audit/export", {
+        headers: { authorization: `Bearer ${staleToken}` },
+      }),
+    );
+    expect(staleResponse.status).toBe(401);
+  });
 });
 
 describe("HTTP method handlers", () => {
@@ -337,6 +495,7 @@ describe("HTTP method handlers", () => {
     const body = await response.json();
     expect(response.status).toBe(405);
     expect(body.error.code).toBe("METHOD_NOT_ALLOWED");
+    expect(response.headers.get("Allow")).toBe("GET, OPTIONS");
     expect(response.headers.get("x-request-id")).toBeTruthy();
   });
 
@@ -345,6 +504,7 @@ describe("HTTP method handlers", () => {
     const body = await response.json();
     expect(response.status).toBe(405);
     expect(body.error.code).toBe("METHOD_NOT_ALLOWED");
+    expect(response.headers.get("Allow")).toBe("GET, OPTIONS");
   });
 
   it("returns 405 for PATCH requests", async () => {
@@ -352,6 +512,7 @@ describe("HTTP method handlers", () => {
     const body = await response.json();
     expect(response.status).toBe(405);
     expect(body.error.code).toBe("METHOD_NOT_ALLOWED");
+    expect(response.headers.get("Allow")).toBe("GET, OPTIONS");
   });
 
   it("returns 405 for DELETE requests", async () => {
@@ -359,6 +520,7 @@ describe("HTTP method handlers", () => {
     const body = await response.json();
     expect(response.status).toBe(405);
     expect(body.error.code).toBe("METHOD_NOT_ALLOWED");
+    expect(response.headers.get("Allow")).toBe("GET, OPTIONS");
   });
 
   it("returns 204 for OPTIONS with allowed methods header", async () => {

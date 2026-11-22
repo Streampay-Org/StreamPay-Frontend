@@ -18,7 +18,7 @@ export default function NotificationsPage() {
           <p className="page-hero__eyebrow">User Settings</p>
           <h1 className="page-hero__title">Notifications</h1>
           <p className="page-hero__description">
-            Manage per-category GrantFox FWC26 notification channels, including in-app and email delivery for each stream event.
+            Manage per-category StreamPay notification channels, including in-app and email delivery for each stream event.
           </p>
         </div>
       </header>

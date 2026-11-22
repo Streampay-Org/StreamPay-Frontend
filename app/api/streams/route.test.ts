@@ -56,6 +56,9 @@ function seedStream(count = 3) {
 
 beforeEach(() => {
   resetDb();
+  // Start every case from an empty stream table; the demo seed would otherwise
+  // leak into list/pagination assertions.
+  getStore().streamRepository.streams.clear();
   resetRateLimitStore();
   _resetAllowlistForTesting();
   addAllowedToken("XLM");
@@ -403,7 +406,7 @@ describe("POST /api/streams", () => {
 
     it("returns 422 for token not in allowlist", async () => {
       _resetAllowlistForTesting();
-      addAllowedToken("USDC");
+      addAllowedToken(`USDC:${VALID_RECIPIENT}`);
 
       const res = await POST(postRequest({ recipient: VALID_RECIPIENT, rate: "50", schedule: "month", token: "XLM" }));
       expect(res.status).toBe(422);

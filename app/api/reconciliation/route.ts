@@ -7,6 +7,7 @@ import { applyRateLimit } from '@/src/middleware/rateLimit';
 import { reconciliationCounter, reconciliationDuration } from '@/src/metrics/registry';
 import { validateReconciliationQuery } from '@/src/validators/reconciliation';
 import type { ValidationError } from '@/app/lib/stream-validation';
+import { withRouteTimeout } from '@/src/middleware/timeout';
 
 function errorResponse(code: string, message: string, status: number) {
   const requestId = getCorrelationContext()?.request_id ?? `req-${crypto.randomUUID()}`;
@@ -30,7 +31,7 @@ function validationErrorResponse(logMessage: string, errors: ValidationError[]) 
   );
 }
 
-export async function GET(request: Request) {
+async function handleReconciliationGet(request: Request) {
   const endTimer = reconciliationDuration.startTimer();
 
   // ── Per-user rate limit ─────────────────────────────────────────────────
@@ -129,4 +130,8 @@ export async function GET(request: Request) {
     endTimer({ status: '500' });
     return errorResponse('INTERNAL_SERVER_ERROR', 'An unexpected error occurred', 500);
   }
+}
+
+export async function GET(request: Request) {
+  return withRouteTimeout(request, () => handleReconciliationGet(request));
 }

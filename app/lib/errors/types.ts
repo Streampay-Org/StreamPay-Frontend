@@ -9,6 +9,8 @@
  * Standardized error codes used across all StreamPay services.
  * These are stable, versioned, and machine-readable.
  */
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue | undefined };
+
 export type ErrorCode =
   // HTTP Standard Errors (4xx)
   | 'BAD_REQUEST'
@@ -71,6 +73,7 @@ export type ErrorCode =
   | 'INVALID_REQUEST'
   | 'MISSING_REQUIRED_FIELD'
   | 'INVALID_FIELD_VALUE'
+  | 'CSRF_TOKEN_INVALID'
   
   // Catch-all
   | 'UNKNOWN_ERROR';
@@ -136,8 +139,8 @@ export interface StreamPayError {
   meta?: {
     /** Field-level validation errors for forms */
     fieldErrors?: Record<string, string>;
-    /** Additional context (safe only) */
-    [key: string]: unknown;
+    /** Additional context (safe only) - must be JSON-serializable */
+    [key: string]: JsonValue | undefined;
   };
   
   /** 
@@ -149,8 +152,8 @@ export interface StreamPayError {
     originalCode?: string;
     /** Original error message from backend */
     originalMessage?: string;
-    /** Raw backend response (sanitized) */
-    rawResponse?: unknown;
+    /** Raw backend response (sanitized) - must be JSON-serializable */
+    rawResponse?: JsonValue;
     /** Stack trace (if available and safe) */
     stack?: string;
     /** Timestamp when error occurred */

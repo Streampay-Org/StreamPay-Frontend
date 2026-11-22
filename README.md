@@ -1,443 +1,127 @@
-# streampay-frontend
+# StreamPay
 
-**StreamPay** dashboard — Next.js app for Stellar wallet integration and payment stream management.
+StreamPay is a dashboard for paying collaborators, vendors and grant
+recipients in a continuous flow instead of lump sums: create a stream, watch funds accrue, pause or stop at any time,
+and let the recipient withdraw what has vested.
 
-See [CHANGELOG.md](CHANGELOG.md) for the full API version history.
+## Live demo: [https://streampay-frontend-alpha.vercel.app](https://streampay-frontend-alpha.vercel.app)
 
-## API Versioning
+> Explore [streams](https://streampay-frontend-alpha.vercel.app/streams), a [stream detail](https://streampay-frontend-alpha.vercel.app/streams/stream-ada), [activity](https://streampay-frontend-alpha.vercel.app/activity) and the in-app [docs](https://streampay-frontend-alpha.vercel.app/docs). The demo needs no wallet and no backend:
+> the API serves seeded sample data, so every screen is populated.
 
-StreamPay uses URL-path versioning (`/api/v1/`, `/api/v2/`).
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FStreampay-Org%2FStreamPay-Frontend&env=JWT_SECRET,STELLAR_NETWORK,ALLOWED_ORIGINS)
 
-| Path | Status | Sunset |
-|------|--------|--------|
-| `/api/v2/streams/*` | **Current** | — |
-| `/api/v1/streams/*` | Deprecated 2026-04-28 | **2026-12-31** |
-| `/api/streams/*` | Alias for v1 | Same as v1 |
+## Features
 
-**Policy**
-- Breaking changes always increment the major version.
-- Deprecated versions receive a minimum **90-day notice** before sunset.
-- Every response from a deprecated path carries `Deprecation` and `Sunset`
-  headers ([RFC 9745](https://www.rfc-editor.org/rfc/rfc9745)).
-- After the sunset date, deprecated paths return `410 Gone` with a
-  machine-readable body and a link to the migration guide.
+- Streams list with status badges, accrual progress, density toggle and per-stream actions (start, pause, stop, settle, withdraw)
+- Stream detail page with payment timeline, settlement transaction and shareable receipt
+- Guided stream creation, multi-recipient splits, previews and reusable templates
+- Activity feed, address book, notification settings, onboarding tour, light/dark/high-contrast themes
+- Command palette and keyboard shortcuts, accessible components, mobile bottom navigation
+- REST API (`/api/v1`, `/api/v2`) with OpenAPI spec, JWT wallet auth, rate limiting, CSRF, request fingerprinting, audit log, webhooks and Prometheus metrics
+- Soroban escrow contract sources in [`contracts/`](contracts)
 
-**Wallet partners on v1:** see [docs/api-v2-migration.md](docs/api-v2-migration.md)
-for the full migration guide, including field-by-field diffs and a migration
-checklist. Deadline: **2026-12-31**.
+## Quick start
 
-## Overview
+Requires Node.js 20+.
 
-Next.js 15 (React, TypeScript) frontend for the StreamPay protocol. Users will connect Stellar wallets and create/manage payment streams from this dashboard.
+```bash
+git clone https://github.com/Streampay-Org/StreamPay-Frontend.git
+cd StreamPay-Frontend
+npm ci
+cp .env.example .env.local   # then edit, see "Environment variables"
+npm run dev              # http://localhost:3000
+```
 
-## Security Configuration
+Minimal `.env.local` for local development:
 
-This application implements strict environment profiles for Stellar testnet and mainnet to prevent dangerous configuration mistakes. See [docs/network-security.md](docs/network-security.md) for complete security documentation.
+```env
+STELLAR_NETWORK=testnet
+JWT_SECRET=dev-secret-key-at-least-32-characters-long
+ALLOWED_ORIGINS=http://localhost:3000
+```
 
-### Required Environment Variables
+## Environment variables
 
-The application will fail to boot without these required variables:
+The app refuses to boot without the first three. Everything else is optional and has a safe default; the complete
+inventory with comments is in [`.env.example`](.env.example).
 
-- `STELLAR_NETWORK` - Network selection: `testnet` or `mainnet`
-- `JWT_SECRET` - JWT signing secret (minimum 32 characters)
-- `ALLOWED_ORIGINS` - Comma-separated list of allowed browser origins for API requests
-- `CANARY_PERCENTAGE` - Optional integer from 0 to 100 that samples requests into the canary path; sampled traffic receives the `X-Canary: true` header
-
-### Setup
-
-1. Copy the example environment file:
-   ```bash
-   cp .env.example .env.local
-   ```
-
-2. Configure for testnet (development):
-   ```env
-   STELLAR_NETWORK=testnet
-   JWT_SECRET=dev-secret-key-at-least-32-chars
-   ALLOWED_ORIGINS=http://localhost:3000
-   NODE_ENV=development
-   ```
-
-3. Start the application:
-   ```bash
-   npm run dev
-   ```
-
-### Security Features
-
-- **Fail-fast validation**: Application refuses to start with invalid configuration
-- **No silent defaults**: Never falls back to mainnet automatically
-- **Explicit CORS allowlist**: Public API origin access is controlled by `ALLOWED_ORIGINS`
-- **Deterministic canary routing**: `CANARY_PERCENTAGE` can sample requests by tenant/user hash so a known percentage of traffic is tagged for canary review without changing the normal request path
-- **CI guardrails**: CI is enforced to use testnet only
-- **Secret redaction**: All secrets are automatically redacted from logs
-- **UI safety labels**: Testnet assets are clearly labeled to prevent confusion
-- **Centralized config**: All network configuration in one module
-
-See [docs/network-security.md](docs/network-security.md) for the complete security guide.
-
-## Stream lifecycle (at a glance)
-
-A stream moves through these on-chain states:
-
-`Draft` → `Active` → (`Paused` ↔ `Active`)* → `Settled`
-
-- **Draft**: created and escrowed, not yet streaming. `start_time` and
-  `end_time` are not pinned until activation.
-- **Active**: vesting linearly between `start_time` and `end_time`.
-  Recipient may withdraw vested funds at any time.
-- **Paused**: accrual is frozen; vested funds remain withdrawable.
-- **Settled**: terminal. All funds released; no further state changes.
-- **Cancelled**: terminal alternative to Settled when the sender ends
-  the stream early. Remaining unvested funds refund to the sender.
-
-See [docs/STATE_MACHINE.md](docs/STATE_MACHINE.md) for the formal
-transition table and invariants.
-
-## Schedule semantics
-
-- Calendar-month schedules use UTC day boundaries for proration.
-- Mid-month starts and last-day pauses are prorated using inclusive UTC days.
-- Short months use actual day counts (no 30/32-day months).
-- Local time display may shift with DST; calculations remain UTC.
-
-## Webhook input validation
-
-`POST /api/webhooks` now validates request bodies with a strict Zod schema.
-Requests must include a non-empty `eventType` string. Optional fields are
-`eventId`, `timestamp` (ISO 8601), `source`, `data`, `metadata`, and `headers`.
-Unknown top-level fields now return HTTP 400 with `INVALID_INPUT`.
-
-## Horizon/Soroban resilience notes
-
-The resilience wrapper in app/lib/stellarClient.ts provides a short-TTL read-through cache for account
-and balance reads, plus circuit breaking and per-client timeouts/concurrency limits. When the circuit
-is open, stale cached reads may be served to keep non-critical UI paths responsive. These reads are
-eventually consistent; balances and account state may lag the chain by the cache TTL or stale window.
-
-Auth and write operations are never cached. Cache keys must include the tenant and account address to
-prevent cross-tenant data leakage.
-
-## Persistence seam
-
-Backend stream, idempotency, export, and activity state now sits behind a
-pluggable repository interface.
-
-- Default adapter: in-memory (`app/lib/repositories/in-memory.ts`)
-- Durable seam: PostgreSQL-oriented adapter contract (`app/lib/repositories/postgres.ts`)
-- Design notes and rollout plan: [docs/persistent-store-interface.md](docs/persistent-store-interface.md)
-
-The default runtime behavior remains in-memory until the SQL migration track
-cuts the durable adapter in.
-
-## Prerequisites
-
-- Node.js 18+
-- npm (or yarn/pnpm)
-
-## Setup for contributors
-
-1. **Clone and enter the repo**
-   ```bash
-   git clone <repo-url>
-   cd streampay-frontend
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Verify setup**
-   ```bash
-   npm run build
-   npm test
-   ```
-
-4. **Run locally**
-   ```bash
-   npm run dev
-   ```
-
-App will be at `http://localhost:3000`.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `STELLAR_NETWORK` | yes | `testnet` or `mainnet`. No implicit default, to avoid accidental mainnet use. |
+| `JWT_SECRET` | yes | Session signing secret, at least 32 characters. |
+| `ALLOWED_ORIGINS` | yes | Comma-separated CORS allow-list (no `*` in production). |
+| `DATABASE_URL` | no | Postgres connection string. Without it the API uses seeded in-memory data. |
+| `HORIZON_URL` / `SOROBAN_RPC_URL` | no | Stellar endpoints (testnet defaults). |
+| `WEBHOOK_SECRET`, `METRICS_AUTH_TOKEN`, `FEE_BUMP_SECRET_KEY`, ... | no | Feature specific, see `.env.example`. |
 
 ## Scripts
 
-| Command        | Description           |
-|----------------|-----------------------|
-| `npm run dev`  | Start dev server      |
-| `npm run build`| Production build      |
-| `npm start`    | Run production build  |
-| `npm test`     | Run Jest tests        |
-| `npm test -- --runInBand tests/contract.test.ts` | Run OpenAPI contract shape verification |
-| `npm run test:e2e` | Run HTTP lifecycle E2E tests |
-| `npm run lint` | Next.js ESLint        |
-| `npm run reconcile` | Run nightly reconciliation job |
-| `npm run recon:cli` | Run on-demand reconciliation CLI for a single stream |
+| Command | What it does |
+|---------|--------------|
+| `npm run dev` | Start the dev server |
+| `npm run build` / `npm start` | Production build / serve it |
+| `npm test` | Unit and component tests (Jest) |
+| `npm run smoke` | OpenAPI validation and API smoke tests |
+| `npm run lint` | ESLint |
+| `npm run openapi:generate` | Regenerate TypeScript types from `openapi.json` |
 
-## CI/CD
-
-On every push/PR to `main`, GitHub Actions runs:
-
-### Standard CI (`.github/workflows/ci.yml`)
-- Install: `npm ci`
-- Build: `npm run build`
-- Tests: `npm test`
-
-### Security Scans (`.github/workflows/security.yml`)
-
-Security gates run on every PR, push to main, and nightly at 2 AM UTC:
-
-1. **CodeQL SAST** - Static Application Security Testing for JavaScript/TypeScript
-   - Analyzes source code for security vulnerabilities
-   - Results appear in GitHub Security tab
-   - Blocks merge on critical findings
-
-2. **Dependency Audit** - npm vulnerability scanning
-   - Scans `package-lock.json` for known vulnerabilities
-   - **Blocks on CRITICAL** severity unless exempted
-   - Exemptions tracked in `.github/security-exemptions.json` with expiry dates
-   - Advisory links provided in PR comments
-
-3. **Container Scan** (conditional - only if Dockerfile exists)
-   - Trivy scanner checks Docker images for OS/library vulnerabilities
-   - Same exemption policy as dependency scan
-   - Scans both CRITICAL and HIGH severity
-
-#### Security Exemptions Policy
-
-Vulnerabilities can be exempted temporarily with:
-- Valid justification and expiry date (max 90 days)
-- No auto-renewal - requires manual review
-- 14-day advance notification before expiry
-- Tracked in `.github/security-exemptions.json`
-
-#### Local Testing
-
-Mirror CI security checks locally:
-```bash
-# Check for dependency vulnerabilities
-npm audit
-
-# View audit in JSON format
-npm audit --json
-
-# Run linting (part of security hygiene)
-npm run lint
-```
-
-Ensure the workflow passes before merging.
-
-## E2E stream lifecycle harness
-
-The repository includes a black-box HTTP E2E test for stream lifecycle actions:
-
-- `create -> start -> pause -> settle`
-- idempotent retries for `create`, `pause`, and `settle`
-- DB state assertions after each transition
-- mocked Stellar/Soroban settlement at adapter boundary (not business logic)
-
-Run locally:
-
-```bash
-npm run test:e2e
-```
-
-Notes for contributors:
-
-- The test boots a local Next server on a random localhost port to stay parallel-safe in CI.
-- Test isolation uses `resetDb()` before each case.
-- Settlement is mocked via `globalThis.__STREAMPAY_STELLAR_SETTLEMENT_CLIENT__` so no real chain keys or network calls are needed.
-
-## Security notes for lifecycle tests
-
-- No private keys, secrets, or wallet credentials are used by the E2E harness.
-- Settlement calls are mocked and never submit on-chain transactions.
-- Test fixtures avoid PII and keep recipient names synthetic.
-- Auth enforcement is currently out of scope for these routes; tests focus on lifecycle correctness and idempotency behavior.
-
-## Project structure
+## Architecture
 
 ```
-streampay-frontend/
-├── app/
-│   ├── layout.tsx
-│   ├── page.tsx
-│   ├── page.test.tsx
-│   ├── globals.css
-│   └── help/
-│       ├── page.tsx        ← Help & FAQ page (RSC)
-│       └── page.test.tsx
-├── next.config.ts
-├── tsconfig.json
-├── jest.config.js
-├── jest.setup.ts
-├── .github/workflows/ci.yml
-└── README.md
+app/            Next.js App Router: pages, components and API route handlers (app/api)
+app/lib/        Server-side helpers: auth, config validation, errors, audit log, repositories
+lib/, src/      Shared clients, middleware (rate limit, timeout, ETag) and metrics
+contracts/      Soroban escrow contract (Rust)
+docs/           Long-form documentation and runbooks
+scripts/         Operational scripts (reconciliation, backfills, OpenAPI tooling)
+middleware.ts   Edge middleware: CORS, CSRF, body-size caps, request ids, fingerprinting
 ```
 
-## API
+Request flow: browser, then `middleware.ts`, then a route handler in `app/api/**`, which validates input, calls a
+repository behind a pluggable store interface (in-memory by default, Postgres when configured) and returns the shared
+error envelope. Stellar and Soroban calls go through a client with caching and circuit breaking. See
+[docs/architecture.md](docs/architecture.md) for details.
 
-The app exposes Next.js route handlers under `app/api/`. All routes share a single error envelope (see below).
+## Documentation
 
-### Authentication
+- In-app overview: `/docs`
+- [docs/reference.md](docs/reference.md) - the full original reference (API versioning, lifecycle, security, webhooks, troubleshooting)
+- [docs/architecture.md](docs/architecture.md), [docs/STATE_MACHINE.md](docs/STATE_MACHINE.md), [docs/api-v2-migration.md](docs/api-v2-migration.md)
+- [docs/DEPLOYMENT-CHECKLIST.md](docs/DEPLOYMENT-CHECKLIST.md) and [docs/runbooks](docs/runbooks)
+- [CHANGELOG.md](CHANGELOG.md), [SECURITY.md](SECURITY.md)
 
-Wallet-based auth uses a challenge/verify flow:
+## Deploying to Vercel
 
-1. `GET /api/auth/wallet?address=G…` — receive a one-time challenge nonce
-2. Sign the challenge with your Stellar private key
-3. `POST /api/auth/wallet` — submit `{ address, challenge, signature }` to receive a bearer token
-4. Pass the token as `Authorization: Bearer <token>` on all authenticated requests
+1. Import the repository in Vercel (or use the button above). The framework preset is detected from `vercel.json`.
+2. Set `STELLAR_NETWORK=testnet`, `JWT_SECRET` (32+ random characters) and `ALLOWED_ORIGINS` (your deployment URL).
+3. Deploy. No database is required for the demo.
 
-### Routes
+CLI: `vercel link && vercel env add JWT_SECRET production && vercel --prod`.
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/api/auth/wallet` | — | Issue wallet challenge |
-| `POST` | `/api/auth/wallet` | — | Verify signature, get token |
-| `GET` | `/api/auth/wallet/health` | — | Wallet-auth subsystem health probe |
-| `GET` | `/api/v2/streams` | Bearer | List streams (v2 shape) |
-| `POST` | `/api/v2/streams` | Bearer | Create a stream |
-| `POST` | `/api/webhooks/dlq` | — | Receive DLQ webhook events |
-| `GET` | `/api/webhooks/deliveries` | — | List delivery attempts |
-| `POST` | `/api/debug/kms-sign` | — | Sign payload via KMS (non-prod only) |
-| `POST` | `/api/internal/reconciliation` | HMAC | Trigger full or scoped reconciliation |
-| `POST` | `/api/internal/reconciliation/nightly` | HMAC | Run the nightly reconciliation job |
-| `GET` | `/api/internal/reconciliation/diff/:id` | HMAC | Per-stream DB vs on-chain diff |
+A container image is also available via the included `Dockerfile` (Next.js standalone output).
 
-> **Internal routes** (`/api/internal/*`) require HMAC-signed service-to-service headers.
-> Callers must be in the `allowedServices` list (`ops-automation`, `reconciliation-worker`).
-> Any auth failure returns `404` to conceal the route from unauthenticated scanners.
-> See [docs/internal-service-auth.md](docs/internal-service-auth.md) for the signing scheme.
+## Contract fees
 
-### Error envelope
+The Soroban escrow contract in [`contracts/`](contracts) charges fees on withdrawal. The fee
+rate is fixed per stream at creation (`stream.fee_bps`) and is paid to the configured
+fee collector. Both withdrawal entrypoints use the same economics:
 
-Every error response — regardless of status code — uses this shape:
+| Entrypoint | Fee rate charged | Fee recipient | Authorization |
+|------------|------------------|---------------|---------------|
+| `withdraw` | `stream.fee_bps` | fee collector | recipient or allowlisted withdrawer |
+| `withdraw_with_max_fee_bps` / `withdraw_guarded` | `stream.fee_bps` | fee collector | recipient or allowlisted withdrawer |
 
-```json
-{
-  "error": {
-    "code": "NOT_FOUND",
-    "message": "The requested stream does not exist.",
-    "request_id": "req_01HZ9ABCDEF"
-  }
-}
-```
+The guarded variant additionally rejects the call with `FeeTooHigh` when `stream.fee_bps > max_fee_bps`,
+before any state change. The global `fee_bps` / `default_fee_bps` admin knobs only see the
+default applied to newly created streams; they are never charged at withdrawal time.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `code` | `string` | Machine-readable error code (e.g. `BAD_REQUEST`, `UNAUTHORIZED`) |
-| `message` | `string` | Human-readable detail safe to display |
-| `request_id` | `string` | Forwarded from `x-request-id` header, or auto-generated fallback |
+## Contributing
 
-The helper lives in `app/lib/errors/index.ts`. Use `errorResponse(code, message, status)` in every route — never return a bare `{ error: "string" }` or `{ success, error }` shape.
-
-### v2 stream shape
-
-`/api/v2/streams` returns streams in the v2 contract. Key differences from v1:
-
-| v1 field | v2 field | Notes |
-|----------|----------|-------|
-| `actions` | `allowed_actions` | Renamed |
-| `createdAt` | `created_at` | snake_case |
-| _(absent)_ | `settlement` | `null` until settled |
-
-See `app/lib/api-version.ts` for the `toV2Stream()` conversion and `openapi.json` for the full OpenAPI 3.1 spec.
-
-## Organization Management API
-
-The following endpoints support multi-tenant organization management:
-
-- `POST /api/orgs/[orgId]/members`: Add a member to an organization (Owner-only).
-- `GET /api/orgs/[orgId]/members`: List organization members (Member-only).
-
-These endpoints require a valid JWT token obtained via `POST /api/auth/wallet` in the `Authorization: Bearer <token>` header.
-
-## Documentation index
-
-Quick links to the long-form docs under [docs/](docs/):
-
-- [Architecture overview](docs/architecture.md)
-- [API client usage](docs/api-client-usage.md)
-- [Stream state glossary](docs/stream-state-glossary.md)
-- [Contract events panel](docs/contract-events-panel.md)
-- [Error codes reference](docs/error-codes.md)
-- [Testing guide](docs/testing-guide.md)
-- [Glossary](docs/glossary.md)
-- [HTTP caching (ETag / 304)](docs/caching.md)
-- [State machine](docs/STATE_MACHINE.md)
-- [Network security](docs/network-security.md)
-- [Privacy](docs/PRIVACY.md)
-- [Reconciliation runbook](docs/reconciliation-runbook.md)
-- [Initial render performance](docs/performance-initial-render.md)
-- [StreamTypeChip color-blind patterns](docs/streamtypechip-cb-patterns.md) — `status` prop & texture overlay API
-- [StreamTypeChip focus accessibility](docs/streamtypechip-focus-accessibility.md)
-- [Help & FAQ page](/help) — in-app support page at `app/help/page.tsx`
-- [Exports access logs](docs/api/exports-access-logs.md) — structured per-request access logs for `/api/exports`
-[SECURITY.md](SECURITY.md) in the repository root.
-
-## Troubleshooting
-
-A few of the most common local-dev issues:
-
-- **App fails to start with "STELLAR_NETWORK environment variable is required"**
-  — copy `.env.example` to `.env.local` and set `STELLAR_NETWORK=testnet`.
-- **JWT errors during local auth** — ensure `JWT_SECRET` is at least
-  32 characters. Generate one with `openssl rand -base64 32`.
-- **CORS errors in the browser** — your origin must appear in
-  `ALLOWED_ORIGINS` (comma-separated). The default is
-  `http://localhost:3000`.
-- **`npm test` cannot find Jest** — run `npm install` first; the test
-  runner is a dev dependency.
-- **Stale Next.js build artifacts** — delete `.next/` and rebuild.
-- **Port 3000 already in use** — set `PORT=3001 npm run dev` or kill
-  the process holding the port.
-
-For deeper issues see [docs/network-security.md](docs/network-security.md)
-and the runbooks under [docs/runbooks/](docs/runbooks).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Before opening a PR run `npm test`, `npm run smoke` and `npm run build`.
+Some legacy test suites are quarantined in `jest.config.js` (`testPathIgnorePatterns`); fixing one and removing it from
+that list is a welcome first contribution.
 
 ## License
 
-MIT
-
-## Onboarding tour
-
-New users see a 5-step `WelcomeTour` modal the first time they land on the home page. The tour covers:
-
-1. What StreamPay is and how streaming payments work.
-2. Connecting a Stellar wallet via the challenge/signature flow.
-3. Creating a payment stream (recipient, amount, dates).
-4. Tracking streams — statuses, vested balance, next action.
-5. Withdrawing vested funds and understanding cancellation.
-
-**Implementation**
-
-| File | Role |
-|------|------|
-| `app/components/WelcomeTour.tsx` | Multi-step modal component. Exports `WelcomeTour`, `TOUR_STEPS`, and `WELCOME_TOUR_KEY`. |
-| `app/components/OnboardingManager.tsx` | Client component mounted in `app/page.tsx`. Shows the tour on first visit, then a plain banner on subsequent visits until both are dismissed. |
-| `app/globals.css` | `.welcome-tour-overlay`, `.welcome-tour`, `.welcome-tour__*` classes. |
-
-**Behaviour**
-
-- **First visit** — the tour modal appears. Clicking "Get started" (last step) or "Skip tour" dismisses it and writes `streampay:welcome-tour-dismissed` to `localStorage`. The plain banner is also suppressed after the tour is seen.
-- **Subsequent visits (tour seen, banner not dismissed)** — the plain banner is shown.
-- **All dismissed** — nothing is rendered.
-- Pressing **Escape** closes the tour. **ArrowRight / ArrowDown** advance, **ArrowLeft / ArrowUp** go back. Clicking a dot jumps to that step. Clicking the backdrop dismisses.
-- Pressing **?** anywhere in the app opens the Keyboard Shortcuts overlay, listing all available shortcuts. Press **?** again or **Escape** to close it.
-
-**Testing**
-
-```bash
-npx jest app/components/WelcomeTour.test.tsx app/components/OnboardingManager.test.tsx
-```
-
-## Smoke tests
-
-This repository includes a CI smoke suite that validates app health and a synthetic stream write/read path.
-
-- `npm run smoke` runs `GET /readyz`, `GET /api/streams`, and a synthetic `POST /api/streams` + `POST /api/streams/{id}/settle`.
-- Use `SMOKE_TARGET_URL` to point at a deployed staging endpoint.
-- Use `SMOKE_AUTH_TOKEN` for synthetic credentials in CI secrets.
-
-A runtime feature flag is also available for incident mode: set `NEXT_PUBLIC_DISABLE_ONCHAIN_OPERATIONS=true` to pause new on-chain operations in the UI.
+See the repository license file.

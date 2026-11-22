@@ -42,7 +42,18 @@ const rulesAt = (level) => ({
     ]),
   ),
   "@typescript-eslint/no-explicit-any": "warn",
-  "@typescript-eslint/no-unused-vars": level,
+  // A leading underscore marks an intentionally unused binding (interface
+  // stubs, positional callback args, discarded destructuring slots).
+  "@typescript-eslint/no-unused-vars": [
+    level,
+    {
+      argsIgnorePattern: "^_",
+      varsIgnorePattern: "^_",
+      caughtErrorsIgnorePattern: "^_",
+      destructuredArrayIgnorePattern: "^_",
+      ignoreRestSiblings: true,
+    },
+  ],
 });
 
 const config = [
