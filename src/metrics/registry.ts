@@ -138,3 +138,15 @@ export function observeStreamsRequest(method: string, status: number, start: [nu
 export const rateLimitStoreUnavailable = getOrCreateCounter('rate_limit_store_unavailable_total', {
   help: 'Total number of times the shared Redis rate-limit store was unavailable',
 });
+
+// ── /api/internal/jobs/settle-ended metrics ──────────────────────────────────
+
+export const settleJobRunsCounter = getOrCreateCounter('settle_job_runs_total', {
+  help: 'Total number of settle-ended internal job runs',
+  labelNames: ['dry_run'],
+});
+
+export const settleJobStreamsCounter = getOrCreateCounter('settle_job_streams_total', {
+  help: 'Total number of streams processed by the settle-ended internal job',
+  labelNames: ['result'],
+});
