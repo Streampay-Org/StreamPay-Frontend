@@ -967,6 +967,130 @@
             "example": "2026-01-15T00:00:00.000Z"
           }
         }
+      },
+      "OrgRole": {
+        "type": "string",
+        "enum": [
+          "owner",
+          "pauser",
+          "settler",
+          "viewer"
+        ]
+      },
+      "StreamPolicy": {
+        "type": "object",
+        "required": [
+          "policyVersion",
+          "canStart",
+          "canPause",
+          "canResume",
+          "canSettle",
+          "canStop",
+          "canWithdraw",
+          "requireApprovals"
+        ],
+        "properties": {
+          "policyVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "canStart": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canPause": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canResume": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canSettle": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canStop": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canWithdraw": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "requireApprovals": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ]
+          }
+        }
+      },
+      "UpdateOrgPolicyRequest": {
+        "type": "object",
+        "required": [
+          "policy"
+        ],
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/StreamPolicy"
+          }
+        }
+      },
+      "OrgPolicyResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "links"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "orgId",
+              "policy",
+              "updatedAt"
+            ],
+            "properties": {
+              "orgId": {
+                "type": "string"
+              },
+              "policy": {
+                "$ref": "#/components/schemas/StreamPolicy"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "links": {
+            "type": "object",
+            "required": [
+              "self"
+            ],
+            "properties": {
+              "self": {
+                "type": "string"
+              }
+            }
+          }
+        }
       }
     },
     "responses": {
@@ -6395,6 +6519,155 @@
           },
           "401": {
             "$ref": "#/components/responses/401"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/policy": {
+      "get": {
+        "summary": "Get organization stream policy",
+        "description": "Returns the current StreamPolicy for the specified organization along with a strong ETag header.",
+        "operationId": "getOrgPolicy",
+        "tags": [
+          "Organizations"
+        ],
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization identifier"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization stream policy",
+            "headers": {
+              "ETag": {
+                "description": "Strong entity tag for optimistic concurrency control",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgPolicyResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace organization stream policy",
+        "description": "Replaces the StreamPolicy for an organization. Restricted to organization owners. Supports optimistic concurrency via the If-Match header and records an audit log entry.",
+        "operationId": "updateOrgPolicy",
+        "tags": [
+          "Organizations"
+        ],
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization identifier"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ETag returned by GET /api/orgs/{orgId}/policy for optimistic concurrency control"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrgPolicyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated organization stream policy",
+            "headers": {
+              "ETag": {
+                "description": "Updated strong entity tag",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgPolicyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid policy payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not an authenticated owner of the organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Optimistic concurrency conflict (If-Match ETag mismatch)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
