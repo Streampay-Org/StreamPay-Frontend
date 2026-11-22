@@ -63,7 +63,13 @@ interface OptionalEnvVars {
   ANOMALY_SETTLE_THRESHOLD?: string;
   /** Anomaly detection threshold for stream cancel burst */
   ANOMALY_CANCEL_THRESHOLD?: string;
+  /** Event bus transport: memory (default) or redis */
+  EVENT_BUS_TRANSPORT?: string;
+  /** Redis connection URL (required when EVENT_BUS_TRANSPORT=redis) */
+  EVENT_BUS_REDIS_URL?: string;
 }
+
+export type EventBusTransportType = 'memory' | 'redis';
 
 /**
  * Validated configuration
@@ -84,6 +90,10 @@ export interface ValidatedConfig {
     currentKeyId: string;
     keys: Record<string, string>;
     allowedClockSkewSeconds: number;
+  };
+  eventBus: {
+    transport: EventBusTransportType;
+    redisUrl?: string;
   };
 }
 
@@ -420,6 +430,54 @@ function validateAnomalyThresholds(
 }
 
 /**
+ * Validate event bus transport configuration.
+ * Defaults to 'memory'. When 'redis' is selected, EVENT_BUS_REDIS_URL is required
+ * and must be a valid redis:// or rediss:// URL.
+ */
+export function validateEventBusConfig(
+  transportRaw?: string,
+  redisUrlRaw?: string
+): { transport: EventBusTransportType; redisUrl?: string } {
+  const normalized = (transportRaw ?? '').trim().toLowerCase();
+  const transport: EventBusTransportType =
+    normalized === '' ? 'memory' : (normalized as EventBusTransportType);
+
+  if (transport !== 'memory' && transport !== 'redis') {
+    throw new ConfigValidationError(
+      `Invalid EVENT_BUS_TRANSPORT: ${transportRaw}. Supported transports: memory, redis`
+    );
+  }
+
+  if (transport === 'redis') {
+    const redisUrl = (redisUrlRaw ?? '').trim();
+    if (!redisUrl) {
+      throw new ConfigValidationError(
+        'EVENT_BUS_REDIS_URL environment variable is required when EVENT_BUS_TRANSPORT=redis'
+      );
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(redisUrl);
+    } catch {
+      throw new ConfigValidationError(
+        'EVENT_BUS_REDIS_URL must be a valid redis:// or rediss:// URL'
+      );
+    }
+
+    if (parsed.protocol !== 'redis:' && parsed.protocol !== 'rediss:') {
+      throw new ConfigValidationError(
+        `EVENT_BUS_REDIS_URL must use redis:// or rediss:// protocol (received: ${parsed.protocol})`
+      );
+    }
+
+    return { transport, redisUrl };
+  }
+
+  return { transport };
+}
+
+/**
  * Main configuration validation function
  * Call this at application boot to fail-fast on invalid configuration
  * 
@@ -452,6 +510,10 @@ export function validateConfig(): ValidatedConfig {
   );
 
   const internalServiceAuth = validateInternalServiceAuth(env);
+  const eventBus = validateEventBusConfig(
+    env.EVENT_BUS_TRANSPORT,
+    env.EVENT_BUS_REDIS_URL
+  );
   
   const config: ValidatedConfig = {
     network: networkProfile,
@@ -462,6 +524,7 @@ export function validateConfig(): ValidatedConfig {
     allowedOrigins,
     anomalyThresholds,
     internalServiceAuth,
+    eventBus,
   };
   
   return config;
