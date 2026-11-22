@@ -235,3 +235,35 @@ export class PostgresWebhookSubscriptionStore {
     }
   }
 }
+
+/** Subscription as exposed over HTTP: the signing secret is never included. */
+export type PublicWebhookSubscription = Omit<WebhookSubscription, 'secret'> & {
+  hasSecret: boolean;
+};
+
+export function toPublicSubscription(subscription: WebhookSubscription): PublicWebhookSubscription {
+  const { secret, ...rest } = subscription;
+  return { ...rest, hasSecret: typeof secret === 'string' && secret.length > 0 };
+}
+
+type SubscriptionLister = Pick<PostgresWebhookSubscriptionStore, 'list'>;
+
+let subscriptionStore: SubscriptionLister | null = null;
+
+/**
+ * Lazily builds the Postgres-backed subscription store from DATABASE_URL.
+ * Tests swap it out with setWebhookSubscriptionStore().
+ */
+export function getWebhookSubscriptionStore(): SubscriptionLister {
+  if (!subscriptionStore) {
+    // Imported lazily so client bundles and unit tests never load `pg`.
+    const { Pool } = require('pg') as typeof import('pg');
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    subscriptionStore = new PostgresWebhookSubscriptionStore(pool as unknown as SqlExecutor);
+  }
+  return subscriptionStore;
+}
+
+export function setWebhookSubscriptionStore(store: SubscriptionLister | null): void {
+  subscriptionStore = store;
+}

@@ -22,7 +22,7 @@ import {
   withCorrelationContext,
 } from "@/app/lib/logger";
 import { logAccessEvent } from "@/src/middleware/accessLog";
-import { streamsRateLimit } from "@/src/middleware/rateLimit";
+import { streamsRateLimit, withRateLimitHeaders } from "@/src/middleware/rateLimit";
 import {
   validateListStreamsQuery,
 } from "@/app/lib/stream-validation";
@@ -255,10 +255,13 @@ async function handleStreamsGet(request: Request) {
 
     if (isIfNoneMatchMatch(etag, getHeader(request, "if-none-match"))) {
       status = 304;
-      return new NextResponse(null, {
-        status,
-        headers: createCacheHeaders(etag),
-      });
+      return withRateLimitHeaders(
+        new NextResponse(null, {
+          status,
+          headers: createCacheHeaders(etag),
+        }),
+        rateLimitResult.headers,
+      );
     }
 
     logger.info("Streams listed successfully", {
@@ -271,7 +274,7 @@ async function handleStreamsGet(request: Request) {
       response.headers.set(name, value);
     }
     status = 200;
-    return response;
+    return withRateLimitHeaders(response, rateLimitResult.headers);
   } catch (error) {
     status = 500;
     logger.error("Streams list failed", { error });
@@ -403,7 +406,8 @@ async function handleStreamsPost(request: Request) {
       return NextResponse.json(payload, { status: 201 });
     };
 
-    return token ? await withLock(`create:${token}`, createOnce) : await createOnce();
+    const response = token ? await withLock(`create:${token}`, createOnce) : await createOnce();
+    return withRateLimitHeaders(response, rateLimitResult.headers);
   } catch (error) {
     status = 500;
     logger.error("Stream creation failed", { error });
