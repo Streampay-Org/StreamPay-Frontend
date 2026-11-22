@@ -1210,6 +1210,119 @@
             "format": "date-time"
           }
         }
+      },
+      "OrgRole": {
+        "type": "string",
+        "enum": [
+          "owner",
+          "pauser",
+          "settler",
+          "viewer"
+        ]
+      },
+      "StreamPolicy": {
+          "policyVersion",
+          "canStart",
+          "canPause",
+          "canResume",
+          "canSettle",
+          "canStop",
+          "canWithdraw",
+          "requireApprovals"
+        ],
+          "policyVersion": {
+            "type": "integer",
+              1
+            ]
+          },
+          "canStart": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canPause": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canResume": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canSettle": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canStop": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canWithdraw": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "requireApprovals": {
+            "type": "integer",
+              1,
+              2
+            ]
+          }
+        }
+      },
+      "UpdateOrgPolicyRequest": {
+          "policy"
+        ],
+          "policy": {
+            "$ref": "#/components/schemas/StreamPolicy"
+          }
+        }
+      },
+      "OrgPolicyResponse": {
+          "data",
+          "links"
+        ],
+          "data": {
+            "type": "object",
+            "required": [
+              "orgId",
+              "policy",
+              "updatedAt"
+            ],
+            "properties": {
+              "orgId": {
+                "type": "string"
+              },
+              "policy": {
+                "$ref": "#/components/schemas/StreamPolicy"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "links": {
+            "type": "object",
+            "required": [
+              "self"
+            ],
+            "properties": {
+              "self": {
+                "type": "string"
+              }
+            }
+          }
+        }
       }
     },
     "responses": {
@@ -2042,6 +2155,71 @@
                         "request_id": "req_01HZ9ABCDEF"
                       }
                     }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "summary": "Revoke the presented bearer token",
+        "description": "Adds the token's `jti` to the access-token denylist until the token's own `exp`. Every route that authenticates with `tryAuthenticateRequest` rejects the token afterwards. Repeated logout calls with the same token are safe. Tokens issued before revocation existed carry no `jti` and simply expire on their own.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "204": {
+            "description": "Token revoked, or already revoked (idempotent)."
+          },
+          "401": {
+            "description": "Missing, malformed, or expired bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "Missing or invalid authorization header",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "IP rate limit exceeded for logout (5 req/min per IP).",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the client may retry.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "rate_limit_exceeded",
+                    "message": "Too many requests. Please try again later.",
+                    "request_id": "req_01HZ9ABCDEF"
                   }
                 }
               }
@@ -6954,6 +7132,115 @@
           },
           "500": {
             "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/policy": {
+        "summary": "Get organization stream policy",
+        "description": "Returns the current StreamPolicy for the specified organization along with a strong ETag header.",
+        "operationId": "getOrgPolicy",
+          "Organizations"
+        ],
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization identifier"
+          }
+        ],
+            "description": "Organization stream policy",
+            "headers": {
+              "ETag": {
+                "description": "Strong entity tag for optimistic concurrency control",
+                  "type": "string"
+                }
+              }
+            },
+                  "$ref": "#/components/schemas/OrgPolicyResponse"
+                }
+              }
+            }
+          },
+            "description": "Organization not found",
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace organization stream policy",
+        "description": "Replaces the StreamPolicy for an organization. Restricted to organization owners. Supports optimistic concurrency via the If-Match header and records an audit log entry.",
+        "operationId": "updateOrgPolicy",
+          "Organizations"
+        ],
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization identifier"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ETag returned by GET /api/orgs/{orgId}/policy for optimistic concurrency control"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrgPolicyRequest"
+              }
+            }
+          }
+        },
+            "description": "Updated organization stream policy",
+            "headers": {
+              "ETag": {
+                "description": "Updated strong entity tag",
+                  "type": "string"
+                }
+              }
+            },
+                  "$ref": "#/components/schemas/OrgPolicyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid policy payload",
+                }
+              }
+            }
+          },
+            "description": "Caller is not an authenticated owner of the organization",
+                }
+              }
+            }
+          },
+            "description": "Organization not found",
+                }
+              }
+            }
+          },
+            "description": "Optimistic concurrency conflict (If-Match ETag mismatch)",
+                }
+              }
+            }
           }
         }
       }

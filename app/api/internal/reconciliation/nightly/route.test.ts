@@ -160,6 +160,67 @@ describe("POST /api/internal/reconciliation/nightly", () => {
     const json = await res.json();
     expect(json.dryRun).toBe(false);
   });
+
+  it("reports per-kind summary and diff entries for mixed-kind rows", async () => {
+    fetchAllDBRowsMock.mockResolvedValueOnce([
+      { id: "shared-1", kind: "standard", amount: "100", status: "confirmed", createdAt: "2026-01-01" },
+      { id: "shared-1", kind: "split", amount: "0", total: "500", status: "confirmed", createdAt: "2026-01-01" },
+      {
+        id: "rec-1",
+        kind: "recurring",
+        amount: "0",
+        amount_per_cycle: "250",
+        total_cycles: 4,
+        status: "confirmed",
+        createdAt: "2026-01-01",
+      },
+    ]);
+    fetchAllIndexerRowsMock.mockResolvedValueOnce([
+      { id: "shared-1", kind: "standard", amount: "100", status: "confirmed", ledgerSeq: 10 },
+      { id: "rec-1", kind: "recurring", amount: "900", status: "confirmed", ledgerSeq: 11 },
+    ]);
+
+    const res = await POST(makeReq({ headers: { "x-cron-secret": "test-secret" }, body: { dryRun: true } }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    expect(json.summary.totalDBRows).toBe(3);
+    expect(json.summary.totalIndexerRows).toBe(2);
+    expect(json.summary.missingInIndexerCount).toBe(1);
+    expect(json.summary.mismatchedAmountCount).toBe(1);
+    expect(json.summary.byKind).toEqual({
+      standard: {
+        totalDBRows: 1,
+        totalIndexerRows: 1,
+        missingInIndexerCount: 0,
+        missingInDBCount: 0,
+        mismatchedAmountCount: 0,
+        mismatchedStatusCount: 0,
+      },
+      split: {
+        totalDBRows: 1,
+        totalIndexerRows: 0,
+        missingInIndexerCount: 1,
+        missingInDBCount: 0,
+        mismatchedAmountCount: 0,
+        mismatchedStatusCount: 0,
+      },
+      recurring: {
+        totalDBRows: 1,
+        totalIndexerRows: 1,
+        missingInIndexerCount: 0,
+        missingInDBCount: 0,
+        mismatchedAmountCount: 1,
+        mismatchedStatusCount: 0,
+      },
+    });
+    expect(json.diff.missingInIndexer).toEqual([
+      { id: "shared-1", kind: "split", amount: "500", createdAt: "2026-01-01" },
+    ]);
+    expect(json.diff.mismatchedAmount).toEqual([
+      { id: "rec-1", kind: "recurring", dbAmount: "1000", indexerAmount: "900" },
+    ]);
+  });
 });
 /** @jest-environment node */
 

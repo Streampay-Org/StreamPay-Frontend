@@ -87,6 +87,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke the presented bearer token
+         * @description Adds the token's `jti` to the access-token denylist until the token's own `exp`. Every route that authenticates with `tryAuthenticateRequest` rejects the token afterwards. Repeated logout calls with the same token are safe. Tokens issued before revocation existed carry no `jti` and simply expire on their own.
+         */
+        post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/streams": {
         parameters: {
             query?: never;
@@ -1137,6 +1157,21 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgId}/policy": {
+            header?: never;
+            path?: never;
+        };
+        /**
+         * Get organization stream policy
+         * @description Returns the current StreamPolicy for the specified organization along with a strong ETag header.
+         */
+        get: operations["getOrgPolicy"];
+        /**
+         * Replace organization stream policy
+         * @description Replaces the StreamPolicy for an organization. Restricted to organization owners. Supports optimistic concurrency via the If-Match header and records an audit log entry.
+         */
+        put: operations["updateOrgPolicy"];
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1643,6 +1678,34 @@ export interface components {
             /** Format: date-time */
             asOf: string;
         };
+        /** @enum {string} */
+        OrgRole: "owner" | "pauser" | "settler" | "viewer";
+        StreamPolicy: {
+            /** @enum {integer} */
+            policyVersion: 1;
+            canStart: components["schemas"]["OrgRole"][];
+            canPause: components["schemas"]["OrgRole"][];
+            canResume: components["schemas"]["OrgRole"][];
+            canSettle: components["schemas"]["OrgRole"][];
+            canStop: components["schemas"]["OrgRole"][];
+            canWithdraw: components["schemas"]["OrgRole"][];
+            /** @enum {integer} */
+            requireApprovals: 1 | 2;
+        };
+        UpdateOrgPolicyRequest: {
+            policy: components["schemas"]["StreamPolicy"];
+        };
+        OrgPolicyResponse: {
+            data: {
+                orgId: string;
+                policy: components["schemas"]["StreamPolicy"];
+                /** Format: date-time */
+                updatedAt: string;
+            };
+            links: {
+                self: string;
+            };
+        };
     };
     responses: {
         /** @description Bad request — invalid input. */
@@ -2140,6 +2203,63 @@ export interface operations {
                     "Retry-After"?: number;
                     /** @description Correlation ID for this response. */
                     "x-request-id"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "rate_limit_exceeded",
+                     *         "message": "Too many requests. Please try again later.",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Token revoked, or already revoked (idempotent). */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing, malformed, or expired bearer token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "UNAUTHORIZED",
+                     *         "message": "Missing or invalid authorization header",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description IP rate limit exceeded for logout (5 req/min per IP). */
+            429: {
+                headers: {
+                    /** @description Seconds until the client may retry. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -4655,6 +4775,66 @@ export interface operations {
                 };
             };
             500: components["responses"]["500"];
+        };
+    };
+    getOrgPolicy: {
+            header?: never;
+                /** @description Organization identifier */
+                orgId: string;
+            };
+        };
+            /** @description Organization stream policy */
+                    /** @description Strong entity tag for optimistic concurrency control */
+                    ETag?: string;
+                };
+                    "application/json": components["schemas"]["OrgPolicyResponse"];
+                };
+            };
+            /** @description Organization not found */
+            404: {
+                };
+                };
+            };
+        };
+    };
+    updateOrgPolicy: {
+                /** @description ETag returned by GET /api/orgs/{orgId}/policy for optimistic concurrency control */
+                "If-Match"?: string;
+            };
+                /** @description Organization identifier */
+                orgId: string;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateOrgPolicyRequest"];
+            };
+        };
+            /** @description Updated organization stream policy */
+                    /** @description Updated strong entity tag */
+                    ETag?: string;
+                };
+                    "application/json": components["schemas"]["OrgPolicyResponse"];
+                };
+            };
+            /** @description Invalid policy payload */
+            400: {
+                };
+                };
+            };
+            /** @description Caller is not an authenticated owner of the organization */
+                };
+                };
+            };
+            /** @description Organization not found */
+            404: {
+                };
+                };
+            };
+            /** @description Optimistic concurrency conflict (If-Match ETag mismatch) */
+                };
+                };
+            };
         };
     };
 }
