@@ -1,5 +1,53 @@
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
+import { webhookDeliveryStore } from "@/app/lib/webhook-delivery-store";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * GET /api/webhooks/dlq
+ *
+ * Admin-only list of dead-letter entries (newest first) for the
+ * /settings/webhooks console. The raw event payload is not included; the
+ * console only needs identifiers, the failure reason and attempt history.
+ *
+ * 401 when the bearer token is missing/invalid, 403 for non-admin roles.
+ */
+export async function GET(req: Request) {
+  const auth = tryAuthenticateRequest(req);
+  if (!auth) {
+    return NextResponse.json(
+      { error: { code: "UNAUTHORIZED", message: "Admin authentication required" } },
+      { status: 401 },
+    );
+  }
+  if (auth.role !== "admin") {
+    return NextResponse.json(
+      { error: { code: "FORBIDDEN", message: "Admin role required" } },
+      { status: 403 },
+    );
+  }
+
+  const data = webhookDeliveryStore
+    .getAllDLQEntries()
+    .map((entry) => ({
+      id: entry.id,
+      deliveryId: entry.deliveryId,
+      endpointId: entry.endpointId,
+      endpointUrl: entry.endpointUrl,
+      eventId: entry.eventId,
+      eventType: entry.eventType,
+      reason: entry.reason,
+      attempts: entry.allAttempts,
+      createdAt: entry.createdAt,
+      replayedDeliveryId: entry.replayedDeliveryId ?? null,
+      replayedAt: entry.replayedAt ?? null,
+    }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  return NextResponse.json({ data, meta: { total: data.length } }, { status: 200 });
+}
 
 /**
  * POST /api/webhooks/dlq

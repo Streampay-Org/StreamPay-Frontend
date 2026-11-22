@@ -1,17 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
-import { MockWorker } from './worker';
-import { MockQueue } from './queue';
-import { withCorrelationContext, type CorrelationContext } from './logger';
+import { MockWorker } from './mock-worker';
+import { InMemoryQueue, type Job } from '../queue';
+import { withCorrelationContext, type CorrelationContext } from '../logger';
 
 const vi = jest;
 
 describe('Mock Worker System', () => {
-  let queue: MockQueue;
+  let queue: InMemoryQueue;
   let worker: MockWorker;
 
   beforeEach(() => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    queue = new MockQueue('test-queue');
+    queue = new InMemoryQueue('test-queue');
   });
 
   afterEach(() => {
@@ -26,7 +26,7 @@ describe('Mock Worker System', () => {
         stream_id: 'stream-123',
       };
 
-      const processor = vi.fn<any>().mockResolvedValue(undefined);
+      const processor = vi.fn<(job: Job) => Promise<void>>().mockResolvedValue(undefined);
       worker = new MockWorker(queue, processor);
 
       await withCorrelationContext(context, async () => {
@@ -45,7 +45,7 @@ describe('Mock Worker System', () => {
         correlation_id: 'corr-1',
       };
 
-      const processor = vi.fn<any>().mockResolvedValue(undefined);
+      const processor = vi.fn<(job: Job) => Promise<void>>().mockResolvedValue(undefined);
       worker = new MockWorker(queue, processor);
 
       await withCorrelationContext(context, async () => {
@@ -73,7 +73,7 @@ describe('Mock Worker System', () => {
         correlation_id: 'corr-1',
       };
 
-      const processor = vi.fn<any>().mockRejectedValue(new Error('Test error'));
+      const processor = vi.fn<(job: Job) => Promise<void>>().mockRejectedValue(new Error('Test error'));
       worker = new MockWorker(queue, processor);
 
       await withCorrelationContext(context, async () => {
@@ -102,7 +102,7 @@ describe('Mock Worker System', () => {
         stream_id: 'stream-123',
       };
 
-      const processor = vi.fn<any>().mockResolvedValue(undefined);
+      const processor = vi.fn<(job: Job) => Promise<void>>().mockResolvedValue(undefined);
       worker = new MockWorker(queue, processor);
 
       await withCorrelationContext(context, async () => {
@@ -130,7 +130,7 @@ describe('Mock Worker System', () => {
         correlation_id: 'corr-1',
       };
 
-      const processor = vi.fn<any>().mockRejectedValue(new Error('Test error'));
+      const processor = vi.fn<(job: Job) => Promise<void>>().mockRejectedValue(new Error('Test error'));
       worker = new MockWorker(queue, processor);
 
       await withCorrelationContext(context, async () => {
@@ -159,7 +159,7 @@ describe('Mock Worker System', () => {
         correlation_id: 'corr-1',
       };
 
-      const processor = vi.fn<any>().mockRejectedValue(new Error('Test error'));
+      const processor = vi.fn<(job: Job) => Promise<void>>().mockRejectedValue(new Error('Test error'));
       worker = new MockWorker(queue, processor);
 
       await withCorrelationContext(context, async () => {
@@ -196,7 +196,7 @@ describe('Mock Worker System', () => {
         correlation_id: 'corr-1',
       };
 
-      const processor = vi.fn<any>().mockResolvedValue(undefined);
+      const processor = vi.fn<(job: Job) => Promise<void>>().mockResolvedValue(undefined);
       worker = new MockWorker(queue, processor);
 
       await withCorrelationContext(context, async () => {
@@ -216,7 +216,7 @@ describe('Mock Worker System', () => {
         correlation_id: 'corr-1',
       };
 
-      const processor = vi.fn<any>().mockResolvedValue(undefined);
+      const processor = vi.fn<(job: Job) => Promise<void>>().mockResolvedValue(undefined);
       worker = new MockWorker(queue, processor);
 
       await withCorrelationContext(context, async () => {
@@ -247,7 +247,7 @@ describe('Mock Worker System', () => {
         correlation_id: 'corr-1',
       };
 
-      const processor = vi.fn<any>()
+      const processor = vi.fn<(job: Job) => Promise<void>>()
         .mockRejectedValueOnce(new Error('Test error'))
         .mockResolvedValue(undefined);
       worker = new MockWorker(queue, processor);

@@ -1,7 +1,23 @@
 import { EventEmitter } from "events";
 import { getStore } from "@/app/lib/db";
 import { activityEventToTimelineEntry } from "@/app/lib/repositories/activity-timeline";
-import type { ActivityEvent } from "@/app/types/openapi";
+import type { ActivityEvent, Stream } from "@/app/types/openapi";
+
+export type StreamUpdatedPayload = Omit<
+  Stream,
+  "email" | "label" | "memo" | "partnerId"
+>;
+
+export type SettleFinishedPayload = Omit<
+  Stream,
+  "email" | "label" | "memo" | "partnerId"
+>;
+
+export interface StreamEventMap {
+  [event: `stream:updated:${string}`]: [data: StreamUpdatedPayload];
+  [event: `settle:finished:${string}`]: [data: SettleFinishedPayload];
+  "activity:new": [event: ActivityEvent];
+}
 
 /**
  * Server-side event bus for StreamPay events.
@@ -29,15 +45,43 @@ class StreamEventBus extends EventEmitter {
   /**
    * Emit a stream update event
    */
-  emitStreamUpdated(streamId: string, data: any) {
+  emitStreamUpdated(streamId: string, data: StreamUpdatedPayload) {
     this.emit(`stream:updated:${streamId}`, data);
+  }
+
+  /**
+   * Subscribe to stream update events for a specific stream.
+   */
+  onStreamUpdated(streamId: string, handler: (data: StreamUpdatedPayload) => void) {
+    this.on(`stream:updated:${streamId}`, handler);
+  }
+
+  /**
+   * Unsubscribe from stream update events for a specific stream.
+   */
+  offStreamUpdated(streamId: string, handler: (data: StreamUpdatedPayload) => void) {
+    this.off(`stream:updated:${streamId}`, handler);
   }
 
   /**
    * Emit a settlement finished event
    */
-  emitSettleFinished(streamId: string, data: any) {
+  emitSettleFinished(streamId: string, data: SettleFinishedPayload) {
     this.emit(`settle:finished:${streamId}`, data);
+  }
+
+  /**
+   * Subscribe to settlement finished events for a specific stream.
+   */
+  onSettleFinished(streamId: string, handler: (data: SettleFinishedPayload) => void) {
+    this.on(`settle:finished:${streamId}`, handler);
+  }
+
+  /**
+   * Unsubscribe from settlement finished events for a specific stream.
+   */
+  offSettleFinished(streamId: string, handler: (data: SettleFinishedPayload) => void) {
+    this.off(`settle:finished:${streamId}`, handler);
   }
 
   /**

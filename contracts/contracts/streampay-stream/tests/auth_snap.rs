@@ -209,6 +209,26 @@ fn auth_snap_set_default_fee_bps() {
 
 #[test]
 #[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_set_token_fee_bps() {
+    let data = auth_setup();
+    let client = auth_initialized(&data);
+
+    data.env.mock_auths(&[]);
+    client.set_token_fee_bps(&data.admin, &data.token, &100);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_clear_token_fee_bps() {
+    let data = auth_setup();
+    let client = auth_initialized(&data);
+
+    data.env.mock_auths(&[]);
+    client.clear_token_fee_bps(&data.admin, &data.token);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_set_fee_bps() {
     let data = auth_setup();
     let client = auth_initialized(&data);
@@ -430,6 +450,18 @@ fn auth_snap_withdraw() {
 
     data.env.mock_auths(&[]);
     client.withdraw(&data.recipient, &id, &250i128);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_withdraw_to() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let destination = Address::generate(&data.env);
+    data.env.ledger().set_timestamp(1_600);
+
+    data.env.mock_auths(&[]);
+    client.withdraw_to(&id, &250i128, &destination);
 }
 
 #[test]

@@ -29,6 +29,30 @@ Adapters live in `app/lib/repositories/`:
 The PostgreSQL adapter is intentionally a seam, not a live cutover. It gives
 the route layer a stable contract before the SQL migration track is wired in.
 
+## Idempotency Backends
+
+`createIdempotencyStore(namespace)` picks the backing store at runtime:
+
+- Redis (`app/lib/idempotency-store-redis.ts`) when `IDEMPOTENCY_REDIS_URL`
+  and `IDEMPOTENCY_REDIS_TOKEN` are set, or when the shared
+  `RATE_LIMIT_REDIS_URL` / `RATE_LIMIT_REDIS_TOKEN` pair is set.
+- The process-local store from `createNamespacedStore(namespace)` otherwise.
+
+The Redis store uses the Upstash REST API (`/pipeline`) like the rate limiter,
+so it adds no client dependency. Records live under
+`streampay:idem:v1:<namespace>:<key>` and are written with `SET ... PX` so
+Redis enforces the TTL.
+
+`IdempotencyStore` optionally exposes `reserve(key, ttlMs)` and
+`release(key)`. `withIdempotency` uses `reserve` (Redis `SET NX PX`) to claim a
+key before running the handler. A concurrent duplicate that loses the claim is
+answered with `409 IdempotencyKeyInProgress` (or replayed if the winner already
+stored the record). Stores without `reserve` keep the previous read-then-run
+behaviour, so the in-memory default and existing tests are unchanged.
+
+Redis failures are logged and treated as fail-open: the request runs without
+replay protection rather than being blocked.
+
 ## Lock, Cursor, and Idempotency Semantics
 
 The refactor preserves the existing behavior:

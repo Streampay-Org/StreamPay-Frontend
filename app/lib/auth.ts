@@ -1,7 +1,9 @@
 import jwt from "jsonwebtoken";
+import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { resolveRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
 import type { AuditActorRole } from "@/app/types/audit";
+import { getTokenDenylist } from "@/app/lib/token-denylist";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -197,6 +199,10 @@ interface TokenClaims {
   actorId?: string;
   iss?: string;
   aud?: string | string[];
+  /** Unique token id, used for revocation. */
+  jti?: string;
+  /** Expiry, seconds since the epoch. */
+  exp?: number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -237,7 +243,13 @@ export function signToken(
 ): string {
   const currentSecret = getJwtSecret();
   return jwt.sign(
-    { sub: walletAddress, iss: JWT_ISSUER, aud: JWT_AUDIENCE, ...extra },
+    {
+      sub: walletAddress,
+      iss: JWT_ISSUER,
+      aud: JWT_AUDIENCE,
+      jti: randomUUID(),
+      ...extra,
+    },
     currentSecret,
     {
       expiresIn: JWT_EXPIRES_IN,
@@ -248,10 +260,24 @@ export function signToken(
 }
 
 /**
- * Attempt to authenticate an incoming request via its `Authorization: Bearer`
- * header.
+ * Result of verifying a bearer token without consulting the denylist.
+ *
+ * Logout needs this: a token that was already revoked must still be
+ * verifiable so a repeated logout stays idempotent.
  */
-export function tryAuthenticateRequest(request: Request): AuthenticatedActor | null {
+export interface VerifiedToken {
+  actor: AuthenticatedActor;
+  /** Token id, absent on tokens issued before revocation existed. */
+  jti?: string;
+  /** Expiry, seconds since the epoch. */
+  exp?: number;
+}
+
+/**
+ * Verifies the request's `Authorization: Bearer` token against the configured
+ * signing keys. Revocation is not checked here.
+ */
+export function verifyRequestToken(request: Request): VerifiedToken | null {
   const authHeader = request.headers?.get?.("authorization") ?? null;
   if (!authHeader?.startsWith("Bearer ")) return null;
 
@@ -276,12 +302,16 @@ export function tryAuthenticateRequest(request: Request): AuthenticatedActor | n
       if (!verified.sub) return null;
 
       return {
-        actorId:
-          typeof verified.actorId === "string" && verified.actorId.length > 0
-            ? verified.actorId
-            : verified.sub,
-        walletAddress: verified.sub,
-        role: normalizeRole(verified.role),
+        actor: {
+          actorId:
+            typeof verified.actorId === "string" && verified.actorId.length > 0
+              ? verified.actorId
+              : verified.sub,
+          walletAddress: verified.sub,
+          role: normalizeRole(verified.role),
+        },
+        jti: verified.jti,
+        exp: verified.exp,
       };
     } catch {
       // Try the next configured secret.
@@ -289,6 +319,23 @@ export function tryAuthenticateRequest(request: Request): AuthenticatedActor | n
   }
 
   return null;
+}
+
+/**
+ * Attempt to authenticate an incoming request via its `Authorization: Bearer`
+ * header. Tokens whose `jti` has been revoked are rejected.
+ */
+export function tryAuthenticateRequest(request: Request): AuthenticatedActor | null {
+  const verified = verifyRequestToken(request);
+  if (!verified) return null;
+
+  // Tokens issued before revocation existed have no `jti` and stay valid
+  // until they expire.
+  if (verified.jti && getTokenDenylist().isRevoked(verified.jti)) {
+    return null;
+  }
+
+  return verified.actor;
 }
 
 /**

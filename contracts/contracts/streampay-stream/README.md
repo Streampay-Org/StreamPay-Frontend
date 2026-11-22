@@ -17,6 +17,7 @@ Linear payment streams on Stellar/Soroban.
 | `resume` | Yes | `stream.sender` | Resumes a paused stream, extending the end time. |
 | `cancel_stream` | Yes | `stream.sender` | Ends a stream early, refunding unvested funds to sender. |
 | `withdraw` | Yes | `stream.recipient` | Withdraws vested funds to the recipient. |
+| `withdraw_to` | Yes | `stream.recipient` | Withdraws vested funds to a custom destination address (recipient-only auth, destination trustline checked). |
 | `settle` | Yes | `stream.recipient` | Ends a stream and releases all remaining funds to recipient. |
 | `get_stream` | No | None | Returns the stream record. |
 | `withdrawable` | No | None | Returns the currently withdrawable amount. |
@@ -33,6 +34,33 @@ Linear payment streams on Stellar/Soroban.
 | `set_cooloff_duration` | Yes | `admin` | Sets the per-user cooloff duration (in seconds) between stream creations. |
 | `get_cooloff_duration` | No | None | Returns the current per-user cooloff duration in seconds. |
 | `get_cooloff_until` | No | None | Returns the timestamp until which a sender is blocked by cooloff. |
+| `pause_recurring_stream` | Yes | `stream.sender` | Freezes cycle accrual for an active recurring stream. |
+| `resume_recurring_stream` | Yes | `stream.sender` | Resumes a paused recurring stream, excluding the pause span from vesting. |
+| `set_fee_collector` | Yes | `admin` | Sets the address that receives protocol fees. |
+| `set_default_fee_bps` | Yes | `admin` | Sets the global default protocol fee in basis points. |
+| `get_default_fee_bps` | No | None | Returns the global default protocol fee. |
+| `set_token_fee_bps` | Yes | `admin` | Sets a per-token protocol fee override. |
+| `clear_token_fee_bps` | Yes | `admin` | Removes a per-token protocol fee override. |
+| `get_token_fee_bps` | No | None | Returns the per-token override, or `null` when unset. |
+| `get_stream_fee_bps` | No | None | Returns the effective fee for a stream after precedence resolution. |
+
+## Protocol fees
+
+Fees are charged on withdrawal in basis points (`1 bps = 0.01%`, maximum
+`10_000`). The effective fee for a stream is resolved in this order:
+
+1. the explicit per-stream `fee_bps` passed to `create_stream`, when non-zero;
+2. the per-token override set with `set_token_fee_bps`;
+3. the global default set with `set_default_fee_bps` (zero unless configured).
+
+A stream created with a non-zero `fee_bps` keeps that value for its whole life.
+Setting a token override later never rewrites an existing stream's stored
+`fee_bps`. A stream created with `fee_bps = 0` carries no per-stream fee, so it
+follows the token override and then the global default. A per-token override of
+`0` makes that token fee-free even when the default is non-zero.
+
+If no fee collector is configured, no fee is charged and the full withdrawn
+amount goes to the recipient.
 
 ## Paginated Stream Enumeration
 
@@ -91,7 +119,8 @@ data     = vec-encoded payload fields
 | `paused`    | `pause`               | `stream_id`, `sender`, `pause_time`, `timestamp` |
 | `resumed`   | `resume`              | `stream_id`, `sender`, `end_time`, `timestamp` |
 | `withdrawn` | `withdraw`            | `stream_id`, `recipient`, `amount`, `timestamp` |
-| `settled`   | `withdraw` (full) or `settle` | `stream_id`, `recipient`, `total_amount`, `timestamp` |
+| `withdrawn_to` | `withdraw_to`      | `stream_id`, `recipient`, `destination`, `amount`, `timestamp` |
+| `settled`   | `withdraw` / `withdraw_to` (full) or `settle` | `stream_id`, `recipient`, `total_amount`, `timestamp` |
 | `cancelled` | `cancel_stream`       | `stream_id`, `cancelled_by`, `returned_amount`, `released_amount`, `timestamp` |
 | `amended`   | `amend_stream`        | `stream_id`, `amended_by`, `new_rate_per_second`, `new_end_time`, `timestamp` |
 | `upgraded`  | `upgrade`             | `new_wasm_hash` (topics: `"StreamPay"/"upgraded"`) |
