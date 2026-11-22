@@ -58,6 +58,7 @@ import {
   buildCancellationRecord,
 } from "@/app/lib/cancel-stream";
 import { escrowNow, resolveEscrowState } from "@/app/lib/escrow-state";
+import { buildCancelInput } from "@/app/lib/stream-outcome-preview";
 import { webhookOutboxStore, toWebhookEvent } from "@/app/lib/webhook-outbox";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -221,14 +222,8 @@ export async function POST(
     const token  = stream.token ?? "XLM";
 
     // ── Compute split ─────────────────────────────────────────────────────────
-    const cancelResult = computeCancellationSplit(stream, {
-      totalAmount:      escrow.total,
-      releasedAmount:   escrow.released,
-      vestedAmount:     escrow.vested,
-      token,
-      senderAddress:    stream.senderAddress!,
-      recipientAddress: stream.recipient,
-    });
+    const cancelInput = buildCancelInput(stream, escrow);
+    const cancelResult = computeCancellationSplit(stream, cancelInput);
 
     if (!cancelResult.ok) {
       const httpStatus = cancelResult.code === "ALREADY_TERMINAL" ? 409 : 422;
@@ -248,14 +243,7 @@ export async function POST(
     // ── Build cancellation record ─────────────────────────────────────────────
     const cancellation = {
       ...buildCancellationRecord(
-        {
-          totalAmount:      escrow.total,
-          releasedAmount:   escrow.released,
-          vestedAmount:     escrow.vested,
-          token,
-          senderAddress:    stream.senderAddress!,
-          recipientAddress: stream.recipient,
-        },
+        cancelInput,
         split,
         recipientTxHash,
         senderTxHash,

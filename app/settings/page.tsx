@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useRef, useState } from 'react';
+import Link from 'next/link';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { Tabs, TabDefinition } from '../components/Tabs';
 import { Modal } from '../components/Modal';
@@ -159,6 +160,9 @@ export function SettingsPageContent({
           <p className="page-hero__description">
             Manage your account preferences and appearance settings.
           </p>
+          <nav aria-label="More settings">
+            <Link href="/settings/webhooks">Webhook console</Link>
+          </nav>
         </div>
       </header>
 

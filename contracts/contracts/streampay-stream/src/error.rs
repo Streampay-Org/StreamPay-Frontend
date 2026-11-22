@@ -66,4 +66,6 @@ pub enum Error {
     AdminCooldown = 21,
     /// 22: Sender is in cooloff period and cannot create a new stream yet.
     CooloffActive = 22,
+    /// 23: Stream `total_amount` exceeds the configured per-token maximum cap.
+    AmountTooLarge = 23,
 }

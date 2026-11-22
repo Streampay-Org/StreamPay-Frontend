@@ -8,9 +8,16 @@
 //!
 //! ```text
 //! Active ──process──► (cycles_completed advances) ──all done──► Ended
-//!    │                                                        │
-//!    └── cancel ──► Cancelled (terminal)                      │
-//!    └── withdraw ── (any time, recipient only)               │
+//!   │ ▲                                                           │
+//!   │ │                                                           │
+//! pause resume                                                    │
+//!   │ │                                                           │
+//!   ▼ │                                                           │
+//! Paused ──cancel──► Cancelled (terminal)                         │
+//!   │                                                             │
+//!   └── process / withdraw ── (already-vested cycles only)        │
+//! Active ──cancel──► Cancelled (terminal)                         │
+//! Active ──withdraw── (any time, recipient only)                  │
 //! ```
 //!
 //! ## Authorization
@@ -18,6 +25,8 @@
 //! * `create` — `sender.require_auth()`
 //! * `process` — permissionless (anyone may call as keeper)
 //! * `withdraw` — `recipient.require_auth()`
+//! * `pause` — `sender.require_auth()`
+//! * `resume` — `sender.require_auth()`
 //! * `cancel` — `sender.require_auth()`
 //!
 //! ## Arithmetic safety
@@ -69,7 +78,7 @@ pub struct RecurringStream {
     pub start_time: u64,
     /// Ledger timestamp of the last `process` or `withdraw` call.
     pub last_processed_time: u64,
-    /// Current lifecycle status (Active, Ended, Cancelled).
+    /// Current lifecycle status (Active, Paused, Ended, Cancelled).
     pub status: StreamStatus,
     /// If paused, the timestamp at which the stream was paused.
     pub paused_at: u64,
@@ -156,16 +165,61 @@ fn next_id(env: &Env) -> u64 {
     id
 }
 
+// ── Migration helpers (storage layout v2) ─────────────────────────────
+
+/// Returns the next recurring stream id (`1` when none exists).
+pub(crate) fn next_recurring_id(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&RecurDataKey::NextRecurringId)
+        .unwrap_or(1u64)
+}
+
+/// Rewrites recurring records with ids in `[start, end)` to the v2 layout.
+///
+/// The layout change is pause bookkeeping: `paused_at` is `0` unless the
+/// stream is `Paused`, in which case it points at the pause instant. Records
+/// that already satisfy the invariant are rewritten unchanged, which makes
+/// the step idempotent. Missing ids are skipped.
+pub(crate) fn migrate_records(env: &Env, start: u64, end: u64) {
+    let mut id = start;
+    while id < end {
+        let stored: Option<RecurringStream> = env
+            .storage()
+            .persistent()
+            .get(&RecurDataKey::RecurringStream(id));
+        if let Some(mut stream) = stored {
+            if stream.status == StreamStatus::Paused {
+                if stream.paused_at == 0 {
+                    stream.paused_at = stream.last_processed_time;
+                }
+            } else {
+                stream.paused_at = 0;
+            }
+            write(env, id, &stream);
+        }
+        id = id.saturating_add(1);
+    }
+}
+
 // ── Vesting math ──────────────────────────────────────────────────────
 
 /// Returns the number of cycles that should have completed by `now`,
 /// clamped to `[0, total_cycles]` and accounting for pause duration.
+///
+/// While `status == StreamStatus::Paused`, effective time is frozen at
+/// `min(now, stream.paused_at)` so vesting does not accrue during the pause.
 fn vested_cycles(stream: &RecurringStream, now: u64) -> u64 {
-    if stream.status != StreamStatus::Active {
+    if stream.status != StreamStatus::Active && stream.status != StreamStatus::Paused {
         return stream.cycles_completed;
     }
 
-    let effective_now = max(stream.start_time, min(now, u64::MAX));
+    let raw_now = if stream.status == StreamStatus::Paused {
+        min(now, stream.paused_at)
+    } else {
+        now
+    };
+    let effective_now = max(stream.start_time, raw_now);
 
     let elapsed = effective_now
         .saturating_sub(stream.start_time)
@@ -235,6 +289,22 @@ pub struct RecurringCancelled {
     pub cancelled_by: Address,
     pub returned_amount: i128,
     pub withdrawn_amount: i128,
+    pub timestamp: u64,
+}
+
+/// Emitted when a recurring stream is paused.
+#[contractevent(topics = ["recurring", "paused"], data_format = "vec")]
+pub struct RecurringPaused {
+    pub stream_id: u64,
+    pub sender: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when a recurring stream is resumed.
+#[contractevent(topics = ["recurring", "resumed"], data_format = "vec")]
+pub struct RecurringResumed {
+    pub stream_id: u64,
+    pub sender: Address,
     pub timestamp: u64,
 }
 
@@ -393,7 +463,7 @@ pub fn create(
 pub fn process(env: Env, recurring_id: u64) -> Result<RecurringStream, Error> {
     let mut stream = get_existing(&env, recurring_id)?;
 
-    if stream.status != StreamStatus::Active {
+    if stream.status != StreamStatus::Active && stream.status != StreamStatus::Paused {
         return Err(Error::InvalidState);
     }
 
@@ -515,7 +585,95 @@ pub fn withdraw(
     Ok(amount)
 }
 
-/// Cancels an active or ended recurring stream.
+/// Pauses an active recurring stream, freezing cycle accrual.
+///
+/// Only the stream sender may call this.  On pause, `status` is set to
+/// [`StreamStatus::Paused`] and `paused_at` is recorded as the current ledger
+/// timestamp.  Already-vested cycles remain processable and withdrawable while
+/// paused, but no new cycles accrue until [`resume`] is called.
+///
+/// @param `recurring_id` — Numeric ID of the recurring stream to pause.
+///
+/// @return The updated [`RecurringStream`] in `Paused` status.
+///
+/// @custom:error [`Error::ContractPaused`] if the global pause flag is set.
+/// @custom:error [`Error::NotFound`] if `recurring_id` does not exist.
+/// @custom:error [`Error::InvalidState`] if the stream is not `Active`.
+///
+/// @custom:auth Requires authorisation from the stream `sender`.
+pub fn pause(env: Env, recurring_id: u64) -> Result<RecurringStream, Error> {
+    require_not_paused(&env)?;
+
+    let mut stream = get_existing(&env, recurring_id)?;
+    stream.sender.require_auth();
+
+    if stream.status != StreamStatus::Active {
+        return Err(Error::InvalidState);
+    }
+
+    let now = env.ledger().timestamp();
+    stream.paused_at = now;
+    stream.status = StreamStatus::Paused;
+
+    write(&env, recurring_id, &stream);
+    RecurringPaused {
+        stream_id: recurring_id,
+        sender: stream.sender.clone(),
+        timestamp: now,
+    }
+    .publish(&env);
+
+    Ok(stream)
+}
+
+/// Resumes a previously paused recurring stream.
+///
+/// Only the stream sender may call this.  Adds the elapsed pause span
+/// (`now - paused_at`) to `total_paused_duration` using checked arithmetic,
+/// clears `paused_at`, and restores `status` to [`StreamStatus::Active`].
+///
+/// @param `recurring_id` — Numeric ID of the recurring stream to resume.
+///
+/// @return The updated [`RecurringStream`] in `Active` status.
+///
+/// @custom:error [`Error::NotFound`] if `recurring_id` does not exist.
+/// @custom:error [`Error::InvalidState`] if the stream is not `Paused`.
+/// @custom:error [`Error::InvalidTimeRange`] if `now < paused_at`.
+/// @custom:error [`Error::Overflow`] if adding the pause span overflows `u64`.
+///
+/// @custom:auth Requires authorisation from the stream `sender`.
+pub fn resume(env: Env, recurring_id: u64) -> Result<RecurringStream, Error> {
+    let mut stream = get_existing(&env, recurring_id)?;
+    stream.sender.require_auth();
+
+    if stream.status != StreamStatus::Paused {
+        return Err(Error::InvalidState);
+    }
+
+    let now = env.ledger().timestamp();
+    let pause_span = now
+        .checked_sub(stream.paused_at)
+        .ok_or(Error::InvalidTimeRange)?;
+
+    stream.total_paused_duration = stream
+        .total_paused_duration
+        .checked_add(pause_span)
+        .ok_or(Error::Overflow)?;
+    stream.paused_at = 0;
+    stream.status = StreamStatus::Active;
+
+    write(&env, recurring_id, &stream);
+    RecurringResumed {
+        stream_id: recurring_id,
+        sender: stream.sender.clone(),
+        timestamp: now,
+    }
+    .publish(&env);
+
+    Ok(stream)
+}
+
+/// Cancels an active, paused, or ended recurring stream.
 ///
 /// Only the sender may cancel.  Unvested escrow is returned to the sender;
 /// the recipient keeps all already-withdrawn funds plus any vested but

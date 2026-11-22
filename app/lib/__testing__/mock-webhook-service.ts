@@ -1,6 +1,6 @@
-import { withWebhookContext, logger, getCorrelationContext } from "./logger";
-import { WebhookEndpoint, WebhookEvent } from "./webhook-delivery";
-import { webhookOutboxStore } from "./webhook-outbox";
+import { withWebhookContext, logger, getCorrelationContext } from "../logger";
+import { WebhookEndpoint, WebhookEvent } from "../webhook-delivery";
+import { webhookOutboxStore } from "../webhook-outbox";
 
 // Mock webhook payload
 export interface WebhookPayload {
@@ -67,7 +67,7 @@ export class MockWebhookService {
   /**
    * Strip internal headers before sending to external webhook (kept for backwards compatibility)
    */
-  private stripInternalHeaders(headers: Headers): Headers {
+  protected stripInternalHeaders(headers: Headers): Headers {
     const safeHeaders = new Headers();
     const internalHeaders = ["x-internal-auth", "x-service-token", "x-correlation-id-internal"];
 
@@ -80,7 +80,7 @@ export class MockWebhookService {
     return safeHeaders;
   }
 
-  private async simulateDelay(ms: number): Promise<void> {
+  protected async simulateDelay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

@@ -18,6 +18,16 @@ Events are emitted AFTER successful state mutation and any token transfer. Faile
 | `"stream"` | `"cancelled"` | Emitted when a stream is cancelled. |
 | `"stream"` | `"amended"` | Emitted when a stream is amended. |
 
+## Split Stream Events
+
+| Primary Topic | Sub-topic | Description |
+| --- | --- | --- |
+| `"stream"` | `"split_cr"` | Emitted when a split stream is created. |
+| `"stream"` | `"split_wd"` | Emitted when a recipient withdraws from a split stream. |
+| `"stream"` | `"split_ca"` | Emitted when a split stream is cancelled. |
+| `"stream"` | `"split_pa"` | Emitted when a split stream is paused. |
+| `"stream"` | `"split_re"` | Emitted when a paused split stream is resumed. |
+
 ## Administrative Events
 
 | Primary Topic | Sub-topic | Description |
@@ -26,6 +36,7 @@ Events are emitted AFTER successful state mutation and any token transfer. Faile
 | `"stream"` | `"set_pause"` | Emitted when the admin toggles the global pause flag. |
 | `"stream"` | `"set_admin"` | Emitted when the admin role is transferred. |
 | `"stream"` | `"set_token"` | Emitted when a token's allowlist status is changed. |
+| `"stream"` | `"set_max_a"` | Emitted when the per-token maximum stream amount cap is set or cleared (`0` indicates cleared). |
 | `"stream"` | `"set_fee_c"` | Emitted when the fee collector address is updated. |
 | `"stream"` | `"set_dfee"` | Emitted when the global default fee bps is updated. |
 | `"stream"` | `"fee"` | Emitted for every withdrawal that incurs a non-zero fee. |

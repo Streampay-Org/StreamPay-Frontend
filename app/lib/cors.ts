@@ -25,9 +25,11 @@ export const DEFAULT_CORS_MAX_AGE_SECONDS = 600;
 /**
  * Response headers browser clients are allowed to read on a cross-origin
  * response. `x-request-id` is required for incident correlation,
- * `retry-after` for rate-limit back-off and `etag` for conditional reads.
+ * `retry-after` and `x-ratelimit-*` for rate-limit pacing/back-off and `etag`
+ * for conditional reads.
  */
-export const DEFAULT_CORS_EXPOSE_HEADERS = 'x-request-id, retry-after, etag';
+export const DEFAULT_CORS_EXPOSE_HEADERS =
+  'x-request-id, retry-after, etag, x-ratelimit-limit, x-ratelimit-remaining, x-ratelimit-reset';
 
 /**
  * The literal `Origin: null` header value. Browsers send it for sandboxed
