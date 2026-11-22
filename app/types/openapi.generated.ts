@@ -1070,12 +1070,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/orgs/{orgId}/policy": {
+    "/api/streams/{id}/cancel/preview": {
         parameters: {
             query?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Preview cancellation payout split for a stream
+         * @description Read-only preview of cancelling an active or paused stream. Returns the exact recipient payout and sender refund without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.
+         */
+        get: operations["previewCancelStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/{id}/settle/preview": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Preview settlement outcome for a stream
+         * @description Read-only preview of settling an active or paused stream. Returns the resulting status and escrow amounts without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.
+         */
+        get: operations["previewSettleStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/{id}/withdraw/preview": {
+        parameters: {
+            query?: {
+                /** @description Optional withdrawal amount in raw i128 units. Omit to preview withdrawing the full withdrawable balance. */
+                amount?: string;
+            };
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Preview withdrawal outcome for a stream
+         * @description Read-only preview of withdrawing from an ended stream. Computes the exact payout and updated released amount without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.
+         */
+        get: operations["previewWithdrawStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/policy": {
             header?: never;
             path?: never;
-            cookie?: never;
         };
         /**
          * Get organization stream policy
@@ -1087,12 +1171,6 @@ export interface paths {
          * @description Replaces the StreamPolicy for an organization. Restricted to organization owners. Supports optimistic concurrency via the If-Match header and records an audit log entry.
          */
         put: operations["updateOrgPolicy"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
     };
 }
 export type webhooks = Record<string, never>;
@@ -1527,6 +1605,78 @@ export interface components {
              * @example 2026-01-15T00:00:00.000Z
              */
             createdAt: string;
+        };
+        CancelOutcomePreview: {
+            /** @enum {string} */
+            action: "cancel";
+            allowed: boolean;
+            /** @enum {string} */
+            currentStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            /** @enum {string} */
+            nextStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            token: string;
+            /** @description Raw i128 units as string. */
+            totalAmount: string;
+            /** @description Raw i128 units as string. */
+            releasedAmount: string;
+            /** @description Raw i128 units as string. */
+            vestedAmount: string;
+            /** @description Raw i128 units as string. */
+            recipientPayout: string;
+            /** @description Raw i128 units as string. */
+            senderRefund: string;
+            /** @description Raw i128 units as string. */
+            escrowDrained: string;
+            /** Format: date-time */
+            asOf: string;
+        };
+        SettleOutcomePreview: {
+            /** @enum {string} */
+            action: "settle";
+            allowed: boolean;
+            /** @enum {string} */
+            currentStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            /** @enum {string} */
+            nextStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            token: string;
+            /** @description Raw i128 units as string. */
+            totalAmount: string;
+            /** @description Raw i128 units as string. */
+            releasedAmount: string;
+            /** @description Raw i128 units as string. */
+            vestedAmount: string;
+            /** @description Raw i128 units as string. */
+            withdrawableAmount: string;
+            /** @description Raw i128 units as string. */
+            unvestedAmount: string;
+            /** Format: date-time */
+            asOf: string;
+        };
+        WithdrawOutcomePreview: {
+            /** @enum {string} */
+            action: "withdraw";
+            allowed: boolean;
+            /** @enum {string} */
+            currentStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            /** @enum {string} */
+            nextStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            token: string;
+            /** @description Raw i128 units as string. */
+            totalAmount: string;
+            /** @description Raw i128 units as string. */
+            releasedAmount: string;
+            /** @description Raw i128 units as string. */
+            vestedAmount: string;
+            /** @description Raw i128 units as string. */
+            withdrawableAmount: string;
+            /** @description Raw i128 units as string. */
+            amountPaidOut: string;
+            /** @description Raw i128 units as string. */
+            newReleasedAmount: string;
+            /** @description Raw i128 units as string. */
+            remainingEscrow: string;
+            /** Format: date-time */
+            asOf: string;
         };
         /** @enum {string} */
         OrgRole: "owner" | "pauser" | "settler" | "viewer";
@@ -4441,80 +4591,36 @@ export interface operations {
             401: components["responses"]["401"];
         };
     };
-    getOrgPolicy: {
+    previewCancelStream: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
             path: {
-                /** @description Organization identifier */
-                orgId: string;
+                /** @description Stream identifier. */
+                id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Organization stream policy */
+            /** @description Cancellation outcome preview computed. */
             200: {
                 headers: {
-                    /** @description Strong entity tag for optimistic concurrency control */
-                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OrgPolicyResponse"];
+                    "application/json": {
+                        data: components["schemas"]["CancelOutcomePreview"];
+                    };
                 };
             };
-            /** @description Organization not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
-            };
-        };
-    };
-    updateOrgPolicy: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description ETag returned by GET /api/orgs/{orgId}/policy for optimistic concurrency control */
-                "If-Match"?: string;
-            };
-            path: {
-                /** @description Organization identifier */
-                orgId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateOrgPolicyRequest"];
-            };
-        };
-        responses: {
-            /** @description Updated organization stream policy */
-            200: {
-                headers: {
-                    /** @description Updated strong entity tag */
-                    ETag?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPolicyResponse"];
-                };
-            };
-            /** @description Invalid policy payload */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
-            };
-            /** @description Caller is not an authenticated owner of the organization */
+            401: components["responses"]["401"];
+            /** @description Forbidden: caller is not authorized to preview this stream action. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4523,8 +4629,9 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Organization not found */
-            404: {
+            404: components["responses"]["404"];
+            /** @description Conflict: illegal state transition or terminal stream state. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4532,13 +4639,200 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Optimistic concurrency conflict (If-Match ETag mismatch) */
+            422: components["responses"]["422"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    previewSettleStream: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settlement outcome preview computed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SettleOutcomePreview"];
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Forbidden: caller is not authorized to preview this stream action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["404"];
+            /** @description Conflict: illegal state transition or terminal stream state. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            422: components["responses"]["422"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    previewWithdrawStream: {
+        parameters: {
+            query?: {
+                /** @description Optional withdrawal amount in raw i128 units. Omit to preview withdrawing the full withdrawable balance. */
+                amount?: string;
+            };
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Withdrawal outcome preview computed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WithdrawOutcomePreview"];
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Forbidden: caller is not authorized to preview this stream action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["404"];
+            /** @description Conflict: illegal state transition or terminal stream state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            422: components["responses"]["422"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    getOrgPolicy: {
+            header?: never;
+                /** @description Organization identifier */
+                orgId: string;
+            };
+        };
+            /** @description Organization stream policy */
+                    /** @description Strong entity tag for optimistic concurrency control */
+                    ETag?: string;
+                };
+                    "application/json": components["schemas"]["OrgPolicyResponse"];
+                };
+            };
+            /** @description Organization not found */
+            404: {
+                };
+                };
+            };
+        };
+    };
+    updateOrgPolicy: {
+                /** @description ETag returned by GET /api/orgs/{orgId}/policy for optimistic concurrency control */
+                "If-Match"?: string;
+            };
+                /** @description Organization identifier */
+                orgId: string;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateOrgPolicyRequest"];
+            };
+        };
+            /** @description Updated organization stream policy */
+                    /** @description Updated strong entity tag */
+                    ETag?: string;
+                };
+                    "application/json": components["schemas"]["OrgPolicyResponse"];
+                };
+            };
+            /** @description Invalid policy payload */
+            400: {
+                };
+                };
+            };
+            /** @description Caller is not an authenticated owner of the organization */
+                };
+                };
+            };
+            /** @description Organization not found */
+            404: {
+                };
+                };
+            };
+            /** @description Optimistic concurrency conflict (If-Match ETag mismatch) */
+                };
                 };
             };
         };
