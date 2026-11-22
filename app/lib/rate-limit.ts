@@ -116,10 +116,19 @@ export function getClientIdentity(request: Request): ClientIdentity {
   };
 }
 
+export interface RateLimitCheckResult {
+  allowed: boolean;
+  remaining: number;
+  limit: number;
+  resetAt: number;
+  retryAfter?: number;
+  degraded?: boolean;
+}
+
 export async function checkRateLimit(
   identity: ClientIdentity,
   limitType: LimitType
-): Promise<{ allowed: boolean; remaining: number; retryAfter?: number }> {
+): Promise<RateLimitCheckResult> {
   const store = getRateLimitStore();
   const config = RATE_LIMITS[limitType];
 
@@ -133,13 +142,43 @@ export async function checkRateLimit(
   return {
     allowed: result.allowed,
     remaining: result.allowed ? result.remaining : 0,
+    limit: config.limit,
+    resetAt: result.resetAt,
     retryAfter: result.retryAfter,
+    ...(result.degraded ? { degraded: true } : {}),
   };
 }
 
-export function rateLimitResponse(retryAfter: number) {
+/**
+ * Build standard `X-RateLimit-*` response headers from a rate-limit check result.
+ * Returns an empty object when the store failed open (degraded) or metadata is absent,
+ * so callers omit headers rather than emitting inaccurate values.
+ */
+export function rateLimitHeaders(
+  result: Partial<Pick<RateLimitCheckResult, "allowed" | "remaining" | "limit" | "resetAt" | "degraded">>,
+): Record<string, string> {
+  if (result.degraded || result.limit === undefined || result.resetAt === undefined) {
+    return {};
+  }
+
+  const remaining = result.allowed === false ? 0 : Math.max(0, result.remaining ?? 0);
+  return {
+    "X-RateLimit-Limit": String(result.limit),
+    "X-RateLimit-Remaining": String(remaining),
+    "X-RateLimit-Reset": String(result.resetAt),
+  };
+}
+
+export function rateLimitResponse(
+  retryAfter: number,
+  result?: Partial<Pick<RateLimitCheckResult, "limit" | "resetAt" | "degraded">>,
+) {
   const requestId =
     getCorrelationContext()?.request_id ?? generateRequestId();
+
+  const rlHeaders = result
+    ? rateLimitHeaders({ ...result, allowed: false, remaining: 0 })
+    : {};
 
   return NextResponse.json(
     {
@@ -152,6 +191,7 @@ export function rateLimitResponse(retryAfter: number) {
     {
       status: 429,
       headers: {
+        ...rlHeaders,
         "Retry-After": String(retryAfter),
         [REQUEST_ID_HEADER]: requestId,
       },
@@ -172,8 +212,12 @@ export async function withRateLimit(
   const result = await checkRateLimit(identity, limitType);
 
   if (!result.allowed) {
-    return rateLimitResponse(result.retryAfter!);
+    return rateLimitResponse(result.retryAfter!, result);
   }
 
-  return handler();
+  const response = await handler();
+  for (const [name, value] of Object.entries(rateLimitHeaders(result))) {
+    response.headers.set(name, value);
+  }
+  return response;
 }

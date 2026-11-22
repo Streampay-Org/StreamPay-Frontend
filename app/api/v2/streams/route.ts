@@ -20,6 +20,7 @@
 
 import { NextResponse } from "next/server";
 import { db, idempotencyToken, getStore, newStreamId } from "@/app/lib/db";
+import { filterStreamsByTag } from "@/app/lib/stream-tags";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { getClientIdentity } from "@/app/lib/rate-limit";
 import { checkOrgDailyQuota, orgQuotaResponse } from "@/app/lib/org-quota";

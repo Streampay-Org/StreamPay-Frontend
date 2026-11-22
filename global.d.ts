@@ -140,6 +140,16 @@ declare namespace NodeJS {
     /** Bearer token for authenticating requests to the Upstash REST API. */
     RATE_LIMIT_REDIS_TOKEN?: string;
     /**
+     * Upstash-compatible REST URL for the Redis idempotency store. When unset,
+     * the shared RATE_LIMIT_REDIS_URL is used.
+     */
+    IDEMPOTENCY_REDIS_URL?: string;
+    /**
+     * Bearer token for the Redis idempotency store. When unset, the shared
+     * RATE_LIMIT_REDIS_TOKEN is used.
+     */
+    IDEMPOTENCY_REDIS_TOKEN?: string;
+    /**
      * Failure mode when the Redis rate-limit store is unreachable.
      *   open   – allow the request (default; safe for read/low-risk tiers)
      *   closed – consult local shadow bucket; deny when shadow is also empty

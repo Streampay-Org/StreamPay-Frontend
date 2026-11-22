@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useImperativeHandle } from "react";
 
 interface VirtualListItemProps extends React.LiHTMLAttributes<HTMLLIElement> {
   children: React.ReactNode;
@@ -13,14 +13,16 @@ export const VirtualListItem = React.forwardRef<HTMLLIElement, VirtualListItemPr
     externalRef,
   ) {
     const internalRef = useRef<HTMLLIElement>(null);
-    // Prefer forwarded ref so callers (e.g. focus-management after Load More) work.
-    const ref = (externalRef as React.RefObject<HTMLLIElement>) ?? internalRef;
+
+    // Forward the internal <li> DOM node to callers (both object refs and callback refs),
+    // while ensuring internalRef is always attached to <li> even when no ref is forwarded.
+    useImperativeHandle(externalRef, () => internalRef.current as HTMLLIElement);
 
     const [isVisible, setIsVisible] = useState(true);
     const [height, setHeight] = useState(defaultHeight);
 
     useEffect(() => {
-      const el = ref.current;
+      const el = internalRef.current;
       if (!el) return;
 
       // Fallback to fully rendered if observers aren't available (e.g. JSDOM tests)
@@ -34,9 +36,11 @@ export const VirtualListItem = React.forwardRef<HTMLLIElement, VirtualListItemPr
       const resizeObserver = new ResizeObserver((entries) => {
         for (const entry of entries) {
           if (entry.borderBoxSize && entry.borderBoxSize.length > 0) {
-            setHeight(entry.borderBoxSize[0].blockSize);
-          } else {
-            setHeight(entry.contentRect.height);
+            const blockSize = entry.borderBoxSize[0].blockSize;
+            setHeight(blockSize || defaultHeight);
+          } else if (entry.contentRect) {
+            const contentHeight = entry.contentRect.height;
+            setHeight(contentHeight || defaultHeight);
           }
         }
       });
@@ -48,7 +52,8 @@ export const VirtualListItem = React.forwardRef<HTMLLIElement, VirtualListItemPr
           } else {
             setIsVisible(false);
             if (el) {
-              setHeight(el.getBoundingClientRect().height);
+              const measured = el.getBoundingClientRect().height;
+              setHeight((prev) => (measured > 0 ? measured : prev || defaultHeight));
             }
           }
         },
@@ -56,7 +61,8 @@ export const VirtualListItem = React.forwardRef<HTMLLIElement, VirtualListItemPr
       );
 
       // Eagerly measure initial height to avoid jump on first scroll
-      setHeight(el.getBoundingClientRect().height || defaultHeight);
+      const initialHeight = el.getBoundingClientRect().height;
+      setHeight(initialHeight || defaultHeight);
 
       resizeObserver.observe(el);
       observer.observe(el);
@@ -65,11 +71,11 @@ export const VirtualListItem = React.forwardRef<HTMLLIElement, VirtualListItemPr
         resizeObserver.disconnect();
         observer.disconnect();
       };
-    }, [defaultHeight, ref]);
+    }, [defaultHeight]);
 
     return (
       <li
-        ref={ref}
+        ref={internalRef}
         style={{ ...style, minHeight: isVisible ? undefined : height }}
         {...props}
       >
@@ -78,3 +84,4 @@ export const VirtualListItem = React.forwardRef<HTMLLIElement, VirtualListItemPr
     );
   },
 );
+

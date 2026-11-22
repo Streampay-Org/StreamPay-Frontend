@@ -1,3 +1,5 @@
+import type { Stream } from "@/app/types/openapi";
+
 export interface CacheEntry<T> {
   value: T;
   expiresAt: number;
@@ -106,7 +108,7 @@ export function createCache<T>(scope: string, ttlMs?: number): TenantScopedCache
   return new TenantScopedCache<T>(scope, ttlMs);
 }
 
-export const streamCache = createCache<any>("stream");
+export const streamCache = createCache<Stream>("stream");
 
 /**
  * Flush the process-wide stream cache.
