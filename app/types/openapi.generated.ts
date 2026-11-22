@@ -1050,6 +1050,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/streams/{id}/cancel/preview": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Preview cancellation payout split for a stream
+         * @description Read-only preview of cancelling an active or paused stream. Returns the exact recipient payout and sender refund without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.
+         */
+        get: operations["previewCancelStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/{id}/settle/preview": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Preview settlement outcome for a stream
+         * @description Read-only preview of settling an active or paused stream. Returns the resulting status and escrow amounts without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.
+         */
+        get: operations["previewSettleStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/{id}/withdraw/preview": {
+        parameters: {
+            query?: {
+                /** @description Optional withdrawal amount in raw i128 units. Omit to preview withdrawing the full withdrawable balance. */
+                amount?: string;
+            };
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Preview withdrawal outcome for a stream
+         * @description Read-only preview of withdrawing from an ended stream. Computes the exact payout and updated released amount without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.
+         */
+        get: operations["previewWithdrawStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1483,6 +1570,78 @@ export interface components {
              * @example 2026-01-15T00:00:00.000Z
              */
             createdAt: string;
+        };
+        CancelOutcomePreview: {
+            /** @enum {string} */
+            action: "cancel";
+            allowed: boolean;
+            /** @enum {string} */
+            currentStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            /** @enum {string} */
+            nextStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            token: string;
+            /** @description Raw i128 units as string. */
+            totalAmount: string;
+            /** @description Raw i128 units as string. */
+            releasedAmount: string;
+            /** @description Raw i128 units as string. */
+            vestedAmount: string;
+            /** @description Raw i128 units as string. */
+            recipientPayout: string;
+            /** @description Raw i128 units as string. */
+            senderRefund: string;
+            /** @description Raw i128 units as string. */
+            escrowDrained: string;
+            /** Format: date-time */
+            asOf: string;
+        };
+        SettleOutcomePreview: {
+            /** @enum {string} */
+            action: "settle";
+            allowed: boolean;
+            /** @enum {string} */
+            currentStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            /** @enum {string} */
+            nextStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            token: string;
+            /** @description Raw i128 units as string. */
+            totalAmount: string;
+            /** @description Raw i128 units as string. */
+            releasedAmount: string;
+            /** @description Raw i128 units as string. */
+            vestedAmount: string;
+            /** @description Raw i128 units as string. */
+            withdrawableAmount: string;
+            /** @description Raw i128 units as string. */
+            unvestedAmount: string;
+            /** Format: date-time */
+            asOf: string;
+        };
+        WithdrawOutcomePreview: {
+            /** @enum {string} */
+            action: "withdraw";
+            allowed: boolean;
+            /** @enum {string} */
+            currentStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            /** @enum {string} */
+            nextStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            token: string;
+            /** @description Raw i128 units as string. */
+            totalAmount: string;
+            /** @description Raw i128 units as string. */
+            releasedAmount: string;
+            /** @description Raw i128 units as string. */
+            vestedAmount: string;
+            /** @description Raw i128 units as string. */
+            withdrawableAmount: string;
+            /** @description Raw i128 units as string. */
+            amountPaidOut: string;
+            /** @description Raw i128 units as string. */
+            newReleasedAmount: string;
+            /** @description Raw i128 units as string. */
+            remainingEscrow: string;
+            /** Format: date-time */
+            asOf: string;
         };
     };
     responses: {
@@ -4310,6 +4469,192 @@ export interface operations {
                 };
             };
             401: components["responses"]["401"];
+        };
+    };
+    previewCancelStream: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cancellation outcome preview computed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CancelOutcomePreview"];
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Forbidden: caller is not authorized to preview this stream action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["404"];
+            /** @description Conflict: illegal state transition or terminal stream state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            422: components["responses"]["422"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    previewSettleStream: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settlement outcome preview computed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SettleOutcomePreview"];
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Forbidden: caller is not authorized to preview this stream action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["404"];
+            /** @description Conflict: illegal state transition or terminal stream state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            422: components["responses"]["422"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    previewWithdrawStream: {
+        parameters: {
+            query?: {
+                /** @description Optional withdrawal amount in raw i128 units. Omit to preview withdrawing the full withdrawable balance. */
+                amount?: string;
+            };
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Withdrawal outcome preview computed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WithdrawOutcomePreview"];
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Forbidden: caller is not authorized to preview this stream action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["404"];
+            /** @description Conflict: illegal state transition or terminal stream state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            422: components["responses"]["422"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
         };
     };
 }

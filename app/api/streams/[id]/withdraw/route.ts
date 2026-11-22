@@ -16,21 +16,14 @@ import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
 import { publishStreamChange } from "@/app/lib/stream-publish";
 import { evaluateWithdrawalState } from "@/app/lib/withdraw-finality";
 import { computeWithdraw, resolveEscrowState } from "@/app/lib/recipient-withdraw";
-import type { WithdrawErrorCode } from "@/app/lib/recipient-withdraw";
+import {
+  buildWithdrawInput,
+  parseRawI128Amount,
+  WITHDRAW_ERROR_STATUS,
+} from "@/app/lib/stream-outcome-preview";
 import { maybeFeeBump } from "@/lib/feeBump";
 
 type Context = { params: Promise<{ id: string }> };
-
-const I128_MAX = (1n << 127n) - 1n;
-
-const WITHDRAW_ERROR_STATUS: Record<WithdrawErrorCode, number> = {
-  RECIPIENT_AUTH_REQUIRED: 403,
-  ZERO_AMOUNT: 422,
-  OVER_WITHDRAW: 422,
-  INVALID_ESCROW_STATE: 422,
-  NO_WITHDRAWABLE_BALANCE: 409,
-  INVALID_STREAM_STATE: 409,
-};
 
 function createErrorResponse(code: string, message: string, status: number) {
   const requestId = getCorrelationContext()?.request_id ?? generateRequestId();
@@ -155,28 +148,7 @@ async function parseRequestedAmount(
     return { ok: true };
   }
 
-  if (typeof value !== "string" || !/^\d+$/.test(value)) {
-    return {
-      ok: false,
-      message: "amount must be a non-negative raw i128 integer string.",
-    };
-  }
-
-  let requestedAmount: bigint;
-  try {
-    requestedAmount = BigInt(value);
-  } catch {
-    return {
-      ok: false,
-      message: "amount must be a non-negative raw i128 integer string.",
-    };
-  }
-
-  if (requestedAmount > I128_MAX) {
-    return { ok: false, message: "amount exceeds the maximum i128 value." };
-  }
-
-  return { ok: true, requestedAmount };
+  return parseRawI128Amount(value);
 }
 
 function withIdempotencyReadableBody(request: Request): Request {
@@ -267,16 +239,13 @@ export async function POST(
         );
       }
       const escrow = escrowResult.value;
-      const outcome = computeWithdraw(stream, {
-        totalAmount: escrow.total,
-        releasedAmount: escrow.released,
-        vestedAmount: escrow.vested,
-        requestedAmount: parsedAmount.requestedAmount,
-        token: stream.token ?? "XLM",
-        recipientAddress: stream.recipient,
-        callerAddress: stream.recipient,
-        now,
-      });
+      const outcome = computeWithdraw(
+        stream,
+        buildWithdrawInput(stream, escrow, {
+          requestedAmount: parsedAmount.requestedAmount,
+          now,
+        }),
+      );
 
       if (!outcome.ok) {
         return createErrorResponse(
