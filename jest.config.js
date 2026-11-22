@@ -16,7 +16,6 @@ const config = {
     "<rootDir>/app/api/notifications/preferences/route.test.ts",
     "<rootDir>/app/streams/new/recurring.test.tsx",
     "<rootDir>/__tests__/a11y.test.tsx",
-    "<rootDir>/__tests__/openapi-webhooks.test.ts",
     "<rootDir>/app/api/audit/export/route.test.ts",
     "<rootDir>/app/api/exports/exports.accessLog.test.ts",
     "<rootDir>/app/api/exports/exports.metrics.test.ts",

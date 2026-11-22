@@ -14,10 +14,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "__tests__/openapi-webhooks.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/api/audit/export/route.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
