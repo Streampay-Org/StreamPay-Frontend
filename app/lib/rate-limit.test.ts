@@ -1,5 +1,10 @@
 import crypto from "crypto";
-import { getClientIdentity, checkRateLimit } from "./rate-limit";
+import {
+  getClientIdentity,
+  checkRateLimit,
+  rateLimitHeaders,
+  rateLimitResponse,
+} from "./rate-limit";
 import { signToken } from "./auth";
 import { getMetrics, resetMetrics } from "./rate-limit-metrics";
 import { InMemoryRateLimitStore } from "./rate-limit-store";
@@ -583,5 +588,64 @@ describe("Verified Identity and Rate Limiting Scenarios", () => {
     }
     const check2 = await checkRateLimit(id2, "write");
     expect(check2.allowed).toBe(false);
+  });
+});
+
+describe("X-RateLimit-* headers", () => {
+  afterEach(() => {
+    resetRateLimitStore();
+  });
+
+  it("checkRateLimit returns limit and resetAt in epoch seconds per tier", async () => {
+    const id = { type: "ip" as const, value: "10.0.0.1", displayValue: "10.0.0.1" };
+    const readRes = await checkRateLimit(id, "read");
+    const writeRes = await checkRateLimit(id, "write");
+
+    expect(readRes.allowed).toBe(true);
+    expect(readRes.limit).toBe(60);
+    expect(readRes.remaining).toBe(59);
+    expect(Number.isInteger(readRes.resetAt)).toBe(true);
+    expect(readRes.resetAt).toBeGreaterThan(1_000_000_000);
+
+    expect(writeRes.allowed).toBe(true);
+    expect(writeRes.limit).toBe(10);
+    expect(writeRes.remaining).toBe(9);
+  });
+
+  it("rateLimitHeaders builds standard headers and omits them when degraded", () => {
+    expect(
+      rateLimitHeaders({ allowed: true, limit: 60, remaining: 42, resetAt: 1700000060 }),
+    ).toEqual({
+      "X-RateLimit-Limit": "60",
+      "X-RateLimit-Remaining": "42",
+      "X-RateLimit-Reset": "1700000060",
+    });
+
+    expect(
+      rateLimitHeaders({ allowed: false, limit: 60, remaining: 5, resetAt: 1700000060 }),
+    ).toEqual({
+      "X-RateLimit-Limit": "60",
+      "X-RateLimit-Remaining": "0",
+      "X-RateLimit-Reset": "1700000060",
+    });
+
+    expect(
+      rateLimitHeaders({
+        allowed: true,
+        limit: 60,
+        remaining: 59,
+        resetAt: 1700000060,
+        degraded: true,
+      }),
+    ).toEqual({});
+  });
+
+  it("rateLimitResponse includes X-RateLimit-* headers alongside Retry-After when result is provided", () => {
+    const res = rateLimitResponse(30, { limit: 10, resetAt: 1700000030 });
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
+    expect(res.headers.get("X-RateLimit-Limit")).toBe("10");
+    expect(res.headers.get("X-RateLimit-Remaining")).toBe("0");
+    expect(res.headers.get("X-RateLimit-Reset")).toBe("1700000030");
   });
 });
