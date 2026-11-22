@@ -19,6 +19,7 @@ import {
   isActorHeaderAllowed,
   ActorMismatchError,
   createRbacErrorResponse,
+  validateStreamPolicy,
   OrgAction,
 } from "./org-policy";
 import { OrgRecord, DEFAULT_STREAM_POLICY } from "./org-types";
@@ -700,5 +701,111 @@ describe("createRbacErrorResponse", () => {
     const res = createRbacErrorResponse(req, "TEST_CODE", "Test message", 403);
     const body = await res.json();
     expect(body.error.request_id).toMatch(/^req_/);
+  });
+});
+
+// ─── validateStreamPolicy ─────────────────────────────────────────────────────
+
+describe("validateStreamPolicy", () => {
+  it("accepts a valid StreamPolicy and returns a cloned policy", () => {
+    const input = {
+      ...DEFAULT_STREAM_POLICY,
+      requireApprovals: 2 as const,
+    };
+    const result = validateStreamPolicy(input);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.policy).toEqual(input);
+      expect(result.policy.canStart).not.toBe(input.canStart);
+    }
+  });
+
+  it("rejects non-object inputs (null, primitive, array)", () => {
+    for (const bad of [null, undefined, "policy", 42, []]) {
+      const result = validateStreamPolicy(bad);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errors.policy).toBeDefined();
+      }
+    }
+  });
+
+  it("rejects invalid policyVersion", () => {
+    const result = validateStreamPolicy({
+      ...DEFAULT_STREAM_POLICY,
+      policyVersion: 2,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.policyVersion).toMatch(/policyVersion/i);
+    }
+  });
+
+  it("rejects requireApprovals other than 1 or 2 (e.g. 0, 3, '1')", () => {
+    for (const bad of [0, 3, -1, "1", null]) {
+      const result = validateStreamPolicy({
+        ...DEFAULT_STREAM_POLICY,
+        requireApprovals: bad,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errors.requireApprovals).toMatch(/1 or 2/);
+      }
+    }
+  });
+
+  it("rejects removing 'owner' from any can* list to prevent lock-out", () => {
+    const keys = [
+      "canStart",
+      "canPause",
+      "canResume",
+      "canSettle",
+      "canStop",
+      "canWithdraw",
+    ] as const;
+
+    for (const key of keys) {
+      const result = validateStreamPolicy({
+        ...DEFAULT_STREAM_POLICY,
+        [key]: ["pauser"],
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errors[key]).toMatch(/owner/i);
+      }
+    }
+  });
+
+  it("rejects unknown role strings", () => {
+    const result = validateStreamPolicy({
+      ...DEFAULT_STREAM_POLICY,
+      canPause: ["owner", "superadmin"],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.canPause).toMatch(/superadmin/);
+    }
+  });
+
+  it("rejects duplicate roles in a can* list", () => {
+    const result = validateStreamPolicy({
+      ...DEFAULT_STREAM_POLICY,
+      canSettle: ["owner", "settler", "settler"],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.canSettle).toMatch(/duplicate/i);
+    }
+  });
+
+  it("rejects non-array can* fields", () => {
+    const result = validateStreamPolicy({
+      ...DEFAULT_STREAM_POLICY,
+      canWithdraw: "owner",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.canWithdraw).toMatch(/array/i);
+    }
   });
 });

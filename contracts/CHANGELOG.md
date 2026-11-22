@@ -12,7 +12,23 @@ and must never be reused — see the module rustdoc for details.
 
 ## [Unreleased]
 
+### Added
+- **Split stream pause/resume.** `pause_split_stream` and
+  `resume_split_stream` let a split stream's sender freeze and restart
+  accrual for every recipient. Pausing records `pause_time`; resuming adds the
+  paused span to `total_paused_duration`, extends `end_time` by the same span,
+  and emits `split_pa` / `split_re` events. Both require sender authorisation,
+  honour the contract-wide pause flag, and reject invalid transitions with
+  `InvalidState`.
+
 ### Changed
+- **Storage layout v2 migration.** `migrate` now advances contracts to storage
+  version 2, normalising pause bookkeeping on split and recurring records
+  (`pause_time` / `paused_at` are cleared unless the record is `Paused`) and
+  re-stamping their TTLs. Records are rewritten in batches of 50 ids per call;
+  `storage_version()` stays at 1 until every record has been visited, and
+  re-running `migrate` at the latest version remains a no-op. Existing records
+  and balances are preserved.
 - **Guarded withdraw fee parity.** `withdraw_with_max_fee_bps` now charges the
   stream's own `stream.fee_bps` (set at creation) and pays the configured
   fee collector, identically to `withdraw`. Previously it compared and

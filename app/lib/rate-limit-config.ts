@@ -41,6 +41,7 @@ export const ORG_DAILY_STREAM_QUOTA = {
   windowMs: 24 * 60 * 60_000, // 24 h — window is one UTC calendar day
 } as const;
 
+// Keep in sync with docs/rate-limits.md (verified by docs/__tests__/rate-limits-doc.test.ts).
 export const ROUTE_LIMITS: Record<string, LimitType> = {
   "GET:/api/reconciliation": "reconciliation",
   "GET:/api/webhooks": "webhook",

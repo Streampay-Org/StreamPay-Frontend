@@ -328,3 +328,129 @@ describe('ReconciliationService abort signal', () => {
     expect(dbClient.updateLastRunStatus).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('ReconciliationService kind-aware reporting', () => {
+  let service: ReconciliationService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = new ReconciliationService();
+  });
+
+  it('omits byKind and kind on standard-only runs for backward compatibility', async () => {
+    (onChainClient.fetchStream as jest.Mock).mockResolvedValue({
+      id: 's1',
+      recipient_address: 'r1',
+      total_amount: 200n,
+      released_amount: 50n,
+      status: ContractStreamStatus.ACTIVE,
+    });
+
+    const report = await service.runReconciliation({
+      dbStreams: [
+        {
+          id: 's1',
+          recipient_address: 'r1',
+          total_amount: '100',
+          released_amount: '50',
+          status: 'ACTIVE',
+          last_sync_ledger: 0,
+        },
+      ],
+      dryRun: true,
+    });
+
+    expect(report.status).toBe('MISMATCH_FOUND');
+    expect(report.byKind).toBeUndefined();
+    expect('kind' in report.mismatches[0]).toBe(false);
+  });
+
+  it('reports per-kind counts and normalises split & recurring amounts using bigint math', async () => {
+    (onChainClient.fetchStream as jest.Mock).mockImplementation(async (_net, id) => {
+      if (id === 'std-1') {
+        return {
+          id: 'std-1',
+          recipient_address: 'r1',
+          total_amount: 100n,
+          released_amount: 50n,
+          status: ContractStreamStatus.ACTIVE,
+        };
+      }
+      if (id === 'split-1') {
+        return null; // missing on-chain
+      }
+      if (id === 'rec-1') {
+        return {
+          id: 'rec-1',
+          recipient_address: 'r3',
+          total_amount: 300000000000000000001n, // off by 1 stroop from 100000000000000000000 * 3
+          released_amount: 0n,
+          status: ContractStreamStatus.ACTIVE,
+        };
+      }
+      return null;
+    });
+
+    const report = await service.runReconciliation({
+      dbStreams: [
+        {
+          id: 'std-1',
+          kind: 'standard',
+          recipient_address: 'r1',
+          total_amount: '100',
+          released_amount: '50',
+          status: 'ACTIVE',
+          last_sync_ledger: 0,
+        },
+        {
+          id: 'split-1',
+          kind: 'split',
+          recipient_address: 'r2',
+          total_amount: '0',
+          total: '500',
+          released_amount: '0',
+          status: 'ACTIVE',
+          last_sync_ledger: 0,
+        },
+        {
+          id: 'rec-1',
+          kind: 'recurring',
+          recipient_address: 'r3',
+          total_amount: '0',
+          amount_per_cycle: '100000000000000000000',
+          total_cycles: 3,
+          released_amount: '0',
+          status: 'ACTIVE',
+          last_sync_ledger: 0,
+        },
+      ],
+      dryRun: true,
+    });
+
+    expect(report.status).toBe('MISMATCH_FOUND');
+    expect(report.totalStreamsChecked).toBe(3);
+    expect(report.byKind).toEqual({
+      standard: { totalStreamsChecked: 1, mismatchCount: 0, errorCount: 0 },
+      split: { totalStreamsChecked: 1, mismatchCount: 1, errorCount: 0 },
+      recurring: { totalStreamsChecked: 1, mismatchCount: 1, errorCount: 0 },
+    });
+    expect(report.mismatches).toEqual([
+      {
+        streamId: 'split-1',
+        kind: 'split',
+        field: 'presence',
+        dbValue: 'exists',
+        onChainValue: 'missing',
+        toleranceApplied: false,
+      },
+      {
+        streamId: 'rec-1',
+        kind: 'recurring',
+        field: 'total_amount',
+        dbValue: 300000000000000000000n,
+        onChainValue: 300000000000000000001n,
+        toleranceApplied: false,
+      },
+    ]);
+  });
+});
