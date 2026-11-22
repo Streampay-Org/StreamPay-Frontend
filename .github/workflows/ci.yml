@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Restore incremental typecheck cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .cache/typecheck-core.tsbuildinfo
           key: types-core-${{ runner.os }}-node20-${{ hashFiles('package-lock.json', 'tsconfig*.json') }}-${{ github.sha }}
