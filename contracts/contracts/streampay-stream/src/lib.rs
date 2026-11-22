@@ -39,6 +39,9 @@ mod withdrawer;
 // #[cfg(test)]
 // mod fee_sweep_test;
 
+#[cfg(test)]
+mod max_amount_test;
+
 pub use error::Error;
 pub use handshake::{HandshakeState, current_protocol_version, get_handshake, get_negotiated_version, is_handshake_complete, max_compatible_version, min_compatible_version, version_from_parts, version_to_parts};
 pub use multi::{RecipientAllocation, SplitStream};
@@ -334,10 +337,74 @@ impl Contract {
         fees::get_default_fee_bps(&env)
     }
 
+    /// Sets a per-token `fee_bps` override.
+    ///
+    /// The override takes precedence over the global default for every stream
+    /// of `token` that does not carry an explicit per-stream fee. Streams
+    /// created with a non-zero `fee_bps` keep their stored value; the override
+    /// never rewrites existing stream rows.
+    ///
+    /// A value of `0` makes the token fee-free even when the default is
+    /// non-zero.
+    ///
+    /// @param `admin`   — Must match the admin set at initialisation.
+    /// @param `token`   — Stellar asset contract address.
+    /// @param `fee_bps` — Fee in basis points `[0, 10_000]`.
+    ///
+    /// @custom:error [`Error::Unauthorized`] if `admin` is not the initialised admin.
+    /// @custom:error [`Error::InvalidFeeBps`] if `fee_bps > 10_000`.
+    ///
+    /// @custom:auth Requires authorisation from `admin`.
+    pub fn set_token_fee_bps(
+        env: Env,
+        admin: Address,
+        token: Address,
+        fee_bps: u32,
+    ) -> Result<(), Error> {
+        require_admin(&env, &admin)?;
+        fees::validate_fee_bps(fee_bps)?;
+        fees::set_token_fee_bps(&env, &token, fee_bps);
+        events::token_fee_bps_set(
+            &env,
+            &admin,
+            &token,
+            fee_bps,
+            env.ledger().timestamp(),
+        );
+        Ok(())
+    }
+
+    /// Clears a per-token `fee_bps` override.
+    ///
+    /// Streams of `token` without an explicit per-stream fee fall back to the
+    /// global default again.
+    ///
+    /// @custom:error [`Error::Unauthorized`] if `admin` is not the initialised admin.
+    ///
+    /// @custom:auth Requires authorisation from `admin`.
+    pub fn clear_token_fee_bps(
+        env: Env,
+        admin: Address,
+        token: Address,
+    ) -> Result<(), Error> {
+        require_admin(&env, &admin)?;
+        fees::clear_token_fee_bps(&env, &token);
+        events::token_fee_bps_cleared(&env, &admin, &token, env.ledger().timestamp());
+        Ok(())
+    }
+
+    /// Returns the per-token `fee_bps` override, or `None` when unset.
+    ///
+    /// @custom:error This entrypoint is read-only and never returns an error.
+    pub fn get_token_fee_bps(env: Env, token: Address) -> Option<u32> {
+        fees::get_token_fee_bps(&env, &token)
+    }
+
     /// Returns the effective `fee_bps` for `stream_id`.
     ///
-    /// This is the per-stream override if one was supplied at creation time,
-    /// otherwise it falls back to the global default (which is `0` by default).
+    /// Resolution order: an explicit per-stream override, then the stream row's
+    /// non-zero `fee_bps`, then the per-token override for the stream's token,
+    /// then the global default.
     ///
     /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
     pub fn get_stream_fee_bps(env: Env, stream_id: u64) -> Result<u32, Error> {
@@ -521,6 +588,71 @@ impl Contract {
     /// @custom:error This entrypoint is read-only and never returns an error.
     pub fn max_streams_per_sender(env: Env) -> u64 {
         limits::get_max_streams_per_sender(&env)
+    }
+
+    /// Sets the maximum `total_amount` allowed for a single stream in `token`.
+    ///
+    /// Streams created via [`Contract::create_stream`],
+    /// [`Contract::create_draft_stream`], or [`Contract::create_stream_for_org`]
+    /// with `total_amount > max` are rejected with [`Error::AmountTooLarge`]
+    /// before any token transfer.
+    ///
+    /// To remove a previously configured cap, call
+    /// [`Contract::clear_max_stream_amount`].
+    ///
+    /// @param `admin` — Must match the admin set at initialisation.
+    /// @param `token` — Token contract address to cap.
+    /// @param `max` — Maximum allowed `total_amount` (must be `> 0`).
+    ///
+    /// @custom:error [`Error::Unauthorized`] if `admin` is not the initialised admin.
+    /// @custom:error [`Error::InvalidAmount`] if `max <= 0`.
+    ///
+    /// @custom:auth Requires authorisation from `admin`.
+    pub fn set_max_stream_amount(
+        env: Env,
+        admin: Address,
+        token: Address,
+        max: i128,
+    ) -> Result<(), Error> {
+        require_admin(&env, &admin)?;
+        if max <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        limits::set_max_stream_amount(&env, &token, max);
+        events::max_stream_amount_set(&env, &admin, &token, max, env.ledger().timestamp());
+        Ok(())
+    }
+
+    /// Clears the per-token maximum stream amount cap for `token`, restoring
+    /// unlimited stream amounts for that token.
+    ///
+    /// @param `admin` — Must match the admin set at initialisation.
+    /// @param `token` — Token contract address whose cap should be removed.
+    ///
+    /// @custom:error [`Error::Unauthorized`] if `admin` is not the initialised admin.
+    ///
+    /// @custom:auth Requires authorisation from `admin`.
+    pub fn clear_max_stream_amount(
+        env: Env,
+        admin: Address,
+        token: Address,
+    ) -> Result<(), Error> {
+        require_admin(&env, &admin)?;
+        limits::clear_max_stream_amount(&env, &token);
+        events::max_stream_amount_set(&env, &admin, &token, 0, env.ledger().timestamp());
+        Ok(())
+    }
+
+    /// Returns the configured maximum stream `total_amount` cap for `token`,
+    /// or `None` if no cap is set (unlimited).
+    ///
+    /// @param `token` — Token contract address to query.
+    ///
+    /// @return `Some(cap)` if a cap is configured, or `None` if unlimited.
+    ///
+    /// @custom:error This entrypoint is read-only and never returns an error.
+    pub fn max_stream_amount(env: Env, token: Address) -> Option<i128> {
+        limits::get_max_stream_amount(&env, &token)
     }
 
     /// Returns the number of active streams currently attributed to `sender`.
@@ -843,6 +975,8 @@ impl Contract {
             return Err(Error::InvalidAmount);
         }
 
+        limits::check_max_stream_amount(&env, &token, total_amount)?;
+
         if sender == recipient {
             return Err(Error::SelfStream);
         }
@@ -892,6 +1026,12 @@ impl Contract {
         };
 
         storage::set_stream(&env, id, &stream);
+        // Only an explicit non-zero fee is persisted as a per-stream override.
+        // A zero fee means "no per-stream fee", so the stream follows the
+        // per-token override and then the global default.
+        if fee_bps > 0 {
+            fees::set_stream_fee_bps(&env, id, fee_bps);
+        }
         events::created(
             &env,
             id,
@@ -941,6 +1081,8 @@ impl Contract {
             return Err(Error::InvalidAmount);
         }
 
+        limits::check_max_stream_amount(&env, &token, total_amount)?;
+
         if sender == recipient {
             return Err(Error::InvalidState);
         }
@@ -977,9 +1119,6 @@ impl Contract {
         };
 
         storage::set_stream(&env, id, &stream);
-        // Persist the per-stream fee_bps so it can be retrieved independently
-        // from the stream row for read-only callers.
-        fees::set_stream_fee_bps(&env, id, 0);
         limits::increment_sender_stream_count(&env, &stream.sender);
         events::created(
             &env,

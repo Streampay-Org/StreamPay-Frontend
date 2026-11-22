@@ -160,3 +160,115 @@ export type OrgStreamOwnership = {
   streamId: string;
   orgId: string;
 };
+
+// ─── Policy validation ────────────────────────────────────────────────────────
+
+export const VALID_ORG_ROLES: readonly OrgRole[] = [
+  "owner",
+  "pauser",
+  "settler",
+  "viewer",
+] as const;
+
+export const POLICY_ACTION_KEYS = [
+  "canStart",
+  "canPause",
+  "canResume",
+  "canSettle",
+  "canStop",
+  "canWithdraw",
+] as const;
+
+export type PolicyActionKey = (typeof POLICY_ACTION_KEYS)[number];
+
+export type StreamPolicyValidationResult =
+  | { ok: true; policy: StreamPolicy }
+  | { ok: false; errors: Record<string, string> };
+
+/**
+ * Validates an untrusted StreamPolicy payload.
+ *
+ * Rules:
+ * - `input` must be a non-null plain object.
+ * - `policyVersion` must be 1 (fixed).
+ * - `requireApprovals` must be 1 or 2.
+ * - Every `can*` field must be an array of valid, unique OrgRoles and must
+ *   retain `"owner"` to prevent org lock-out.
+ */
+export function validateStreamPolicy(input: unknown): StreamPolicyValidationResult {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return {
+      ok: false,
+      errors: { policy: "Policy must be a JSON object." },
+    };
+  }
+
+  const record = input as Record<string, unknown>;
+  const errors: Record<string, string> = {};
+  const validRoleSet = new Set<string>(VALID_ORG_ROLES);
+
+  if (record.policyVersion !== 1) {
+    errors.policyVersion = "policyVersion must be 1.";
+  }
+
+  if (record.requireApprovals !== 1 && record.requireApprovals !== 2) {
+    errors.requireApprovals = "requireApprovals must be 1 or 2.";
+  }
+
+  const validatedLists: Partial<Record<PolicyActionKey, OrgRole[]>> = {};
+
+  for (const key of POLICY_ACTION_KEYS) {
+    const raw = record[key];
+    if (!Array.isArray(raw)) {
+      errors[key] = `${key} must be an array of roles.`;
+      continue;
+    }
+
+    const seen = new Set<string>();
+    const roles: OrgRole[] = [];
+    let fieldError: string | null = null;
+
+    for (const item of raw) {
+      if (typeof item !== "string" || !validRoleSet.has(item)) {
+        fieldError = `${key} contains invalid role '${String(item)}'. Allowed roles: ${VALID_ORG_ROLES.join(", ")}.`;
+        break;
+      }
+      if (seen.has(item)) {
+        fieldError = `${key} contains duplicate role '${item}'.`;
+        break;
+      }
+      seen.add(item);
+      roles.push(item as OrgRole);
+    }
+
+    if (fieldError) {
+      errors[key] = fieldError;
+      continue;
+    }
+
+    if (!seen.has("owner")) {
+      errors[key] = `${key} must include 'owner' to prevent organization lock-out.`;
+      continue;
+    }
+
+    validatedLists[key] = roles;
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return { ok: false, errors };
+  }
+
+  return {
+    ok: true,
+    policy: {
+      policyVersion: 1,
+      canStart: validatedLists.canStart!,
+      canPause: validatedLists.canPause!,
+      canResume: validatedLists.canResume!,
+      canSettle: validatedLists.canSettle!,
+      canStop: validatedLists.canStop!,
+      canWithdraw: validatedLists.canWithdraw!,
+      requireApprovals: record.requireApprovals as 1 | 2,
+    },
+  };
+}
