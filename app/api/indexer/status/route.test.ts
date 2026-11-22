@@ -8,6 +8,14 @@ import { applyRateLimit } from "@/src/middleware/rateLimit";
 
 jest.mock("@/src/middleware/rateLimit", () => ({
   applyRateLimit: jest.fn(),
+  withRateLimitHeaders: jest.fn((res: Response, headers?: Record<string, string>) => {
+    if (headers) {
+      for (const [k, v] of Object.entries(headers)) {
+        res.headers.set(k, v);
+      }
+    }
+    return res;
+  }),
 }));
 
 const ADMIN_ADDRESS = "GADMIN_TEST_ADDRESS_12345";
@@ -19,7 +27,7 @@ beforeEach(() => {
   cursorsDb.clear();
   process.env.STELLAR_NETWORK = "testnet";
   process.env.STALL_THRESHOLD_MS = "10000";
-  (applyRateLimit as jest.Mock).mockResolvedValue(null);
+  (applyRateLimit as jest.Mock).mockResolvedValue({ allowed: true, headers: {} });
   nowSpy = jest.spyOn(Date, "now").mockReturnValue(1_000);
 });
 
@@ -97,7 +105,10 @@ describe("GET /api/indexer/status — per-identity rate limiting", () => {
       },
       { status: 429, headers: { "Retry-After": "60" } },
     );
-    (applyRateLimit as jest.Mock).mockResolvedValueOnce(limitedResponse);
+    (applyRateLimit as jest.Mock).mockResolvedValueOnce({
+      allowed: false,
+      response: limitedResponse,
+    });
 
     const request = new Request("http://localhost/api/indexer/status", {
       headers: { "X-API-Key": "status-client-key" },
