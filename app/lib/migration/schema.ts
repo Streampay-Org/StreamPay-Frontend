@@ -27,6 +27,7 @@ export interface StreamV1 {
   vestedAmount?: string;
   releasedAmount?: string;
   pausedAt?: string;
+  tags?: string[];
   // V1 flattened fields for withdrawal and cancellation
   withdrawalState?: string;
   withdrawalRequestedAt?: string;

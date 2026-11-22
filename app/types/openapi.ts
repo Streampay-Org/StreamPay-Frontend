@@ -89,6 +89,8 @@ export interface Stream {
    */
   senderAddress?: string | null;
   /**
+   * 
+   * 
    * Stream ownership state:
    * - "individual": Owned by a specific wallet sender (requires sender JWT auth to cancel).
    * - "org": Managed by organization RBAC policy.
@@ -100,6 +102,10 @@ export interface Stream {
    * Tracks how much the recipient has earned so far.
    */
   vestedAmount?: string;
+
+
+    tags?: string[];
+    
   /**
    * Amount already released to the recipient before this operation (raw i128 units).
    */
