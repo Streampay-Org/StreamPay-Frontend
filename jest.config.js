@@ -72,6 +72,7 @@ const config = {
     "lib/**/*.{ts,tsx}",
     "!**/*.d.ts",
     "!**/*.test.{ts,tsx}",
+    "!app/lib/__testing__/**",
   ],
 };
 
