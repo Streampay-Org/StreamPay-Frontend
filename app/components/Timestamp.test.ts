@@ -4,10 +4,12 @@
 
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
-import { Timestamp } from "./Timestamp";
+import { formatAbsoluteTimestamp, Timestamp } from "./Timestamp";
+import { setDisplayTimeZone } from "../lib/timezone";
 
 describe("Timestamp", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     jest.useFakeTimers();
     jest.setSystemTime(new Date("2026-06-27T12:00:00.000Z"));
   });
@@ -117,3 +119,69 @@ describe("Timestamp", () => {
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 });
+
+describe("formatAbsoluteTimestamp", () => {
+  const instant = "2026-06-27T10:00:00.000Z";
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("keeps the UTC output unchanged when no preference is set", () => {
+    expect(formatAbsoluteTimestamp(instant)).toBe("Jun 27, 2026, 10:00 AM UTC");
+  });
+
+  it("formats the same instant in the requested zones", () => {
+    expect(formatAbsoluteTimestamp(instant, "UTC")).toBe(
+      "Jun 27, 2026, 10:00 AM UTC"
+    );
+    expect(formatAbsoluteTimestamp(instant, "America/New_York")).toBe(
+      "Jun 27, 2026, 6:00 AM EDT"
+    );
+    expect(formatAbsoluteTimestamp(instant, "Asia/Kolkata")).toBe(
+      "Jun 27, 2026, 3:30 PM GMT+5:30"
+    );
+  });
+
+  it("uses the stored preference by default", () => {
+    setDisplayTimeZone("America/New_York");
+
+    expect(formatAbsoluteTimestamp(instant)).toBe("Jun 27, 2026, 6:00 AM EDT");
+  });
+
+  it("falls back to UTC for invalid zones", () => {
+    expect(formatAbsoluteTimestamp(instant, "Bad/Zone")).toBe(
+      "Jun 27, 2026, 10:00 AM UTC"
+    );
+  });
+});
+
+describe("Timestamp display time zone", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-06-27T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("re-renders the tooltip when the preference changes without a reload", () => {
+    render(React.createElement(Timestamp, { iso: "2026-06-27T10:00:00.000Z" }));
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: /show exact timestamp/i }));
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "Absolute: Jun 27, 2026, 10:00 AM UTC"
+    );
+
+    act(() => {
+      setDisplayTimeZone("Asia/Kolkata");
+    });
+
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "Absolute: Jun 27, 2026, 3:30 PM GMT+5:30"
+    );
+  });
+});
+

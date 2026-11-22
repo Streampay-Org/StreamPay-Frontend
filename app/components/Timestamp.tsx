@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import {
+  DEFAULT_TIME_ZONE,
+  formatDateTimeInTimeZone,
+  getDisplayTimeZone,
+  subscribeToDisplayTimeZone,
+} from "../lib/timezone";
 
 const LONG_PRESS_DELAY_MS = 450;
 const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000;
@@ -84,18 +90,23 @@ export function formatRelativeTimestamp(iso: TimestampInput, now: Date = new Dat
   return new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(value, unit);
 }
 
-export function formatAbsoluteTimestamp(iso: TimestampInput): string {
+/**
+ * Formats an absolute timestamp, defaulting to the user's display zone.
+ *
+ * With no stored preference the output is identical to the previous UTC
+ * format (for example `"Jun 27, 2026, 10:00 AM UTC"`).
+ */
+export function formatAbsoluteTimestamp(
+  iso: TimestampInput,
+  timeZone?: string
+): string {
   const target = normalizeTimestamp(iso);
 
   if (!target) {
     return typeof iso === "string" ? iso : "";
   }
 
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(target) + " UTC";
+  return formatDateTimeInTimeZone(target, timeZone ?? getDisplayTimeZone());
 }
 
 type TimestampProps = {
@@ -108,6 +119,14 @@ export function Timestamp({ iso, className }: TimestampProps) {
   const longPressTimerRef = useRef<number | null>(null);
   const [isTooltipVisible, setIsTooltipVisible] = useState(false);
   const [now, setNow] = useState<Date>(() => getAdjustedNow());
+  // Start at UTC so the server render and first client render agree; the stored
+  // preference is applied after mount.
+  const [displayTimeZone, setDisplayTimeZone] = useState(DEFAULT_TIME_ZONE);
+
+  useEffect(() => {
+    setDisplayTimeZone(getDisplayTimeZone());
+    return subscribeToDisplayTimeZone(setDisplayTimeZone);
+  }, []);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -126,7 +145,7 @@ export function Timestamp({ iso, className }: TimestampProps) {
   }, []);
 
   const relativeLabel = formatRelativeTimestamp(iso, now);
-  const absoluteLabel = formatAbsoluteTimestamp(iso);
+  const absoluteLabel = formatAbsoluteTimestamp(iso, displayTimeZone);
   const normalizedDate = normalizeTimestamp(iso);
   const isoLabel = normalizedDate ? normalizedDate.toISOString() : (typeof iso === "string" ? iso : "");
 

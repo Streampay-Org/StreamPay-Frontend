@@ -1,22 +1,126 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { StateTriad } from "../components/StateTriad";
 import {
   ActivityTimeline,
   ActivityTimelineSkeleton,
+  type ActivityEvent,
   type ActivityGroup,
 } from "../components/ActivityTimeline";
 import type { StateTriadState } from "../components/StateTriad";
 import { LiveRegion } from "../components/LiveRegion";
+import {
+  DEFAULT_TIME_ZONE,
+  getDisplayTimeZone,
+  subscribeToDisplayTimeZone,
+} from "../lib/timezone";
 
 type ActivityPageState = "loading" | "populated" | "empty" | "error";
+
+type RawActivityEvent = {
+  id: string;
+  type: string;
+  description?: string;
+  timestamp: string;
+  streamId?: string;
+  isDeleted?: boolean;
+};
+
+const STATUS_BY_TYPE: Record<string, ActivityEvent["status"]> = {
+  stream_created: "accent",
+  wallet_connected: "success",
+  funds_withdrawn: "warning",
+  stream_settled: "info",
+};
+
+function dayKey(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone,
+  }).format(date);
+}
+
+function shiftDayKey(key: string, days: number): string {
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day) + days * 86400000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+function formatDayLabel(date: Date, timeZone: string, now: Date): string {
+  const key = dayKey(date, timeZone);
+  const todayKey = dayKey(now, timeZone);
+
+  if (key === todayKey) return "Today";
+  if (key === shiftDayKey(todayKey, -1)) return "Yesterday";
+
+  return new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone,
+  }).format(date);
+}
+
+function groupActivityEvents(
+  events: RawActivityEvent[],
+  timeZone: string,
+  now: Date
+): ActivityGroup[] {
+  const groups = new Map<string, ActivityEvent[]>();
+
+  for (const event of events) {
+    const date = new Date(event.timestamp);
+    const label = Number.isNaN(date.getTime())
+      ? "Unknown"
+      : formatDayLabel(date, timeZone, now);
+    const type = event.type.replace(".", "_");
+
+    const uiEvent: ActivityEvent = {
+      id: event.id,
+      type: type as ActivityEvent["type"],
+      title: event.description || type,
+      timestamp: event.timestamp,
+      link:
+        event.streamId && !event.isDeleted
+          ? `/streams/${event.streamId}`
+          : undefined,
+      status: STATUS_BY_TYPE[type] ?? "info",
+    };
+
+    const bucket = groups.get(label);
+    if (bucket) {
+      bucket.push(uiEvent);
+    } else {
+      groups.set(label, [uiEvent]);
+    }
+  }
+
+  return Array.from(groups, ([date, groupEvents]) => ({
+    date,
+    events: groupEvents,
+  }));
+}
 
 export default function ActivityPage() {
   const [pageState, setPageState] = useState<ActivityPageState>("loading");
   const [errorMessage, setErrorMessage] = useState<string>("");
-  const [activities, setActivities] = useState<ActivityGroup[]>([]);
+  const [activityEvents, setActivityEvents] = useState<RawActivityEvent[]>([]);
+  const [timeZone, setTimeZone] = useState<string>(DEFAULT_TIME_ZONE);
   const [loadKey, setLoadKey] = useState(0);
+
+  useEffect(() => {
+    setTimeZone(getDisplayTimeZone());
+    return subscribeToDisplayTimeZone(setTimeZone);
+  }, []);
+
+  const activities = useMemo(
+    () => groupActivityEvents(activityEvents, timeZone, new Date()),
+    [activityEvents, timeZone]
+  );
 
   const handleRetry = useCallback(() => {
     setLoadKey((k) => k + 1);
@@ -38,57 +142,10 @@ export default function ActivityPage() {
         
         if (!mounted) return;
 
-        const events = body.data || [];
-        
-        // Group and map events
-        const groupsMap: Record<string, any[]> = {};
-        for (const event of events) {
-          const d = new Date(event.timestamp);
-          
-          let dateStr = "Unknown";
-          if (!isNaN(d.getTime())) {
-            const today = new Date();
-            const yesterday = new Date(today);
-            yesterday.setDate(yesterday.getDate() - 1);
-            
-            if (d.toDateString() === today.toDateString()) {
-              dateStr = "Today";
-            } else if (d.toDateString() === yesterday.toDateString()) {
-              dateStr = "Yesterday";
-            } else {
-              dateStr = d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-            }
-          }
-          
-          let status = "info";
-          const typeStr = event.type.replace('.', '_');
-          if (typeStr === "stream_created") status = "accent";
-          else if (typeStr === "wallet_connected") status = "success";
-          else if (typeStr === "funds_withdrawn") status = "warning";
-          else if (typeStr === "stream_settled") status = "info";
-          
-          const uiEvent = {
-            id: event.id,
-            type: typeStr as any,
-            title: event.description || typeStr,
-            timestamp: event.timestamp,
-            link: event.streamId && !event.isDeleted ? `/streams/${event.streamId}` : undefined,
-            status: status as any,
-          };
-      
-          if (!groupsMap[dateStr]) {
-            groupsMap[dateStr] = [];
-          }
-          groupsMap[dateStr].push(uiEvent);
-        }
+        const events: RawActivityEvent[] = Array.isArray(body.data) ? body.data : [];
 
-        const grouped = Object.keys(groupsMap).map(date => ({
-          date,
-          events: groupsMap[date],
-        }));
-
-        setActivities(grouped);
-        setPageState(grouped.length > 0 ? "populated" : "empty");
+        setActivityEvents(events);
+        setPageState(events.length > 0 ? "populated" : "empty");
       } catch (err: unknown) {
         if (mounted) {
           setPageState("error");

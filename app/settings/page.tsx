@@ -11,6 +11,7 @@ import {
 } from '../components/settings/NotificationSettings';
 import { QuietHoursConfig } from '../lib/quiet-hours';
 import { useUnsavedChangesGuard } from '../hooks/useUnsavedChangesGuard';
+import { TimeZoneSettings } from '../components/settings/TimeZoneSettings';
 
 interface SavedNotificationPreferences {
   prefs: NotificationPreferences;
@@ -123,6 +124,7 @@ export function SettingsPageContent({
           </div>
           <div className="settings-group__content">
             <ThemeToggle />
+            <TimeZoneSettings />
           </div>
         </section>
       ),
