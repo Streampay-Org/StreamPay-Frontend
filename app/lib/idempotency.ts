@@ -90,6 +90,7 @@ export function createNamespacedStore(namespace: string): IdempotencyStore {
 // Default route-scoped stores exported for callers to import.
 export const settleStore = createNamespacedStore("settle");
 export const withdrawStore = createNamespacedStore("withdraw");
+export const orgCreateStore = createNamespacedStore("orgs.create");
 
 // Validate idempotency key: printable ASCII, 1-255 characters.
 // We disallow control characters and Unicode; spaces are not allowed to avoid
