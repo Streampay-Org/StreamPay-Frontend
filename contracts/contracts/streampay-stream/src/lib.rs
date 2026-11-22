@@ -334,10 +334,74 @@ impl Contract {
         fees::get_default_fee_bps(&env)
     }
 
+    /// Sets a per-token `fee_bps` override.
+    ///
+    /// The override takes precedence over the global default for every stream
+    /// of `token` that does not carry an explicit per-stream fee. Streams
+    /// created with a non-zero `fee_bps` keep their stored value; the override
+    /// never rewrites existing stream rows.
+    ///
+    /// A value of `0` makes the token fee-free even when the default is
+    /// non-zero.
+    ///
+    /// @param `admin`   — Must match the admin set at initialisation.
+    /// @param `token`   — Stellar asset contract address.
+    /// @param `fee_bps` — Fee in basis points `[0, 10_000]`.
+    ///
+    /// @custom:error [`Error::Unauthorized`] if `admin` is not the initialised admin.
+    /// @custom:error [`Error::InvalidFeeBps`] if `fee_bps > 10_000`.
+    ///
+    /// @custom:auth Requires authorisation from `admin`.
+    pub fn set_token_fee_bps(
+        env: Env,
+        admin: Address,
+        token: Address,
+        fee_bps: u32,
+    ) -> Result<(), Error> {
+        require_admin(&env, &admin)?;
+        fees::validate_fee_bps(fee_bps)?;
+        fees::set_token_fee_bps(&env, &token, fee_bps);
+        events::token_fee_bps_set(
+            &env,
+            &admin,
+            &token,
+            fee_bps,
+            env.ledger().timestamp(),
+        );
+        Ok(())
+    }
+
+    /// Clears a per-token `fee_bps` override.
+    ///
+    /// Streams of `token` without an explicit per-stream fee fall back to the
+    /// global default again.
+    ///
+    /// @custom:error [`Error::Unauthorized`] if `admin` is not the initialised admin.
+    ///
+    /// @custom:auth Requires authorisation from `admin`.
+    pub fn clear_token_fee_bps(
+        env: Env,
+        admin: Address,
+        token: Address,
+    ) -> Result<(), Error> {
+        require_admin(&env, &admin)?;
+        fees::clear_token_fee_bps(&env, &token);
+        events::token_fee_bps_cleared(&env, &admin, &token, env.ledger().timestamp());
+        Ok(())
+    }
+
+    /// Returns the per-token `fee_bps` override, or `None` when unset.
+    ///
+    /// @custom:error This entrypoint is read-only and never returns an error.
+    pub fn get_token_fee_bps(env: Env, token: Address) -> Option<u32> {
+        fees::get_token_fee_bps(&env, &token)
+    }
+
     /// Returns the effective `fee_bps` for `stream_id`.
     ///
-    /// This is the per-stream override if one was supplied at creation time,
-    /// otherwise it falls back to the global default (which is `0` by default).
+    /// Resolution order: an explicit per-stream override, then the stream row's
+    /// non-zero `fee_bps`, then the per-token override for the stream's token,
+    /// then the global default.
     ///
     /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
     pub fn get_stream_fee_bps(env: Env, stream_id: u64) -> Result<u32, Error> {
@@ -892,6 +956,12 @@ impl Contract {
         };
 
         storage::set_stream(&env, id, &stream);
+        // Only an explicit non-zero fee is persisted as a per-stream override.
+        // A zero fee means "no per-stream fee", so the stream follows the
+        // per-token override and then the global default.
+        if fee_bps > 0 {
+            fees::set_stream_fee_bps(&env, id, fee_bps);
+        }
         events::created(
             &env,
             id,
@@ -977,9 +1047,6 @@ impl Contract {
         };
 
         storage::set_stream(&env, id, &stream);
-        // Persist the per-stream fee_bps so it can be retrieved independently
-        // from the stream row for read-only callers.
-        fees::set_stream_fee_bps(&env, id, 0);
         limits::increment_sender_stream_count(&env, &stream.sender);
         events::created(
             &env,
@@ -1211,10 +1278,13 @@ impl Contract {
         }
 
         // ── Fee split ──────────────────────────────────────────────────────────
-        // Compute fee and net amount based on the per-stream fee_bps.  If no
-        // fee collector has been configured the full `amount` goes to the
-        // recipient regardless of `fee_bps`.
-        let fee_result = fees::apply_fee(amount, stream.fee_bps)?;
+        // Resolve the effective fee: explicit per-stream fee, then the token
+        // override, then the global default.  If no fee collector has been
+        // configured the full `amount` goes to the recipient regardless of the
+        // effective fee.
+        let effective_fee_bps =
+            fees::resolve_stream_fee_bps(&env, stream_id, &stream.token, stream.fee_bps);
+        let fee_result = fees::apply_fee(amount, effective_fee_bps)?;
         let maybe_collector = fees::get_fee_collector(&env);
 
         // Transfer to recipient (net amount after fee).
@@ -1238,7 +1308,7 @@ impl Contract {
                     &env,
                     stream_id,
                     fee_result.fee_amount,
-                    stream.fee_bps,
+                    effective_fee_bps,
                     &collector,
                     now,
                 );

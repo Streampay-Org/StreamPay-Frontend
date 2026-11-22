@@ -328,6 +328,36 @@ pub fn default_fee_bps_set(env: &Env, admin: &Address, fee_bps: u32, timestamp: 
     );
 }
 
+/// Emitted when a per-token fee override is set via
+/// [`Contract::set_token_fee_bps`].
+///
+/// Topics: `("stream", "set_tfee")`.
+/// Data: `(admin, token, fee_bps, timestamp)`.
+pub fn token_fee_bps_set(
+    env: &Env,
+    admin: &Address,
+    token: &Address,
+    fee_bps: u32,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (symbol_short!("stream"), symbol_short!("set_tfee")),
+        (admin.clone(), token.clone(), fee_bps, timestamp),
+    );
+}
+
+/// Emitted when a per-token fee override is cleared via
+/// [`Contract::clear_token_fee_bps`].
+///
+/// Topics: `("stream", "clr_tfee")`.
+/// Data: `(admin, token, timestamp)`.
+pub fn token_fee_bps_cleared(env: &Env, admin: &Address, token: &Address, timestamp: u64) {
+    env.events().publish(
+        (symbol_short!("stream"), symbol_short!("clr_tfee")),
+        (admin.clone(), token.clone(), timestamp),
+    );
+}
+
 /// Emitted for every withdrawal that incurs a non-zero fee.
 ///
 /// Topics: `("stream", "fee_charged")`.

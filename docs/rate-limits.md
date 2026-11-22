@@ -27,6 +27,20 @@ If your infrastructure uses shared NAT, multiple legitimate users may appear to 
 - Using wallet authentication for user-level tracking
 - Contacting support if you need higher limits for NAT-heavy environments
 
+## Response Headers
+
+Rate-limited endpoints emit standard rate-limit headers on both successful (`2xx`) and throttled (`429 Too Many Requests`) responses so clients can pace requests proactively:
+
+| Header | Type / Units | Description |
+|--------|--------------|-------------|
+| `X-RateLimit-Limit` | Integer (requests) | Maximum number of requests permitted in the current tier's window (e.g. `60` for Read, `10` for Write, `30` for Reconciliation/Webhooks). |
+| `X-RateLimit-Remaining` | Integer (requests) | Remaining requests available in the caller's bucket for this tier after the current request. Always `0` on `429` responses. |
+| `X-RateLimit-Reset` | Integer (Unix epoch seconds) | UTC timestamp in whole seconds when the bucket refills (on `2xx`) or when at least one token becomes available again (on `429`). |
+
+- **Per-tier behaviour**: Each rate-limit tier (`read`, `write`, `reconciliation`, `webhook`, `export`) maintains an independent bucket per client identity, so `X-RateLimit-Limit` and `X-RateLimit-Remaining` reflect the tier of the route being called.
+- **CORS**: `x-ratelimit-limit`, `x-ratelimit-remaining`, and `x-ratelimit-reset` are listed in `Access-Control-Expose-Headers` alongside `x-request-id`, `retry-after`, and `etag`, making them readable from browser clients.
+- **Fail-open outages**: When the shared Redis store is unreachable and `RATE_LIMIT_FAIL_MODE=open` is active, requests are allowed through and the `X-RateLimit-*` headers are omitted rather than reporting inaccurate values.
+
 ## 429 Response
 
 When a rate limit is exceeded, the API returns a `429 Too Many Requests` response:
@@ -40,10 +54,13 @@ When a rate limit is exceeded, the API returns a `429 Too Many Requests` respons
 }
 ```
 
-The response includes a `Retry-After` header indicating when you can retry:
+The response includes `Retry-After` alongside the `X-RateLimit-*` headers (with `X-RateLimit-Remaining: 0`):
 
 ```
 HTTP/1.1 429 Too Many Requests
+X-RateLimit-Limit: 60
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1745841630
 Retry-After: 30
 ```
 

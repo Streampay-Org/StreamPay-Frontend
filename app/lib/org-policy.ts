@@ -497,3 +497,13 @@ export function castApproval(
   return { ok: true, approval: updated, thresholdMet };
 }
 
+// ─── Policy validation ────────────────────────────────────────────────────────
+
+export {
+  validateStreamPolicy,
+  VALID_ORG_ROLES,
+  POLICY_ACTION_KEYS,
+  type StreamPolicyValidationResult,
+  type PolicyActionKey,
+} from "./org-types";
+
