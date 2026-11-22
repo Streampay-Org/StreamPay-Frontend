@@ -156,6 +156,21 @@ fn next_id(env: &Env) -> u64 {
     id
 }
 
+/// Reads the next recurring stream ID counter without mutating storage or extending TTLs.
+pub(crate) fn peek_next_recurring_id(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&RecurDataKey::NextRecurringId)
+        .unwrap_or(1u64)
+}
+
+/// Reads a recurring stream by ID without extending its TTL.
+pub(crate) fn peek_recurring_stream(env: &Env, recurring_id: u64) -> Option<RecurringStream> {
+    env.storage()
+        .persistent()
+        .get(&RecurDataKey::RecurringStream(recurring_id))
+}
+
 // ── Vesting math ──────────────────────────────────────────────────────
 
 /// Returns the number of cycles that should have completed by `now`,

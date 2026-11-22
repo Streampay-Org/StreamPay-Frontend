@@ -48,6 +48,7 @@ use soroban_sdk::contracttype;
 use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env};
 pub(crate) use storage::DataKey;
 pub use storage::{Stream, StreamStatus};
+pub use views::{RecurringStreamPage, SplitStreamPage};
 
 /// The `StreamPay` contract entry point registered with the Soroban host.
 #[contract]
@@ -2035,6 +2036,44 @@ impl Contract {
         limit: u64,
     ) -> views::StreamPage {
         views::list_streams_by_sender_and_status(&env, &sender, status, start_after, limit)
+    }
+
+    /// Returns a paginated list of split streams received by a given address.
+    ///
+    /// This is a read-only view that never mutates state or requires auth.
+    /// A recipient appearing in multiple allocations within a split stream is
+    /// returned once per stream.
+    ///
+    /// @param `recipient` — Filter: only return split streams containing `recipient`.
+    /// @param `start_after` — Exclusive cursor: return split streams with `id > start_after`.
+    /// @param `limit` — Maximum number of split streams to return. Capped at [`MAX_PAGE_SIZE`].
+    ///
+    /// @return A [`SplitStreamPage`] with up to `limit` matching split streams.
+    pub fn list_split_streams_by_recipient(
+        env: Env,
+        recipient: Address,
+        start_after: Option<u64>,
+        limit: u64,
+    ) -> views::SplitStreamPage {
+        views::list_split_streams_by_recipient(&env, &recipient, start_after, limit)
+    }
+
+    /// Returns a paginated list of recurring streams sent by a given address.
+    ///
+    /// This is a read-only view that never mutates state or requires auth.
+    ///
+    /// @param `sender` — Filter: only return recurring streams where `stream.sender == sender`.
+    /// @param `start_after` — Exclusive cursor: return recurring streams with `id > start_after`.
+    /// @param `limit` — Maximum number of recurring streams to return. Capped at [`MAX_PAGE_SIZE`].
+    ///
+    /// @return A [`RecurringStreamPage`] with up to `limit` matching recurring streams.
+    pub fn list_recurring_by_sender(
+        env: Env,
+        sender: Address,
+        start_after: Option<u64>,
+        limit: u64,
+    ) -> views::RecurringStreamPage {
+        views::list_recurring_by_sender(&env, &sender, start_after, limit)
     }
 
     // ── Recurring streams ───────────────────────────────────────────────────
