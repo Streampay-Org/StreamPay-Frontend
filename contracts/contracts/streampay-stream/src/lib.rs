@@ -39,6 +39,9 @@ mod withdrawer;
 // #[cfg(test)]
 // mod fee_sweep_test;
 
+#[cfg(test)]
+mod max_amount_test;
+
 pub use error::Error;
 pub use handshake::{HandshakeState, current_protocol_version, get_handshake, get_negotiated_version, is_handshake_complete, max_compatible_version, min_compatible_version, version_from_parts, version_to_parts};
 pub use multi::{RecipientAllocation, SplitStream};
@@ -587,6 +590,71 @@ impl Contract {
         limits::get_max_streams_per_sender(&env)
     }
 
+    /// Sets the maximum `total_amount` allowed for a single stream in `token`.
+    ///
+    /// Streams created via [`Contract::create_stream`],
+    /// [`Contract::create_draft_stream`], or [`Contract::create_stream_for_org`]
+    /// with `total_amount > max` are rejected with [`Error::AmountTooLarge`]
+    /// before any token transfer.
+    ///
+    /// To remove a previously configured cap, call
+    /// [`Contract::clear_max_stream_amount`].
+    ///
+    /// @param `admin` — Must match the admin set at initialisation.
+    /// @param `token` — Token contract address to cap.
+    /// @param `max` — Maximum allowed `total_amount` (must be `> 0`).
+    ///
+    /// @custom:error [`Error::Unauthorized`] if `admin` is not the initialised admin.
+    /// @custom:error [`Error::InvalidAmount`] if `max <= 0`.
+    ///
+    /// @custom:auth Requires authorisation from `admin`.
+    pub fn set_max_stream_amount(
+        env: Env,
+        admin: Address,
+        token: Address,
+        max: i128,
+    ) -> Result<(), Error> {
+        require_admin(&env, &admin)?;
+        if max <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        limits::set_max_stream_amount(&env, &token, max);
+        events::max_stream_amount_set(&env, &admin, &token, max, env.ledger().timestamp());
+        Ok(())
+    }
+
+    /// Clears the per-token maximum stream amount cap for `token`, restoring
+    /// unlimited stream amounts for that token.
+    ///
+    /// @param `admin` — Must match the admin set at initialisation.
+    /// @param `token` — Token contract address whose cap should be removed.
+    ///
+    /// @custom:error [`Error::Unauthorized`] if `admin` is not the initialised admin.
+    ///
+    /// @custom:auth Requires authorisation from `admin`.
+    pub fn clear_max_stream_amount(
+        env: Env,
+        admin: Address,
+        token: Address,
+    ) -> Result<(), Error> {
+        require_admin(&env, &admin)?;
+        limits::clear_max_stream_amount(&env, &token);
+        events::max_stream_amount_set(&env, &admin, &token, 0, env.ledger().timestamp());
+        Ok(())
+    }
+
+    /// Returns the configured maximum stream `total_amount` cap for `token`,
+    /// or `None` if no cap is set (unlimited).
+    ///
+    /// @param `token` — Token contract address to query.
+    ///
+    /// @return `Some(cap)` if a cap is configured, or `None` if unlimited.
+    ///
+    /// @custom:error This entrypoint is read-only and never returns an error.
+    pub fn max_stream_amount(env: Env, token: Address) -> Option<i128> {
+        limits::get_max_stream_amount(&env, &token)
+    }
+
     /// Returns the number of active streams currently attributed to `sender`.
     ///
     /// @param `sender` — Address to query.
@@ -907,6 +975,8 @@ impl Contract {
             return Err(Error::InvalidAmount);
         }
 
+        limits::check_max_stream_amount(&env, &token, total_amount)?;
+
         if sender == recipient {
             return Err(Error::SelfStream);
         }
@@ -1010,6 +1080,8 @@ impl Contract {
         if total_amount <= 0 {
             return Err(Error::InvalidAmount);
         }
+
+        limits::check_max_stream_amount(&env, &token, total_amount)?;
 
         if sender == recipient {
             return Err(Error::InvalidState);

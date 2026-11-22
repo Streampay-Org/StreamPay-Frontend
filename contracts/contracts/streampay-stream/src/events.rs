@@ -376,6 +376,26 @@ pub fn fee_charged(
     );
 }
 
+/// Emitted when the admin sets or clears the per-token maximum stream amount
+/// cap via [`Contract::set_max_stream_amount`] or
+/// [`Contract::clear_max_stream_amount`].
+///
+/// Topics: `("stream", "set_max_a")`.
+/// Data: `(admin, token, max_amount, timestamp)` where `max_amount == 0`
+/// indicates the cap was cleared (unlimited).
+pub fn max_stream_amount_set(
+    env: &Env,
+    admin: &Address,
+    token: &Address,
+    max_amount: i128,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (symbol_short!("stream"), symbol_short!("set_max_a")),
+        (admin.clone(), token.clone(), max_amount, timestamp),
+    );
+}
+
 /// Emitted when the admin updates the per-user cooloff duration via
 /// [`Contract::set_cooloff_duration`].
 ///
