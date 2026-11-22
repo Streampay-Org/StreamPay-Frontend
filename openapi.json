@@ -2956,6 +2956,113 @@
         }
       }
     },
+    "/api/streams/stats": {
+      "get": {
+        "tags": ["Streams"],
+        "summary": "Get aggregate stream statistics",
+        "description": "Returns aggregate counts by stream status and exact BigInt escrowed/released totals per token for all streams visible to the caller in the resolved tenant.",
+        "operationId": "getStreamStats",
+        "parameters": [
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Strong ETag from a previous response for conditional 304 revalidation.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aggregate stream statistics.",
+            "headers": {
+              "ETag": {
+                "description": "Strong ETag of the stats payload.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "links"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["counts", "totals", "skipped"],
+                      "properties": {
+                        "counts": {
+                          "type": "object",
+                          "required": ["draft", "active", "paused", "ended", "withdrawn", "cancelled"],
+                          "properties": {
+                            "draft": { "type": "integer", "minimum": 0 },
+                            "active": { "type": "integer", "minimum": 0 },
+                            "paused": { "type": "integer", "minimum": 0 },
+                            "ended": { "type": "integer", "minimum": 0 },
+                            "withdrawn": { "type": "integer", "minimum": 0 },
+                            "cancelled": { "type": "integer", "minimum": 0 }
+                          }
+                        },
+                        "totals": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "required": ["escrowed", "released"],
+                            "properties": {
+                              "escrowed": {
+                                "type": "string",
+                                "pattern": "^\\d+$",
+                                "description": "Total escrowed base units as a base-10 integer string."
+                              },
+                              "released": {
+                                "type": "string",
+                                "pattern": "^\\d+$",
+                                "description": "Total released base units as a base-10 integer string."
+                              }
+                            }
+                          }
+                        },
+                        "skipped": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Number of streams skipped from totals due to unparsable amount strings."
+                        }
+                      }
+                    },
+                    "links": {
+                      "type": "object",
+                      "required": ["self"],
+                      "properties": {
+                        "self": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Not Modified — ETag matched If-None-Match."
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
     "/api/streams/{id}": {
       "parameters": [
         {
