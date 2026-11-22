@@ -1,5 +1,5 @@
 {
-  "QUARANTINE_MAX": 49,
+  "QUARANTINE_MAX": 48,
   "entries": [
     {
       "path": "app/api/notifications/preferences/route.test.ts",
@@ -11,10 +11,6 @@
     },
     {
       "path": "__tests__/a11y.test.tsx",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "__tests__/openapi-webhooks.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {

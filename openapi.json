@@ -5309,6 +5309,110 @@
         }
       }
     },
+    "/api/webhooks": {
+      "get": {
+        "operationId": "getWebhookMetrics",
+        "summary": "Retrieve Prometheus metrics for webhook processing",
+        "description": "Returns Prometheus text-format metrics for webhook requests and durations.",
+        "security": [],
+        "tags": [
+          "Webhooks"
+        ],
+        "responses": {
+          "200": {
+            "description": "Prometheus metrics payload.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests — rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
+      "post": {
+        "operationId": "receiveWebhook",
+        "summary": "Receive an incoming webhook event",
+        "description": "Validates and accepts an incoming webhook event payload.",
+        "security": [],
+        "tags": [
+          "Webhooks"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "eventType"
+                ],
+                "properties": {
+                  "eventType": {
+                    "type": "string",
+                    "example": "payment.received"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook event accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "429": {
+            "description": "Too many requests — rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
     "/api/webhooks/dlq": {
       "post": {
         "operationId": "receiveDlqWebhook",
@@ -5427,8 +5531,175 @@
           "400": {
             "$ref": "#/components/responses/400"
           },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
           "500": {
             "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/webhooks/dlq/{dlqId}/replay": {
+      "post": {
+        "operationId": "replayDlqWebhook",
+        "summary": "Replay a dead-lettered webhook delivery",
+        "description": "Idempotently re-enqueues a dead-lettered webhook delivery through the delivery worker. Requires internal-service HMAC authentication or an admin JWT.",
+        "tags": [
+          "Webhooks"
+        ],
+        "parameters": [
+          {
+            "name": "dlqId",
+            "in": "path",
+            "required": true,
+            "description": "Identifier of the dead-letter queue entry to replay.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "DLQ entry replayed (or already replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "links"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "dlqId",
+                        "deliveryId",
+                        "alreadyReplayed",
+                        "endpointId",
+                        "endpointUrl",
+                        "eventId",
+                        "eventType",
+                        "replayedAt"
+                      ],
+                      "properties": {
+                        "dlqId": {
+                          "type": "string"
+                        },
+                        "deliveryId": {
+                          "type": "string"
+                        },
+                        "alreadyReplayed": {
+                          "type": "boolean"
+                        },
+                        "endpointId": {
+                          "type": "string"
+                        },
+                        "endpointUrl": {
+                          "type": "string"
+                        },
+                        "eventId": {
+                          "type": "string"
+                        },
+                        "eventType": {
+                          "type": "string"
+                        },
+                        "replayedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "links": {
+                      "type": "object",
+                      "properties": {
+                        "dlq": {
+                          "type": "string"
+                        },
+                        "delivery": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "502": {
+            "description": "Bad gateway — worker failed to enqueue the replay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhooks/rotate": {
+      "post": {
+        "operationId": "rotateWebhookSecret",
+        "summary": "Rotate the active webhook signing secret",
+        "description": "Rotates the active webhook signing secret. Requires admin authentication.",
+        "tags": [
+          "Webhooks"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "secret"
+                ],
+                "properties": {
+                  "secret": {
+                    "type": "string",
+                    "description": "New webhook signing secret."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook signing secret rotated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
           }
         }
       }
@@ -5519,6 +5790,9 @@
             "description": "Failed to retrieve health stats",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
                 "examples": {
                   "internalError": {
                     "summary": "Unexpected error retrieving health",

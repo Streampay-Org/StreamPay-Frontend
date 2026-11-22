@@ -599,6 +599,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieve Prometheus metrics for webhook processing
+         * @description Returns Prometheus text-format metrics for webhook requests and durations.
+         */
+        get: operations["getWebhookMetrics"];
+        put?: never;
+        /**
+         * Receive an incoming webhook event
+         * @description Validates and accepts an incoming webhook event payload.
+         */
+        post: operations["receiveWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/webhooks/dlq": {
         parameters: {
             query?: never;
@@ -630,6 +654,46 @@ export interface paths {
         get: operations["listWebhookDeliveries"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/webhooks/dlq/{dlqId}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay a dead-lettered webhook delivery
+         * @description Idempotently re-enqueues a dead-lettered webhook delivery through the delivery worker. Requires internal-service HMAC authentication or an admin JWT.
+         */
+        post: operations["replayDlqWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/webhooks/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate the active webhook signing secret
+         * @description Rotates the active webhook signing secret. Requires admin authentication.
+         */
+        post: operations["rotateWebhookSecret"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3648,6 +3712,78 @@ export interface operations {
             500: components["responses"]["500"];
         };
     };
+    getWebhookMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Prometheus metrics payload. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Too many requests — rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    receiveWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example payment.received */
+                    eventType: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Webhook event accepted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["400"];
+            413: components["responses"]["413"];
+            /** @description Too many requests — rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
     receiveDlqWebhook: {
         parameters: {
             query?: never;
@@ -3705,7 +3841,90 @@ export interface operations {
                 };
             };
             400: components["responses"]["400"];
+            422: components["responses"]["422"];
             500: components["responses"]["500"];
+        };
+    };
+    replayDlqWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Identifier of the dead-letter queue entry to replay. */
+                dlqId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description DLQ entry replayed (or already replayed). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            dlqId: string;
+                            deliveryId: string;
+                            alreadyReplayed: boolean;
+                            endpointId: string;
+                            endpointUrl: string;
+                            eventId: string;
+                            eventType: string;
+                            /** Format: date-time */
+                            replayedAt: string;
+                        };
+                        links: {
+                            dlq?: string;
+                            delivery?: string;
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            404: components["responses"]["404"];
+            /** @description Bad gateway — worker failed to enqueue the replay. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    rotateWebhookSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description New webhook signing secret. */
+                    secret: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Webhook signing secret rotated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: Record<string, never>;
+                    };
+                };
+            };
+            400: components["responses"]["400"];
+            403: components["responses"]["403"];
+            422: components["responses"]["422"];
         };
     };
     getWebhookHealth: {
@@ -3732,7 +3951,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
