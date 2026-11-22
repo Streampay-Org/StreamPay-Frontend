@@ -58,3 +58,8 @@ fn err_discriminants_from_19_to_22_are_stable() {
     assert_eq!(Error::AdminCooldown as u32, 21);
     assert_eq!(Error::CooloffActive as u32, 22);
 }
+
+#[test]
+fn err_discriminant_23_is_stable() {
+    assert_eq!(Error::AmountTooLarge as u32, 23);
+}

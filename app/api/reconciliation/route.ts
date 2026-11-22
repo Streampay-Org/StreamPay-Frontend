@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { getCorrelationContext, logger } from '@/app/lib/logger';
 import { encodeCompositeCursor, decodeCompositeCursor } from '@/app/lib/db';
 import { withStrongEtag } from '@/src/middleware/etag';
-import { applyRateLimit } from '@/src/middleware/rateLimit';
+import { applyRateLimit, withRateLimitHeaders } from '@/src/middleware/rateLimit';
 import { reconciliationCounter, reconciliationDuration } from '@/src/metrics/registry';
 import { validateReconciliationQuery } from '@/src/validators/reconciliation';
 import type { ValidationError } from '@/app/lib/stream-validation';
@@ -37,11 +37,11 @@ async function handleReconciliationGet(request: Request) {
   // ── Per-user rate limit ─────────────────────────────────────────────────
   // Identity resolution priority: API key > JWT wallet sub > IP address.
   // Returns 429 with Retry-After when the caller's bucket is exhausted.
-  const rateLimited = await applyRateLimit(request, 'reconciliation');
-  if (rateLimited) {
+  const rateLimitResult = await applyRateLimit(request, 'reconciliation');
+  if (!rateLimitResult.allowed) {
     reconciliationCounter.labels('429').inc();
     endTimer({ status: '429' });
-    return rateLimited;
+    return rateLimitResult.response;
   }
 
   // ── Request handling ────────────────────────────────────────────────────
@@ -123,7 +123,7 @@ async function handleReconciliationGet(request: Request) {
 
     reconciliationCounter.labels('200').inc();
     endTimer({ status: '200' });
-    return withStrongEtag(request, responsePayload);
+    return withRateLimitHeaders(withStrongEtag(request, responsePayload), rateLimitResult.headers);
   } catch (error: any) {
     logger.error('Unexpected error in reconciliation route', { error: error.message });
     reconciliationCounter.labels('500').inc();

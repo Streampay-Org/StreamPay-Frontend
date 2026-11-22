@@ -107,8 +107,18 @@ describe("TenantScopedCache", () => {
   });
 
   it("flushStreamCache() empties the process-wide streamCache", () => {
-    streamCache.set("tenant-x", "id-x", { id: "id-x" }, "testnet");
-    expect(streamCache.get("tenant-x", "id-x", "testnet")).toEqual({ id: "id-x" });
+    const stream = {
+      id: "id-x",
+      recipient: "GABCD1234",
+      rate: "100 XLM / month",
+      schedule: "Pays every 30 days",
+      status: "active" as const,
+      createdAt: "2026-04-01T00:00:00Z",
+      updatedAt: "2026-04-01T00:00:00Z",
+      token: "XLM",
+    };
+    streamCache.set("tenant-x", "id-x", stream, "testnet");
+    expect(streamCache.get("tenant-x", "id-x", "testnet")).toEqual(stream);
 
     flushStreamCache();
 
