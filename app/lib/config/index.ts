@@ -69,6 +69,8 @@ interface OptionalEnvVars {
   DATABASE_URL?: string;
 }
 
+export type EventBusTransportType = 'memory' | 'redis';
+
 /**
  * Validated configuration
  */

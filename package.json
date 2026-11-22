@@ -25,6 +25,7 @@
   "dependencies": {
     "@stellar/stellar-sdk": "15.1.0",
     "@types/pg": "^8.20.0",
+    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "next": "^15.0.0",
     "pg": "^8.22.0",
