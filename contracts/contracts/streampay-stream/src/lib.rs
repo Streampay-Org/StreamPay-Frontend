@@ -1342,6 +1342,14 @@ impl Contract {
         let recipient = stream.recipient.clone();
         let ts = execute_withdraw(&env, stream_id, &mut stream, amount, &recipient)?;
 
+        // Resolve the effective fee: explicit per-stream fee, then the token
+        // override, then the global default.  If no fee collector has been
+        // configured the full `amount` goes to the recipient regardless of the
+        // effective fee.
+        let effective_fee_bps =
+            fees::resolve_stream_fee_bps(&env, stream_id, &stream.token, stream.fee_bps);
+        let fee_result = fees::apply_fee(amount, effective_fee_bps)?;
+                    effective_fee_bps,
         events::withdrawn(&env, stream_id, &stream.recipient, amount, ts);
         if stream.status == StreamStatus::Settled {
             events::settled(&env, stream_id, &stream.recipient, stream.total_amount, ts);
