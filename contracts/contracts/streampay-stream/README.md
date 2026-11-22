@@ -33,6 +33,8 @@ Linear payment streams on Stellar/Soroban.
 | `set_cooloff_duration` | Yes | `admin` | Sets the per-user cooloff duration (in seconds) between stream creations. |
 | `get_cooloff_duration` | No | None | Returns the current per-user cooloff duration in seconds. |
 | `get_cooloff_until` | No | None | Returns the timestamp until which a sender is blocked by cooloff. |
+| `pause_recurring_stream` | Yes | `stream.sender` | Freezes cycle accrual for an active recurring stream. |
+| `resume_recurring_stream` | Yes | `stream.sender` | Resumes a paused recurring stream, excluding the pause span from vesting. |
 
 ## Paginated Stream Enumeration
 

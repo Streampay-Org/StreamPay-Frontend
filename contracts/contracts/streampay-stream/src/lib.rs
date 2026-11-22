@@ -2144,7 +2144,44 @@ impl Contract {
         recurring::withdraw(env, recurring_id, recipient, amount)
     }
 
-    /// Cancels an active or ended recurring stream.
+    /// Pauses an active recurring stream, freezing cycle accrual.
+    ///
+    /// Only the stream sender may call this.  Already-vested cycles remain
+    /// processable and withdrawable while paused.
+    ///
+    /// @param `recurring_id` — Numeric ID of the recurring stream to pause.
+    ///
+    /// @return The updated [`RecurringStream`] in `Paused` status.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the global pause flag is set.
+    /// @custom:error [`Error::NotFound`] if `recurring_id` does not exist.
+    /// @custom:error [`Error::InvalidState`] if the stream is not `Active`.
+    ///
+    /// @custom:auth Requires authorisation from the stream `sender`.
+    pub fn pause_recurring_stream(env: Env, recurring_id: u64) -> Result<RecurringStream, Error> {
+        recurring::pause(env, recurring_id)
+    }
+
+    /// Resumes a previously paused recurring stream.
+    ///
+    /// Only the stream sender may call this.  The pause span is added to
+    /// `total_paused_duration` so vesting resumes from the frozen point.
+    ///
+    /// @param `recurring_id` — Numeric ID of the recurring stream to resume.
+    ///
+    /// @return The updated [`RecurringStream`] in `Active` status.
+    ///
+    /// @custom:error [`Error::NotFound`] if `recurring_id` does not exist.
+    /// @custom:error [`Error::InvalidState`] if the stream is not `Paused`.
+    /// @custom:error [`Error::InvalidTimeRange`] if `now < paused_at`.
+    /// @custom:error [`Error::Overflow`] if adding the pause span overflows `u64`.
+    ///
+    /// @custom:auth Requires authorisation from the stream `sender`.
+    pub fn resume_recurring_stream(env: Env, recurring_id: u64) -> Result<RecurringStream, Error> {
+        recurring::resume(env, recurring_id)
+    }
+
+    /// Cancels an active, paused, or ended recurring stream.
     ///
     /// Only the sender may cancel.  Unvested escrow is returned to the
     /// sender; the recipient keeps already-withdrawn funds plus any vested
