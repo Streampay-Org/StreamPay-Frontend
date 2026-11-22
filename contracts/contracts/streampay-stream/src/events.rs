@@ -48,6 +48,20 @@ pub struct StreamWithdrawn {
     pub timestamp: u64,
 }
 
+/// Emitted when tokens are withdrawn from a stream to a custom destination
+/// address (topic: `"stream"`, sub-topic: `"withdrawn_to"`).
+///
+/// Contains the stream ID, recipient, destination address, amount withdrawn,
+/// and the ledger timestamp.
+#[contractevent(topics = ["stream", "withdrawn_to"], data_format = "vec")]
+pub struct StreamWithdrawnTo {
+    pub stream_id: u64,
+    pub recipient: Address,
+    pub destination: Address,
+    pub amount: i128,
+    pub timestamp: u64,
+}
+
 /// Emitted when a stream is fully settled (topic: `"stream"`, sub-topic: `"settled"`).
 ///
 /// Contains the stream ID, recipient, total amount of the stream, and the
@@ -177,6 +191,25 @@ pub fn withdrawn(env: &Env, stream_id: u64, recipient: &Address, amount: i128, t
     StreamWithdrawn {
         stream_id,
         recipient: recipient.clone(),
+        amount,
+        timestamp,
+    }
+    .publish(env);
+}
+
+/// Publishes a [`StreamWithdrawnTo`] event.
+pub fn withdrawn_to(
+    env: &Env,
+    stream_id: u64,
+    recipient: &Address,
+    destination: &Address,
+    amount: i128,
+    timestamp: u64,
+) {
+    StreamWithdrawnTo {
+        stream_id,
+        recipient: recipient.clone(),
+        destination: destination.clone(),
         amount,
         timestamp,
     }

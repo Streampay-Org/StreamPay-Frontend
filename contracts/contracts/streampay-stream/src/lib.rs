@@ -1323,82 +1323,75 @@ impl Contract {
         // Enforce allowlist authorization: caller must be recipient or allowlisted.
         withdrawer::require_withdraw_auth(&env, stream_id, &caller, &stream.recipient)?;
 
-        if stream.status == StreamStatus::Settled {
-            return Err(Error::AlreadySettled);
-        }
+        let recipient = stream.recipient.clone();
+        let ts = execute_withdraw(&env, stream_id, &mut stream, amount, &recipient)?;
 
-        // Allow withdrawals from Active or Paused streams
-        if stream.status != StreamStatus::Active && stream.status != StreamStatus::Paused {
-            return Err(Error::InvalidState);
-        }
-
-        let now = env.ledger().timestamp();
-        let available = release::withdrawable(&stream, now)?;
-        if amount > available {
-            return Err(Error::OverWithdraw);
-        }
-
-        stream.released_amount = stream
-            .released_amount
-            .checked_add(amount)
-            .ok_or(Error::InvalidAmount)?;
-        stream.last_update = now;
-
-        if stream.released_amount == stream.total_amount {
-            stream.status = StreamStatus::Settled;
-            limits::decrement_sender_stream_count(&env, &stream.sender);
-        }
-
-        // ── Fee split ──────────────────────────────────────────────────────────
-        // Resolve the effective fee: explicit per-stream fee, then the token
-        // override, then the global default.  If no fee collector has been
-        // configured the full `amount` goes to the recipient regardless of the
-        // effective fee.
-        let effective_fee_bps =
-            fees::resolve_stream_fee_bps(&env, stream_id, &stream.token, stream.fee_bps);
-        let fee_result = fees::apply_fee(amount, effective_fee_bps)?;
-        let maybe_collector = fees::get_fee_collector(&env);
-
-        // Transfer to recipient (net amount after fee).
-        #[allow(clippy::needless_borrows_for_generic_args)]
-        token::Client::new(&env, &stream.token).transfer(
-            &env.current_contract_address(),
-            &stream.recipient,
-            &fee_result.net_amount,
-        );
-
-        // Transfer fee to the collector if one is configured and fee > 0.
-        if fee_result.fee_amount > 0 {
-            if let Some(collector) = maybe_collector.clone() {
-                #[allow(clippy::needless_borrows_for_generic_args)]
-                token::Client::new(&env, &stream.token).transfer(
-                    &env.current_contract_address(),
-                    &collector,
-                    &fee_result.fee_amount,
-                );
-                events::fee_charged(
-                    &env,
-                    stream_id,
-                    fee_result.fee_amount,
-                    effective_fee_bps,
-                    &collector,
-                    now,
-                );
-            } else {
-                // No collector configured: forward fee to recipient as well so
-                // no funds are stranded in the contract.
-                #[allow(clippy::needless_borrows_for_generic_args)]
-                token::Client::new(&env, &stream.token).transfer(
-                    &env.current_contract_address(),
-                    &stream.recipient,
-                    &fee_result.fee_amount,
-                );
-            }
-        }
-
-        storage::set_stream(&env, stream_id, &stream);
-        let ts = stream.last_update;
         events::withdrawn(&env, stream_id, &stream.recipient, amount, ts);
+        if stream.status == StreamStatus::Settled {
+            events::settled(&env, stream_id, &stream.recipient, stream.total_amount, ts);
+        }
+
+        Ok(amount)
+    }
+
+    /// Withdraws accrued escrow and directs the net payout to `destination`.
+    ///
+    /// Performs the same state, accrual, settlement, and fee-split accounting as
+    /// [`Contract::withdraw`], but transfers the net amount to `destination`
+    /// (for example a cold wallet) after verifying that `destination` has a
+    /// valid trustline for the stream's token.
+    ///
+    /// ## Authorization
+    ///
+    /// Only the stream's `recipient` may call `withdraw_to`. Allowlisted
+    /// withdrawers are intentionally **not** permitted here: allowlisted
+    /// withdrawers are added by the stream sender to trigger routine payouts to
+    /// the recipient's own address, so allowing them to pick an arbitrary
+    /// `destination` would let a third party redirect the recipient's vested
+    /// funds.
+    ///
+    /// @param `stream_id`   — Numeric ID of the stream to withdraw from.
+    /// @param `amount`      — Token amount (base units) to withdraw. Must be > 0 and
+    /// ≤ the currently accrued withdrawable balance.
+    /// @param `destination` — Address that will receive the net withdrawal payout.
+    ///
+    /// @return The gross `amount` that was withdrawn on success.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the global pause flag is set.
+    /// @custom:error [`Error::InvalidAmount`] if `amount <= 0`.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::RecipientTrustlineMissing`] if `destination` lacks a
+    /// @custom:error trustline for the stream's token.
+    /// @custom:error [`Error::AlreadySettled`] if the stream is already fully settled.
+    /// @custom:error [`Error::InvalidState`] if the stream is not Active or Paused.
+    /// @custom:error [`Error::OverWithdraw`] if `amount` exceeds accrued funds.
+    ///
+    /// @custom:auth Requires authorisation from the stream's `recipient` only.
+    pub fn withdraw_to(
+        env: Env,
+        stream_id: u64,
+        amount: i128,
+        destination: Address,
+    ) -> Result<i128, Error> {
+        require_not_paused(&env)?;
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        let mut stream = get_existing_stream(&env, stream_id)?;
+
+        // Strictly require the stream recipient's own authorisation — never
+        // allowlisted withdrawers — because this entrypoint redirects funds to
+        // an arbitrary destination address.
+        stream.recipient.require_auth();
+
+        // Verify the destination can hold the stream token before mutating
+        // state or transferring funds.
+        require_recipient_trustline(&env, &stream.token, &destination)?;
+
+        let ts = execute_withdraw(&env, stream_id, &mut stream, amount, &destination)?;
+
+        events::withdrawn_to(&env, stream_id, &stream.recipient, &destination, amount, ts);
         if stream.status == StreamStatus::Settled {
             events::settled(&env, stream_id, &stream.recipient, stream.total_amount, ts);
         }
@@ -2381,6 +2374,93 @@ impl Contract {
     pub fn recurring_vested(env: Env, recurring_id: u64) -> Result<i128, Error> {
         recurring::get_vested(env, recurring_id)
     }
+}
+
+/// Shared withdrawal accounting, settlement transition, fee split, and storage
+/// persistence used by both [`Contract::withdraw`] and [`Contract::withdraw_to`].
+///
+/// Transfers the net payout to `destination` and any protocol fee to the
+/// configured fee collector (or to `destination` when no collector is set).
+/// Returns the ledger timestamp recorded in `stream.last_update`.
+fn execute_withdraw(
+    env: &Env,
+    stream_id: u64,
+    stream: &mut Stream,
+    amount: i128,
+    destination: &Address,
+) -> Result<u64, Error> {
+    if stream.status == StreamStatus::Settled {
+        return Err(Error::AlreadySettled);
+    }
+
+    // Allow withdrawals from Active or Paused streams
+    if stream.status != StreamStatus::Active && stream.status != StreamStatus::Paused {
+        return Err(Error::InvalidState);
+    }
+
+    let now = env.ledger().timestamp();
+    let available = release::withdrawable(stream, now)?;
+    if amount > available {
+        return Err(Error::OverWithdraw);
+    }
+
+    stream.released_amount = stream
+        .released_amount
+        .checked_add(amount)
+        .ok_or(Error::InvalidAmount)?;
+    stream.last_update = now;
+
+    if stream.released_amount == stream.total_amount {
+        stream.status = StreamStatus::Settled;
+        limits::decrement_sender_stream_count(env, &stream.sender);
+    }
+
+    // ── Fee split ──────────────────────────────────────────────────────────
+    // Compute fee and net amount based on the per-stream fee_bps.  If no
+    // fee collector has been configured the full `amount` goes to
+    // `destination` regardless of `fee_bps`.
+    let fee_result = fees::apply_fee(amount, stream.fee_bps)?;
+    let maybe_collector = fees::get_fee_collector(env);
+
+    // Transfer net amount to destination.
+    #[allow(clippy::needless_borrows_for_generic_args)]
+    token::Client::new(env, &stream.token).transfer(
+        &env.current_contract_address(),
+        destination,
+        &fee_result.net_amount,
+    );
+
+    // Transfer fee to the collector if one is configured and fee > 0.
+    if fee_result.fee_amount > 0 {
+        if let Some(collector) = maybe_collector {
+            #[allow(clippy::needless_borrows_for_generic_args)]
+            token::Client::new(env, &stream.token).transfer(
+                &env.current_contract_address(),
+                &collector,
+                &fee_result.fee_amount,
+            );
+            events::fee_charged(
+                env,
+                stream_id,
+                fee_result.fee_amount,
+                stream.fee_bps,
+                &collector,
+                now,
+            );
+        } else {
+            // No collector configured: forward fee to destination as well so
+            // no funds are stranded in the contract.
+            #[allow(clippy::needless_borrows_for_generic_args)]
+            token::Client::new(env, &stream.token).transfer(
+                &env.current_contract_address(),
+                destination,
+                &fee_result.fee_amount,
+            );
+        }
+    }
+
+    storage::set_stream(env, stream_id, stream);
+    Ok(stream.last_update)
 }
 
 fn get_existing_stream(env: &Env, stream_id: u64) -> Result<Stream, Error> {

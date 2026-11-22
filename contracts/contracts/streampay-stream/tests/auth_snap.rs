@@ -454,6 +454,18 @@ fn auth_snap_withdraw() {
 
 #[test]
 #[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_withdraw_to() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let destination = Address::generate(&data.env);
+    data.env.ledger().set_timestamp(1_600);
+
+    data.env.mock_auths(&[]);
+    client.withdraw_to(&id, &250i128, &destination);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_withdraw_with_max_fee_bps() {
     let data = auth_setup();
     let (client, id) = auth_with_stream(&data);
