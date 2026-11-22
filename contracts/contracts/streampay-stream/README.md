@@ -17,6 +17,7 @@ Linear payment streams on Stellar/Soroban.
 | `resume` | Yes | `stream.sender` | Resumes a paused stream, extending the end time. |
 | `cancel_stream` | Yes | `stream.sender` | Ends a stream early, refunding unvested funds to sender. |
 | `withdraw` | Yes | `stream.recipient` | Withdraws vested funds to the recipient. |
+| `withdraw_many` | Yes | `caller` (recipient or allowlisted withdrawer) | Claims the full withdrawable balance from up to 20 streams in one invocation, returning a per-stream `WithdrawOutcome`. |
 | `settle` | Yes | `stream.recipient` | Ends a stream and releases all remaining funds to recipient. |
 | `get_stream` | No | None | Returns the stream record. |
 | `withdrawable` | No | None | Returns the currently withdrawable amount. |

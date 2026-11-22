@@ -49,6 +49,21 @@ use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env};
 pub(crate) use storage::DataKey;
 pub use storage::{Stream, StreamStatus};
 
+/// Maximum number of stream IDs accepted in a single [`Contract::withdraw_many`] call.
+pub const MAX_WITHDRAW_MANY_BATCH: u32 = 20;
+
+/// Per-stream outcome returned by [`Contract::withdraw_many`].
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WithdrawOutcome {
+    /// Stream ID this outcome corresponds to.
+    pub stream_id: u64,
+    /// Gross amount withdrawn (`0` if the withdrawal failed).
+    pub amount: i128,
+    /// `None` on success, or `Some(code)` (the [`Error`] discriminant) on failure.
+    pub error: Option<u32>,
+}
+
 /// The `StreamPay` contract entry point registered with the Soroban host.
 #[contract]
 pub struct Contract;
@@ -1179,89 +1194,58 @@ impl Contract {
             return Err(Error::InvalidAmount);
         }
 
-        let mut stream = get_existing_stream(&env, stream_id)?;
+        withdraw_inner(&env, &caller, stream_id, Some(amount), true)
+    }
 
-        // Enforce allowlist authorization: caller must be recipient or allowlisted.
-        withdrawer::require_withdraw_auth(&env, stream_id, &caller, &stream.recipient)?;
-
-        if stream.status == StreamStatus::Settled {
-            return Err(Error::AlreadySettled);
+    /// Withdraws the full currently withdrawable balance from multiple streams
+    /// in a single transaction.
+    ///
+    /// Returns a `Vec<WithdrawOutcome>` aligned by index with `stream_ids`.
+    /// Per-stream failures (e.g. not found, unauthorized, already settled,
+    /// nothing withdrawable) are recorded in the corresponding
+    /// [`WithdrawOutcome::error`] without rolling back other streams in the
+    /// batch. Contract-level pause or an over-limit batch aborts the entire
+    /// invocation.
+    ///
+    /// @param `caller`     — Address initiating the batch withdrawal (must be
+    /// the recipient or an allowlisted withdrawer for each stream).
+    /// @param `stream_ids` — List of stream IDs to claim (at most
+    /// [`MAX_WITHDRAW_MANY_BATCH`] entries).
+    ///
+    /// @return Per-stream [`WithdrawOutcome`] entries in the same order as
+    /// `stream_ids`.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the global pause flag is set.
+    /// @custom:error [`Error::InvalidAmount`] if `stream_ids.len() > MAX_WITHDRAW_MANY_BATCH`.
+    ///
+    /// @custom:auth Requires authorisation from `caller` once for the batch.
+    pub fn withdraw_many(
+        env: Env,
+        caller: Address,
+        stream_ids: soroban_sdk::Vec<u64>,
+    ) -> Result<soroban_sdk::Vec<WithdrawOutcome>, Error> {
+        require_not_paused(&env)?;
+        if stream_ids.len() > MAX_WITHDRAW_MANY_BATCH {
+            return Err(Error::InvalidAmount);
         }
+        caller.require_auth();
 
-        // Allow withdrawals from Active or Paused streams
-        if stream.status != StreamStatus::Active && stream.status != StreamStatus::Paused {
-            return Err(Error::InvalidState);
-        }
-
-        let now = env.ledger().timestamp();
-        let available = release::withdrawable(&stream, now)?;
-        if amount > available {
-            return Err(Error::OverWithdraw);
-        }
-
-        stream.released_amount = stream
-            .released_amount
-            .checked_add(amount)
-            .ok_or(Error::InvalidAmount)?;
-        stream.last_update = now;
-
-        if stream.released_amount == stream.total_amount {
-            stream.status = StreamStatus::Settled;
-            limits::decrement_sender_stream_count(&env, &stream.sender);
-        }
-
-        // ── Fee split ──────────────────────────────────────────────────────────
-        // Compute fee and net amount based on the per-stream fee_bps.  If no
-        // fee collector has been configured the full `amount` goes to the
-        // recipient regardless of `fee_bps`.
-        let fee_result = fees::apply_fee(amount, stream.fee_bps)?;
-        let maybe_collector = fees::get_fee_collector(&env);
-
-        // Transfer to recipient (net amount after fee).
-        #[allow(clippy::needless_borrows_for_generic_args)]
-        token::Client::new(&env, &stream.token).transfer(
-            &env.current_contract_address(),
-            &stream.recipient,
-            &fee_result.net_amount,
-        );
-
-        // Transfer fee to the collector if one is configured and fee > 0.
-        if fee_result.fee_amount > 0 {
-            if let Some(collector) = maybe_collector.clone() {
-                #[allow(clippy::needless_borrows_for_generic_args)]
-                token::Client::new(&env, &stream.token).transfer(
-                    &env.current_contract_address(),
-                    &collector,
-                    &fee_result.fee_amount,
-                );
-                events::fee_charged(
-                    &env,
+        let mut outcomes = soroban_sdk::Vec::new(&env);
+        for stream_id in stream_ids.iter() {
+            match withdraw_inner(&env, &caller, stream_id, None, false) {
+                Ok(amount) => outcomes.push_back(WithdrawOutcome {
                     stream_id,
-                    fee_result.fee_amount,
-                    stream.fee_bps,
-                    &collector,
-                    now,
-                );
-            } else {
-                // No collector configured: forward fee to recipient as well so
-                // no funds are stranded in the contract.
-                #[allow(clippy::needless_borrows_for_generic_args)]
-                token::Client::new(&env, &stream.token).transfer(
-                    &env.current_contract_address(),
-                    &stream.recipient,
-                    &fee_result.fee_amount,
-                );
+                    amount,
+                    error: None,
+                }),
+                Err(err) => outcomes.push_back(WithdrawOutcome {
+                    stream_id,
+                    amount: 0,
+                    error: Some(err as u32),
+                }),
             }
         }
-
-        storage::set_stream(&env, stream_id, &stream);
-        let ts = stream.last_update;
-        events::withdrawn(&env, stream_id, &stream.recipient, amount, ts);
-        if stream.status == StreamStatus::Settled {
-            events::settled(&env, stream_id, &stream.recipient, stream.total_amount, ts);
-        }
-
-        Ok(amount)
+        Ok(outcomes)
     }
 
     /// Adds `withdrawer` to the per-stream allowlist, granting them the right
@@ -2218,6 +2202,125 @@ fn require_admin(env: &Env, caller: &Address) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+/// Shared withdrawal logic used by both [`Contract::withdraw`] and
+/// [`Contract::withdraw_many`].
+///
+/// When `requested_amount` is `Some(amt)`, withdraws that exact amount (checking
+/// `amt <= available`). When `None`, withdraws the full `available` amount
+/// (returning [`Error::InvalidAmount`] if nothing is withdrawable).
+///
+/// When `require_auth` is `true`, delegates to [`withdrawer::require_withdraw_auth`]
+/// which invokes `caller.require_auth()`. When `false` (batch path where the
+/// caller was already authenticated once), verifies recipient / allowlist
+/// membership without re-invoking `require_auth`.
+fn withdraw_inner(
+    env: &Env,
+    caller: &Address,
+    stream_id: u64,
+    requested_amount: Option<i128>,
+    require_auth: bool,
+) -> Result<i128, Error> {
+    let mut stream = get_existing_stream(env, stream_id)?;
+
+    // Enforce allowlist authorization: caller must be recipient or allowlisted.
+    if require_auth {
+        withdrawer::require_withdraw_auth(env, stream_id, caller, &stream.recipient)?;
+    } else if caller != &stream.recipient && !storage::is_withdrawer_allowed(env, stream_id, caller)
+    {
+        return Err(Error::Unauthorized);
+    }
+
+    if stream.status == StreamStatus::Settled {
+        return Err(Error::AlreadySettled);
+    }
+
+    // Allow withdrawals from Active or Paused streams
+    if stream.status != StreamStatus::Active && stream.status != StreamStatus::Paused {
+        return Err(Error::InvalidState);
+    }
+
+    let now = env.ledger().timestamp();
+    let available = release::withdrawable(&stream, now)?;
+    let amount = match requested_amount {
+        Some(req) => {
+            if req > available {
+                return Err(Error::OverWithdraw);
+            }
+            req
+        }
+        None => {
+            if available <= 0 {
+                return Err(Error::InvalidAmount);
+            }
+            available
+        }
+    };
+
+    stream.released_amount = stream
+        .released_amount
+        .checked_add(amount)
+        .ok_or(Error::InvalidAmount)?;
+    stream.last_update = now;
+
+    if stream.released_amount == stream.total_amount {
+        stream.status = StreamStatus::Settled;
+        limits::decrement_sender_stream_count(env, &stream.sender);
+    }
+
+    // ── Fee split ──────────────────────────────────────────────────────────
+    // Compute fee and net amount based on the per-stream fee_bps.  If no
+    // fee collector has been configured the full `amount` goes to the
+    // recipient regardless of `fee_bps`.
+    let fee_result = fees::apply_fee(amount, stream.fee_bps)?;
+    let maybe_collector = fees::get_fee_collector(env);
+
+    // Transfer to recipient (net amount after fee).
+    #[allow(clippy::needless_borrows_for_generic_args)]
+    token::Client::new(env, &stream.token).transfer(
+        &env.current_contract_address(),
+        &stream.recipient,
+        &fee_result.net_amount,
+    );
+
+    // Transfer fee to the collector if one is configured and fee > 0.
+    if fee_result.fee_amount > 0 {
+        if let Some(collector) = maybe_collector {
+            #[allow(clippy::needless_borrows_for_generic_args)]
+            token::Client::new(env, &stream.token).transfer(
+                &env.current_contract_address(),
+                &collector,
+                &fee_result.fee_amount,
+            );
+            events::fee_charged(
+                env,
+                stream_id,
+                fee_result.fee_amount,
+                stream.fee_bps,
+                &collector,
+                now,
+            );
+        } else {
+            // No collector configured: forward fee to recipient as well so
+            // no funds are stranded in the contract.
+            #[allow(clippy::needless_borrows_for_generic_args)]
+            token::Client::new(env, &stream.token).transfer(
+                &env.current_contract_address(),
+                &stream.recipient,
+                &fee_result.fee_amount,
+            );
+        }
+    }
+
+    storage::set_stream(env, stream_id, &stream);
+    let ts = stream.last_update;
+    events::withdrawn(env, stream_id, &stream.recipient, amount, ts);
+    if stream.status == StreamStatus::Settled {
+        events::settled(env, stream_id, &stream.recipient, stream.total_amount, ts);
+    }
+
+    Ok(amount)
 }
 
 /// Returns [`Error::ContractPaused`] when the global pause flag is `true`.
