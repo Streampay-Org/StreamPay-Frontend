@@ -86,6 +86,9 @@ module.exports = async () => {
     "^\\./app/(.*)$": "<rootDir>/app/$1",
     "^next/navigation$": "<rootDir>/__mocks__/next/navigation.js",
     "^next/router$": "<rootDir>/__mocks__/next/router.js",
+    // NodeNext-style relative specifiers (`./redact.js`) resolve to the
+    // TypeScript sources during tests, mirroring the SDK build output.
+    "^(\\.{1,2}/.*)\\.js$": "$1",
   };
   return resolvedConfig;
 };

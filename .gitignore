@@ -32,3 +32,6 @@ Desktop.ini
 
 litellm_config.yaml
 .vercel
+
+# Partner SDK build output
+lib/sdk/dist/
