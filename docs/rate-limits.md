@@ -73,6 +73,8 @@ All API endpoints are rate limited:
 | GET | `/api/streams` | Read |
 | GET | `/api/streams/{id}` | Read |
 | POST | `/api/streams` | Write |
+| POST | `/api/streams/batch` | Write |
+| DELETE | `/api/streams` | Write |
 | DELETE | `/api/streams/{id}` | Write |
 | POST | `/api/streams/{id}/start` | Write |
 | POST | `/api/streams/{id}/pause` | Write |
@@ -82,6 +84,8 @@ All API endpoints are rate limited:
 | POST | `/api/streams/{id}/webhooks/test` | Write |
 | GET | `/api/activity` | Read |
 | GET | `/api/identity/me` | Read |
+| GET | `/api/indexer/status` | Read |
+| GET | `/api/indexer/sse` | Read |
 | GET | `/api/auth/wallet` | Challenge (20 req/min per IP) |
 | POST | `/api/auth/wallet` | Login (5 req/min per IP) |
 | POST | `/api/exports` | Export (5 req/min per user) |
