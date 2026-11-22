@@ -87,6 +87,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke the presented bearer token
+         * @description Adds the token's `jti` to the access-token denylist until the token's own `exp`. Every route that authenticates with `tryAuthenticateRequest` rejects the token afterwards. Repeated logout calls with the same token are safe. Tokens issued before revocation existed carry no `jti` and simply expire on their own.
+         */
+        post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/streams": {
         parameters: {
             query?: never;
@@ -1981,6 +2001,63 @@ export interface operations {
                     "Retry-After"?: number;
                     /** @description Correlation ID for this response. */
                     "x-request-id"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "rate_limit_exceeded",
+                     *         "message": "Too many requests. Please try again later.",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Token revoked, or already revoked (idempotent). */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing, malformed, or expired bearer token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "UNAUTHORIZED",
+                     *         "message": "Missing or invalid authorization header",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description IP rate limit exceeded for logout (5 req/min per IP). */
+            429: {
+                headers: {
+                    /** @description Seconds until the client may retry. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

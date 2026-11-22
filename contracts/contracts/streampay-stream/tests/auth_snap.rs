@@ -209,6 +209,26 @@ fn auth_snap_set_default_fee_bps() {
 
 #[test]
 #[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_set_token_fee_bps() {
+    let data = auth_setup();
+    let client = auth_initialized(&data);
+
+    data.env.mock_auths(&[]);
+    client.set_token_fee_bps(&data.admin, &data.token, &100);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_clear_token_fee_bps() {
+    let data = auth_setup();
+    let client = auth_initialized(&data);
+
+    data.env.mock_auths(&[]);
+    client.clear_token_fee_bps(&data.admin, &data.token);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_set_fee_bps() {
     let data = auth_setup();
     let client = auth_initialized(&data);

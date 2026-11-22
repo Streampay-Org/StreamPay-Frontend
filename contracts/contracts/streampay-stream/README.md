@@ -33,6 +33,31 @@ Linear payment streams on Stellar/Soroban.
 | `set_cooloff_duration` | Yes | `admin` | Sets the per-user cooloff duration (in seconds) between stream creations. |
 | `get_cooloff_duration` | No | None | Returns the current per-user cooloff duration in seconds. |
 | `get_cooloff_until` | No | None | Returns the timestamp until which a sender is blocked by cooloff. |
+| `set_fee_collector` | Yes | `admin` | Sets the address that receives protocol fees. |
+| `set_default_fee_bps` | Yes | `admin` | Sets the global default protocol fee in basis points. |
+| `get_default_fee_bps` | No | None | Returns the global default protocol fee. |
+| `set_token_fee_bps` | Yes | `admin` | Sets a per-token protocol fee override. |
+| `clear_token_fee_bps` | Yes | `admin` | Removes a per-token protocol fee override. |
+| `get_token_fee_bps` | No | None | Returns the per-token override, or `null` when unset. |
+| `get_stream_fee_bps` | No | None | Returns the effective fee for a stream after precedence resolution. |
+
+## Protocol fees
+
+Fees are charged on withdrawal in basis points (`1 bps = 0.01%`, maximum
+`10_000`). The effective fee for a stream is resolved in this order:
+
+1. the explicit per-stream `fee_bps` passed to `create_stream`, when non-zero;
+2. the per-token override set with `set_token_fee_bps`;
+3. the global default set with `set_default_fee_bps` (zero unless configured).
+
+A stream created with a non-zero `fee_bps` keeps that value for its whole life.
+Setting a token override later never rewrites an existing stream's stored
+`fee_bps`. A stream created with `fee_bps = 0` carries no per-stream fee, so it
+follows the token override and then the global default. A per-token override of
+`0` makes that token fee-free even when the default is non-zero.
+
+If no fee collector is configured, no fee is charged and the full withdrawn
+amount goes to the recipient.
 
 ## Paginated Stream Enumeration
 

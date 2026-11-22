@@ -1810,6 +1810,71 @@
         }
       }
     },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "summary": "Revoke the presented bearer token",
+        "description": "Adds the token's `jti` to the access-token denylist until the token's own `exp`. Every route that authenticates with `tryAuthenticateRequest` rejects the token afterwards. Repeated logout calls with the same token are safe. Tokens issued before revocation existed carry no `jti` and simply expire on their own.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "204": {
+            "description": "Token revoked, or already revoked (idempotent)."
+          },
+          "401": {
+            "description": "Missing, malformed, or expired bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "Missing or invalid authorization header",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "IP rate limit exceeded for logout (5 req/min per IP).",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the client may retry.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "rate_limit_exceeded",
+                    "message": "Too many requests. Please try again later.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
     "/api/streams": {
       "get": {
         "operationId": "listStreams",
