@@ -31,7 +31,6 @@ const config = {
     "<rootDir>/app/api/streams/\\[id\\]/start/route.test.ts",
     "<rootDir>/app/api/streams/\\[id\\]/webhooks/test/route.test.ts",
     "<rootDir>/app/api/streams/concurrency.test.ts",
-    "<rootDir>/app/api/streams/route.timeout.test.ts",
     "<rootDir>/app/api/streams/stream-lifecycle.e2e.test.ts",
     "<rootDir>/app/api/streams/v1-contract.test.ts",
     "<rootDir>/app/api/v2/streams/batch/route.test.ts",
@@ -39,11 +38,9 @@ const config = {
     "<rootDir>/app/api/v2/streams/route.test.ts",
     "<rootDir>/app/api/v2/streams/v2-streams-quota.test.ts",
     "<rootDir>/app/api/webhooks/deliveries/route.test.ts",
-    "<rootDir>/app/api/webhooks/dlq/route.test.ts",
     "<rootDir>/app/api/webhooks/health/route.test.ts",
     "<rootDir>/app/components/EmptyState.test.tsx",
     "<rootDir>/app/components/ReceiptShareCard.test.tsx",
-    "<rootDir>/app/components/StreamViz.test.tsx",
     "<rootDir>/app/dashboard/IndexerStatus.test.tsx",
     "<rootDir>/app/lib/config/config.test.ts",
     "<rootDir>/app/lib/dtos/audit.dto.test.ts",
@@ -71,6 +68,7 @@ const config = {
     "lib/**/*.{ts,tsx}",
     "!**/*.d.ts",
     "!**/*.test.{ts,tsx}",
+    "!app/lib/__testing__/**",
   ],
 };
 

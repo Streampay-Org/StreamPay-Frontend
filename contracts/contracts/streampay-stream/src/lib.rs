@@ -39,6 +39,9 @@ mod withdrawer;
 // #[cfg(test)]
 // mod fee_sweep_test;
 
+#[cfg(test)]
+mod max_amount_test;
+
 pub use error::Error;
 pub use handshake::{HandshakeState, current_protocol_version, get_handshake, get_negotiated_version, is_handshake_complete, max_compatible_version, min_compatible_version, version_from_parts, version_to_parts};
 pub use multi::{RecipientAllocation, SplitStream};
@@ -334,10 +337,74 @@ impl Contract {
         fees::get_default_fee_bps(&env)
     }
 
+    /// Sets a per-token `fee_bps` override.
+    ///
+    /// The override takes precedence over the global default for every stream
+    /// of `token` that does not carry an explicit per-stream fee. Streams
+    /// created with a non-zero `fee_bps` keep their stored value; the override
+    /// never rewrites existing stream rows.
+    ///
+    /// A value of `0` makes the token fee-free even when the default is
+    /// non-zero.
+    ///
+    /// @param `admin`   — Must match the admin set at initialisation.
+    /// @param `token`   — Stellar asset contract address.
+    /// @param `fee_bps` — Fee in basis points `[0, 10_000]`.
+    ///
+    /// @custom:error [`Error::Unauthorized`] if `admin` is not the initialised admin.
+    /// @custom:error [`Error::InvalidFeeBps`] if `fee_bps > 10_000`.
+    ///
+    /// @custom:auth Requires authorisation from `admin`.
+    pub fn set_token_fee_bps(
+        env: Env,
+        admin: Address,
+        token: Address,
+        fee_bps: u32,
+    ) -> Result<(), Error> {
+        require_admin(&env, &admin)?;
+        fees::validate_fee_bps(fee_bps)?;
+        fees::set_token_fee_bps(&env, &token, fee_bps);
+        events::token_fee_bps_set(
+            &env,
+            &admin,
+            &token,
+            fee_bps,
+            env.ledger().timestamp(),
+        );
+        Ok(())
+    }
+
+    /// Clears a per-token `fee_bps` override.
+    ///
+    /// Streams of `token` without an explicit per-stream fee fall back to the
+    /// global default again.
+    ///
+    /// @custom:error [`Error::Unauthorized`] if `admin` is not the initialised admin.
+    ///
+    /// @custom:auth Requires authorisation from `admin`.
+    pub fn clear_token_fee_bps(
+        env: Env,
+        admin: Address,
+        token: Address,
+    ) -> Result<(), Error> {
+        require_admin(&env, &admin)?;
+        fees::clear_token_fee_bps(&env, &token);
+        events::token_fee_bps_cleared(&env, &admin, &token, env.ledger().timestamp());
+        Ok(())
+    }
+
+    /// Returns the per-token `fee_bps` override, or `None` when unset.
+    ///
+    /// @custom:error This entrypoint is read-only and never returns an error.
+    pub fn get_token_fee_bps(env: Env, token: Address) -> Option<u32> {
+        fees::get_token_fee_bps(&env, &token)
+    }
+
     /// Returns the effective `fee_bps` for `stream_id`.
     ///
-    /// This is the per-stream override if one was supplied at creation time,
-    /// otherwise it falls back to the global default (which is `0` by default).
+    /// Resolution order: an explicit per-stream override, then the stream row's
+    /// non-zero `fee_bps`, then the per-token override for the stream's token,
+    /// then the global default.
     ///
     /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
     pub fn get_stream_fee_bps(env: Env, stream_id: u64) -> Result<u32, Error> {
@@ -521,6 +588,71 @@ impl Contract {
     /// @custom:error This entrypoint is read-only and never returns an error.
     pub fn max_streams_per_sender(env: Env) -> u64 {
         limits::get_max_streams_per_sender(&env)
+    }
+
+    /// Sets the maximum `total_amount` allowed for a single stream in `token`.
+    ///
+    /// Streams created via [`Contract::create_stream`],
+    /// [`Contract::create_draft_stream`], or [`Contract::create_stream_for_org`]
+    /// with `total_amount > max` are rejected with [`Error::AmountTooLarge`]
+    /// before any token transfer.
+    ///
+    /// To remove a previously configured cap, call
+    /// [`Contract::clear_max_stream_amount`].
+    ///
+    /// @param `admin` — Must match the admin set at initialisation.
+    /// @param `token` — Token contract address to cap.
+    /// @param `max` — Maximum allowed `total_amount` (must be `> 0`).
+    ///
+    /// @custom:error [`Error::Unauthorized`] if `admin` is not the initialised admin.
+    /// @custom:error [`Error::InvalidAmount`] if `max <= 0`.
+    ///
+    /// @custom:auth Requires authorisation from `admin`.
+    pub fn set_max_stream_amount(
+        env: Env,
+        admin: Address,
+        token: Address,
+        max: i128,
+    ) -> Result<(), Error> {
+        require_admin(&env, &admin)?;
+        if max <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        limits::set_max_stream_amount(&env, &token, max);
+        events::max_stream_amount_set(&env, &admin, &token, max, env.ledger().timestamp());
+        Ok(())
+    }
+
+    /// Clears the per-token maximum stream amount cap for `token`, restoring
+    /// unlimited stream amounts for that token.
+    ///
+    /// @param `admin` — Must match the admin set at initialisation.
+    /// @param `token` — Token contract address whose cap should be removed.
+    ///
+    /// @custom:error [`Error::Unauthorized`] if `admin` is not the initialised admin.
+    ///
+    /// @custom:auth Requires authorisation from `admin`.
+    pub fn clear_max_stream_amount(
+        env: Env,
+        admin: Address,
+        token: Address,
+    ) -> Result<(), Error> {
+        require_admin(&env, &admin)?;
+        limits::clear_max_stream_amount(&env, &token);
+        events::max_stream_amount_set(&env, &admin, &token, 0, env.ledger().timestamp());
+        Ok(())
+    }
+
+    /// Returns the configured maximum stream `total_amount` cap for `token`,
+    /// or `None` if no cap is set (unlimited).
+    ///
+    /// @param `token` — Token contract address to query.
+    ///
+    /// @return `Some(cap)` if a cap is configured, or `None` if unlimited.
+    ///
+    /// @custom:error This entrypoint is read-only and never returns an error.
+    pub fn max_stream_amount(env: Env, token: Address) -> Option<i128> {
+        limits::get_max_stream_amount(&env, &token)
     }
 
     /// Returns the number of active streams currently attributed to `sender`.
@@ -843,6 +975,8 @@ impl Contract {
             return Err(Error::InvalidAmount);
         }
 
+        limits::check_max_stream_amount(&env, &token, total_amount)?;
+
         if sender == recipient {
             return Err(Error::SelfStream);
         }
@@ -892,6 +1026,12 @@ impl Contract {
         };
 
         storage::set_stream(&env, id, &stream);
+        // Only an explicit non-zero fee is persisted as a per-stream override.
+        // A zero fee means "no per-stream fee", so the stream follows the
+        // per-token override and then the global default.
+        if fee_bps > 0 {
+            fees::set_stream_fee_bps(&env, id, fee_bps);
+        }
         events::created(
             &env,
             id,
@@ -941,6 +1081,8 @@ impl Contract {
             return Err(Error::InvalidAmount);
         }
 
+        limits::check_max_stream_amount(&env, &token, total_amount)?;
+
         if sender == recipient {
             return Err(Error::InvalidState);
         }
@@ -977,9 +1119,6 @@ impl Contract {
         };
 
         storage::set_stream(&env, id, &stream);
-        // Persist the per-stream fee_bps so it can be retrieved independently
-        // from the stream row for read-only callers.
-        fees::set_stream_fee_bps(&env, id, 0);
         limits::increment_sender_stream_count(&env, &stream.sender);
         events::created(
             &env,
@@ -1184,79 +1323,75 @@ impl Contract {
         // Enforce allowlist authorization: caller must be recipient or allowlisted.
         withdrawer::require_withdraw_auth(&env, stream_id, &caller, &stream.recipient)?;
 
-        if stream.status == StreamStatus::Settled {
-            return Err(Error::AlreadySettled);
-        }
+        let recipient = stream.recipient.clone();
+        let ts = execute_withdraw(&env, stream_id, &mut stream, amount, &recipient)?;
 
-        // Allow withdrawals from Active or Paused streams
-        if stream.status != StreamStatus::Active && stream.status != StreamStatus::Paused {
-            return Err(Error::InvalidState);
-        }
-
-        let now = env.ledger().timestamp();
-        let available = release::withdrawable(&stream, now)?;
-        if amount > available {
-            return Err(Error::OverWithdraw);
-        }
-
-        stream.released_amount = stream
-            .released_amount
-            .checked_add(amount)
-            .ok_or(Error::InvalidAmount)?;
-        stream.last_update = now;
-
-        if stream.released_amount == stream.total_amount {
-            stream.status = StreamStatus::Settled;
-            limits::decrement_sender_stream_count(&env, &stream.sender);
-        }
-
-        // ── Fee split ──────────────────────────────────────────────────────────
-        // Compute fee and net amount based on the per-stream fee_bps.  If no
-        // fee collector has been configured the full `amount` goes to the
-        // recipient regardless of `fee_bps`.
-        let fee_result = fees::apply_fee(amount, stream.fee_bps)?;
-        let maybe_collector = fees::get_fee_collector(&env);
-
-        // Transfer to recipient (net amount after fee).
-        #[allow(clippy::needless_borrows_for_generic_args)]
-        token::Client::new(&env, &stream.token).transfer(
-            &env.current_contract_address(),
-            &stream.recipient,
-            &fee_result.net_amount,
-        );
-
-        // Transfer fee to the collector if one is configured and fee > 0.
-        if fee_result.fee_amount > 0 {
-            if let Some(collector) = maybe_collector.clone() {
-                #[allow(clippy::needless_borrows_for_generic_args)]
-                token::Client::new(&env, &stream.token).transfer(
-                    &env.current_contract_address(),
-                    &collector,
-                    &fee_result.fee_amount,
-                );
-                events::fee_charged(
-                    &env,
-                    stream_id,
-                    fee_result.fee_amount,
-                    stream.fee_bps,
-                    &collector,
-                    now,
-                );
-            } else {
-                // No collector configured: forward fee to recipient as well so
-                // no funds are stranded in the contract.
-                #[allow(clippy::needless_borrows_for_generic_args)]
-                token::Client::new(&env, &stream.token).transfer(
-                    &env.current_contract_address(),
-                    &stream.recipient,
-                    &fee_result.fee_amount,
-                );
-            }
-        }
-
-        storage::set_stream(&env, stream_id, &stream);
-        let ts = stream.last_update;
         events::withdrawn(&env, stream_id, &stream.recipient, amount, ts);
+        if stream.status == StreamStatus::Settled {
+            events::settled(&env, stream_id, &stream.recipient, stream.total_amount, ts);
+        }
+
+        Ok(amount)
+    }
+
+    /// Withdraws accrued escrow and directs the net payout to `destination`.
+    ///
+    /// Performs the same state, accrual, settlement, and fee-split accounting as
+    /// [`Contract::withdraw`], but transfers the net amount to `destination`
+    /// (for example a cold wallet) after verifying that `destination` has a
+    /// valid trustline for the stream's token.
+    ///
+    /// ## Authorization
+    ///
+    /// Only the stream's `recipient` may call `withdraw_to`. Allowlisted
+    /// withdrawers are intentionally **not** permitted here: allowlisted
+    /// withdrawers are added by the stream sender to trigger routine payouts to
+    /// the recipient's own address, so allowing them to pick an arbitrary
+    /// `destination` would let a third party redirect the recipient's vested
+    /// funds.
+    ///
+    /// @param `stream_id`   — Numeric ID of the stream to withdraw from.
+    /// @param `amount`      — Token amount (base units) to withdraw. Must be > 0 and
+    /// ≤ the currently accrued withdrawable balance.
+    /// @param `destination` — Address that will receive the net withdrawal payout.
+    ///
+    /// @return The gross `amount` that was withdrawn on success.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the global pause flag is set.
+    /// @custom:error [`Error::InvalidAmount`] if `amount <= 0`.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::RecipientTrustlineMissing`] if `destination` lacks a
+    /// @custom:error trustline for the stream's token.
+    /// @custom:error [`Error::AlreadySettled`] if the stream is already fully settled.
+    /// @custom:error [`Error::InvalidState`] if the stream is not Active or Paused.
+    /// @custom:error [`Error::OverWithdraw`] if `amount` exceeds accrued funds.
+    ///
+    /// @custom:auth Requires authorisation from the stream's `recipient` only.
+    pub fn withdraw_to(
+        env: Env,
+        stream_id: u64,
+        amount: i128,
+        destination: Address,
+    ) -> Result<i128, Error> {
+        require_not_paused(&env)?;
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        let mut stream = get_existing_stream(&env, stream_id)?;
+
+        // Strictly require the stream recipient's own authorisation — never
+        // allowlisted withdrawers — because this entrypoint redirects funds to
+        // an arbitrary destination address.
+        stream.recipient.require_auth();
+
+        // Verify the destination can hold the stream token before mutating
+        // state or transferring funds.
+        require_recipient_trustline(&env, &stream.token, &destination)?;
+
+        let ts = execute_withdraw(&env, stream_id, &mut stream, amount, &destination)?;
+
+        events::withdrawn_to(&env, stream_id, &stream.recipient, &destination, amount, ts);
         if stream.status == StreamStatus::Settled {
             events::settled(&env, stream_id, &stream.recipient, stream.total_amount, ts);
         }
@@ -1966,6 +2101,46 @@ impl Contract {
         multi::cancel_split_stream(env, stream_id)
     }
 
+    /// Pauses a split stream, freezing accrual for every recipient.
+    ///
+    /// Only the stream sender may call this. While paused, each recipient's
+    /// withdrawable amount stays at the value accrued up to the pause time.
+    ///
+    /// @param `stream_id` — Numeric ID of the split stream to pause.
+    ///
+    /// @return The updated [`SplitStream`] record.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the global pause flag is set.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::Unauthorized`] if caller is not the stream sender.
+    /// @custom:error [`Error::InvalidState`] if the stream is not `Active`.
+    ///
+    /// @custom:auth Requires authorisation from the stream's `sender`.
+    pub fn pause_split_stream(env: Env, stream_id: u64) -> Result<SplitStream, Error> {
+        multi::pause_split_stream(env, stream_id)
+    }
+
+    /// Resumes a paused split stream, extending `end_time` by the paused span.
+    ///
+    /// Only the stream sender may call this. Accrual continues from the frozen
+    /// amount and the stream ends `paused_duration` later than originally
+    /// scheduled, preserving the unstreamed time.
+    ///
+    /// @param `stream_id` — Numeric ID of the split stream to resume.
+    ///
+    /// @return The updated [`SplitStream`] record.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the global pause flag is set.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::Unauthorized`] if caller is not the stream sender.
+    /// @custom:error [`Error::InvalidState`] if the stream is not `Paused`.
+    /// @custom:error [`Error::InvalidTimeRange`] if the paused span overflows.
+    ///
+    /// @custom:auth Requires authorisation from the stream's `sender`.
+    pub fn resume_split_stream(env: Env, stream_id: u64) -> Result<SplitStream, Error> {
+        multi::resume_split_stream(env, stream_id)
+    }
+
     /// Returns the stored split stream record for `stream_id`.
     ///
     /// This is a read-only view that never mutates state or requires auth.
@@ -2144,7 +2319,44 @@ impl Contract {
         recurring::withdraw(env, recurring_id, recipient, amount)
     }
 
-    /// Cancels an active or ended recurring stream.
+    /// Pauses an active recurring stream, freezing cycle accrual.
+    ///
+    /// Only the stream sender may call this.  Already-vested cycles remain
+    /// processable and withdrawable while paused.
+    ///
+    /// @param `recurring_id` — Numeric ID of the recurring stream to pause.
+    ///
+    /// @return The updated [`RecurringStream`] in `Paused` status.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the global pause flag is set.
+    /// @custom:error [`Error::NotFound`] if `recurring_id` does not exist.
+    /// @custom:error [`Error::InvalidState`] if the stream is not `Active`.
+    ///
+    /// @custom:auth Requires authorisation from the stream `sender`.
+    pub fn pause_recurring_stream(env: Env, recurring_id: u64) -> Result<RecurringStream, Error> {
+        recurring::pause(env, recurring_id)
+    }
+
+    /// Resumes a previously paused recurring stream.
+    ///
+    /// Only the stream sender may call this.  The pause span is added to
+    /// `total_paused_duration` so vesting resumes from the frozen point.
+    ///
+    /// @param `recurring_id` — Numeric ID of the recurring stream to resume.
+    ///
+    /// @return The updated [`RecurringStream`] in `Active` status.
+    ///
+    /// @custom:error [`Error::NotFound`] if `recurring_id` does not exist.
+    /// @custom:error [`Error::InvalidState`] if the stream is not `Paused`.
+    /// @custom:error [`Error::InvalidTimeRange`] if `now < paused_at`.
+    /// @custom:error [`Error::Overflow`] if adding the pause span overflows `u64`.
+    ///
+    /// @custom:auth Requires authorisation from the stream `sender`.
+    pub fn resume_recurring_stream(env: Env, recurring_id: u64) -> Result<RecurringStream, Error> {
+        recurring::resume(env, recurring_id)
+    }
+
+    /// Cancels an active, paused, or ended recurring stream.
     ///
     /// Only the sender may cancel.  Unvested escrow is returned to the
     /// sender; the recipient keeps already-withdrawn funds plus any vested
@@ -2202,6 +2414,93 @@ impl Contract {
     pub fn recurring_vested(env: Env, recurring_id: u64) -> Result<i128, Error> {
         recurring::get_vested(env, recurring_id)
     }
+}
+
+/// Shared withdrawal accounting, settlement transition, fee split, and storage
+/// persistence used by both [`Contract::withdraw`] and [`Contract::withdraw_to`].
+///
+/// Transfers the net payout to `destination` and any protocol fee to the
+/// configured fee collector (or to `destination` when no collector is set).
+/// Returns the ledger timestamp recorded in `stream.last_update`.
+fn execute_withdraw(
+    env: &Env,
+    stream_id: u64,
+    stream: &mut Stream,
+    amount: i128,
+    destination: &Address,
+) -> Result<u64, Error> {
+    if stream.status == StreamStatus::Settled {
+        return Err(Error::AlreadySettled);
+    }
+
+    // Allow withdrawals from Active or Paused streams
+    if stream.status != StreamStatus::Active && stream.status != StreamStatus::Paused {
+        return Err(Error::InvalidState);
+    }
+
+    let now = env.ledger().timestamp();
+    let available = release::withdrawable(stream, now)?;
+    if amount > available {
+        return Err(Error::OverWithdraw);
+    }
+
+    stream.released_amount = stream
+        .released_amount
+        .checked_add(amount)
+        .ok_or(Error::InvalidAmount)?;
+    stream.last_update = now;
+
+    if stream.released_amount == stream.total_amount {
+        stream.status = StreamStatus::Settled;
+        limits::decrement_sender_stream_count(env, &stream.sender);
+    }
+
+    // ── Fee split ──────────────────────────────────────────────────────────
+    // Compute fee and net amount based on the per-stream fee_bps.  If no
+    // fee collector has been configured the full `amount` goes to
+    // `destination` regardless of `fee_bps`.
+    let fee_result = fees::apply_fee(amount, stream.fee_bps)?;
+    let maybe_collector = fees::get_fee_collector(env);
+
+    // Transfer net amount to destination.
+    #[allow(clippy::needless_borrows_for_generic_args)]
+    token::Client::new(env, &stream.token).transfer(
+        &env.current_contract_address(),
+        destination,
+        &fee_result.net_amount,
+    );
+
+    // Transfer fee to the collector if one is configured and fee > 0.
+    if fee_result.fee_amount > 0 {
+        if let Some(collector) = maybe_collector {
+            #[allow(clippy::needless_borrows_for_generic_args)]
+            token::Client::new(env, &stream.token).transfer(
+                &env.current_contract_address(),
+                &collector,
+                &fee_result.fee_amount,
+            );
+            events::fee_charged(
+                env,
+                stream_id,
+                fee_result.fee_amount,
+                stream.fee_bps,
+                &collector,
+                now,
+            );
+        } else {
+            // No collector configured: forward fee to destination as well so
+            // no funds are stranded in the contract.
+            #[allow(clippy::needless_borrows_for_generic_args)]
+            token::Client::new(env, &stream.token).transfer(
+                &env.current_contract_address(),
+                destination,
+                &fee_result.fee_amount,
+            );
+        }
+    }
+
+    storage::set_stream(env, stream_id, stream);
+    Ok(stream.last_update)
 }
 
 fn get_existing_stream(env: &Env, stream_id: u64) -> Result<Stream, Error> {

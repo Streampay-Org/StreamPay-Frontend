@@ -66,7 +66,7 @@ import {
   setIdempotency,
   withLock,
 } from "@/app/lib/db";
-import { streamsRateLimit } from "@/src/middleware/rateLimit";
+import { streamsRateLimit, withRateLimitHeaders } from "@/src/middleware/rateLimit";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { nextActionFor, transition } from "@/app/lib/state-machine";
 import { enforceStreamRbac, resolveActorAddress } from "@/app/lib/org-policy";
@@ -136,11 +136,14 @@ export async function POST(
           { status: 409 },
         );
       }
-      return NextResponse.json(cached.body, { status: cached.status });
+      return withRateLimitHeaders(
+        NextResponse.json(cached.body, { status: cached.status }),
+        rateCheck.headers,
+      );
     }
   }
 
-  return withLock(id, async () => {
+  const response = await withLock(id, async () => {
     // Post-lock idempotency check — guards against races between concurrent
     // requests that both passed the pre-lock check simultaneously.
     if (token) {
@@ -277,4 +280,5 @@ export async function POST(
 
     return NextResponse.json(responseBody);
   });
+  return withRateLimitHeaders(response, rateCheck.headers);
 }

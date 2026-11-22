@@ -1,4 +1,3 @@
-import jwt from "jsonwebtoken";
 import type { Stream } from "@/app/types/openapi";
 import { getAdminAddress } from "@/app/lib/admin-guard";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
@@ -76,47 +75,18 @@ export function resolveRequestTenant(request: Request): string {
 }
 
 /**
- * Resolves the verified caller identity from a request when available.
+ * Resolves the caller identity from a verified Bearer JWT, or from explicitly
+ * enabled non-production actor headers. Header identities are never admins.
  *
- * Checks:
- * 1. Verified Bearer JWT via `tryAuthenticateRequest(request)` (or decoded
- *    Bearer JWT claims when a structured JWT is supplied).
- * 2. Explicit actor headers (`Actor-Wallet-Address`, `x-actor-id`,
- *    `x-streampay-actor-id`, `x-wallet-address`, `x-streampay-actor-role`).
- *
- * Returns `null` when no verified actor is present (e.g. unauthenticated v1
- * callers or v2 callers with an opaque token).
+ * Returns `null` when no verified actor is present and
+ * `STREAMPAY_ALLOW_ACTOR_HEADER` is not exactly `"true"`. Invalid Bearer
+ * tokens never fall back to header identities.
  */
 export function resolveRequestActor(request: Request): StreamActorObject | null {
-  const headerRole =
-    request.headers?.get?.("x-streampay-actor-role")?.trim() ||
-    request.headers?.get?.("x-actor-role")?.trim() ||
-    null;
-
-  let jwtActor = tryAuthenticateRequest(request);
-  if (!jwtActor) {
-    const authHeader = request.headers?.get?.("authorization") ?? null;
-    if (authHeader?.startsWith("Bearer ")) {
-      const rawToken = authHeader.slice(7).trim();
-      if (rawToken.split(".").length === 3) {
-        const decoded = jwt.decode(rawToken) as
-          | { sub?: string; actorId?: string; role?: string }
-          | null;
-        if (decoded && typeof decoded === "object" && typeof decoded.sub === "string" && decoded.sub.trim().length > 0) {
-          jwtActor = {
-            actorId: typeof decoded.actorId === "string" && decoded.actorId.length > 0 ? decoded.actorId : decoded.sub,
-            walletAddress: decoded.sub,
-            role: (decoded.role as import("@/app/types/audit").AuditActorRole) ?? "user",
-          };
-        }
-      }
-    }
-  }
-
+  const jwtActor = tryAuthenticateRequest(request);
   if (jwtActor) {
     const isAdmin =
       jwtActor.role === "admin" ||
-      headerRole === "admin" ||
       jwtActor.walletAddress === getAdminAddress();
     return {
       actorId: jwtActor.actorId,
@@ -124,6 +94,17 @@ export function resolveRequestActor(request: Request): StreamActorObject | null 
       role: isAdmin ? "admin" : jwtActor.role,
       isAdmin,
     };
+  }
+
+  if (request.headers?.get?.("authorization")) {
+    return null;
+  }
+
+  if (
+    process.env.STREAMPAY_ALLOW_ACTOR_HEADER !== "true" ||
+    process.env.NODE_ENV === "production"
+  ) {
+    return null;
   }
 
   const walletHeader =
@@ -134,24 +115,11 @@ export function resolveRequestActor(request: Request): StreamActorObject | null 
     null;
 
   if (walletHeader && walletHeader.length > 0) {
-    const isAdmin =
-      headerRole === "admin" ||
-      walletHeader === "admin" ||
-      walletHeader === getAdminAddress();
     return {
       actorId: walletHeader,
       walletAddress: walletHeader,
-      role: isAdmin ? "admin" : headerRole ?? "user",
-      isAdmin,
-    };
-  }
-
-  if (headerRole === "admin") {
-    return {
-      actorId: getAdminAddress(),
-      walletAddress: getAdminAddress(),
-      role: "admin",
-      isAdmin: true,
+      role: "user",
+      isAdmin: false,
     };
   }
 
@@ -178,7 +146,7 @@ function normalizeActor(actor: StreamActor): NormalizedActor | null {
     }
     return {
       walletAddress: trimmed,
-      isAdmin: trimmed === "admin" || trimmed === adminAddress,
+      isAdmin: trimmed === adminAddress,
       orgIds: new Set<string>(),
     };
   }
@@ -192,8 +160,8 @@ function normalizeActor(actor: StreamActor): NormalizedActor | null {
   const role = actor.role?.trim()?.toLowerCase() ?? null;
   const isAdmin =
     actor.isAdmin === true ||
-    role === "admin" ||
-    (wallet !== null && (wallet === "admin" || wallet === adminAddress));
+    (actor.isAdmin !== false &&
+      (role === "admin" || (wallet !== null && wallet === adminAddress)));
 
   if (!wallet && !isAdmin && (!actor.orgIds || actor.orgIds.length === 0)) {
     return null;

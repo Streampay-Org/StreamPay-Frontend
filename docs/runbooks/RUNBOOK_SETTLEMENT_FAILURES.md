@@ -97,5 +97,39 @@ This returns `503 ContractPaused` for `create_stream` and `withdraw` operations 
 - **Bug**: Roll back the last deployment to the previous stable tag.
 - **DLQ**: Once the root cause is fixed, use the `replay-dlq.sh` script to move messages back to the main queue.
 
+## Automated Settlement Job (`POST /api/internal/jobs/settle-ended`)
+
+Streams whose `endTime` has passed remain `active` or `paused` until settled. The internal job `POST /api/internal/jobs/settle-ended` sweeps eligible streams and settles them through the same lock, state machine, Stellar/Soroban settlement client, history, audit log, and webhook outbox path as `POST /api/streams/:id/settle`.
+
+- **Allowed internal services**: `ops-automation`, `settle-worker` (signed via HMAC; see `docs/internal-service-auth.md`). Unauthenticated callers receive a concealed `404`.
+- **Request body (optional JSON)**:
+  - `dryRun` (`boolean`, default `false`): reports eligible stream IDs without mutating state or calling Stellar.
+  - `limit` (`integer`, default `100`, max `500`): maximum number of eligible streams processed per run.
+- **Metrics** (exposed in `src/metrics/registry.ts`):
+  - `settle_job_runs_total{dry_run="true|false"}`
+  - `settle_job_streams_total{result="settled|skipped|failed"}`
+
+### Running a Dry Run
+
+Before triggering a live sweep (especially after an outage or RPC recovery), run a dry run to inspect how many streams are eligible:
+
+```bash
+# Sign the request with ops-automation or settle-worker HMAC headers
+# Body: {"dryRun": true, "limit": 100}
+POST /api/internal/jobs/settle-ended
+```
+
+The response returns `scanned`, `eligible`, `processed`, and `candidates` (the stream IDs that would be settled) with `settled: 0` and no state changes.
+
+### Handling Partial Failures
+
+The job processes each eligible stream independently under its per-stream lock. If the Stellar/Soroban settlement client throws for one stream, that stream is left in its prior status, recorded in `failedStreamIds`, and the job continues settling the remaining candidates.
+
+When a run reports `failed > 0`:
+1. **Inspect logs & `failedStreamIds`**: Check structured logs for `"Failed to settle ended stream"` with the affected `streamId` values.
+2. **Verify RPC & contract health**: Follow the [Troubleshooting Steps](#troubleshooting-steps) above to rule out Horizon/Soroban RPC issues or contract reverts.
+3. **Re-run the job safely**: Because already-settled streams are in `ended` status (and `settleStreamById` is idempotent under `withLock`), re-running `POST /api/internal/jobs/settle-ended` will skip previously settled streams and retry only the remaining eligible ones.
+4. **Manual fallback**: For a single stuck stream, operators can invoke `POST /api/streams/:id/settle` directly once the underlying chain issue is resolved.
+
 ## Post-Mortem
 If this alert was a False Positive, update the thresholds in `operations/alerts/streams.yaml`.

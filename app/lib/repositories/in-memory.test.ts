@@ -585,9 +585,8 @@ describe("repository adapters", () => {
       });
       expect(resolveRequestTenant(reqCookieOther)).toBe("default-tenant");
 
-      // Structured JWT token with sub
-      const jwt = require("jsonwebtoken");
-      const customJwt = jwt.sign({ sub: "GWALLET_CUSTOM", actorId: "actor-custom" }, "random-secret");
+      // Verified JWT token with a custom actor id
+      const customJwt = signToken("GWALLET_CUSTOM", { actorId: "actor-custom" });
       const reqWithCustomJwt = new Request("http://localhost/api/v2/streams", {
         headers: { authorization: `Bearer ${customJwt}` },
       });
@@ -609,11 +608,11 @@ describe("repository adapters", () => {
         } as any),
       ).toBe(true);
 
-      // Header role admin fallback without wallet header
+      // Actor-role headers cannot create an identity or grant admin access
       const reqWithRoleOnly = new Request("http://localhost/api/streams", {
         headers: { "x-streampay-actor-role": "admin" },
       });
-      expect(resolveRequestActor(reqWithRoleOnly)?.isAdmin).toBe(true);
+      expect(resolveRequestActor(reqWithRoleOnly)).toBeNull();
     });
   });
 });

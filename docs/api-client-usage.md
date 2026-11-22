@@ -30,6 +30,10 @@ const created = await post<Stream>('/api/v2/streams', {
 });
 ```
 
+`POST /api/orgs` also accepts an optional `Idempotency-Key`. Reuse the same
+key when retrying one org creation; a repeated request replays the original
+`201` response. Requests without the header retain the legacy behavior.
+
 `post`, `put`, and `patch` automatically:
 
 - attach `Content-Type: application/json`

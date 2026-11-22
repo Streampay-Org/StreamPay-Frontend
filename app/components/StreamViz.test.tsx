@@ -2,10 +2,13 @@
  * @jest-environment jsdom
  */
 import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { logger } from "@/app/lib/logger";
 import { StreamViz } from "./StreamViz";
 import type { StreamVizDataPoint } from "./StreamViz";
+
+jest.mock("@/app/lib/logger", () => ({ logger: { warn: jest.fn() } }));
 
 const sampleData: StreamVizDataPoint[] = [
   { date: "2026-05-01T00:00:00Z", remaining: 1000, accrued: 0 },
@@ -26,21 +29,25 @@ describe("StreamViz", () => {
     });
 
     it("displays the latest remaining value", () => {
-      render(<StreamViz dataPoints={sampleData} unit="XLM" />);
-      expect(screen.getByText(/0 XLM/)).toBeInTheDocument();
-      expect(screen.getByText(/0% remaining/)).toBeInTheDocument();
+      const { container } = render(<StreamViz dataPoints={sampleData} unit="XLM" />);
+      expect(container.querySelector(".stream-viz__chart-value")).toHaveTextContent(
+        /^0 XLM \(0% remaining\)$/
+      );
     });
 
     it("renders a legend with remaining and accrued labels", () => {
-      render(<StreamViz dataPoints={sampleData} unit="XLM" />);
-      expect(screen.getByText(/Remaining/)).toBeInTheDocument();
-      expect(screen.getByText(/Accrued/)).toBeInTheDocument();
+      const { container } = render(<StreamViz dataPoints={sampleData} unit="XLM" />);
+      const legend = container.querySelector<HTMLElement>(".stream-viz__legend")!;
+      expect(within(legend).getByText("Remaining (XLM)")).toBeInTheDocument();
+      expect(within(legend).getByText("Accrued (XLM)")).toBeInTheDocument();
     });
 
     it("includes the helper text", () => {
       render(<StreamViz dataPoints={sampleData} />);
       expect(
-        screen.getByText(/Estimate updates when StreamPay refreshes/)
+        screen.getByText(
+          "Estimate updates when StreamPay refreshes wallet and chain-observed activity."
+        )
       ).toBeInTheDocument();
     });
 
@@ -67,7 +74,7 @@ describe("StreamViz", () => {
     it("renders an accessible image with remaining percentage", () => {
       render(<StreamViz dataPoints={sampleData} variant="sparkline" />);
       expect(
-        screen.getByRole("img", { name: /0% remaining/ })
+        screen.getByRole("img", { name: "Funds remaining chart: 0% remaining" })
       ).toBeInTheDocument();
     });
 
@@ -77,7 +84,7 @@ describe("StreamViz", () => {
       ];
       render(<StreamViz dataPoints={fullData} variant="sparkline" />);
       expect(
-        screen.getByRole("img", { name: /100% remaining/ })
+        screen.getByRole("img", { name: "Funds remaining chart: 100% remaining" })
       ).toBeInTheDocument();
     });
 
@@ -123,7 +130,9 @@ describe("StreamViz", () => {
 
     it("shows empty message when no data", () => {
       render(<StreamViz dataPoints={[]} variant="data-table" />);
-      expect(screen.getByText("No data available.")).toBeInTheDocument();
+      expect(
+        screen.getByText("Not enough stream activity to chart yet.")
+      ).toBeInTheDocument();
     });
   });
 
@@ -205,7 +214,7 @@ describe("StreamViz", () => {
         <StreamViz dataPoints={zeroData} variant="sparkline" />
       );
       expect(
-        screen.getByRole("img", { name: /0% remaining/ })
+        screen.getByRole("img", { name: "Funds remaining chart: 0% remaining" })
       ).toBeInTheDocument();
       const svg = container.querySelector("svg");
       expect(svg).toBeInTheDocument();
@@ -220,45 +229,57 @@ describe("StreamViz", () => {
     });
   });
 });
-  // New tests for runtime safeguards
-  describe('runtime safeguards', () => {
-    const mockWarn = jest.fn();
-    jest.mock('@/app/lib/logger', () => ({ logger: { warn: mockWarn } }));
-
-    const generateData = (count: number) =>
-      Array.from({ length: count }, (_, i) => ({
-        date: `2026-05-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
-        remaining: 1000 - i * 2,
-        accrued: i * 2,
-      }));
-
-    it('truncates data points in BurnDownChart and logs warning', () => {
-      const manyData = generateData(600);
-      render(<StreamViz dataPoints={manyData} />);
-      expect(mockWarn).toHaveBeenCalledWith(
-        expect.stringContaining('dataPoints truncated from 600 to 500')
-      );
-    });
-
-    it('truncates data points in SparklineChart and logs warning', () => {
-      const manyData = generateData(600);
-      render(<StreamViz dataPoints={manyData} variant="sparkline" />);
-      expect(mockWarn).toHaveBeenCalledWith(
-        expect.stringContaining('dataPoints truncated from 600 to 500')
-      );
-    });
-
-    it('clamps ChartSkeleton dimensions to max values', () => {
-      render(
-        <StreamViz
-          dataPoints={[]}
-          loading
-          // Force large dimensions via props passed through ChartSkeleton indirectly
-        />
-      );
-      // The skeleton renders ChartSkeleton with default width/height, we can test via DOM
-      const skeleton = document.querySelector('.stream-viz__skeleton');
-      expect(skeleton).toBeInTheDocument();
-      // Since clamping is internal, ensure no error and element exists
-    });
+describe("runtime safeguards", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
   });
+
+  const generateData = (count: number): StreamVizDataPoint[] =>
+    Array.from({ length: count }, (_, i) => ({
+      date: new Date(Date.UTC(2026, 4, 1 + i)).toISOString(),
+      remaining: count - i,
+      accrued: i,
+    }));
+
+  describe.each(["burn-down", "sparkline"] as const)("%s", (variant) => {
+    it.each([500, 501, 600])(
+      "limits %i data points and warns only above 500",
+      (count) => {
+        const { container } = render(
+          <StreamViz dataPoints={generateData(count)} variant={variant} />
+        );
+        const line = container.querySelector(
+          variant === "burn-down"
+            ? ".stream-viz__line--remaining"
+            : 'path[fill="none"]'
+        );
+        expect(line?.getAttribute("d")?.match(/[ML]/g)).toHaveLength(
+          Math.min(count, 500)
+        );
+
+        if (count > 500) {
+          expect(logger.warn).toHaveBeenCalledTimes(1);
+          expect(logger.warn).toHaveBeenCalledWith(
+            `StreamViz: dataPoints truncated from ${count} to 500`
+          );
+        } else {
+          expect(logger.warn).not.toHaveBeenCalled();
+        }
+      }
+    );
+  });
+
+  it('clamps ChartSkeleton dimensions to max values', () => {
+    render(
+      <StreamViz
+        dataPoints={[]}
+        loading
+        // Force large dimensions via props passed through ChartSkeleton indirectly
+      />
+    );
+    // The skeleton renders ChartSkeleton with default width/height, we can test via DOM
+    const skeleton = document.querySelector('.stream-viz__skeleton');
+    expect(skeleton).toBeInTheDocument();
+    // Since clamping is internal, ensure no error and element exists
+  });
+});

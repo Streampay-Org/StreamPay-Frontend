@@ -15,6 +15,82 @@ import crypto from "crypto";
 import { Stream } from "@/app/types/openapi";
 import { getStore } from "./db";
 
+const REDACTED = "[REDACTED]";
+const CIRCULAR = "[CIRCULAR]";
+
+/**
+ * Key fragments that identify credential or PII material. Matching is done on
+ * a normalised key (lower-cased, `_`/`-` stripped) so `secret_key`,
+ * `secretKey` and `SECRET-KEY` are all caught.
+ *
+ * Note: because matching is by substring, `tokenSymbol` and `tokenAddress`
+ * also match `token` and are redacted. `redact` has no production callers
+ * today, so no log field needs the asset code to stay readable; add an
+ * allowlist here if one ever does.
+ */
+const SENSITIVE_KEY_FRAGMENTS = [
+  "signature",
+  "publickey",
+  "secret",
+  "password",
+  "token",
+  "email",
+  "authorization",
+  "apikey",
+  "privatekey",
+];
+
+function normaliseKey(key: string): string {
+  return key.toLowerCase().replace(/[_-]/g, "");
+}
+
+function isSensitiveKey(key: string): boolean {
+  const normalised = normaliseKey(key);
+  return SENSITIVE_KEY_FRAGMENTS.some((fragment) => normalised.includes(fragment));
+}
+
+/** Plain objects only — Date, Buffer, Map, class instances are left untouched. */
+function isPlainObject(value: object): boolean {
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Deep-copy `data`, replacing sensitive values with `[REDACTED]`.
+ *
+ * - Arrays stay arrays; plain objects stay plain objects.
+ * - `null` and primitives are returned as-is.
+ * - Non-plain objects (Date, Buffer, …) are returned as-is.
+ * - Cyclic references are replaced with `[CIRCULAR]`.
+ * - The input is never mutated.
+ */
+export function redact(data: any): any {
+  return redactValue(data, new WeakSet<object>());
+}
+
+function redactValue(data: any, seen: WeakSet<object>): any {
+  if (typeof data !== "object" || data === null) return data;
+  if (!Array.isArray(data) && !isPlainObject(data)) return data;
+  if (seen.has(data)) return CIRCULAR;
+
+  seen.add(data);
+  try {
+    if (Array.isArray(data)) {
+      return data.map((item) => redactValue(item, seen));
+    }
+
+    const redacted: Record<string, any> = {};
+    for (const key of Object.keys(data)) {
+      redacted[key] = isSensitiveKey(key)
+        ? REDACTED
+        : redactValue(data[key], seen);
+    }
+    return redacted;
+  } finally {
+    seen.delete(data);
+  }
+}
+
 /**
  * Retention period: 7 years in milliseconds.
  */
