@@ -259,6 +259,44 @@ describe("ContactsPage — search / filter", () => {
     });
     expect(screen.getByText(/1 of 2 contacts/i)).toBeInTheDocument();
   });
+
+  it("does not filter when the search contains only whitespace", () => {
+    render(<ContactsPage />);
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "   " },
+    });
+    expect(screen.getByText("Alice Design")).toBeInTheDocument();
+    expect(screen.getByText("Bob Builder")).toBeInTheDocument();
+  });
+
+  it("changes contact order when sort selection changes", () => {
+    render(<ContactsPage />);
+
+    const sortSelect = screen.getByRole("combobox", { name: "Sort contacts" });
+    fireEvent.change(sortSelect, { target: { value: "label-asc" } });
+
+    let items = within(screen.getByRole("region", { name: "Contact list" })).getAllByRole("listitem");
+    expect(within(items[0]).getByText("Alice Design")).toBeInTheDocument();
+
+    fireEvent.change(sortSelect, { target: { value: "label-desc" } });
+    items = within(screen.getByRole("region", { name: "Contact list" })).getAllByRole("listitem");
+    expect(within(items[0]).getByText("Bob Builder")).toBeInTheDocument();
+  });
+
+  it("persists the sort selection", () => {
+    const { unmount } = render(<ContactsPage />);
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Sort contacts" }),
+      { target: { value: "oldest" } },
+    );
+    expect(store["streampay-contacts-sort"]).toBe("oldest");
+
+    unmount();
+    render(<ContactsPage />);
+    expect(
+      (screen.getByRole("combobox", { name: "Sort contacts" }) as HTMLSelectElement).value,
+    ).toBe("oldest");
+  });
 });
 
 describe("ContactsPage — add contact modal", () => {
