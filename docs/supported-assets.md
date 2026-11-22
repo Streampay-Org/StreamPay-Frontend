@@ -1,6 +1,6 @@
 # Supported Assets (v1)
 
-StreamPay supports Stellar Native (XLM) and any valid Stellar Classic assets (Alpha-numeric 4 or 12). 
+StreamPay supports Stellar Native (XLM) and Stellar Classic assets with 1-12 alphanumeric code characters.
 
 ## Asset Types
 
