@@ -165,6 +165,43 @@ fn next_id(env: &Env) -> u64 {
     id
 }
 
+// ── Migration helpers (storage layout v2) ─────────────────────────────
+
+/// Returns the next recurring stream id (`1` when none exists).
+pub(crate) fn next_recurring_id(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&RecurDataKey::NextRecurringId)
+        .unwrap_or(1u64)
+}
+
+/// Rewrites recurring records with ids in `[start, end)` to the v2 layout.
+///
+/// The layout change is pause bookkeeping: `paused_at` is `0` unless the
+/// stream is `Paused`, in which case it points at the pause instant. Records
+/// that already satisfy the invariant are rewritten unchanged, which makes
+/// the step idempotent. Missing ids are skipped.
+pub(crate) fn migrate_records(env: &Env, start: u64, end: u64) {
+    let mut id = start;
+    while id < end {
+        let stored: Option<RecurringStream> = env
+            .storage()
+            .persistent()
+            .get(&RecurDataKey::RecurringStream(id));
+        if let Some(mut stream) = stored {
+            if stream.status == StreamStatus::Paused {
+                if stream.paused_at == 0 {
+                    stream.paused_at = stream.last_processed_time;
+                }
+            } else {
+                stream.paused_at = 0;
+            }
+            write(env, id, &stream);
+        }
+        id = id.saturating_add(1);
+    }
+}
+
 // ── Vesting math ──────────────────────────────────────────────────────
 
 /// Returns the number of cycles that should have completed by `now`,

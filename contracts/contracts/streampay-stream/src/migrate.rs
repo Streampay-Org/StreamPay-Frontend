@@ -17,7 +17,8 @@
 //! | Version | Description                                 |
 //! |---------|---------------------------------------------|
 //! | `0`     | Unset — pre-migration contract (default).   |
-//! | `1`     | Current stable layout (no migration needed). |
+//! | `1`     | Initial layout marker (no data transformation). |
+//! | `2`     | Pause bookkeeping normalised on split and recurring records. |
 //!
 //! When a new version of the contract requires a storage layout change,
 //! a new migration step is added to this module and the version
@@ -47,6 +48,8 @@
 //! 4. Write focused unit tests targeting the new step.
 //! 5. Update the doc comment table above.
 
+use core::cmp::{max, min};
+
 use crate::error::Error;
 use crate::storage;
 use soroban_sdk::{contracttype, Address, Env};
@@ -58,7 +61,15 @@ use soroban_sdk::{contracttype, Address, Env};
 /// All new contracts are deployed at this version. The `migrate`
 /// entrypoint advances a contract toward this version one step at a
 /// time so that intermediate upgrades do not skip a layout change.
-pub const LATEST_VERSION: u32 = 1;
+pub const LATEST_VERSION: u32 = 2;
+
+/// Maximum number of split/recurring ids rewritten by a single `migrate` call.
+///
+/// Migration work is bounded so a large dataset cannot exceed the Soroban
+/// per-transaction budget. When the limit is reached the version marker stays
+/// at the previous value and the admin calls `migrate` again; `storage_version`
+/// only advances to [`LATEST_VERSION`] once every record has been visited.
+const MIGRATION_BATCH_SIZE: u64 = 50;
 
 /// Storage key for the contract's schema version.
 #[derive(Clone)]
@@ -66,6 +77,9 @@ pub const LATEST_VERSION: u32 = 1;
 enum VersionKey {
     /// Singleton: the current [`StorageVersion`] of the contract.
     StorageVersion,
+    /// Cursor for a partially applied migration step: the next record id to
+    /// rewrite. Absent when no step is in progress.
+    MigrationCursor,
 }
 
 /// On-chain record of the contract's schema version.
@@ -116,6 +130,46 @@ fn set_version(env: &Env, version: u32) {
         .saturating_add(crate::storage::INSTANCE_TTL_MIN_REMAINING);
     let target = threshold.saturating_add(crate::storage::INSTANCE_TTL_EXTEND_TO);
     env.storage().instance().extend_ttl(threshold, target);
+}
+
+/// Advances the storage version by one step, rewriting records in batches.
+///
+/// Returns `true` when the step is complete. A `false` return means the batch
+/// limit was hit; the cursor is persisted and a later call continues from it.
+fn migrate_records_step(env: &Env) -> bool {
+    let start: u64 = env
+        .storage()
+        .instance()
+        .get(&VersionKey::MigrationCursor)
+        .unwrap_or(1);
+
+    let last = max(
+        crate::multi::next_split_stream_id(env),
+        crate::recurring::next_recurring_id(env),
+    );
+
+    if start >= last {
+        env.storage()
+            .instance()
+            .remove(&VersionKey::MigrationCursor);
+        return true;
+    }
+
+    let end = min(start.saturating_add(MIGRATION_BATCH_SIZE), last);
+    crate::multi::migrate_records(env, start, end);
+    crate::recurring::migrate_records(env, start, end);
+
+    if end >= last {
+        env.storage()
+            .instance()
+            .remove(&VersionKey::MigrationCursor);
+        true
+    } else {
+        env.storage()
+            .instance()
+            .set(&VersionKey::MigrationCursor, &end);
+        false
+    }
 }
 
 // ── Migration engine ─────────────────────────────────────────────────────────
@@ -176,19 +230,21 @@ pub fn migrate_internal(env: &Env, caller: &Address) -> Result<(), Error> {
         v = 1;
     }
 
+    // Step 1 → 2: normalise pause bookkeeping on split and recurring records
+    // and re-stamp their TTLs. Records are rewritten in bounded batches; when
+    // the batch limit is hit the version stays at 1 and the next `migrate`
+    // call resumes from the persisted cursor.
+    if v == 1 && migrate_records_step(env) {
+        set_version(env, 2);
+        v = 2;
+    }
+
     // ── Future steps ───────────────────────────────────────────────────
     // Add new `if v == N` blocks below this line for each new version.
-    //
-    // Example:
-    //   if v == 1 {
-    //       transform_something(env)?;
-    //       set_version(env, 2);
-    //       v = 2;
-    //   }
 
-    // All steps completed — the contract is now at LATEST_VERSION.
-    // Sanity-check the invariant (debug assertion, stripped in release).
-    debug_assert!(v == LATEST_VERSION);
+    // All steps completed — the contract is now at LATEST_VERSION. A step
+    // that returned `false` leaves the version unchanged on purpose.
+    debug_assert!(v <= LATEST_VERSION);
 
     Ok(())
 }
