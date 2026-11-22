@@ -262,6 +262,61 @@ describe("privacy", () => {
     });
   });
 
+
+    }
+
+      });
+    }
+
+      }
+      }
+    });
+
+
+        })
+      );
+        })
+      );
+        })
+      );
+        })
+      );
+        })
+      );
+
+      });
+      });
+      });
+      });
+
+
+      }
+
+
+
+
+      }
+
+      }
+    });
+
+
+      });
+
+
+    });
+
+      });
+
+
+      );
+    });
+
+        );
+      }
+    });
+  });
+
   it("keeps arrays as arrays and redacts their entries", () => {
     const redacted = redact([{ token: "x", amount: 1 }]);
     expect(Array.isArray(redacted)).toBe(true);
