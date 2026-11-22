@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/app/lib/db";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { authorizeStreamSubscriber, DEFAULT_STREAM_TENANT } from "@/app/lib/stream-subscriber-auth";
-import { eventBus } from "@/app/lib/event-bus";
+import {
+  eventBus,
+  type SettleFinishedPayload,
+  type StreamUpdatedPayload,
+} from "@/app/lib/event-bus";
 import { logger } from "@/app/lib/logger";
 import {
   createSseConnection,
@@ -72,17 +76,17 @@ export async function GET(request: NextRequest) {
       logger.info("Client connected to stream events", { actorId: actor.actorId, streamId });
 
       // Event handlers
-      const onStreamUpdated = (data: unknown) => {
+      const onStreamUpdated = (data: StreamUpdatedPayload) => {
         sse?.send("stream:updated", data);
       };
 
-      const onSettleFinished = (data: unknown) => {
+      const onSettleFinished = (data: SettleFinishedPayload) => {
         sse?.send("settle:finished", data);
       };
 
       // Subscribe to event bus
-      eventBus.on(`stream:updated:${streamId}`, onStreamUpdated);
-      eventBus.on(`settle:finished:${streamId}`, onSettleFinished);
+      eventBus.onStreamUpdated(streamId, onStreamUpdated);
+      eventBus.onSettleFinished(streamId, onSettleFinished);
 
       // Bounded heartbeats + dead-client detection (abort, rejected writes,
       // idle deadline) are handled by the shared SSE connection helper.
@@ -99,8 +103,8 @@ export async function GET(request: NextRequest) {
           });
         },
         onClose: (reason, stats) => {
-          eventBus.off(`stream:updated:${streamId}`, onStreamUpdated);
-          eventBus.off(`settle:finished:${streamId}`, onSettleFinished);
+          eventBus.offStreamUpdated(streamId, onStreamUpdated);
+          eventBus.offSettleFinished(streamId, onSettleFinished);
           logger.info("Client disconnected from stream events", {
             actorId: actor.actorId,
             streamId,
