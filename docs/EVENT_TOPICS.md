@@ -18,6 +18,16 @@ Events are emitted AFTER successful state mutation and any token transfer. Faile
 | `"stream"` | `"cancelled"` | Emitted when a stream is cancelled. |
 | `"stream"` | `"amended"` | Emitted when a stream is amended. |
 
+## Split Stream Events
+
+| Primary Topic | Sub-topic | Description |
+| --- | --- | --- |
+| `"stream"` | `"split_cr"` | Emitted when a split stream is created. |
+| `"stream"` | `"split_wd"` | Emitted when a recipient withdraws from a split stream. |
+| `"stream"` | `"split_ca"` | Emitted when a split stream is cancelled. |
+| `"stream"` | `"split_pa"` | Emitted when a split stream is paused. |
+| `"stream"` | `"split_re"` | Emitted when a paused split stream is resumed. |
+
 ## Administrative Events
 
 | Primary Topic | Sub-topic | Description |

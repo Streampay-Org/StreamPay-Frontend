@@ -1966,6 +1966,46 @@ impl Contract {
         multi::cancel_split_stream(env, stream_id)
     }
 
+    /// Pauses a split stream, freezing accrual for every recipient.
+    ///
+    /// Only the stream sender may call this. While paused, each recipient's
+    /// withdrawable amount stays at the value accrued up to the pause time.
+    ///
+    /// @param `stream_id` — Numeric ID of the split stream to pause.
+    ///
+    /// @return The updated [`SplitStream`] record.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the global pause flag is set.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::Unauthorized`] if caller is not the stream sender.
+    /// @custom:error [`Error::InvalidState`] if the stream is not `Active`.
+    ///
+    /// @custom:auth Requires authorisation from the stream's `sender`.
+    pub fn pause_split_stream(env: Env, stream_id: u64) -> Result<SplitStream, Error> {
+        multi::pause_split_stream(env, stream_id)
+    }
+
+    /// Resumes a paused split stream, extending `end_time` by the paused span.
+    ///
+    /// Only the stream sender may call this. Accrual continues from the frozen
+    /// amount and the stream ends `paused_duration` later than originally
+    /// scheduled, preserving the unstreamed time.
+    ///
+    /// @param `stream_id` — Numeric ID of the split stream to resume.
+    ///
+    /// @return The updated [`SplitStream`] record.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the global pause flag is set.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::Unauthorized`] if caller is not the stream sender.
+    /// @custom:error [`Error::InvalidState`] if the stream is not `Paused`.
+    /// @custom:error [`Error::InvalidTimeRange`] if the paused span overflows.
+    ///
+    /// @custom:auth Requires authorisation from the stream's `sender`.
+    pub fn resume_split_stream(env: Env, stream_id: u64) -> Result<SplitStream, Error> {
+        multi::resume_split_stream(env, stream_id)
+    }
+
     /// Returns the stored split stream record for `stream_id`.
     ///
     /// This is a read-only view that never mutates state or requires auth.
