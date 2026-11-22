@@ -1,3 +1,17 @@
+export function redact(data: any): any {
+  if (typeof data !== 'object' || data === null) return data;
+  const redacted = { ...data };
+  const keysToRedact = ['signature', 'publickey', 'secret', 'password', 'token', 'email'];
+  for (const key in redacted) {
+    if (keysToRedact.includes(key.toLowerCase())) {
+      redacted[key] = '[REDACTED]';
+    } else if (typeof redacted[key] === 'object') {
+      redacted[key] = redact(redacted[key]);
+    }
+  }
+  return redacted;
+}
+import crypto from "crypto";
 import { Stream } from "@/app/types/openapi";
 import { getStore } from "./db";
 
@@ -121,21 +135,41 @@ export function isPastRetention(createdAt: string): boolean {
  * Permanently scrubs PII from streams and deletes the user record.
  * Legal/Audit requirement: Keep stream aggregates (IDs, amounts, status) for 7 years.
  */
-export async function processDeletionRequest(walletAddress: string): Promise<{ requestId: string; status: string }> {
+export async function processDeletionRequest(
+  walletAddress: string
+): Promise<{ requestId: string; status: string; scrubbedCount: number }> {
   const { streamRepository } = getStore();
   // 1. Scrub PII from all streams associated with this user
-  // In a real DB, we'd query by user_id. Here we check recipient and email.
   const user = streamRepository.users.get(walletAddress);
-  const userEmail = user?.email;
-  const userName = user?.display_name;
+  const normalizedUserEmail =
+    typeof user?.email === "string" && user.email.trim().length > 0
+      ? user.email.trim().toLowerCase()
+      : null;
+
+  let scrubbedCount = 0;
 
   for (const [id, stream] of streamRepository.streams.entries()) {
-    const isAssociated = 
-      stream.email === userEmail || 
-      (userName && stream.recipient.includes(userName)) ||
-      stream.recipient.includes(walletAddress);
+    const streamWithAliases = stream as Stream & {
+      sender?: string;
+      recipientAddress?: string;
+    };
 
-    if (isAssociated) {
+    const matchesWallet =
+      Boolean(walletAddress) &&
+      (stream.senderAddress === walletAddress ||
+        streamWithAliases.sender === walletAddress ||
+        streamWithAliases.recipientAddress === walletAddress ||
+        stream.recipient === walletAddress);
+
+    const normalizedStreamEmail =
+      typeof stream.email === "string" && stream.email.trim().length > 0
+        ? stream.email.trim().toLowerCase()
+        : null;
+
+    const matchesEmail =
+      normalizedUserEmail !== null && normalizedStreamEmail === normalizedUserEmail;
+
+    if (matchesWallet || matchesEmail) {
       streamRepository.streams.set(id, {
         ...stream,
         email: undefined,
@@ -144,6 +178,7 @@ export async function processDeletionRequest(walletAddress: string): Promise<{ r
         partnerId: undefined,
         updatedAt: new Date().toISOString(),
       });
+      scrubbedCount += 1;
     }
   }
 
@@ -151,7 +186,8 @@ export async function processDeletionRequest(walletAddress: string): Promise<{ r
   streamRepository.users.delete(walletAddress);
 
   return {
-    requestId: `dsr-${Math.random().toString(36).slice(2, 11)}`,
+    requestId: `dsr-${crypto.randomUUID()}`,
     status: "processing",
+    scrubbedCount,
   };
 }
