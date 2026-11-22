@@ -17,6 +17,7 @@ Linear payment streams on Stellar/Soroban.
 | `resume` | Yes | `stream.sender` | Resumes a paused stream, extending the end time. |
 | `cancel_stream` | Yes | `stream.sender` | Ends a stream early, refunding unvested funds to sender. |
 | `withdraw` | Yes | `stream.recipient` | Withdraws vested funds to the recipient. |
+| `withdraw_to` | Yes | `stream.recipient` | Withdraws vested funds to a custom destination address (recipient-only auth, destination trustline checked). |
 | `settle` | Yes | `stream.recipient` | Ends a stream and releases all remaining funds to recipient. |
 | `get_stream` | No | None | Returns the stream record. |
 | `withdrawable` | No | None | Returns the currently withdrawable amount. |
@@ -93,7 +94,8 @@ data     = vec-encoded payload fields
 | `paused`    | `pause`               | `stream_id`, `sender`, `pause_time`, `timestamp` |
 | `resumed`   | `resume`              | `stream_id`, `sender`, `end_time`, `timestamp` |
 | `withdrawn` | `withdraw`            | `stream_id`, `recipient`, `amount`, `timestamp` |
-| `settled`   | `withdraw` (full) or `settle` | `stream_id`, `recipient`, `total_amount`, `timestamp` |
+| `withdrawn_to` | `withdraw_to`      | `stream_id`, `recipient`, `destination`, `amount`, `timestamp` |
+| `settled`   | `withdraw` / `withdraw_to` (full) or `settle` | `stream_id`, `recipient`, `total_amount`, `timestamp` |
 | `cancelled` | `cancel_stream`       | `stream_id`, `cancelled_by`, `returned_amount`, `released_amount`, `timestamp` |
 | `amended`   | `amend_stream`        | `stream_id`, `amended_by`, `new_rate_per_second`, `new_end_time`, `timestamp` |
 | `upgraded`  | `upgrade`             | `new_wasm_hash` (topics: `"StreamPay"/"upgraded"`) |
