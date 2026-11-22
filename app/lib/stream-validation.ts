@@ -14,6 +14,40 @@ import { STELLAR_MAX_I64, STROOPS_SCALE } from "@/app/lib/amount";
 import { z } from "zod";
 import type { StreamStatus } from "@/app/types/openapi";
 
+// ── Tags ───────────────────────────────────────────────────────────────────
+
+/**
+ * Tag rules (shared by create, PATCH and the `?tag=` list filter):
+ * - trimmed, internal whitespace collapsed to a single space
+ * - LOWER-CASED (so "Vendor" and "vendor" are the same tag)
+ * - 1-50 characters after normalisation
+ * - Unicode letters/digits, space, "-", "_" and "."; must start with a letter/digit
+ * - max 10 per stream, de-duplicated (first occurrence wins)
+ */
+export const TAG_MAX_LENGTH = 50;
+export const TAG_MAX_COUNT = 10;
+const TAG_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N} _.\-]*$/u;
+
+export function normalizeTag(raw: string): string {
+  return raw.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export const tagSchema = z
+  .string()
+  .transform(normalizeTag)
+  .pipe(
+    z
+      .string()
+      .min(1, "Tag must not be empty")
+      .max(TAG_MAX_LENGTH, `Tag must be at most ${TAG_MAX_LENGTH} characters`)
+      .regex(TAG_PATTERN, "Tag contains invalid characters"),
+  );
+
+export const tagsSchema = z
+  .array(tagSchema)
+  .max(TAG_MAX_COUNT, `At most ${TAG_MAX_COUNT} tags allowed`)
+  .transform((tags) => Array.from(new Set(tags))); // dedupe, keeps first-seen order
+
 // ── Constants ──────────────────────────────────────────────────────────────
 
 /**
@@ -78,6 +112,7 @@ export interface NormalisedCreateStreamInput {
   rate: string;
   schedule: SupportedSchedule;
   token?: string;
+  tags?: string[];
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -97,6 +132,7 @@ export interface CreateStreamBody {
   totalAmount?: string;
   startTime?: string;
   endTime?: string;
+  tags?: string[];
 }
 
 /**
@@ -104,7 +140,8 @@ export interface CreateStreamBody {
  *
  * - `description`: Optional, up to 280 characters.
  * - `webhook_url`: Optional, must be a valid URL.
- * - `tags`: Optional, array of up to 10 strings, each 1-50 characters.
+ * - `tags`: Optional; normalised via `tagsSchema` (replace semantics: the
+ *   stored tags become exactly this list, `[]` clears them).
  *
  * The schema is `strict`, meaning any unknown fields will be rejected.
  */
@@ -112,15 +149,7 @@ export const patchStreamSchema = z
   .object({
     description: z.string().min(1, "Description cannot be empty.").max(280).optional(),
     webhook_url: z.string().url("Must be a valid URL.").optional(),
-    tags: z
-      .array(
-        z
-          .string()
-          .min(1, "Tag cannot be empty.")
-          .max(50, "Tag cannot exceed 50 characters."),
-      )
-      .max(10, "Cannot have more than 10 tags.")
-      .optional(),
+    tags: tagsSchema.optional(),
   })
   .strict("Unknown fields are not allowed.");
 
@@ -251,6 +280,19 @@ export const createStreamSchema = z
         fail("endTime", "INVALID_VESTING_WINDOW", "startTime and endTime must be valid dates with endTime after startTime.");
       }
     }
+
+    if (body.tags !== undefined) {
+      if (!Array.isArray(body.tags)) {
+        fail("tags", "INVALID_TAGS", "tags must be an array of strings.");
+      } else {
+        const parsedTags = tagsSchema.safeParse(body.tags);
+        if (!parsedTags.success) {
+          for (const issue of parsedTags.error.issues) {
+            fail(["tags", ...issue.path].join("."), "INVALID_TAGS", issue.message);
+          }
+        }
+      }
+    }
   });
 
 /**
@@ -276,6 +318,7 @@ export type ParseCreateStreamResult =
  * - rate: canonical decimal form (no leading zeros, no trailing fractional zeros)
  * - schedule: trimmed lowercased SupportedSchedule
  * - token: optional string
+ * - tags: optional, normalised (trimmed, lower-cased, de-duplicated)
  */
 export function parseCreateStreamBody(
   body: unknown,
@@ -290,6 +333,7 @@ export function parseCreateStreamBody(
   const rate = canonicaliseRate(String(b.rate));
   const schedule = String(b.schedule).trim().toLowerCase() as SupportedSchedule;
   const token = typeof b.token === "string" ? b.token : undefined;
+  const tags = Array.isArray(b.tags) ? tagsSchema.parse(b.tags) : undefined;
 
   return {
     success: true,
@@ -298,6 +342,7 @@ export function parseCreateStreamBody(
       rate,
       schedule,
       ...(token !== undefined ? { token } : {}),
+      ...(tags !== undefined ? { tags } : {}),
     },
   };
 }
@@ -318,6 +363,10 @@ export const STREAM_STATUSES = [
  * strings; `limit` is returned as a number. Unknown params are ignored by
  * the caller, and cursor decoding stays a separate semantic check
  * (INVALID_CURSOR) in the route.
+ *
+ * `tag` is a single tag following the same rules as `tagSchema`; the
+ * returned value is normalised. A repeated param (array) is rejected with
+ * INVALID_TAG.
  */
 export const listStreamsQuerySchema = z.object({
   limit: z
@@ -366,6 +415,29 @@ export const listStreamsQuerySchema = z.object({
       }
     })
     .optional(),
+  tag: z
+    .unknown()
+    .superRefine((value, ctx) => {
+      if (value === undefined) return;
+      const fail = (message: string) =>
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message,
+          params: { code: "INVALID_TAG" },
+        });
+
+      if (typeof value !== "string") {
+        fail("tag must be a single string value.");
+        return;
+      }
+      const parsed = tagSchema.safeParse(value);
+      if (!parsed.success) {
+        fail(parsed.error.issues[0]?.message ?? "tag is invalid.");
+      }
+    })
+    .transform((value): string | undefined =>
+      typeof value === "string" ? normalizeTag(value) : undefined,
+    ),
 });
 
 export type ListStreamsQuery = z.infer<typeof listStreamsQuerySchema>;
@@ -386,6 +458,32 @@ export function validateListStreamsQuery(query: Record<string, unknown>): {
   return { errors: zodIssuesToErrors(result.error), values: {} };
 }
 
+// ── PATCH /api/v2/streams/[id] ─────────────────────────────────────────────
+
+function patchIssuesToErrors(error: z.ZodError): ValidationError[] {
+  return error.issues.map((issue) => ({
+    field: issue.path.join(".") || "body",
+    code: issue.code.toUpperCase(),
+    message: issue.message,
+  }));
+}
+
+export type ParsePatchStreamResult =
+  | { success: true; data: z.infer<typeof patchStreamSchema> }
+  | { success: false; errors: ValidationError[] };
+
+/**
+ * Validates AND normalises the PATCH body. Use `data` (not the raw body)
+ * when storing, so tags are saved trimmed, lower-cased and de-duplicated.
+ */
+export function parsePatchStreamBody(body: unknown): ParsePatchStreamResult {
+  const result = patchStreamSchema.safeParse(body);
+  if (result.success) {
+    return { success: true, data: result.data };
+  }
+  return { success: false, errors: patchIssuesToErrors(result.error) };
+}
+
 /**
  * Validates the request body for PATCH /api/v2/streams/[id] using Zod.
  *
@@ -395,15 +493,6 @@ export function validateListStreamsQuery(query: Record<string, unknown>): {
 export function validatePatchStreamBody(
   body: unknown,
 ): ValidationError[] {
-  const result = patchStreamSchema.safeParse(body);
-
-  if (result.success) {
-    return [];
-  }
-
-  return result.error.issues.map((issue) => ({
-    field: issue.path.join(".") || "body",
-    code: issue.code.toUpperCase(),
-    message: issue.message,
-  }));
+  const result = parsePatchStreamBody(body);
+  return result.success ? [] : result.errors;
 }
