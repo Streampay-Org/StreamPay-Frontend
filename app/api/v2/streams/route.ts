@@ -19,6 +19,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { idempotencyKeyErrorResponse, validateIdempotencyKey } from "@/app/lib/idempotency";
 import { db, idempotencyToken, getStore, newStreamId } from "@/app/lib/db";
 import { filterStreamsByTag } from "@/app/lib/stream-tags";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
@@ -191,7 +192,15 @@ async function handleV2StreamsPost(request: Request) {
   }
 
   // ── 1. Idempotency ────────────────────────────────────────────────────────
-  const idempotencyKey = request.headers.get("Idempotency-Key");
+  const rawIdempotencyKey = request.headers.get("Idempotency-Key");
+  let idempotencyKey: string | null = null;
+  if (rawIdempotencyKey !== null) {
+    const keyValidation = validateIdempotencyKey(rawIdempotencyKey);
+    if (!keyValidation.ok) {
+      return idempotencyKeyErrorResponse(keyValidation.reason);
+    }
+    idempotencyKey = keyValidation.key;
+  }
   const token = idempotencyKey
     ? idempotencyToken("v2.streams.create", idempotencyKey)
     : null;
