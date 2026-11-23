@@ -13,12 +13,18 @@
  * the /api/v1/* middleware returns 410 Gone.
  */
 
-import { db, resetDb } from "@/app/lib/db";
+import { resetDb } from "@/app/lib/db";
 import { POST as createStream } from "@/app/api/streams/route";
 import { GET as getStream } from "@/app/api/streams/[id]/route";
 import { V1_SUNSET_DATE, V1_DEPRECATION_DATE } from "@/app/lib/api-version";
+import {
+  InMemoryRateLimitStore,
+  resetRateLimitStore,
+  setRateLimitStore,
+} from "@/app/lib/rate-limit-store";
 
 const VALID_STELLAR_KEY = "GDSBCG3OKHCMMWS5EBH2X7XOYTJRWXN2YYQPCNS5OFBU4IDO4X7OFSQA";
+const TEST_TENANT = "tenant-v1-contract";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -34,7 +40,27 @@ function postRequest(body: unknown, headers: Record<string, string> = {}) {
   });
 }
 
-beforeEach(() => resetDb());
+function getRequest(id: string, tenant = TEST_TENANT) {
+  return new Request(`http://localhost/api/streams/${id}`, {
+    headers: { "x-tenant-id": tenant },
+  });
+}
+
+let rateLimitStore: InMemoryRateLimitStore;
+
+beforeEach(() => {
+  resetDb();
+  rateLimitStore = new InMemoryRateLimitStore(10_000);
+  setRateLimitStore(rateLimitStore);
+});
+
+afterEach(() => {
+  rateLimitStore.destroy();
+});
+
+afterAll(() => {
+  resetRateLimitStore();
+});
 
 // ── Create response shape (POST /api/streams) ─────────────────────────────
 
@@ -115,20 +141,22 @@ describe("v1 contract: POST /api/streams response shape", () => {
 // ── Get response shape (GET /api/streams/:id) ─────────────────────────────
 
 describe("v1 contract: GET /api/streams/:id response shape", () => {
-  async function seedStream() {
+  let seededId: string;
+
+  beforeEach(async () => {
     const res = await createStream(
-      postRequest({ recipient: VALID_STELLAR_KEY, rate: "10", schedule: "day" }),
+      postRequest(
+        { recipient: VALID_STELLAR_KEY, rate: "10", schedule: "day" },
+        { "x-tenant-id": TEST_TENANT },
+      ),
     );
+    expect(res.status).toBe(201);
     const { data } = await res.json();
-    return data.id as string;
-  }
+    seededId = data.id as string;
+  });
 
   it("returns 200 with data and links.self", async () => {
-    const id = await seedStream();
-    const res = await getStream(
-      new Request(`http://localhost/api/streams/${id}`),
-      ctx(id),
-    );
+    const res = await getStream(getRequest(seededId), ctx(seededId));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toHaveProperty("data");
@@ -136,11 +164,8 @@ describe("v1 contract: GET /api/streams/:id response shape", () => {
   });
 
   it("data contains all v1 required fields", async () => {
-    const id = await seedStream();
-    const res = await getStream(
-      new Request(`http://localhost/api/streams/${id}`),
-      ctx(id),
-    );
+    const res = await getStream(getRequest(seededId), ctx(seededId));
+    expect(res.status).toBe(200);
     const { data } = await res.json();
 
     // These fields must be present and correctly named in v1.
@@ -160,11 +185,8 @@ describe("v1 contract: GET /api/streams/:id response shape", () => {
   });
 
   it("data does NOT contain v2-only fields", async () => {
-    const id = await seedStream();
-    const res = await getStream(
-      new Request(`http://localhost/api/streams/${id}`),
-      ctx(id),
-    );
+    const res = await getStream(getRequest(seededId), ctx(seededId));
+    expect(res.status).toBe(200);
     const { data } = await res.json();
 
     // v2 field names must NOT appear in v1 responses.
@@ -174,23 +196,18 @@ describe("v1 contract: GET /api/streams/:id response shape", () => {
   });
 
   it("returns 404 STREAM_NOT_FOUND for an unknown id", async () => {
-    const res = await getStream(
-      new Request("http://localhost/api/streams/does-not-exist"),
-      ctx("does-not-exist"),
-    );
+    const missingId = "stream-does-not-exist";
+    const res = await getStream(getRequest(missingId), ctx(missingId));
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.error.code).toBe("STREAM_NOT_FOUND");
   });
 
   it("links.self contains the stream id", async () => {
-    const id = await seedStream();
-    const res = await getStream(
-      new Request(`http://localhost/api/streams/${id}`),
-      ctx(id),
-    );
+    const res = await getStream(getRequest(seededId), ctx(seededId));
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.links.self).toContain(id);
+    expect(body.links.self).toContain(seededId);
   });
 });
 

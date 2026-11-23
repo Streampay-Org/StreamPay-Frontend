@@ -13,6 +13,38 @@ and must never be reused — see the module rustdoc for details.
 ## [Unreleased]
 
 ### Added
+- **Optional cliff vesting (`cliff_time`).** `Stream` now includes
+  `cliff_time: u64` (`0` = no cliff) and an additive
+  `create_stream_with_cliff` entrypoint (preserving ABI compatibility for
+  `create_stream`). When `cliff_time > 0`, it must satisfy
+  `start_time <= cliff_time <= end_time` (otherwise `InvalidTimeRange` is
+  returned); `vested_amount` / `withdrawable` return `0` until active elapsed
+  time reaches `cliff_time - start_time`, at which point vesting jumps to the
+  linear accrued amount and still reaches `total_amount` at `end_time`.
+  `StreamCreated` now includes `cliff_time`, and `migrate` advances storage to
+  version `3` by initialising `cliff_time = 0` on pre-existing streams.
+- **Two-step recipient transfer.** Added `propose_recipient_transfer`,
+  `accept_recipient_transfer`, `cancel_recipient_transfer`, and
+  `get_pending_recipient` to safely rotate a stream's recipient address.
+  The current recipient proposes a new recipient (rejecting self-transfer,
+  sender-as-recipient, missing trustline, and terminal streams; overwriting any
+  prior proposal), the proposed address accepts (updating `stream.recipient`,
+  clearing the proposal and previous withdrawer allowlist, and preserving
+  already-released amounts and fee accounting), and either the current recipient
+  or sender can cancel before acceptance. Appended `Error::NoPendingTransfer = 26`
+  and added `recipient_transfer_proposed`, `recipient_transfer_accepted`, and
+  `recipient_transfer_cancelled` events.
+- **Dormant-stream expiry sweeping.**
+  - Admin-gated `set_dormancy_grace(admin, seconds)` and read-only
+    `get_dormancy_grace()` configure a global grace period (`0` = disabled) and
+    emit `("stream", "dorm_grc")`.
+  - Sender-only `sweep_dormant_stream(stream_id)` reclaims unclaimed vested
+    funds after `now >= max(end_time, last_withdraw_time) + grace` for ended
+    streams with positive withdrawable balance, applies protocol fee handling
+    consistent with `withdraw`, marks the stream `Settled`, and emits
+    `("stream", "dorm_swp")`.
+  - Appended error codes `NotDormant = 24` and `DormancyDisabled = 25`.
+  or sender can cancel before acceptance. Appended `Error::NoPendingTransfer = 24`
 - **Stepped milestone release schedules (`ReleaseCurve`).** Streams now carry a
   `curve: ReleaseCurve` field (`Linear` by default, or `Milestones(Vec<Milestone>)`).
   The new `create_stream_with_milestones` entrypoint creates a milestone stream
@@ -31,6 +63,16 @@ and must never be reused — see the module rustdoc for details.
   `InvalidState`.
 
 ### Changed
+- **Protocol fee on `withdraw_split` (#1966).** `SplitStream` now snapshots
+  `default_fee_bps` into a new `fee_bps` field at creation time (validated by
+  `fees::validate_fee_bps`). Each `withdraw_split` call applies floor-rounded
+  protocol fees (`fee = floor(amount * fee_bps / 10_000)`, `net = amount - fee`),
+  transfers `net` to the recipient and `fee` to the configured fee collector
+  (forwarding `fee` to the recipient when no collector is set), accrues the fee
+  via `fees::accrue_fees`, and emits `("stream", "fee")` when `fee > 0` and a
+  collector is configured. Gross-amount release and settlement bookkeeping are
+  unchanged, `sweep_fees` now also resolves split-stream tokens, and
+  `cancel_split_stream` remains fee-free for consistency with `cancel_stream`.
 - **Storage layout v2 migration.** `migrate` now advances contracts to storage
   version 2, normalising pause bookkeeping on split and recurring records
   (`pause_time` / `paused_at` are cleared unless the record is `Paused`) and

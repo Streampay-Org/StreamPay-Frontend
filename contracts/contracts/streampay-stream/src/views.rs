@@ -556,6 +556,7 @@ mod tests {
                 paused_at: 0,
                 total_paused_duration: 0,
                 fee_bps: 0,
+                cliff_time: 0,
                 curve: crate::storage::ReleaseCurve::Linear,
             };
             storage::set_stream(env, i, &stream);
@@ -744,6 +745,7 @@ mod tests {
                     paused_at: 0,
                     total_paused_duration: 0,
                     fee_bps: 0,
+                    cliff_time: 0,
                     curve: crate::storage::ReleaseCurve::Linear,
                 };
                 storage::set_stream(&env, *i, &stream);

@@ -2,6 +2,9 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 import { tryAuthenticateRequest, getJwtSecret } from "@/app/lib/auth";
 import { getStore } from "@/app/lib/db";
+import { checkRateLimit, rateLimitResponse, type ClientIdentity } from "@/app/lib/rate-limit";
+import { getLimitForRoute } from "@/app/lib/rate-limit-config";
+import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 
 function createErrorResponse(code: string, message: string, status: number) {
   return NextResponse.json({ error: { code, message, request_id: "mock-request-id" } }, { status });
@@ -38,6 +41,20 @@ export async function GET(
     return createErrorResponse("UNAUTHORIZED", "Missing or invalid authorization header", 401);
   }
 
+  const url = new URL(request.url);
+  const limitType = getLimitForRoute("GET", url.pathname);
+  const identity: ClientIdentity = {
+    type: "wallet",
+    value: actor.walletAddress,
+    displayValue: actor.walletAddress.slice(0, 16) + "...",
+  };
+  const rateLimitResult = await checkRateLimit(identity, limitType);
+  if (!rateLimitResult.allowed) {
+    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
+    return rateLimitResponse(rateLimitResult.retryAfter!);
+  }
+  recordRequest(url.pathname);
+
   const { id } = await params;
   const job = exportRepository.jobs.get(id);
   if (!job) {
@@ -56,7 +73,6 @@ export async function GET(
     return createErrorResponse("EXPORT_EXPIRED", "This export has expired and is no longer available.", 410);
   }
 
-  const url = new URL(request.url);
   const isDownload = url.searchParams.get("download") === "true" || url.searchParams.get("download") === "1";
 
   if (isDownload) {

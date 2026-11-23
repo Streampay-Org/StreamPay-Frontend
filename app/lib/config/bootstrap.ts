@@ -7,8 +7,13 @@
  * SECURITY: Configuration validation must happen before any network calls or wallet operations.
  */
 
-import { validateConfig, getConfig, resetConfigCache, ValidatedConfig } from './index';
+import { validateConfig, getConfig, resetConfigCache, onNetworkChange, ValidatedConfig } from './index';
+import { flushStreamCache } from '../cache';
 import { logger } from '../logger';
+
+// Flush the process-wide stream cache immediately whenever the configured
+// Stellar network changes or the config cache is explicitly reset.
+onNetworkChange(flushStreamCache);
 
 let isBootstrapped = false;
 

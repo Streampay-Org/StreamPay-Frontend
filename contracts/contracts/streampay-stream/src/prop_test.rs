@@ -53,6 +53,7 @@ fn make_stream(
         status: StreamStatus::Active,
         paused_at: 0,
         total_paused_duration: 0,
+        cliff_time: 0,
         fee_bps: 0,
         curve: ReleaseCurve::Linear,
     }
@@ -248,9 +249,35 @@ proptest! {
         prop_assert_eq!(release::vested_amount(&stream, now), Ok(0));
     }
 
+    /// P9: With a valid cliff_time in [start, end], vested is always in
+    /// [0, total] and monotonically non-decreasing in time.
+    #[test]
+    fn prop_cliff_vested_bounds_and_monotonic(
+        total in safe_amount(),
+        (start, end) in valid_time_range(),
+        cliff_offset in 0_u64..=u32::MAX as u64,
+        now1 in safe_timestamp(),
+        delta in 0_u64..=10_000_u64,
+    ) {
+        let env = soroban_sdk::Env::default();
+        let duration = end - start;
+        let cliff_time = start + (cliff_offset % (duration + 1));
+        let mut stream = make_stream(&env, total, 0, start, end);
+        stream.cliff_time = cliff_time;
+
+        let now2 = now1.saturating_add(delta);
+        if let (Ok(v1), Ok(v2)) = (
+            release::vested_amount(&stream, now1),
+            release::vested_amount(&stream, now2),
+        ) {
+            prop_assert!(v1 >= 0 && v1 <= total, "v1={v1} out of [0, {total}]");
+            prop_assert!(v2 >= 0 && v2 <= total, "v2={v2} out of [0, {total}]");
+            prop_assert!(v1 <= v2, "not monotonic: v1={v1} > v2={v2}");
+        }
+    }
+
     /// P9: Milestone streams are monotonically non-decreasing in time,
     /// bounded by `total_amount`, and equal `total_amount` at `end_time`.
-    #[test]
     fn prop_milestone_monotonic_bounded_and_full_at_end(
         total in 1_i128..=1_000_000_000_i128,
         start in 1_000_u64..=10_000_u64,
@@ -260,14 +287,12 @@ proptest! {
         t1_offset in 0_u64..=3_000_u64,
         dt in 0_u64..=1_000_u64,
     ) {
-        let env = soroban_sdk::Env::default();
         let m1_time = start + d1;
         let end = m1_time + d2;
         let mut ms = soroban_sdk::Vec::new(&env);
         ms.push_back(Milestone { time: m1_time, cumulative_bps: bps1 });
         ms.push_back(Milestone { time: end, cumulative_bps: 10_000 });
 
-        let mut stream = make_stream(&env, total, 0, start, end);
         stream.curve = ReleaseCurve::Milestones(ms);
 
         let now1 = start.saturating_add(t1_offset);
@@ -284,14 +309,12 @@ proptest! {
     }
 
     /// P10: Linear streams match the legacy formula `total * elapsed / duration`.
-    #[test]
     fn prop_linear_matches_legacy_formula(
         total in 1_i128..=1_000_000_000_i128,
         start in 0_u64..=100_000_u64,
         duration in 1_u64..=100_000_u64,
         now in 0_u64..=250_000_u64,
     ) {
-        let env = soroban_sdk::Env::default();
         let end = start + duration;
         let stream = make_stream(&env, total, 0, start, end);
 

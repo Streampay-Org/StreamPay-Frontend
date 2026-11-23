@@ -58,6 +58,9 @@ fn err_discriminants_are_stable() {
     assert_eq!(Error::SweepNoFees as u32, 19);
     assert_eq!(Error::SweepAmountMismatch as u32, 20);
     assert_eq!(Error::AdminCooldown as u32, 21);
+    assert_eq!(Error::CooloffActive as u32, 22);
+    assert_eq!(Error::AmountTooLarge as u32, 23);
+    assert_eq!(Error::NoPendingTransfer as u32, 24);
 }
 
 /// All discriminants from `1` to `21` must be assigned and contiguous.
@@ -127,6 +130,7 @@ fn err_conversion_roundtrip() {
         Error::AdminCooldown,
         Error::CooloffActive,
         Error::AmountTooLarge,
+        Error::NoPendingTransfer,
         Error::InvalidSchedule,
     ];
 
@@ -179,6 +183,7 @@ fn err_xdr_roundtrip_via_soroban_env() {
         Error::AdminCooldown,
         Error::CooloffActive,
         Error::AmountTooLarge,
+        Error::NoPendingTransfer,
         Error::InvalidSchedule,
     ];
 
