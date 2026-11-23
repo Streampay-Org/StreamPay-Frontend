@@ -32,7 +32,7 @@ export interface paths {
         };
         /**
          * List activity events
-         * @description Returns a paginated, cursor-based list of activity events for the authenticated caller. Only events for streams the caller sends or receives, plus the caller's own wallet events, are returned. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId and event type.
+         * @description Returns a paginated, cursor-based list of activity events for the authenticated caller. Only events for streams the caller sends or receives, plus the caller's own wallet events, are returned. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId, event type, and an inclusive from/to date range.
          */
         get: operations["listActivity"];
         put?: never;
@@ -2033,6 +2033,10 @@ export interface operations {
                 streamId?: string;
                 /** @description Filter events by a known type (e.g. stream.created, wallet.connected). */
                 type?: string;
+                /** @description Inclusive lower bound for event timestamps. Accepts an ISO date (YYYY-MM-DD, treated as 00:00:00 UTC) or an ISO datetime. */
+                from?: string;
+                /** @description Inclusive upper bound for event timestamps. Accepts an ISO date (YYYY-MM-DD, treated as 23:59:59.999 UTC) or an ISO datetime. */
+                to?: string;
             };
             header?: never;
             path?: never;
@@ -2085,7 +2089,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Unprocessable entity — invalid limit (INVALID_LIMIT), type, streamId, or cursor. */
+            /** @description Unprocessable entity — invalid limit (INVALID_LIMIT), type, streamId, cursor, or date range (INVALID_DATE_RANGE). */
             422: {
                 headers: {
                     [name: string]: unknown;

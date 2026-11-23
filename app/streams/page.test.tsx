@@ -255,7 +255,9 @@ describe("Density toggle", () => {
     const list = screen.getByLabelText(/streams list/i);
     expect(list).toHaveClass("stream-list--compact");
 
-    const rows = screen.getAllByRole("article");
+    const rows = screen
+      .getAllByRole("row")
+      .filter((row) => row.classList.contains("stream-row"));
     for (const row of rows) {
       expect(row).toHaveClass("stream-row--compact");
     }
