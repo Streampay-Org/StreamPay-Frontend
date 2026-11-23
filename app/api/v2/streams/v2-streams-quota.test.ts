@@ -11,20 +11,13 @@
  *   - Idempotent replay is not counted against quota
  *   - Quota is scoped per identity (two different callers share nothing)
  *   - Quota resets at UTC midnight (fake-timer test)
- *   - ORG_DAILY_STREAM_QUOTA_LIMIT env var controls the cap
  *   - OrgQuotaStore peek() reflects correct state
  *   - UTC day helpers return correct values
  */
 
 import { POST as createStreamV2 } from "@/app/api/v2/streams/route";
 import { signToken } from "@/app/lib/auth";
-
-// Deterministic test wallet and JWT
-const testWallet = "GTESTWALLET12345";
-const testJwt = signToken(testWallet);
-
 import { resetDb } from "@/app/lib/db";
-import { orgDb, _resetOrgDbForTesting } from "@/app/lib/org-db";
 import {
   InMemoryOrgQuotaStore,
   setOrgQuotaStore,
@@ -43,23 +36,18 @@ import { ORG_DAILY_STREAM_QUOTA } from "@/app/lib/rate-limit-config";
 function makePostRequest(
   body: unknown = { recipient: "GABC123", rate: "50 XLM/month", schedule: "30 days" },
   headers: Record<string, string> = {},
+  wallet = "GORG_DEFAULT_WALLET",
 ) {
-  // Ensure Authorization header with test JWT is present unless overridden
-  const authHeader = headers["Authorization"] ?? `Bearer ${testJwt}`;
+  const authHeader = headers["Authorization"] ?? `Bearer ${signToken(wallet)}`;
   return new Request("http://localhost/api/v2/streams", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": authHeader, ...headers },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: authHeader,
+      ...headers,
+    },
     body: JSON.stringify(body),
   });
-}
-
-/** Fire `n` POST requests for a given API key, ignoring all responses. */
-async function exhaustQuota(apiKey: string, n: number) {
-  for (let i = 0; i < n; i++) {
-    await createStreamV2(
-      makePostRequest(undefined, { "X-API-Key": apiKey }),
-    );
-  }
 }
 
 // ── Setup / teardown ───────────────────────────────────────────────────────
@@ -97,26 +85,29 @@ describe("ORG_DAILY_STREAM_QUOTA config", () => {
 describe("POST /api/v2/streams — happy path", () => {
   it("returns 201 when under quota", async () => {
     const res = await createStreamV2(
-      makePostRequest(undefined, { "X-API-Key": "key-under-quota" }),
+      makePostRequest(undefined, {}, "GORG_UNDER_QUOTA"),
     );
     expect(res.status).toBe(201);
   });
 
-  it("response body is v2-shaped (allowed_actions, snake_case dates)", async () => {
+  it("response body is v2-shaped (allowed_actions, created_at, settlement)", async () => {
     const res = await createStreamV2(
-      makePostRequest(undefined, { "X-API-Key": "key-shape-test" }),
+      makePostRequest(undefined, {}, "GORG_SHAPE_TEST"),
     );
-    const { data } = await res.json();
+    expect(res.status).toBe(201);
+    const data = await res.json();
     expect(data).toHaveProperty("allowed_actions");
     expect(data).toHaveProperty("created_at");
-    expect(data).toHaveProperty("updated_at");
-    expect(data).not.toHaveProperty("nextAction");
-    expect(data).not.toHaveProperty("createdAt");
+    expect(data).toHaveProperty("next_action");
+    expect(data).toHaveProperty("settlement", null);
   });
 
   it("increments the org counter after a successful create", async () => {
-    await createStreamV2(makePostRequest(undefined, { "X-API-Key": "key-peek" }));
-    const count = await quotaStore.peek("key-peek");
+    const res = await createStreamV2(
+      makePostRequest(undefined, {}, "GORG_PEEK"),
+    );
+    expect(res.status).toBe(201);
+    const count = await quotaStore.peek("GORG_PEEK");
     expect(count).toBe(1);
   });
 });
@@ -124,29 +115,23 @@ describe("POST /api/v2/streams — happy path", () => {
 // ── Quota exhaustion ───────────────────────────────────────────────────────
 
 describe("POST /api/v2/streams — quota exceeded", () => {
-  it("returns 429 after the limit is reached", async () => {
-    // Use a small ad-hoc limit to keep the test fast.
-    const smallStore = new InMemoryOrgQuotaStore();
-    setOrgQuotaStore(smallStore);
-
-    // Manually fill the counter to the configured limit.
+  it("allows the limit-th request and returns 429 on limit+1", async () => {
+    const wallet = "GORG_OVERFLOW";
     const { limit } = ORG_DAILY_STREAM_QUOTA;
-    for (let i = 0; i < limit; i++) {
-      await smallStore.increment("key-overflow");
+
+    // Pre-fill counter to limit - 1 so the next request is the exact boundary.
+    for (let i = 0; i < limit - 1; i++) {
+      await quotaStore.increment(wallet);
     }
 
-    const res = await createStreamV2(
-      makePostRequest(undefined, { "X-API-Key": "key-overflow" }),
-    );
-    expect(res.status).toBe(429);
+    const atLimitRes = await createStreamV2(makePostRequest(undefined, {}, wallet));
+    expect(atLimitRes.status).toBe(201);
 
-    smallStore.destroy();
-    resetOrgQuotaStore();
-    setOrgQuotaStore(quotaStore); // restore
+    const overLimitRes = await createStreamV2(makePostRequest(undefined, {}, wallet));
+    expect(overLimitRes.status).toBe(429);
   });
 
   it("429 body has ORG_DAILY_QUOTA_EXCEEDED error code", async () => {
-    // Swap in a store that always rejects.
     const alwaysFullStore: import("@/app/lib/org-quota-store").OrgQuotaStore = {
       async increment() {
         return { count: 9999, retryAfter: 3600 };
@@ -158,7 +143,7 @@ describe("POST /api/v2/streams — quota exceeded", () => {
     setOrgQuotaStore(alwaysFullStore);
 
     const res = await createStreamV2(
-      makePostRequest(undefined, { "X-API-Key": "key-always-full" }),
+      makePostRequest(undefined, {}, "GORG_ALWAYS_FULL"),
     );
     const body = await res.json();
 
@@ -167,25 +152,28 @@ describe("POST /api/v2/streams — quota exceeded", () => {
     expect(body.error.message).toBeTruthy();
   });
 
-  it("429 response includes a Retry-After header", async () => {
-    const alwaysFullStore: import("@/app/lib/org-quota-store").OrgQuotaStore = {
-      async increment() {
-        return { count: 9999, retryAfter: 7200 };
-      },
-      async peek() {
-        return 9999;
-      },
-    };
-    setOrgQuotaStore(alwaysFullStore);
+  it("429 response includes a positive integer Retry-After header", async () => {
+    const fakeTimers = jest.useFakeTimers();
+    try {
+      // Pin time to 2026-01-15 22:00:00 UTC -> 7200s until UTC midnight.
+      fakeTimers.setSystemTime(new Date("2026-01-15T22:00:00Z").getTime());
 
-    const res = await createStreamV2(
-      makePostRequest(undefined, { "X-API-Key": "key-retry-after" }),
-    );
+      const wallet = "GORG_RETRY_AFTER";
+      const { limit } = ORG_DAILY_STREAM_QUOTA;
+      for (let i = 0; i < limit; i++) {
+        await quotaStore.increment(wallet);
+      }
 
-    expect(res.status).toBe(429);
-    const retryAfter = res.headers.get("Retry-After");
-    expect(retryAfter).toBeTruthy();
-    expect(Number(retryAfter)).toBeGreaterThan(0);
+      const res = await createStreamV2(makePostRequest(undefined, {}, wallet));
+
+      expect(res.status).toBe(429);
+      const retryAfter = res.headers.get("Retry-After");
+      expect(retryAfter).toBe("7200");
+      expect(Number.isInteger(Number(retryAfter))).toBe(true);
+      expect(Number(retryAfter)).toBeGreaterThan(0);
+    } finally {
+      fakeTimers.useRealTimers();
+    }
   });
 });
 
@@ -203,17 +191,20 @@ describe("quota rejection metric", () => {
     };
     setOrgQuotaStore(alwaysFullStore);
 
-    await createStreamV2(makePostRequest(undefined, { "X-API-Key": "key-metric" }));
+    await createStreamV2(makePostRequest(undefined, {}, "GORG_METRIC"));
 
     const { rejections } = getOrgQuotaMetrics();
-    expect(rejections["key-metric"]).toBe(1);
+    expect(rejections["GORG_METRIC"]).toBe(1);
   });
 
   it("does NOT emit a metric on a successful create", async () => {
-    await createStreamV2(makePostRequest(undefined, { "X-API-Key": "key-no-metric" }));
+    const res = await createStreamV2(
+      makePostRequest(undefined, {}, "GORG_NO_METRIC"),
+    );
+    expect(res.status).toBe(201);
 
     const { rejections } = getOrgQuotaMetrics();
-    expect(rejections["key-no-metric"]).toBeUndefined();
+    expect(rejections["GORG_NO_METRIC"]).toBeUndefined();
   });
 });
 
@@ -221,19 +212,21 @@ describe("quota rejection metric", () => {
 
 describe("idempotent replay does not consume quota", () => {
   it("second call with same Idempotency-Key returns 201 and does not increment counter", async () => {
+    const wallet = "GORG_IDEM";
     const headers = {
-      "X-API-Key": "key-idem",
       "Idempotency-Key": "idem-quota-1",
     };
     const body = { recipient: "GIDEM", rate: "10 XLM/day", schedule: "daily" };
 
     // First call — consumes 1 quota unit.
-    await createStreamV2(makePostRequest(body, headers));
-    const countAfterFirst = await quotaStore.peek("key-idem");
+    const res1 = await createStreamV2(makePostRequest(body, headers, wallet));
+    expect(res1.status).toBe(201);
+    const countAfterFirst = await quotaStore.peek(wallet);
+    expect(countAfterFirst).toBe(1);
 
     // Second call — replayed, should NOT increment.
-    const res2 = await createStreamV2(makePostRequest(body, headers));
-    const countAfterSecond = await quotaStore.peek("key-idem");
+    const res2 = await createStreamV2(makePostRequest(body, headers, wallet));
+    const countAfterSecond = await quotaStore.peek(wallet);
 
     expect(res2.status).toBe(201);
     expect(countAfterSecond).toBe(countAfterFirst);
@@ -243,13 +236,13 @@ describe("idempotent replay does not consume quota", () => {
 // ── Per-identity scoping ───────────────────────────────────────────────────
 
 describe("quota is scoped per identity", () => {
-  it("two different API keys have independent counters", async () => {
-    await createStreamV2(makePostRequest(undefined, { "X-API-Key": "key-alpha" }));
-    await createStreamV2(makePostRequest(undefined, { "X-API-Key": "key-alpha" }));
-    await createStreamV2(makePostRequest(undefined, { "X-API-Key": "key-beta" }));
+  it("two different orgs have independent counters", async () => {
+    await createStreamV2(makePostRequest(undefined, {}, "GORG_ALPHA"));
+    await createStreamV2(makePostRequest(undefined, {}, "GORG_ALPHA"));
+    await createStreamV2(makePostRequest(undefined, {}, "GORG_BETA"));
 
-    expect(await quotaStore.peek("key-alpha")).toBe(2);
-    expect(await quotaStore.peek("key-beta")).toBe(1);
+    expect(await quotaStore.peek("GORG_ALPHA")).toBe(2);
+    expect(await quotaStore.peek("GORG_BETA")).toBe(1);
   });
 });
 
@@ -262,16 +255,16 @@ describe("quota resets at UTC midnight", () => {
       // Pin time to a known moment — 2026-01-15 23:59:59 UTC.
       fakeTimers.setSystemTime(new Date("2026-01-15T23:59:59Z").getTime());
 
-      await createStreamV2(makePostRequest(undefined, { "X-API-Key": "key-midnight" }));
-      expect(await quotaStore.peek("key-midnight")).toBe(1);
+      await createStreamV2(makePostRequest(undefined, {}, "GORG_MIDNIGHT"));
+      expect(await quotaStore.peek("GORG_MIDNIGHT")).toBe(1);
 
       // Advance past midnight to 2026-01-16 00:00:01 UTC.
       fakeTimers.advanceTimersByTime(2_000);
 
-      await createStreamV2(makePostRequest(undefined, { "X-API-Key": "key-midnight" }));
+      await createStreamV2(makePostRequest(undefined, {}, "GORG_MIDNIGHT"));
 
       // The new day's counter should start at 1, not 2.
-      expect(await quotaStore.peek("key-midnight")).toBe(1);
+      expect(await quotaStore.peek("GORG_MIDNIGHT")).toBe(1);
     } finally {
       fakeTimers.useRealTimers();
     }
@@ -323,7 +316,7 @@ describe("secondsUntilUtcMidnight()", () => {
 describe("request validation is unaffected by quota", () => {
   it("returns 422 for missing fields", async () => {
     const res = await createStreamV2(
-      makePostRequest({ recipient: "GABC" }, { "X-API-Key": "key-validation" }),
+      makePostRequest({ recipient: "GABC" }, {}, "GORG_VALIDATION"),
     );
     expect(res.status).toBe(422);
     const body = await res.json();
@@ -333,7 +326,10 @@ describe("request validation is unaffected by quota", () => {
   it("returns 400 for invalid JSON", async () => {
     const req = new Request("http://localhost/api/v2/streams", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": "key-badjson" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${signToken("GORG_BADJSON")}`,
+      },
       body: "not-json",
     });
     const res = await createStreamV2(req);
