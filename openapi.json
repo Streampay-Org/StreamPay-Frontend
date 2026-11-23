@@ -1596,7 +1596,7 @@
       "get": {
         "operationId": "listActivity",
         "summary": "List activity events",
-        "description": "Returns a paginated, cursor-based list of activity events for the authenticated caller. Only events for streams the caller sends or receives, plus the caller's own wallet events, are returned. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId and event type.",
+        "description": "Returns a paginated, cursor-based list of activity events for the authenticated caller. Only events for streams the caller sends or receives, plus the caller's own wallet events, are returned. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId, event type, and an inclusive from/to date range.",
         "tags": [
           "Activity"
         ],
@@ -1639,6 +1639,40 @@
             "description": "Filter events by a known type (e.g. stream.created, wallet.connected).",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Inclusive lower bound for event timestamps. Accepts an ISO date (YYYY-MM-DD, treated as 00:00:00 UTC) or an ISO datetime.",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              ]
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Inclusive upper bound for event timestamps. Accepts an ISO date (YYYY-MM-DD, treated as 23:59:59.999 UTC) or an ISO datetime.",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              ]
             }
           }
         ],
@@ -1688,7 +1722,7 @@
             }
           },
           "422": {
-            "description": "Unprocessable entity — invalid limit (INVALID_LIMIT), type, streamId, or cursor.",
+            "description": "Unprocessable entity — invalid limit (INVALID_LIMIT), type, streamId, cursor, or date range (INVALID_DATE_RANGE).",
             "content": {
               "application/json": {
                 "schema": {

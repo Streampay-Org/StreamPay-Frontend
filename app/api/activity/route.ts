@@ -49,6 +49,40 @@ function parseLimit(raw: string | null): number | null {
   return value;
 }
 
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Parses an ISO date (`YYYY-MM-DD`) or datetime into epoch milliseconds.
+ *
+ * Date-only values cover the whole UTC day so both range ends stay inclusive:
+ * `from` resolves to 00:00:00.000 and `to` to 23:59:59.999 of that date.
+ */
+function parseDateBoundary(
+  raw: string,
+  boundary: "start" | "end",
+): number | null {
+  const value = raw.trim();
+  if (value === "") return null;
+
+  if (DATE_ONLY_PATTERN.test(value)) {
+    const [year, month, day] = value.split("-").map(Number);
+    const startOfDay = Date.UTC(year, month - 1, day);
+    const normalized = new Date(startOfDay);
+    // Date.UTC rolls impossible dates over (2026-02-30 becomes March 2).
+    if (
+      normalized.getUTCFullYear() !== year ||
+      normalized.getUTCMonth() !== month - 1 ||
+      normalized.getUTCDate() !== day
+    ) {
+      return null;
+    }
+    return boundary === "start" ? startOfDay : startOfDay + 86_399_999;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 interface ActivityScope {
   ownsStream(streamId: string): boolean;
   isDeleted(entry: ActivityTimelineEntry): boolean;
@@ -139,6 +173,11 @@ async function handleActivityGet(request: Request) {
     const streamId = searchParams.get("streamId");
     const type = searchParams.get("type");
     const limit = parseLimit(searchParams.get("limit"));
+    const fromParam = searchParams.get("from");
+    const toParam = searchParams.get("to");
+    const fromMs =
+      fromParam === null ? null : parseDateBoundary(fromParam, "start");
+    const toMs = toParam === null ? null : parseDateBoundary(toParam, "end");
 
     if (limit === null) {
       return createErrorResponse(
@@ -164,6 +203,34 @@ async function handleActivityGet(request: Request) {
       );
     }
 
+    if (
+      (fromParam !== null && fromMs === null) ||
+      (toParam !== null && toMs === null)
+    ) {
+      return createErrorResponse(
+        "INVALID_DATE_RANGE",
+        "from and to must be ISO dates (YYYY-MM-DD) or datetimes",
+        422,
+      );
+    }
+
+    if (fromMs !== null && toMs !== null && fromMs > toMs) {
+      return createErrorResponse(
+        "INVALID_DATE_RANGE",
+        "from must be earlier than or equal to to",
+        422,
+      );
+    }
+
+    const matchesDateRange = (entry: ActivityTimelineEntry): boolean => {
+      if (fromMs === null && toMs === null) return true;
+      const timestamp = Date.parse(entry.timestamp);
+      if (Number.isNaN(timestamp)) return false;
+      if (fromMs !== null && timestamp < fromMs) return false;
+      if (toMs !== null && timestamp > toMs) return false;
+      return true;
+    };
+
     const scope = createActivityScope(
       store.streamRepository.streams.values(),
       actor.walletAddress,
@@ -186,7 +253,7 @@ async function handleActivityGet(request: Request) {
       limit,
       streamId: streamId ?? undefined,
       type: type ?? undefined,
-      predicate: (entry) => scope.isVisible(entry),
+      predicate: (entry) => scope.isVisible(entry) && matchesDateRange(entry),
     });
 
     const enrichedData = queryResult.data.map((entry) => ({
