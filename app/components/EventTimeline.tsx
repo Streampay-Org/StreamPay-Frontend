@@ -4,6 +4,9 @@ import { useEffect, useRef, useMemo, useState } from "react";
 import { CopyAddress } from "./CopyAddress";
 import { Timestamp } from "./Timestamp";
 import { VirtualListItem } from "./VirtualListItem";
+import { getConfig } from "../lib/config";
+import type { StellarNetwork } from "../lib/config/stellar";
+import { explorerTxUrl } from "../lib/explorer";
 
 /**
  * Contract event types emitted by the StreamPay Soroban contract over a
@@ -84,6 +87,11 @@ interface EventTimelineProps {
   onLoadMore?: () => void;
   /** When true, the "Load more" button shows a loading indicator. */
   loadingMore?: boolean;
+  /**
+   * Stellar network used to build explorer links.
+   * Defaults to the network from the app config (same approach as NetworkBadge).
+   */
+  network?: StellarNetwork;
 }
 
 /**
@@ -99,8 +107,18 @@ interface EventTimelineProps {
  * - Result count changes are announced via `role="status"` / `aria-live`.
  * - Each event exposes a descriptive `aria-label` summarising type + time.
  */
-export function EventTimeline({ events, hasMore, onLoadMore, loadingMore }: EventTimelineProps) {
+export function EventTimeline({ events, hasMore, onLoadMore, loadingMore, network: networkOverride }: EventTimelineProps) {
   const [activeFilter, setActiveFilter] = useState<FilterValue>("all");
+
+  // Resolve network once: prefer the explicit prop, fall back to app config.
+  const network = useMemo<StellarNetwork | null>(() => {
+    if (networkOverride) return networkOverride;
+    try {
+      return getConfig().network.name as StellarNetwork;
+    } catch {
+      return null;
+    }
+  }, [networkOverride]);
 
   // Track list length so we can move focus to the first newly-appended item
   // after "Load more" (WCAG 2.1 AA — keyboard users must not lose context).
@@ -240,7 +258,43 @@ export function EventTimeline({ events, hasMore, onLoadMore, loadingMore }: Even
                               <div className="event-meta__item">
                                 <dt>Tx</dt>
                                 <dd>
-                                  <CopyAddress value={event.txHash} truncateChars={6} />
+                                  {(() => {
+                                    const url = network ? explorerTxUrl(network, event.txHash) : null;
+                                    return url ? (
+                                      <span className="event-meta__tx">
+                                        <a
+                                          href={url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          aria-label="View transaction on explorer"
+                                          className="event-meta__explorer-link"
+                                        >
+                                          <CopyAddress value={event.txHash} truncateChars={6} />
+                                          {/* External-link affordance icon */}
+                                          <svg
+                                            aria-hidden="true"
+                                            focusable="false"
+                                            className="event-meta__external-icon"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            width="12"
+                                            height="12"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                          >
+                                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                            <polyline points="15 3 21 3 21 9" />
+                                            <line x1="10" y1="14" x2="21" y2="3" />
+                                          </svg>
+                                        </a>
+                                      </span>
+                                    ) : (
+                                      <CopyAddress value={event.txHash} truncateChars={6} />
+                                    );
+                                  })()}
                                 </dd>
                               </div>
                             )}
