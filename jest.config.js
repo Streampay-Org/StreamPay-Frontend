@@ -50,7 +50,6 @@ const config = {
     "<rootDir>/app/streams/new/page.focus.test.tsx",
     "<rootDir>/app/streams/new/page.resp.test.tsx",
     "<rootDir>/app/streams/page.test.tsx",
-    "<rootDir>/app/streams/streams-cascade.test.tsx",
     "<rootDir>/app/streams/StreamsPageContent.test.tsx",
     "<rootDir>/app/StreamTypeChip.test.tsx",
     "<rootDir>/lib/sorobanRetryQueue.test.ts",

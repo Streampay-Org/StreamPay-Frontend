@@ -142,10 +142,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "app/streams/streams-cascade.test.tsx",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/streams/StreamsPageContent.test.tsx",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
