@@ -64,6 +64,7 @@
 
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
+import { idempotencyKeyErrorResponse, validateIdempotencyKey } from "@/app/lib/idempotency";
 import {
   computeFingerprint,
   getStore,
@@ -417,14 +418,12 @@ export async function POST(request: Request) {
   let fingerprint = "";
 
   if (!dryRun) {
-    const idempotencyKey = request.headers.get("Idempotency-Key")?.trim() ?? "";
-    if (!idempotencyKey) {
-      return errorResponse(
-        "IDEMPOTENCY_KEY_REQUIRED",
-        "Idempotency-Key header is required when dryRun is false.",
-        400,
-      );
+    const rawIdempotencyKey = request.headers.get("Idempotency-Key");
+    const keyValidation = validateIdempotencyKey(rawIdempotencyKey);
+    if (!keyValidation.ok) {
+      return idempotencyKeyErrorResponse(keyValidation.reason);
     }
+    const idempotencyKey = keyValidation.key;
 
     const canonicalRows = normalisedRows.map(canonicaliseRowForFingerprint);
     fingerprint = computeFingerprint("POST", "/api/streams/import", canonicalRows);

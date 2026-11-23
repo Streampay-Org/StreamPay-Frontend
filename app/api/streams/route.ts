@@ -24,6 +24,10 @@ import {
 import { recordCreationQuotaRejection } from "@/app/lib/org-quota-metrics";
 import { orgDb } from "@/app/lib/org-db";
 import {
+  idempotencyKeyErrorResponse,
+  validateIdempotencyKey,
+} from "@/app/lib/idempotency";
+import {
   decodeStreamCursor,
   encodeStreamCursor,
   isAfterCursor,
@@ -321,7 +325,16 @@ async function handleStreamsPost(request: Request) {
       return rateLimitResult.response;
     }
 
-    const idempotencyKey = getHeader(request, "Idempotency-Key");
+    const rawIdempotencyKey = getHeader(request, "Idempotency-Key");
+    let idempotencyKey: string | null = null;
+    if (rawIdempotencyKey !== null) {
+      const keyValidation = validateIdempotencyKey(rawIdempotencyKey);
+      if (!keyValidation.ok) {
+        status = 400;
+        return idempotencyKeyErrorResponse(keyValidation.reason);
+      }
+      idempotencyKey = keyValidation.key;
+    }
     const token = idempotencyKey ? idempotencyToken("streams.create", idempotencyKey) : null;
 
   const id = `stream-${crypto.randomUUID().slice(0, 8)}`;

@@ -68,7 +68,10 @@ describe("withIdempotency", () => {
     );
 
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe("IdempotencyKeyRequired");
+    expect((await res.json()).error).toMatchObject({
+      code: "IDEMPOTENCY_KEY_REQUIRED",
+      message: expect.any(String),
+    });
     expect(handler).not.toHaveBeenCalled();
   });
 
@@ -85,7 +88,10 @@ describe("withIdempotency", () => {
     );
 
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe("IdempotencyKeyInvalid");
+    expect((await res.json()).error).toMatchObject({
+      code: "IDEMPOTENCY_KEY_INVALID",
+      message: expect.any(String),
+    });
     expect(handler).not.toHaveBeenCalled();
   });
 

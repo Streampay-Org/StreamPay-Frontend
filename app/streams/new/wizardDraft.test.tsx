@@ -97,7 +97,7 @@ describe("NewStreamPage - Save Draft State (#863)", () => {
     };
     window.localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(savedDraft));
 
-    render(<NewStreamPage />);
+    const { rerender, unmount } = render(<NewStreamPage />);
 
     expect(screen.getByTestId("draft-restored-banner")).toBeInTheDocument();
 
@@ -110,6 +110,39 @@ describe("NewStreamPage - Save Draft State (#863)", () => {
     expect(screen.getByLabelText(/token/i)).toHaveValue("XLM");
 
     expect(window.localStorage.getItem(WIZARD_DRAFT_KEY)).toBeNull();
+
+    // Stays null after a re-render and after unmount
+    rerender(<NewStreamPage />);
+    expect(window.localStorage.getItem(WIZARD_DRAFT_KEY)).toBeNull();
+
+    unmount();
+    expect(window.localStorage.getItem(WIZARD_DRAFT_KEY)).toBeNull();
+  });
+
+  it("saves a new draft normally when editing a field after discarding", () => {
+    const savedDraft = {
+      recipient: "GD72X2Y3B6V7XW5P",
+      amount: "450",
+      token: "USDC" as const,
+      gasOnRecipient: true,
+      savedAt: Date.now(),
+    };
+    window.localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(savedDraft));
+
+    render(<NewStreamPage />);
+
+    fireEvent.click(screen.getByTestId("discard-draft-btn"));
+    expect(window.localStorage.getItem(WIZARD_DRAFT_KEY)).toBeNull();
+
+    const recipientInput = screen.getByLabelText(/recipient address/i);
+    fireEvent.change(recipientInput, { target: { value: "GNEWRECIPIENT123" } });
+
+    const raw = window.localStorage.getItem(WIZARD_DRAFT_KEY);
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw!);
+    expect(parsed.recipient).toBe("GNEWRECIPIENT123");
+    expect(parsed.amount).toBe("");
+    expect(parsed.token).toBe("XLM");
   });
 
   it("clears localStorage draft on successful stream creation", async () => {

@@ -8,8 +8,10 @@ import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { withTimeout } from "@/src/middleware/timeout";
 import { withStrongEtag } from "@/src/middleware/etag";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
+import { generateRequestId } from "@/lib/requestId";
 import { logAccessEvent } from "@/src/middleware/accessLog";
 import { exportCounter, exportDuration } from "@/src/metrics/registry";
+import { validateExportRequest } from "@/src/validators/exports";
 
 function getRequestUrl(request: Request): URL {
   try {
@@ -37,8 +39,8 @@ const EXPORTS_TIMEOUT_MS =
   Number(process.env.EXPORTS_TIMEOUT_MS) || 15_000;
 
 function createErrorResponse(code: string, message: string, status: number) {
-  const context = getCorrelationContext();
-  return NextResponse.json({ error: { code, message, request_id: context?.request_id } }, { status });
+  const requestId = getCorrelationContext()?.request_id ?? generateRequestId();
+  return NextResponse.json({ error: { code, message, request_id: requestId } }, { status });
 }
 
 function createAuditRecord(exportId: string, type: "export.requested" | "export.downloaded" | "export.expired", details?: Record<string, unknown>) {
@@ -49,6 +51,24 @@ function createAuditRecord(exportId: string, type: "export.requested" | "export.
     timestamp: new Date().toISOString(),
     details,
   });
+}
+
+async function enforceExportRateLimit(request: Request, method: "GET" | "POST", walletAddress: string) {
+  const url = getRequestUrl(request);
+  const limitType = getLimitForRoute(method, url.pathname);
+  const identity: ClientIdentity = {
+    type: "wallet",
+    value: walletAddress,
+    displayValue: walletAddress.slice(0, 16) + "...",
+  };
+  const result = await checkRateLimit(identity, limitType);
+
+  if (!result.allowed) {
+    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
+    return rateLimitResponse(result.retryAfter!);
+  }
+  recordRequest(url.pathname);
+  return null;
 }
 
 function escapeCsvField(value: string | undefined): string {
@@ -146,7 +166,19 @@ function recordExportMetrics(method: "GET" | "POST", status: number, startedAt: 
   exportDuration.observe(labels, durationSeconds);
 }
 
+/**
+ * POST /api/exports — enqueue a new data export job.
+ *
+ * Request processing order:
+ * 1. Authentication (`tryAuthenticateRequest` -> 401 UNAUTHORIZED) before reading/parsing body
+ * 2. JSON body parsing (400 INVALID_JSON for malformed/empty JSON)
+ * 3. Schema validation (`validateExportRequest` -> 422 VALIDATION_ERROR)
+ * 4. Per-wallet rate limiting (429 rate_limit_exceeded)
+ */
 export async function POST(request: Request) {
+  const actor = tryAuthenticateRequest(request);
+  if (!actor) {
+    return createErrorResponse("UNAUTHORIZED", "Missing or invalid authorization header", 401);
   const startedAt = process.hrtime();
   let status = 500;
   let actorId: string | undefined;
@@ -174,20 +206,22 @@ export async function POST(request: Request) {
         }
       }
 
-      const { validateExportRequest } = await import("@/src/validators/exports");
       const validation = validateExportRequest(body);
-      
+
       if (!validation.success) {
-        errorCode = "VALIDATION_FAILED";
-        const context = getCorrelationContext();
-        return NextResponse.json({
-          error: {
-            code: "VALIDATION_FAILED",
-            message: "Invalid export filters",
-            details: validation.errors,
-            request_id: context?.request_id
-          }
-        }, { status: 400 });
+        errorCode = "VALIDATION_ERROR";
+        const requestId = getCorrelationContext()?.request_id ?? generateRequestId();
+        return NextResponse.json(
+          {
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "Invalid export filters",
+              details: validation.errors,
+              request_id: requestId,
+            },
+          },
+          { status: 422 },
+        );
       }
 
       const filters = validation.data;
@@ -220,12 +254,16 @@ export async function POST(request: Request) {
         requestedAt,
         status: "pending",
         expiresAt,
-        fileName: `streampay-export-${requestedAt.slice(0, 10)}.csv`,
+        fileName: `streampay-export-${requestedAt.slice(0, 10)}.${filters.format}`,
         rows: 0,
       };
 
       exportRepository.jobs.set(id, job);
-      createAuditRecord(id, "export.requested", { requestedAt, retentionDays: EXPORT_RETENTION_DAYS });
+      createAuditRecord(id, "export.requested", {
+        requestedAt,
+        retentionDays: EXPORT_RETENTION_DAYS,
+        format: filters.format,
+      });
       scheduleExportJob(id);
 
       exportJobId = id;
@@ -247,8 +285,8 @@ export async function POST(request: Request) {
       path: "/api/exports",
       status,
       durationMs,
-      actorId,
-      exportJobId,
+      ...(actorId !== undefined ? { actorId } : {}),
+      ...(exportJobId !== undefined ? { exportJobId } : {}),
       ...(errorCode ? { errorCode } : {}),
     });
     recordExportMetrics("POST", status, startedAt);
@@ -360,6 +398,31 @@ export async function GET(request: Request) {
       return withStrongEtag(request, payload);
     });
 
+  // Limit by the verified wallet, after auth, so a forged bearer token can
+  // neither mint fresh buckets nor spend another user's budget.
+  const rateLimited = await enforceExportRateLimit(request, "POST", actor.walletAddress);
+  if (rateLimited) return rateLimited;
+
+  const { exportRepository } = getStore();
+  const id = crypto.randomUUID();
+  const requestedAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + EXPORT_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  const job: ExportJob = {
+    id,
+    ownerId: actor.walletAddress,
+    requestedAt,
+    status: "pending",
+    expiresAt,
+    fileName: `streampay-export-${requestedAt.slice(0, 10)}.csv`,
+    rows: 0,
+  };
+
+  exportRepository.jobs.set(id, job);
+  createAuditRecord(id, "export.requested", { requestedAt, retentionDays: EXPORT_RETENTION_DAYS });
+  scheduleExportJob(id);
+
+  return NextResponse.json({ data: job, links: { self: `/api/exports/${id}` } }, { status: 201 });
     status = response.status;
     return response;
   } catch (error) {
@@ -375,9 +438,23 @@ export async function GET(request: Request) {
       path: "/api/exports",
       status,
       durationMs,
-      actorId,
+      ...(actorId !== undefined ? { actorId } : {}),
       ...(errorCode ? { errorCode } : {}),
     });
     recordExportMetrics("GET", status, startedAt);
   }
+}
+
+export async function GET(request: Request) {
+  const actor = tryAuthenticateRequest(request);
+  if (!actor) {
+    return createErrorResponse("UNAUTHORIZED", "Missing or invalid authorization header", 401);
+  }
+
+  const rateLimited = await enforceExportRateLimit(request, "GET", actor.walletAddress);
+  if (rateLimited) return rateLimited;
+
+  const jobs = Array.from(getStore().exportRepository.jobs.values())
+    .filter((job) => job.ownerId === actor.walletAddress);
+  return NextResponse.json({ data: jobs });
 }

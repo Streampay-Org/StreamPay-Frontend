@@ -71,9 +71,11 @@ function seedTestData(): void {
   });
 }
 
+const DEFAULT_REASON = "Emergency pause for compromised sender account";
+
 function postReq(
   body: unknown,
-  opts: { actor?: string } = {},
+  opts: { actor?: string; omitReason?: boolean } = {},
 ): Request {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -81,10 +83,20 @@ function postReq(
   if (opts.actor) {
     headers["Actor-Wallet-Address"] = opts.actor;
   }
+  let payload = body;
+  if (
+    !opts.omitReason &&
+    body &&
+    typeof body === "object" &&
+    !Array.isArray(body) &&
+    !("reason" in (body as Record<string, unknown>))
+  ) {
+    payload = { ...(body as Record<string, unknown>), reason: DEFAULT_REASON };
+  }
   return new Request("http://localhost/api/admin/pause-by-sender", {
     method: "POST",
     headers,
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -118,6 +130,29 @@ describe("POST /api/admin/pause-by-sender", () => {
         postReq({ senderAddress: SENDER_A }, { actor: ADMIN_ADDR }),
       );
       expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.auditRequestId).toBeTruthy();
+      const entries = auditLogStore.list({ action: "admin.pause-by-sender" });
+      expect(entries.length).toBeGreaterThanOrEqual(1);
+      expect(entries[0].metadata?.reason).toBe(DEFAULT_REASON);
+    });
+
+    it("returns 422 when reason is missing", async () => {
+      const res = await POST(
+        postReq({ senderAddress: SENDER_A }, { actor: ADMIN_ADDR, omitReason: true }),
+      );
+      expect(res.status).toBe(422);
+      const body = await res.json();
+      expect(body.error.code).toBe("VALIDATION_ERROR");
+    });
+
+    it("returns 422 when reason is too short", async () => {
+      const res = await POST(
+        postReq({ senderAddress: SENDER_A, reason: "short" }, { actor: ADMIN_ADDR }),
+      );
+      expect(res.status).toBe(422);
+      const body = await res.json();
+      expect(body.error.code).toBe("VALIDATION_ERROR");
     });
   });
 
