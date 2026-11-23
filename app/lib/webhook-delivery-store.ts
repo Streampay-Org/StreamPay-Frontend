@@ -15,6 +15,15 @@ export interface WebhookDeliveriesPage {
   total: number;
 }
 
+export interface WebhookDeliveryHealthStats {
+  total: number;
+  delivered: number;
+  failed: number;
+  pending: number;
+  dlq: number;
+  stale: number;
+}
+
 /**
  * In-memory storage for webhook deliveries and DLQ entries.
  * In production, this would use PostgreSQL or similar.
@@ -333,6 +342,61 @@ export class WebhookDeliveryStore {
       dlq: deliveries.filter(d => d.status === 'dlq').length,
       totalAttempts: deliveries.reduce((sum, d) => sum + d.attempts.length, 0),
       dlqEntries: this.dlq.size,
+    };
+  }
+
+  /**
+   * Aggregate delivery counts by status and detect stale pending deliveries.
+   *
+   * A pending delivery is considered stale when its last attempt timestamp
+   * (or `createdAt` if no attempts have been recorded) is strictly older than
+   * `staleAfterMs` relative to `now`.
+   */
+  getDeliveryHealthStats(
+    now: Date | number,
+    staleAfterMs: number,
+  ): WebhookDeliveryHealthStats {
+    const nowMs = typeof now === 'number' ? now : now.getTime();
+    let delivered = 0;
+    let failed = 0;
+    let pending = 0;
+    let dlq = 0;
+    let stale = 0;
+
+    for (const record of this.deliveries.values()) {
+      switch (record.status) {
+        case 'delivered':
+          delivered += 1;
+          break;
+        case 'failed':
+          failed += 1;
+          break;
+        case 'dlq':
+          dlq += 1;
+          break;
+        case 'pending': {
+          pending += 1;
+          const lastAttempt =
+            record.attempts.length > 0
+              ? record.attempts[record.attempts.length - 1]
+              : undefined;
+          const refTimestamp = lastAttempt?.timestamp ?? record.createdAt;
+          const refMs = new Date(refTimestamp).getTime();
+          if (Number.isFinite(refMs) && nowMs - refMs > staleAfterMs) {
+            stale += 1;
+          }
+          break;
+        }
+      }
+    }
+
+    return {
+      total: this.deliveries.size,
+      delivered,
+      failed,
+      pending,
+      dlq,
+      stale,
     };
   }
 }

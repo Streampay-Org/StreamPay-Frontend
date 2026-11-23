@@ -151,6 +151,202 @@ export const settleJobStreamsCounter = getOrCreateCounter('settle_job_streams_to
   labelNames: ['result'],
 });
 
+// ── Generic HTTP request duration histogram ──────────────────────────────────
+
+export const HTTP_REQUEST_DURATION_BUCKETS = [
+  0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
+];
+
+export const httpRequestDuration = getOrCreateHistogram('http_request_duration_seconds', {
+  help: 'Histogram of HTTP request duration in seconds',
+  labelNames: ['method', 'route', 'status_class'],
+  buckets: HTTP_REQUEST_DURATION_BUCKETS,
+});
+
+/**
+ * Bounded set of canonical API route templates.
+ * Dynamic segments are represented as `:id` so label cardinality stays bounded.
+ */
+const KNOWN_ROUTE_TEMPLATES = new Set<string>([
+  '/api/activity',
+  '/api/admin/circuit-breaker',
+  '/api/admin/jobs',
+  '/api/admin/pause',
+  '/api/admin/pause-by-sender',
+  '/api/admin/quotas',
+  '/api/admin/quotas/:id',
+  '/api/admin/rotate',
+  '/api/admin/streams/health',
+  '/api/admin/upgrade',
+  '/api/admin/webhooks/redeliver',
+  '/api/audit',
+  '/api/audit/archive',
+  '/api/audit/export',
+  '/api/auth/logout',
+  '/api/auth/wallet',
+  '/api/auth/wallet/health',
+  '/api/debug/kms-sign',
+  '/api/exports',
+  '/api/exports/health',
+  '/api/exports/:id',
+  '/api/healthz',
+  '/api/identity/me',
+  '/api/identity/me/delete',
+  '/api/indexer/sse',
+  '/api/indexer/status',
+  '/api/internal/cleanup/idempotency',
+  '/api/internal/jobs/settle-ended',
+  '/api/internal/reconciliation',
+  '/api/internal/reconciliation/diff/:id',
+  '/api/internal/reconciliation/nightly',
+  '/api/metrics',
+  '/api/notifications/preferences',
+  '/api/orgs',
+  '/api/orgs/:id',
+  '/api/orgs/:id/audit',
+  '/api/orgs/:id/members',
+  '/api/orgs/:id/policy',
+  '/api/orgs/:id/token-allowlist',
+  '/api/readyz',
+  '/api/reconciliation',
+  '/api/reconciliation/health',
+  '/api/streams',
+  '/api/streams/batch',
+  '/api/streams/batch/start',
+  '/api/streams/batch/stop',
+  '/api/streams/dryrun',
+  '/api/streams/events',
+  '/api/streams/health',
+  '/api/streams/import',
+  '/api/streams/preview',
+  '/api/streams/search',
+  '/api/streams/stats',
+  '/api/streams/template',
+  '/api/streams/:id',
+  '/api/streams/:id/approvals',
+  '/api/streams/:id/approvals/:id/approve',
+  '/api/streams/:id/cancel',
+  '/api/streams/:id/cancel/preview',
+  '/api/streams/:id/events',
+  '/api/streams/:id/history',
+  '/api/streams/:id/pause',
+  '/api/streams/:id/settle',
+  '/api/streams/:id/settle/preview',
+  '/api/streams/:id/start',
+  '/api/streams/:id/stop',
+  '/api/streams/:id/webhooks/test',
+  '/api/streams/:id/withdraw',
+  '/api/streams/:id/withdraw/preview',
+  '/api/v2/streams',
+  '/api/v2/streams/batch',
+  '/api/v2/streams/multi',
+  '/api/v2/streams/multi/:id',
+  '/api/v2/streams/multi/:id/pause',
+  '/api/v2/streams/multi/:id/start',
+  '/api/v2/streams/multi/:id/stop',
+  '/api/v2/streams/:id',
+  '/api/webhooks',
+  '/api/webhooks/deliveries',
+  '/api/webhooks/dlq',
+  '/api/webhooks/dlq/:id/replay',
+  '/api/webhooks/health',
+  '/api/webhooks/rotate',
+  '/api/webhooks/subscriptions',
+]);
+
+const DYNAMIC_ROUTE_PATTERNS: Array<{ template: string; segments: string[] }> = Array.from(
+  KNOWN_ROUTE_TEMPLATES,
+)
+  .filter((template) => template.includes(':id'))
+  .map((template) => ({ template, segments: template.split('/') }));
+
+/**
+ * Pure function that normalizes a raw URL path or route template into a
+ * bounded route label (e.g. `/api/streams/abc123` -> `/api/streams/:id`,
+ * `/api/streams/[id]` -> `/api/streams/:id`). Unknown routes are grouped as
+ * `unmatched` so label cardinality stays bounded.
+ */
+export function normalizeRoute(path: string): string {
+  if (!path || typeof path !== 'string') {
+    return 'unmatched';
+  }
+
+  // Strip query string and fragment, collapse duplicate slashes, trim trailing slash.
+  let cleaned = path.split(/[?#]/, 1)[0].replace(/\/{2,}/g, '/');
+  if (cleaned.length > 1 && cleaned.endsWith('/')) {
+    cleaned = cleaned.slice(0, -1);
+  }
+  if (!cleaned.startsWith('/')) {
+    return 'unmatched';
+  }
+
+  // Normalize Next.js bracket params (`[id]`, `[orgId]`) and `:param` placeholders to `:id`.
+  const templateNormalized = cleaned
+    .split('/')
+    .map((seg) => (/^\[[^\]]+\]$/.test(seg) || /^:[^/]+$/.test(seg) ? ':id' : seg))
+    .join('/');
+
+  if (KNOWN_ROUTE_TEMPLATES.has(templateNormalized)) {
+    return templateNormalized;
+  }
+
+  // Match raw paths against known dynamic route templates (static routes already matched above).
+  const segments = templateNormalized.split('/');
+  for (const candidate of DYNAMIC_ROUTE_PATTERNS) {
+    if (candidate.segments.length !== segments.length) continue;
+    let matched = true;
+    for (let i = 0; i < segments.length; i++) {
+      if (candidate.segments[i] !== ':id' && candidate.segments[i] !== segments[i]) {
+        matched = false;
+        break;
+      }
+      if (candidate.segments[i] === ':id' && segments[i].length === 0) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) {
+      return candidate.template;
+    }
+  }
+
+  return 'unmatched';
+}
+
+function toStatusClass(status: number): string {
+  if (!Number.isFinite(status)) return '5xx';
+  const group = Math.floor(status / 100);
+  if (group >= 1 && group <= 5) {
+    return `${group}xx`;
+  }
+  return 'unknown';
+}
+
+/**
+ * Record an HTTP request duration observation on `http_request_duration_seconds`.
+ */
+export function observeHttpRequest(
+  method: string,
+  route: string,
+  status: number,
+  durationSeconds: number,
+): void {
+  const normalizedMethod = (method || 'UNKNOWN').toUpperCase();
+  const normalizedRoute = normalizeRoute(route);
+  const statusClass = toStatusClass(status);
+  const safeDuration =
+    Number.isFinite(durationSeconds) && durationSeconds >= 0 ? durationSeconds : 0;
+
+  httpRequestDuration.observe(
+    {
+      method: normalizedMethod,
+      route: normalizedRoute,
+      status_class: statusClass,
+    },
+    safeDuration,
+  );
+}
+
 // ── Outbound webhook delivery metrics ────────────────────────────────────────
 
 export type WebhookDeliveryOutcome =
@@ -174,6 +370,5 @@ export const webhookDeliveryDuration = getOrCreateHistogram(
 export function observeWebhookDelivery(
   outcome: WebhookDeliveryOutcome,
   seconds: number,
-): void {
   webhookDeliveryDuration.observe({ outcome }, Math.max(0, seconds));
 }

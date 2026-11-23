@@ -18,6 +18,11 @@ import {
   validatePartialQuietHours,
 } from "@/app/lib/quiet-hours";
 import {
+  getPreferences,
+  setPreferences,
+  type NotificationPreferences,
+} from "@/app/lib/notification-prefs-store";
+import {
   buildLimitsConfig,
   createBodySizeTooLargeResponse,
   getBodySizeLimit,
@@ -28,42 +33,6 @@ import {
   readJsonBody,
 } from "@/lib/readJsonBody";
 import { resolveRequestId } from "@/lib/requestId";
-
-export interface NotificationPreferences {
-  userId: string;
-  email: boolean;
-  inApp: boolean;
-  webhook: boolean;
-  soundEnabled: boolean;
-  events: {
-    streamCreated: boolean;
-    streamCompleted: boolean;
-    streamCancelled: boolean;
-    paymentFailed: boolean;
-    lowBalance: boolean;
-  };
-  quietHours: QuietHoursConfig;
-  updatedAt: string;
-}
-
-const prefsStore = new Map<string, NotificationPreferences>();
-
-const DEFAULT_PREFS: Omit<NotificationPreferences, "userId" | "updatedAt"> = {
-  email: true,
-  inApp: true,
-  webhook: false,
-  soundEnabled: true,
-  events: {
-    streamCreated: true,
-    streamCompleted: true,
-    paymentFailed: true,
-    streamCancelled: true,
-    lowBalance: false,
-  },
-  quietHours: {
-    ...DEFAULT_QUIET_HOURS,
-  },
-};
 
 const TOP_LEVEL_FIELDS = ["email", "inApp", "webhook", "soundEnabled", "events", "quietHours"] as const;
 const EVENT_FIELDS = [
@@ -102,22 +71,6 @@ function createErrorResponse(request: Request, code: string, message: string, st
     },
     { status },
   );
-}
-
-function getPreferences(userId: string): NotificationPreferences {
-  const existing = prefsStore.get(userId);
-  if (existing) {
-    // Ensure quietHours is populated even if previously saved without it
-    return {
-      ...existing,
-      quietHours: existing.quietHours ?? { ...DEFAULT_QUIET_HOURS },
-    };
-  }
-  return {
-    userId,
-    ...DEFAULT_PREFS,
-    updatedAt: new Date().toISOString(),
-  };
 }
 
 interface PartialPreferencePayload {
@@ -309,7 +262,7 @@ async function handleNotificationPreferencesPut(request: Request) {
     updatedAt: new Date().toISOString(),
   };
 
-  prefsStore.set(actor.actorId, updated);
+  setPreferences(actor.actorId, updated);
   const newEtag = computeETag(actor.actorId, updated);
 
   logger.info("Notification preferences updated", {

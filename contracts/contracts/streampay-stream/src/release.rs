@@ -16,6 +16,16 @@ use core::cmp::{max, min};
 ///
 /// Accounts for paused duration: time "stops" while the stream is paused.
 ///
+/// ## Cliff semantics
+///
+/// When `stream.cliff_time > 0`, vesting is withheld (`0`) until the active
+/// elapsed time reaches `cliff_time - start_time`. At and after the cliff,
+/// vesting jumps to the full linear amount for the elapsed time
+/// (`total_amount * elapsed / duration`) and still reaches `total_amount` at
+/// `end_time`. Because the cliff threshold is evaluated against `elapsed`
+/// (which already excludes paused time), pausing across the cliff shifts the
+/// effective cliff date by the paused duration in lockstep with `end_time`.
+///
 /// # Returns
 ///
 /// * `Ok(vested)` — the vested amount, always in `[0, total_amount]`.
@@ -37,6 +47,15 @@ pub fn vested_amount(stream: &Stream, now: u64) -> Result<i128, Error> {
     let elapsed = effective_now
         .saturating_sub(stream.start_time)
         .saturating_sub(stream.total_paused_duration);
+
+    // If a cliff is configured, nothing vests until active elapsed time
+    // reaches `cliff_time - start_time`.
+    if stream.cliff_time > 0 {
+        let cliff_elapsed = stream.cliff_time.saturating_sub(stream.start_time);
+        if elapsed < cliff_elapsed {
+            return Ok(0);
+        }
+    }
 
     // If stream duration has fully elapsed, total amount is fully vested
     if stream.duration == 0 || elapsed >= stream.duration {
@@ -99,6 +118,7 @@ mod tests {
             paused_at: 0,
             total_paused_duration: 0,
             fee_bps: 0,
+            cliff_time: 0,
         }
     }
 
@@ -272,5 +292,77 @@ mod tests {
                 case.0, case.1, case.2, case.3, case.4, case.5, result
             );
         }
+    }
+
+    // ── cliff tests ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cliff_before_at_and_after() {
+        let mut stream = test_stream(1000, 0, 1000, 2000);
+        stream.cliff_time = 1400; // 40% cliff
+
+        // Before cliff: vested and withdrawable are 0
+        assert_eq!(vested_amount(&stream, 1000), Ok(0));
+        assert_eq!(vested_amount(&stream, 1399), Ok(0));
+        assert_eq!(withdrawable(&stream, 1399), Ok(0));
+
+        // Exactly at cliff: jumps to linear amount for elapsed time (400 / 1000 * 1000 = 400)
+        assert_eq!(vested_amount(&stream, 1400), Ok(400));
+        assert_eq!(withdrawable(&stream, 1400), Ok(400));
+
+        // After cliff: continues linearly to total_amount at end_time
+        assert_eq!(vested_amount(&stream, 1700), Ok(700));
+        assert_eq!(vested_amount(&stream, 2000), Ok(1000));
+        assert_eq!(vested_amount(&stream, 2500), Ok(1000));
+    }
+
+    #[test]
+    fn test_cliff_at_start_time_vests_immediately() {
+        let mut stream = test_stream(1000, 0, 1000, 2000);
+        stream.cliff_time = 1000;
+
+        assert_eq!(vested_amount(&stream, 1000), Ok(0));
+        assert_eq!(vested_amount(&stream, 1250), Ok(250));
+        assert_eq!(vested_amount(&stream, 2000), Ok(1000));
+    }
+
+    #[test]
+    fn test_cliff_at_end_time_withholds_until_end() {
+        let mut stream = test_stream(1000, 0, 1000, 2000);
+        stream.cliff_time = 2000;
+
+        assert_eq!(vested_amount(&stream, 1500), Ok(0));
+        assert_eq!(vested_amount(&stream, 1999), Ok(0));
+        assert_eq!(vested_amount(&stream, 2000), Ok(1000));
+        assert_eq!(vested_amount(&stream, 2500), Ok(1000));
+    }
+
+    #[test]
+    fn test_cliff_paused_across_cliff() {
+        // Stream [1000, 2000], cliff at 1500 (500s of active time required).
+        let mut stream = test_stream(1000, 0, 1000, 2000);
+        stream.cliff_time = 1500;
+
+        // Paused at 1200 (200s active elapsed).
+        stream.status = StreamStatus::Paused;
+        stream.paused_at = 1200;
+
+        // Even when wall clock passes 1500 while paused, active elapsed is still 200 < 500.
+        assert_eq!(vested_amount(&stream, 1600), Ok(0));
+
+        // Resumed at 1700 (500s paused): total_paused_duration = 500, end_time = 2500.
+        stream.status = StreamStatus::Active;
+        stream.paused_at = 0;
+        stream.total_paused_duration = 500;
+        stream.end_time = 2500;
+
+        // At 1700, active elapsed = 1700 - 1000 - 500 = 200 < 500 -> still 0.
+        assert_eq!(vested_amount(&stream, 1700), Ok(0));
+        // At 1999, active elapsed = 499 < 500 -> still 0.
+        assert_eq!(vested_amount(&stream, 1999), Ok(0));
+        // At 2000, active elapsed = 500 >= 500 -> jumps to 500.
+        assert_eq!(vested_amount(&stream, 2000), Ok(500));
+        // At extended end_time 2500, active elapsed = 1000 -> 1000.
+        assert_eq!(vested_amount(&stream, 2500), Ok(1000));
     }
 }
