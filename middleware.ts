@@ -5,7 +5,7 @@ import {
   isOriginAllowed,
   DEFAULT_CORS_HEADERS,
   DEFAULT_CORS_METHODS,
-  DEFAULT_CORS_MAX_AGE_SECONDS,
+  resolveCorsMaxAge,
 } from './app/lib/cors';
 import {
   REQUEST_FINGERPRINT_HEADER,
@@ -46,6 +46,7 @@ const bodyLimits = buildLimitsConfig();
 validateConfig();
 
 const allowedOrigins = buildAllowedOriginSet(process.env.ALLOWED_ORIGINS);
+const corsMaxAgeSeconds = resolveCorsMaxAge(process.env.CORS_MAX_AGE_SECONDS);
 
 // Chaos/fault injection config. Resolved once at module init; force-disabled in
 // production by getChaosConfig regardless of env vars.
@@ -62,7 +63,7 @@ function buildCorsHeaders(origin: string) {
   headers.set('Access-Control-Allow-Origin', origin);
   headers.set('Access-Control-Allow-Methods', DEFAULT_CORS_METHODS);
   headers.set('Access-Control-Allow-Headers', DEFAULT_CORS_HEADERS);
-  headers.set('Access-Control-Max-Age', String(DEFAULT_CORS_MAX_AGE_SECONDS));
+  headers.set('Access-Control-Max-Age', String(corsMaxAgeSeconds));
   headers.set('Vary', 'Origin');
   return headers;
 }
