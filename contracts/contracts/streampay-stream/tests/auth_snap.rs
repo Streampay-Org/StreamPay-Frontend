@@ -27,7 +27,7 @@
 #![allow(clippy::expect_used)]
 
 use soroban_sdk::testutils::{Address as _, Ledger as _};
-use soroban_sdk::{token::StellarAssetClient, Address, Env};
+use soroban_sdk::{token::StellarAssetClient, vec, Address, Env};
 use streampay_stream::{Contract, ContractClient};
 
 // ── Shared test helpers ────────────────────────────────────────────────────────
@@ -556,6 +556,27 @@ fn auth_snap_cancel_split_stream() {
 
     data.env.mock_auths(&[]);
     client.cancel_split_stream(&id);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_amend_split_stream() {
+    let data = auth_setup();
+    let client = auth_initialized(&data);
+    let second_recipient = Address::generate(&data.env);
+    StellarAssetClient::new(&data.env, &data.token).mint(&second_recipient, &0);
+    let id = client.create_split_stream(
+        &data.sender,
+        &data.token,
+        &1_000i128,
+        &1_100u64,
+        &2_100u64,
+        &vec![&data.env, data.recipient.clone(), second_recipient],
+        &vec![&data.env, 1u64, 1u64],
+    );
+
+    data.env.mock_auths(&[]);
+    client.amend_split_stream(&id, &0, &None, &None);
 }
 
 // ── Recurring stream auth snapshots ────────────────────────────────────────────

@@ -2080,6 +2080,39 @@ impl Contract {
         )
     }
 
+    /// Amends an active or paused split stream by funding additional escrow,
+    /// changing recipient weights, and/or changing its end time.
+    ///
+    /// Any requested change is checked against the current vesting schedule so
+    /// no recipient's released amount exceeds its vested share.
+    ///
+    /// @param `stream_id` — Numeric ID of the split stream.
+    /// @param `top_up` — Additional tokens to transfer from the sender (>= 0).
+    /// @param `new_weights` — Optional replacement weights in recipient order.
+    /// @param `new_end_time` — Optional new end time.
+    ///
+    /// @return The updated [`SplitStream`] record.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the global pause flag is set.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::InvalidState`] if the stream is not active or paused.
+    /// @custom:error [`Error::InvalidAmount`] if an amount or weight is invalid,
+    /// @custom:error or if a recipient's released amount would exceed its new vested share.
+    /// @custom:error [`Error::InvalidTimeRange`] if `new_end_time` is not in the future
+    /// @custom:error or after `start_time`.
+    /// @custom:error [`Error::Overflow`] if amount, weight, duration, or vesting math overflows.
+    ///
+    /// @custom:auth Requires authorisation from the stream's `sender`.
+    pub fn amend_split_stream(
+        env: Env,
+        stream_id: u64,
+        top_up: i128,
+        new_weights: Option<soroban_sdk::Vec<u64>>,
+        new_end_time: Option<u64>,
+    ) -> Result<SplitStream, Error> {
+        multi::amend_split_stream(env, stream_id, top_up, new_weights, new_end_time)
+    }
+
     /// Withdraws accrued tokens from a split stream for a specific recipient.
     ///
     /// The recipient must be one of the stream's allocated recipients.
