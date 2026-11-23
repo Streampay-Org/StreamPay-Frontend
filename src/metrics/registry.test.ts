@@ -29,6 +29,7 @@ describe('src/metrics/registry', () => {
     expect(mod1.reconciliationDuration).toBe(mod2.reconciliationDuration);
     expect(mod1.streamsCounter).toBe(mod2.streamsCounter);
     expect(mod1.streamsDuration).toBe(mod2.streamsDuration);
+    expect(mod1.webhookDeliveryDuration).toBe(mod2.webhookDeliveryDuration);
   });
 
   describe('getOrCreateCounter', () => {
@@ -82,6 +83,34 @@ describe('src/metrics/registry', () => {
       const metrics = await registry.metrics();
       expect(metrics).toContain('api_streams_requests_total{method="POST",status="201"}');
       expect(metrics).toContain('api_streams_request_duration_seconds');
+    });
+  });
+
+  describe('observeWebhookDelivery', () => {
+    it('registers webhook_delivery_attempt_duration_seconds and observes samples by outcome', async () => {
+      const { registry, webhookDeliveryDuration, observeWebhookDelivery } = require('./registry');
+
+      expect(registry.getSingleMetric('webhook_delivery_attempt_duration_seconds')).toBe(
+        webhookDeliveryDuration,
+      );
+
+      observeWebhookDelivery('success', 0.12);
+      observeWebhookDelivery('timeout', 30);
+
+      const metric = registry.getSingleMetric('webhook_delivery_attempt_duration_seconds');
+      const data = await metric.get();
+      const successCount = data.values.find(
+        (v: { metricName?: string; labels: Record<string, string | number> }) =>
+          v.metricName === 'webhook_delivery_attempt_duration_seconds_count' &&
+          v.labels.outcome === 'success',
+      );
+      const timeoutCount = data.values.find(
+        (v: { metricName?: string; labels: Record<string, string | number> }) =>
+          v.metricName === 'webhook_delivery_attempt_duration_seconds_count' &&
+          v.labels.outcome === 'timeout',
+      );
+      expect(successCount?.value).toBeGreaterThanOrEqual(1);
+      expect(timeoutCount?.value).toBeGreaterThanOrEqual(1);
     });
   });
 });

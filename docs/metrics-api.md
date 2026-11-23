@@ -100,6 +100,7 @@ streampay_metrics_up 1
 | `streampay_metrics_up` | gauge | Whether the metrics endpoint is serving (always 1) |
 | `webhook_requests_total` | counter | Total `/api/webhooks` requests, labelled by status and event type |
 | `webhook_request_duration_seconds` | histogram | Latency of `/api/webhooks` handlers, labelled by status and event type |
+| `webhook_delivery_attempt_duration_seconds` | histogram | Outbound webhook delivery attempt latency in seconds, labelled by `outcome` (`success`, `retryable_failure`, `non_retryable_failure`, `timeout`, `deferred`, `circuit_open`); buckets `[0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30]`. Deferred and circuit-open attempts are recorded explicitly under their own `outcome` labels so they do not pollute network latency series. |
 | `export_requests_total` | counter | Total `/api/exports` requests, labelled by status and method |
 | `export_request_duration_seconds` | histogram | Latency of `/api/exports` handlers, labelled by status and method |
 | `wallet_auth_requests_total` | counter | Per-endpoint `/api/auth/wallet` request counter (see below) |

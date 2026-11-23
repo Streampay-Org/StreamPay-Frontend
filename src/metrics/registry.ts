@@ -150,3 +150,30 @@ export const settleJobStreamsCounter = getOrCreateCounter('settle_job_streams_to
   help: 'Total number of streams processed by the settle-ended internal job',
   labelNames: ['result'],
 });
+
+// ── Outbound webhook delivery metrics ────────────────────────────────────────
+
+export type WebhookDeliveryOutcome =
+  | 'success'
+  | 'retryable_failure'
+  | 'non_retryable_failure'
+  | 'timeout'
+  | 'deferred'
+  | 'circuit_open';
+
+export const webhookDeliveryDuration = getOrCreateHistogram(
+  'webhook_delivery_attempt_duration_seconds',
+  {
+    help: 'Histogram of outbound webhook delivery attempt duration in seconds',
+    labelNames: ['outcome'],
+    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+  },
+);
+
+/** Record an outbound webhook delivery attempt's duration in seconds. */
+export function observeWebhookDelivery(
+  outcome: WebhookDeliveryOutcome,
+  seconds: number,
+): void {
+  webhookDeliveryDuration.observe({ outcome }, Math.max(0, seconds));
+}
