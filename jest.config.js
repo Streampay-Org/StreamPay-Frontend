@@ -32,7 +32,6 @@ const config = {
     "<rootDir>/app/api/streams/\\[id\\]/webhooks/test/route.test.ts",
     "<rootDir>/app/api/streams/concurrency.test.ts",
     "<rootDir>/app/api/streams/stream-lifecycle.e2e.test.ts",
-    "<rootDir>/app/api/streams/v1-contract.test.ts",
     "<rootDir>/app/api/v2/streams/batch/route.test.ts",
     "<rootDir>/app/api/v2/streams/multi/route.test.ts",
     "<rootDir>/app/api/v2/streams/route.test.ts",
@@ -60,7 +59,6 @@ const config = {
     "<rootDir>/tests/contract.test.ts",
     "<rootDir>/tests/env.test.ts",
     "<rootDir>/tests/integration/exports.test.ts",
-    "<rootDir>/tests/streamsShape.test.ts",
   ],
   testMatch: ["**/*.test.{ts,tsx}", "**/*.spec.{ts,tsx}"],
   collectCoverageFrom: [

@@ -1221,6 +1221,8 @@
         ]
       },
       "StreamPolicy": {
+        "type": "object",
+        "required": [
           "policyVersion",
           "canStart",
           "canPause",
@@ -1230,8 +1232,10 @@
           "canWithdraw",
           "requireApprovals"
         ],
+        "properties": {
           "policyVersion": {
             "type": "integer",
+            "enum": [
               1
             ]
           },
@@ -1273,6 +1277,7 @@
           },
           "requireApprovals": {
             "type": "integer",
+            "enum": [
               1,
               2
             ]
@@ -1280,17 +1285,23 @@
         }
       },
       "UpdateOrgPolicyRequest": {
+        "type": "object",
+        "required": [
           "policy"
         ],
+        "properties": {
           "policy": {
             "$ref": "#/components/schemas/StreamPolicy"
           }
         }
       },
       "OrgPolicyResponse": {
+        "type": "object",
+        "required": [
           "data",
           "links"
         ],
+        "properties": {
           "data": {
             "type": "object",
             "required": [
@@ -4901,6 +4912,44 @@
             "bearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "description": "Maximum number of streams to return per page."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque pagination cursor returned by a previous page."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "active",
+                "paused",
+                "ended"
+              ]
+            },
+            "description": "Filter streams by lifecycle status."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Paginated stream list.",
@@ -4979,7 +5028,42 @@
                   "empty-list": {
                     "summary": "No streams for this user",
                     "value": {
-                      "streams": []
+                      "streams": [],
+                      "meta": {
+                        "hasNext": false,
+                        "nextCursor": null,
+                        "total": 0
+                      },
+                      "links": {
+                        "self": "/api/v2/streams?limit=20"
+                      }
+                    }
+                  },
+                  "paginated-first-page": {
+                    "summary": "First page with more results available",
+                    "value": {
+                      "streams": [
+                        {
+                          "id": "stream_lf3k9z",
+                          "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                          "rate": "120 XLM/month",
+                          "status": "active",
+                          "allowed_actions": [
+                            "pause",
+                            "stop"
+                          ],
+                          "created_at": "2024-01-15T10:00:00.000Z",
+                          "settlement": null
+                        }
+                      ],
+                      "meta": {
+                        "hasNext": true,
+                        "nextCursor": "eyJpZCI6InN0cmVhbV9sZjNrOXoifQ==",
+                        "total": 25
+                      },
+                      "links": {
+                        "self": "/api/v2/streams?limit=1"
+                      }
                     }
                   }
                 }
@@ -5078,16 +5162,35 @@
                 "schema": {
                   "$ref": "#/components/schemas/StreamV2"
                 },
-                "example": {
-                  "id": "stream_lf3k9z",
-                  "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
-                  "rate": "120 XLM/month",
-                  "status": "draft",
-                  "allowed_actions": [
-                    "start"
-                  ],
-                  "created_at": "2024-01-15T10:00:00.000Z",
-                  "settlement": null
+                "examples": {
+                  "draft-xlm": {
+                    "summary": "Created draft stream in XLM",
+                    "value": {
+                      "id": "stream_lf3k9z",
+                      "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                      "rate": "120 XLM/month",
+                      "status": "draft",
+                      "allowed_actions": [
+                        "start"
+                      ],
+                      "created_at": "2024-01-15T10:00:00.000Z",
+                      "settlement": null
+                    }
+                  },
+                  "draft-usdc": {
+                    "summary": "Created draft stream in USDC",
+                    "value": {
+                      "id": "stream_usdc01",
+                      "recipient": "GDEF1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFGH",
+                      "rate": "500 USDC/week",
+                      "status": "draft",
+                      "allowed_actions": [
+                        "start"
+                      ],
+                      "created_at": "2024-01-15T10:00:00.000Z",
+                      "settlement": null
+                    }
+                  }
                 }
               }
             }
@@ -7518,9 +7621,11 @@
       }
     },
     "/api/orgs/{orgId}/policy": {
+      "get": {
         "summary": "Get organization stream policy",
         "description": "Returns the current StreamPolicy for the specified organization along with a strong ETag header.",
         "operationId": "getOrgPolicy",
+        "tags": [
           "Organizations"
         ],
         "parameters": [
@@ -7534,20 +7639,31 @@
             "description": "Organization identifier"
           }
         ],
+        "responses": {
+          "200": {
             "description": "Organization stream policy",
             "headers": {
               "ETag": {
                 "description": "Strong entity tag for optimistic concurrency control",
+                "schema": {
                   "type": "string"
                 }
               }
             },
+            "content": {
+              "application/json": {
+                "schema": {
                   "$ref": "#/components/schemas/OrgPolicyResponse"
                 }
               }
             }
           },
+          "404": {
             "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -7558,6 +7674,7 @@
         "summary": "Replace organization stream policy",
         "description": "Replaces the StreamPolicy for an organization. Restricted to organization owners. Supports optimistic concurrency via the If-Match header and records an audit log entry.",
         "operationId": "updateOrgPolicy",
+        "tags": [
           "Organizations"
         ],
         "parameters": [
@@ -7581,6 +7698,7 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -7589,14 +7707,20 @@
             }
           }
         },
+        "responses": {
+          "200": {
             "description": "Updated organization stream policy",
             "headers": {
               "ETag": {
                 "description": "Updated strong entity tag",
+                "schema": {
                   "type": "string"
                 }
               }
             },
+            "content": {
+              "application/json": {
+                "schema": {
                   "$ref": "#/components/schemas/OrgPolicyResponse"
                 }
               }
@@ -7604,21 +7728,40 @@
           },
           "400": {
             "description": "Invalid policy payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
           },
+          "403": {
             "description": "Caller is not an authenticated owner of the organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
           },
+          "404": {
             "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
           },
+          "412": {
             "description": "Optimistic concurrency conflict (If-Match ETag mismatch)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
