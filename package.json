@@ -14,6 +14,8 @@
     "test:quarantine": "node scripts/run-quarantine.mjs",
     "test:e2e": "node scripts/run-from-realpath.mjs jest --runInBand --testPathPattern=e2e\\.test\\.ts$",
     "test:e2e:coverage": "node scripts/run-from-realpath.mjs jest --runInBand --testPathPattern=stream-lifecycle.e2e --coverage --collectCoverageFrom='app/api/streams/**/*.ts' --forceExit",
+    "test:e2e:pw": "playwright test",
+    "test:e2e:pw:install": "playwright install chromium",
     "openapi:generate": "node scripts/generate-openapi-types.mjs",
     "openapi:check": "node scripts/generate-openapi-types.mjs --check",
     "smoke": "node scripts/validate-openapi.mjs && npm run openapi:check && node scripts/run-from-realpath.mjs jest lib/rateLimitIp.test.ts app/api/auth/wallet/route.test.ts --forceExit",
@@ -35,6 +37,7 @@
   },
   "devDependencies": {
     "@next/eslint-plugin-next": "^15.5.12",
+    "@playwright/test": "^1.65.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

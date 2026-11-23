@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { WalletConnection } from "./WalletConnection";
 
 const LINKS = [
   { href: "/streams", label: "Streams" },
@@ -40,6 +41,7 @@ export function SiteHeader() {
         <Link href="/streams/new" className="button button--primary site-header__cta">
           New stream
         </Link>
+        <WalletConnection />
       </div>
     </header>
   );
