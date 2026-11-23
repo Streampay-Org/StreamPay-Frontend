@@ -147,8 +147,20 @@ describe("InMemoryStreamHistoryStore", () => {
 });
 
 describe("truncateActor (no PII, test #9)", () => {
-  it("returns first 6 chars", () => {
+  it("returns first 6 chars for a long wallet", () => {
     expect(truncateActor("GABCDEFGHIJK")).toBe("GABCDE");
+  });
+
+  it("returns the entire string for a short wallet (< 6 chars)", () => {
+    expect(truncateActor("G123")).toBe("G123");
+  });
+
+  it("returns all 6 chars for a wallet of exactly 6 chars", () => {
+    expect(truncateActor("G12345")).toBe("G12345");
+  });
+
+  it("returns undefined for undefined", () => {
+    expect(truncateActor(undefined)).toBeUndefined();
   });
 
   it("returns undefined for null", () => {

@@ -573,8 +573,39 @@ export function validateConfig(): ValidatedConfig {
     internalServiceAuth,
     auditLog,
   };
-  
+
+  if (lastValidatedNetwork !== null && lastValidatedNetwork !== networkProfile.name) {
+    notifyNetworkChange();
+  }
+  lastValidatedNetwork = networkProfile.name;
+
   return config;
+}
+
+/**
+ * Listener invoked when the active Stellar network changes or config cache is reset.
+ */
+export type NetworkChangeListener = () => void;
+
+const networkChangeListeners = new Set<NetworkChangeListener>();
+let lastValidatedNetwork: StellarNetwork | null = null;
+
+function notifyNetworkChange(): void {
+  for (const listener of networkChangeListeners) {
+    listener();
+  }
+}
+
+/**
+ * Register a callback to be invoked whenever the configured Stellar network
+ * changes on re-validation or when `resetConfigCache()` is called explicitly.
+ * Returns an unsubscribe function.
+ */
+export function onNetworkChange(listener: NetworkChangeListener): () => void {
+  networkChangeListeners.add(listener);
+  return () => {
+    networkChangeListeners.delete(listener);
+  };
 }
 
 /**
@@ -590,8 +621,11 @@ export function getConfig(): ValidatedConfig {
 }
 
 /**
- * Reset cached configuration (useful for testing)
+ * Reset cached configuration (useful for testing).
+ * Always notifies registered network-change listeners so caches are flushed immediately.
  */
 export function resetConfigCache(): void {
   cachedConfig = null;
+  lastValidatedNetwork = null;
+  notifyNetworkChange();
 }

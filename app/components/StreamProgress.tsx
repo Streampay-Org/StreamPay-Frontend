@@ -119,6 +119,8 @@ export interface StreamProgressProps {
   emptyActionLabel?: string;
   /** Optional handler invoked when the empty state CTA button is pressed */
   onEmptyAction?: () => void;
+  /** Removes progress controls from the tab sequence when nested in an ARIA grid. */
+  withinGrid?: boolean;
   /**
    * When true, renders a themed skeleton placeholder matching the StreamProgress
    * layout — a shimmer track bar and meta row — while stream data is loading.
@@ -208,6 +210,7 @@ export function StreamProgress({
   emptyDescription,
   emptyActionLabel,
   onEmptyAction,
+  withinGrid = false,
   loading = false,
 }: StreamProgressProps) {
   // ── Loading skeleton (early return before any hooks) ───────────────────────
@@ -340,7 +343,7 @@ export function StreamProgress({
       {/* Track */}
       <div
         role="progressbar"
-        tabIndex={0}
+        tabIndex={withinGrid ? -1 : 0}
         aria-valuenow={Math.round(percent)}
         aria-valuemin={0}
         aria-valuemax={100}
@@ -375,6 +378,7 @@ export function StreamProgress({
           className="stream-progress__hints-toggle"
           onClick={toggleHints}
           aria-expanded={showHints}
+          tabIndex={withinGrid ? -1 : undefined}
           data-testid="stream-progress-kbd-toggle"
         >
           <span className="stream-progress__hints-icon" aria-hidden="true">

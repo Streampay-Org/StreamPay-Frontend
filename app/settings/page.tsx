@@ -12,7 +12,15 @@ import {
 } from '../components/settings/NotificationSettings';
 import { QuietHoursConfig } from '../lib/quiet-hours';
 import { useUnsavedChangesGuard } from '../hooks/useUnsavedChangesGuard';
-import { DeleteAccountDialog } from './DeleteAccountDialog';
+import type { AuditActorRole } from '../types/audit';
+
+const PRIVILEGED_AUDIT_ROLES = new Set<AuditActorRole>([
+  'support',
+  'admin',
+  'finance',
+  'security',
+  'compliance',
+]);
 
 interface SavedNotificationPreferences {
   prefs: NotificationPreferences;
@@ -23,14 +31,14 @@ export interface SettingsPageContentProps {
   onSaveNotifications?: (
     saved: SavedNotificationPreferences
   ) => Promise<void> | void;
-  getAuthToken?: () => string | null | undefined;
+  userRole?: AuditActorRole;
 }
 
 const defaultSaveNotifications = async () => {};
 
 export function SettingsPageContent({
   onSaveNotifications = defaultSaveNotifications,
-  getAuthToken,
+  userRole,
 }: SettingsPageContentProps) {
   const [activeTab, setActiveTab] = useState<string>('appearance');
   const [notificationsDirty, setNotificationsDirty] = useState(false);
@@ -212,8 +220,12 @@ export function SettingsPageContent({
           <p className="page-hero__description">
             Manage your account preferences and appearance settings.
           </p>
-          <nav aria-label="More settings">
+          <nav aria-label="More settings" style={{ display: 'flex', gap: '1rem' }}>
             <Link href="/settings/webhooks">Webhook console</Link>
+            <Link href="/exports">Data exports</Link>
+            {userRole && PRIVILEGED_AUDIT_ROLES.has(userRole) && (
+              <Link href="/audit">Audit log</Link>
+            )}
           </nav>
         </div>
       </header>
