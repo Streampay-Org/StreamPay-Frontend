@@ -32,7 +32,7 @@ export interface paths {
         };
         /**
          * List activity events
-         * @description Returns a paginated, cursor-based list of activity events for the authenticated caller. Only events for streams the caller sends or receives, plus the caller's own wallet events, are returned. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId and event type.
+         * @description Returns a paginated, cursor-based list of activity events for the authenticated caller. Only events for streams the caller sends or receives, plus the caller's own wallet events, are returned. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId, event type, and an inclusive from/to date range.
          */
         get: operations["listActivity"];
         put?: never;
@@ -472,7 +472,13 @@ export interface paths {
          */
         get: operations["listStreamsV2"];
         put?: never;
-        /** Create a payment stream (v2) */
+        /**
+         * Create a payment stream (v2)
+         * @description Creates a payment stream using the v2 request and response shape. Requires bearer authentication and returns the created stream.
+         */
+        /**
+         * @description Creates a v2 payment stream for the authenticated sender and returns its initial representation.
+         */
         post: operations["createStreamV2"];
         delete?: never;
         options?: never;
@@ -670,7 +676,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List webhook delivery attempts */
+        /**
+         * List webhook delivery attempts
+         * @description Returns paginated webhook delivery attempts, including their status, retry count, and related endpoint.
+         */
+        /**
+         * @description Lists webhook delivery attempts with pagination for the authenticated caller.
+         */
         get: operations["listWebhookDeliveries"];
         put?: never;
         post?: never;
@@ -1222,8 +1234,11 @@ export interface paths {
         trace?: never;
     };
     "/api/orgs/{orgId}/policy": {
+        parameters: {
+            query?: never;
             header?: never;
             path?: never;
+            cookie?: never;
         };
         /**
          * Get organization stream policy
@@ -1235,6 +1250,12 @@ export interface paths {
          * @description Replaces the StreamPolicy for an organization. Restricted to organization owners. Supports optimistic concurrency via the If-Match header and records an audit log entry.
          */
         put: operations["updateOrgPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
 }
 export type webhooks = Record<string, never>;
@@ -2012,6 +2033,10 @@ export interface operations {
                 streamId?: string;
                 /** @description Filter events by a known type (e.g. stream.created, wallet.connected). */
                 type?: string;
+                /** @description Inclusive lower bound for event timestamps. Accepts an ISO date (YYYY-MM-DD, treated as 00:00:00 UTC) or an ISO datetime. */
+                from?: string;
+                /** @description Inclusive upper bound for event timestamps. Accepts an ISO date (YYYY-MM-DD, treated as 23:59:59.999 UTC) or an ISO datetime. */
+                to?: string;
             };
             header?: never;
             path?: never;
@@ -2064,7 +2089,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Unprocessable entity — invalid limit (INVALID_LIMIT), type, streamId, or cursor. */
+            /** @description Unprocessable entity — invalid limit (INVALID_LIMIT), type, streamId, cursor, or date range (INVALID_DATE_RANGE). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -4997,61 +5022,103 @@ export interface operations {
         };
     };
     getOrgPolicy: {
+        parameters: {
+            query?: never;
             header?: never;
+            path: {
                 /** @description Organization identifier */
                 orgId: string;
             };
+            cookie?: never;
         };
+        requestBody?: never;
+        responses: {
             /** @description Organization stream policy */
+            200: {
+                headers: {
                     /** @description Strong entity tag for optimistic concurrency control */
                     ETag?: string;
+                    [name: string]: unknown;
                 };
+                content: {
                     "application/json": components["schemas"]["OrgPolicyResponse"];
                 };
             };
             /** @description Organization not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
                 };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
     };
     updateOrgPolicy: {
+        parameters: {
+            query?: never;
+            header?: {
                 /** @description ETag returned by GET /api/orgs/{orgId}/policy for optimistic concurrency control */
                 "If-Match"?: string;
             };
+            path: {
                 /** @description Organization identifier */
                 orgId: string;
             };
+            cookie?: never;
         };
         requestBody: {
             content: {
                 "application/json": components["schemas"]["UpdateOrgPolicyRequest"];
             };
         };
+        responses: {
             /** @description Updated organization stream policy */
+            200: {
+                headers: {
                     /** @description Updated strong entity tag */
                     ETag?: string;
+                    [name: string]: unknown;
                 };
+                content: {
                     "application/json": components["schemas"]["OrgPolicyResponse"];
                 };
             };
             /** @description Invalid policy payload */
             400: {
+                headers: {
+                    [name: string]: unknown;
                 };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Caller is not an authenticated owner of the organization */
+            403: {
+                headers: {
+                    [name: string]: unknown;
                 };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Organization not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
                 };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Optimistic concurrency conflict (If-Match ETag mismatch) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
                 };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };

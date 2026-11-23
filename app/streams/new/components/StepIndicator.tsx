@@ -65,6 +65,7 @@ export function StepIndicator({ steps, currentStep, className = "" }: StepIndica
               key={step.id}
               className={`step-indicator__step step-indicator__step--${stateClass}`}
               aria-current={isCurrent ? "step" : undefined}
+              aria-label={!isCurrent && step.description ? `${step.label}: ${step.description}` : undefined}
             >
               <div className="step-indicator__marker" aria-hidden="true">
                 {isCompleted ? (
@@ -88,7 +89,7 @@ export function StepIndicator({ steps, currentStep, className = "" }: StepIndica
 
               <div className="step-indicator__content">
                 <span className="step-indicator__label">{step.label}</span>
-                {step.description && (
+                {isCurrent && step.description && (
                   <span className="step-indicator__desc">{step.description}</span>
                 )}
               </div>

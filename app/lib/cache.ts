@@ -113,11 +113,9 @@ export const streamCache = createCache<Stream>("stream");
 /**
  * Flush the process-wide stream cache.
  *
- * TODO: wire this into the project-wide `setNetwork()` call site once it
- * lands (the bug spec requires the cache to be flushed *immediately* on
- * network switch — network-segmented keys alone satisfy the regression
- * but not the "flush immediately" wording). Today there is no internal
- * caller, so this helper is exercised only by tests. It maps directly to
+ * Registered with `onNetworkChange()` in `app/lib/config/bootstrap.ts` so the
+ * cache is flushed immediately whenever the configured Stellar network changes
+ * or `resetConfigCache()` / `resetBootstrap()` runs. It maps directly to
  * `Map.clear()`, which is O(n) with n bounded at 500 by `lazySweep()`.
  */
 export function flushStreamCache(): void {

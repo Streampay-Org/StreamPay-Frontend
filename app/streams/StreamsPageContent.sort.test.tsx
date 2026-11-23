@@ -39,8 +39,9 @@ const sampleStreams: StreamRowData[] = [
 
 function getRenderedRecipients(): string[] {
   return screen
-    .getAllByRole("article")
-    .map((article) => article.querySelector("h2")?.textContent ?? "");
+    .getAllByRole("row")
+    .filter((row) => row.classList.contains("stream-row"))
+    .map((row) => row.querySelector("h2")?.textContent ?? "");
 }
 
 describe("StreamsPageContent sort persistence", () => {

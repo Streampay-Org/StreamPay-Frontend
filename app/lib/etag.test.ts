@@ -1,4 +1,4 @@
-import { canonicalize, computeETag, ifNoneMatchMatches } from "./etag";
+import { canonicalize, computeETag, ifMatchSatisfied, ifNoneMatchMatches } from "./etag";
 
 describe("etag helpers", () => {
   describe("canonicalize", () => {
@@ -94,6 +94,48 @@ describe("etag helpers", () => {
       // rather than crashing the request handler.
       expect(ifNoneMatchMatches(`garbage`, tag)).toBe(false);
       expect(ifNoneMatchMatches(`"unterminated, "abc123"`, tag)).toBe(true);
+    });
+  });
+
+  describe("ifMatchSatisfied", () => {
+    const tag = `"abc123"`;
+
+    it("returns false when header or current tag is missing or empty", () => {
+      expect(ifMatchSatisfied(null, tag)).toBe(false);
+      expect(ifMatchSatisfied("", tag)).toBe(false);
+      expect(ifMatchSatisfied("   ", tag)).toBe(false);
+      expect(ifMatchSatisfied(tag, "")).toBe(false);
+    });
+
+    it("matches wildcard '*' when resource exists", () => {
+      expect(ifMatchSatisfied("*", tag)).toBe(true);
+      expect(ifMatchSatisfied(" * ", tag)).toBe(true);
+    });
+
+    it("matches exact strong tags", () => {
+      expect(ifMatchSatisfied(`"abc123"`, tag)).toBe(true);
+      expect(ifMatchSatisfied(`  "abc123"  `, tag)).toBe(true);
+    });
+
+    it("rejects weak tags per RFC 9110 strong comparison", () => {
+      expect(ifMatchSatisfied(`W/"abc123"`, tag)).toBe(false);
+      expect(ifMatchSatisfied(`w/"abc123"`, tag)).toBe(false);
+      expect(ifMatchSatisfied(`"abc123"`, `W/"abc123"`)).toBe(false);
+    });
+
+    it("matches any strong entry in a comma-separated list", () => {
+      expect(ifMatchSatisfied(`"other", "abc123", W/"nope"`, tag)).toBe(true);
+      expect(ifMatchSatisfied(`W/"abc123", "other"`, tag)).toBe(false);
+    });
+
+    it("requires proper double-quoting and ignores malformed entries", () => {
+      expect(ifMatchSatisfied(`abc123`, tag)).toBe(false);
+      expect(ifMatchSatisfied(`"abc123`, tag)).toBe(false);
+      expect(ifMatchSatisfied(`"unterminated, "abc123"`, tag)).toBe(true);
+    });
+
+    it("returns false for non-matching strong tags", () => {
+      expect(ifMatchSatisfied(`"different"`, tag)).toBe(false);
     });
   });
 });

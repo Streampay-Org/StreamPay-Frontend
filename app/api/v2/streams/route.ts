@@ -1,5 +1,5 @@
 /**
- * POST /api/v2/streams — create a stream, enforcing a per-org daily quota.
+ * POST /api/v2/streams — create a stream, enforcing daily and configured quotas.
  * GET  /api/v2/streams — paginated stream list in v2 shape.
  *
  * Quota enforcement (POST only):
@@ -12,6 +12,9 @@
  *   header set to the number of seconds until UTC midnight, and a metric
  *   is emitted via org-quota-metrics.ts.
  *
+ *   Admin-configured user/org active-stream and monthly XLM volume quotas are
+ *   checked under the shared creation lock before the stream is persisted.
+ *
  * Breaking changes vs v1:
  *   - Response body uses `allowed_actions`, `created_at`, `updated_at`
  *     instead of `nextAction`, `createdAt`, `updatedAt`.
@@ -19,6 +22,10 @@
  */
 
 import { NextResponse } from "next/server";
+import { idempotencyKeyErrorResponse, validateIdempotencyKey } from "@/app/lib/idempotency";
+import { db, encodeCursor, decodeCursor, idempotencyToken, getStore } from "@/app/lib/db";
+import { getCorrelationContext } from "@/app/lib/logger";
+import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { db, idempotencyToken, getStore, newStreamId } from "@/app/lib/db";
 import { filterStreamsByTag } from "@/app/lib/stream-tags";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
@@ -33,6 +40,17 @@ import {
   type StreamCursor,
 } from "@/app/lib/stream-cursor";
 import type { Stream } from "@/app/types/openapi";
+import { getLimitForRoute } from "@/app/lib/rate-limit-config";
+import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
+import { checkCreationQuota } from "@/app/lib/quota-enforcement";
+import {
+  creationQuotaResponse,
+  quotaUserId,
+  rateToStroops,
+  withStreamCreationQuotaLock,
+} from "@/app/lib/stream-create-core";
+import { recordCreationQuotaRejection } from "@/app/lib/org-quota-metrics";
+import { orgDb } from "@/app/lib/org-db";
 import { withRouteTimeout } from "@/src/middleware/timeout";
 import { createCacheHeaders, createStrongEtag, isIfNoneMatchMatch } from "@/src/middleware/etag";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
@@ -60,6 +78,21 @@ function getRequestUrl(request: Request, fallbackPath: string): URL {
 }
 
 /** GET /api/v2/streams — paginated stream list in v2 shape. */
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const { searchParams } = url;
+  const limitType = getLimitForRoute("GET", url.pathname);
+  const identity = getClientIdentity(request);
+  const rateLimitResult = await checkRateLimit(identity, limitType);
+  if (!rateLimitResult.allowed) {
+    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
+    return rateLimitResponse(rateLimitResult.retryAfter!);
+  }
+  recordRequest(url.pathname);
+
+  const cursor = searchParams.get("cursor");
+  const status = searchParams.get("status");
+  const limit = Math.min(parseInt(searchParams.get("limit") ?? "20", 10), 100);
 async function handleV2StreamsGet(request: Request) {
   if (!request.headers.get("authorization")) {
     return errorResponse("UNAUTHORIZED", "Bearer token required.", 401);
@@ -185,13 +218,31 @@ export async function GET(request: Request) {
 /**
  * POST /api/v2/streams — create a stream, respond with v2 shape.
  */
+export async function POST(request: Request) {
+  const url = new URL(request.url);
+  const limitType = getLimitForRoute("POST", url.pathname);
+  const identity = getClientIdentity(request);
+  const rateLimitResult = await checkRateLimit(identity, limitType);
+  if (!rateLimitResult.allowed) {
+    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
+    return rateLimitResponse(rateLimitResult.retryAfter!);
+  }
+  recordRequest(url.pathname);
 async function handleV2StreamsPost(request: Request) {
   if (!request.headers.get("authorization")) {
     return errorResponse("UNAUTHORIZED", "Bearer token required.", 401);
   }
 
   // ── 1. Idempotency ────────────────────────────────────────────────────────
-  const idempotencyKey = request.headers.get("Idempotency-Key");
+  const rawIdempotencyKey = request.headers.get("Idempotency-Key");
+  let idempotencyKey: string | null = null;
+  if (rawIdempotencyKey !== null) {
+    const keyValidation = validateIdempotencyKey(rawIdempotencyKey);
+    if (!keyValidation.ok) {
+      return idempotencyKeyErrorResponse(keyValidation.reason);
+    }
+    idempotencyKey = keyValidation.key;
+  }
   const token = idempotencyKey
     ? idempotencyToken("v2.streams.create", idempotencyKey)
     : null;
@@ -210,7 +261,6 @@ async function handleV2StreamsPost(request: Request) {
   //
   // The quota is checked *before* body parsing so the 429 is returned cheaply
   // and the counter is incremented atomically inside checkOrgDailyQuota.
-  const identity = getClientIdentity(request);
   const quota = await checkOrgDailyQuota(identity.value);
 
   if (!quota.allowed) {
@@ -225,10 +275,11 @@ async function handleV2StreamsPost(request: Request) {
     return errorResponse("INVALID_REQUEST", "Request body must be valid JSON", 400);
   }
 
-  const { recipient, rate, schedule } = body as {
+  const { recipient, rate, schedule, orgId: rawOrgId } = body as {
     recipient?: string;
     rate?: string;
     schedule?: string;
+    orgId?: string;
   };
 
   if (!recipient || !rate || !schedule) {
@@ -237,6 +288,11 @@ async function handleV2StreamsPost(request: Request) {
       "One or more fields are invalid.",
       422,
     );
+  }
+
+  const rateMatch = /^(\d+(?:\.\d{1,7})?)(?:\s+.*)?$/.exec(rate.trim());
+  if (!rateMatch || Number(rateMatch[1]) <= 0) {
+    return errorResponse("VALIDATION_ERROR", "rate must be a positive decimal with at most 7 decimal places.", 422);
   }
 
   // ── 4. Persist and respond ────────────────────────────────────────────────
@@ -263,6 +319,43 @@ async function handleV2StreamsPost(request: Request) {
     ...(explicitTenant ? { tenant: explicitTenant } : {}),
   };
 
+  const userId = quotaUserId(identity);
+  const orgId = typeof rawOrgId === "string" && rawOrgId.trim()
+    ? rawOrgId.trim()
+    : undefined;
+
+  return withStreamCreationQuotaLock(async () => {
+    if (token && db.idempotency.has(token)) {
+      return NextResponse.json(db.idempotency.get(token), { status: 201 });
+    }
+
+    const quotaResult = checkCreationQuota({
+      userId,
+      orgId,
+      amountStroops: rateToStroops(rate, "XLM"),
+      now: new Date(now),
+    });
+    if (!quotaResult.allowed) {
+      recordCreationQuotaRejection(
+        quotaResult.scope,
+        quotaResult.subject,
+        quotaResult.code,
+      );
+      return creationQuotaResponse(quotaResult);
+    }
+
+    const storedStream: Stream = {
+      ...newStream,
+      ...(userId ? { senderAddress: userId } : {}),
+    };
+    db.streams.set(id, storedStream);
+    if (orgId) orgDb.streamOwnership.set(id, orgId);
+
+    const stream = toV2Stream(dbStreamToV1(newStream));
+    if (token) db.idempotency.set(token, stream);
+
+    return NextResponse.json(stream, { status: 201 });
+  });
   // Create-only insert: never overwrite an existing stream on an id collision.
   const { streamRepository } = getStore();
   let newStream: Stream | null = null;
