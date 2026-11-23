@@ -71,6 +71,14 @@ pub struct Stream {
     /// collector has been configured, the fee is skipped regardless of this
     /// value.
     pub fee_bps: u32,
+    /// Optional cliff timestamp (ledger seconds).
+    ///
+    /// `0` means no cliff — tokens vest linearly from `start_time`.
+    /// When non-zero, `start_time <= cliff_time <= end_time`: vested amount
+    /// remains `0` until the active elapsed time reaches
+    /// `cliff_time - start_time`, at which point vesting jumps to the linear
+    /// accrued amount for the elapsed time.
+    pub cliff_time: u64,
 }
 
 #[derive(Clone)]
@@ -527,6 +535,7 @@ mod tests {
             paused_at: 0,
             total_paused_duration: 0,
             fee_bps: 0,
+            cliff_time: 0,
         }
     }
 
