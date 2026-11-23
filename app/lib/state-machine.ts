@@ -39,6 +39,12 @@ export type TransitionResult =
   | { ok: true; nextStatus: StreamStatus }
   | { ok: false; error: string; code: "ILLEGAL_TRANSITION" };
 
+export type AmendGuardResult =
+  | { ok: true }
+  | { ok: false; error: string; code: "ILLEGAL_TRANSITION" };
+
+const AMENDABLE_STATUSES = new Set<StreamStatus>(["draft", "active", "paused"]);
+
 // ── Transition table ──────────────────────────────────────────────────────────
 
 /**
@@ -137,6 +143,30 @@ export function transition(
   return {
     ok: false,
     error: `Action '${action}' is illegal for a stream in '${currentStatus}' state.`,
+    code: "ILLEGAL_TRANSITION",
+  };
+}
+
+/**
+ * Returns true if a stream in `status` can be amended (`draft`, `active`, or `paused`).
+ * Amending does not change the stream's lifecycle status.
+ */
+export function canAmend(status: StreamStatus): boolean {
+  return AMENDABLE_STATUSES.has(status);
+}
+
+/**
+ * Validates whether a stream in `currentStatus` may be amended.
+ * Returns an `ILLEGAL_TRANSITION`-style error when the status is terminal
+ * (`ended`, `withdrawn`, or `cancelled`).
+ */
+export function validateAmendStatus(currentStatus: StreamStatus): AmendGuardResult {
+  if (canAmend(currentStatus)) {
+    return { ok: true };
+  }
+  return {
+    ok: false,
+    error: `Action 'amend' is illegal for a stream in '${currentStatus}' state.`,
     code: "ILLEGAL_TRANSITION",
   };
 }

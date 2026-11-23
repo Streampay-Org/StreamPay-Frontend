@@ -7,7 +7,7 @@ import type { ActivityEvent, Stream, StreamAction } from "@/app/types/openapi";
  * Lifecycle actions that can be published. `update` is used by generic PATCH /
  * batch routes when a lifecycle field changed but no single action describes it.
  */
-export type StreamChangeAction = StreamAction | "update";
+export type StreamChangeAction = StreamAction | "amend" | "update";
 
 /** Input for {@link publishStreamChange}. */
 export interface StreamChange {
@@ -48,6 +48,8 @@ const LIFECYCLE_FIELDS = [
   "cancellation",
   "vestedAmount",
   "releasedAmount",
+  "rate",
+  "endTime",
 ] as const satisfies ReadonlyArray<keyof Stream>;
 
 const PAST_TENSE: Record<StreamChangeAction, string> = {
@@ -57,6 +59,7 @@ const PAST_TENSE: Record<StreamChangeAction, string> = {
   settle: "settled",
   withdraw: "withdrawn",
   cancel: "cancelled",
+  amend: "amended",
   update: "updated",
 };
 

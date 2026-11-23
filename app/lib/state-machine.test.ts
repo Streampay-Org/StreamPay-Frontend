@@ -1,4 +1,4 @@
-import { allowedActions, nextActionFor, transition } from "./state-machine";
+import { allowedActions, canAmend, nextActionFor, transition, validateAmendStatus } from "./state-machine";
 import { StreamStatus, StreamAction } from "@/app/types/openapi";
 import * as fc from "fast-check";
 
@@ -144,6 +144,30 @@ describe("Stream State Machine", () => {
         expect(result.code).toBe("ILLEGAL_TRANSITION");
       }
     });
+  });
+
+  describe("Amend guard", () => {
+    test.each<StreamStatus>(["draft", "active", "paused"])(
+      "allows amending stream in '%s' status",
+      (status) => {
+        expect(canAmend(status)).toBe(true);
+        expect(validateAmendStatus(status)).toEqual({ ok: true });
+      },
+    );
+
+    test.each<StreamStatus>(["ended", "withdrawn", "cancelled"])(
+      "rejects amending stream in '%s' status with ILLEGAL_TRANSITION",
+      (status) => {
+        expect(canAmend(status)).toBe(false);
+        const result = validateAmendStatus(status);
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.code).toBe("ILLEGAL_TRANSITION");
+          expect(result.error).toContain("amend");
+          expect(result.error).toContain(status);
+        }
+      },
+    );
   });
 
   describe("Property-based testing", () => {

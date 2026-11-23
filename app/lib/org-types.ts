@@ -122,7 +122,12 @@ export type OrgRecord = {
 // ─── Approval workflow ────────────────────────────────────────────────────────
 
 /** Actions that may be gated behind a two-step approval when requireApprovals > 1 */
-export type ApprovalAction = "settle" | "stop";
+export type ApprovalAction = "settle" | "stop" | "amend";
+
+export type AmendApprovalPayload = {
+  rate?: string;
+  endsAt?: string;
+};
 
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
 
@@ -138,6 +143,8 @@ export type PendingApproval = {
   streamId: string;
   orgId: string;
   action: ApprovalAction;
+  /** Optional payload for actions that carry parameters (e.g. amend). */
+  payload?: AmendApprovalPayload;
   /** Wallet address of the member who initiated the approval */
   initiatedBy: string;
   /** Ordered list of wallet addresses that have cast an approval */

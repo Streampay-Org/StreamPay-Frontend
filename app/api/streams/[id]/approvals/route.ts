@@ -49,8 +49,8 @@ export async function POST(
     return errorResponse("INVALID_REQUEST", "Request body must be valid JSON.", 400);
   }
 
-  const { action } = body as { action?: string };
-  const validActions: ApprovalAction[] = ["settle", "stop"];
+  const { action, payload } = body as { action?: string; payload?: { rate?: string; endsAt?: string } };
+  const validActions: ApprovalAction[] = ["settle", "stop", "amend"];
 
   if (!action || !validActions.includes(action as ApprovalAction)) {
     return errorResponse(
@@ -85,6 +85,7 @@ export async function POST(
     action as ApprovalAction,
     actorAddress,
     org.policy.requireApprovals,
+    payload,
   );
 
   if (!result.ok) {

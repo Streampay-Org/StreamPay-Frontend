@@ -5,6 +5,7 @@
 import { NextResponse } from "next/server";
 import { orgDb } from "@/app/lib/org-db";
 import { castApproval } from "@/app/lib/org-policy";
+import { applyStreamAmendment } from "@/app/lib/amend-stream";
 
 function errorResponse(code: string, message: string, status: number) {
   return NextResponse.json(
@@ -42,20 +43,31 @@ export async function POST(
   }
 
   // 2. If threshold is met, auto-execute the action in business logic
+  let amendedStream = undefined;
   if (result.thresholdMet) {
-    const stream = orgDb.streamOwnership.has(streamId) ? orgDb.streamOwnership.get(streamId) : null;
-    // In a real implementation, we would call the business logic reducer here
-    // For MVP slice, we just return the approved status and let the user know execution would happen.
-    
-    // Simulating side effect on stream status if action is 'stop'
-    if (approval.action === "stop") {
-      const streamRecord = Array.from(orgDb.approvals.values()).find(a => a.id === approvalId);
-      // Logic would typically live in a service layer
+    if (approval.action === "amend" && approval.payload) {
+      const amendOutcome = await applyStreamAmendment({
+        streamId,
+        payload: approval.payload,
+        actorAddress,
+        request,
+      });
+      if (!amendOutcome.ok) {
+        if (amendOutcome.reason === "not_found") {
+          return errorResponse("STREAM_NOT_FOUND", `Stream '${streamId}' not found.`, 404);
+        }
+        if (amendOutcome.reason === "invalid_state") {
+          return errorResponse(amendOutcome.code, amendOutcome.error, 409);
+        }
+        return errorResponse("VALIDATION_ERROR", amendOutcome.message, 422);
+      }
+      amendedStream = amendOutcome.stream;
     }
   }
 
   return NextResponse.json({
     data: result.approval,
+    ...(amendedStream ? { stream: amendedStream } : {}),
     meta: { thresholdMet: result.thresholdMet },
   });
 }

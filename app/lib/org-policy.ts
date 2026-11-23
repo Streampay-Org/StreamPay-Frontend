@@ -40,7 +40,7 @@ import { generateRequestId, isValidRequestId } from "@/lib/requestId";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** Stream actions that can be governed by an org policy */
-export type OrgAction = "start" | "pause" | "resume" | "settle" | "stop" | "withdraw";
+export type OrgAction = "start" | "pause" | "resume" | "settle" | "stop" | "withdraw" | "amend";
 
 export type PolicyDenied = {
   allowed: false;
@@ -71,10 +71,11 @@ const ACTION_POLICY_KEY: Record<OrgAction, keyof StreamPolicy> = {
   settle: "canSettle",
   stop: "canStop",
   withdraw: "canWithdraw",
+  amend: "canStop",
 };
 
 /** Actions that are subject to two-step approval when requireApprovals > 1 */
-const TWO_STEP_ACTIONS = new Set<OrgAction>(["settle", "stop"]);
+const TWO_STEP_ACTIONS = new Set<OrgAction>(["settle", "stop", "amend"]);
 
 /** Approval TTL in milliseconds (24 h) */
 const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
@@ -386,6 +387,7 @@ export function initiateApproval(
   action: ApprovalAction,
   initiatedBy: string,
   requiredCount: number,
+  payload?: PendingApproval["payload"],
 ): InitiateApprovalResult {
   // Guard: no duplicate pending approval for same stream+action
   for (const existing of orgDb.approvals.values()) {
@@ -410,6 +412,7 @@ export function initiateApproval(
     streamId,
     orgId,
     action,
+    ...(payload !== undefined ? { payload } : {}),
     initiatedBy,
     approvals: [initiatedBy], // initiator auto-approves
     requiredCount,

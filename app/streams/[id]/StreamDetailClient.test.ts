@@ -373,4 +373,35 @@ describe("StreamDetailClient", () => {
 
     expect(window.alert).not.toHaveBeenCalled();
   });
+
+  it("opens AmendStreamModal and updates stream state on successful amend", async () => {
+    const amended: Stream = {
+      ...activeStream,
+      rate: "250",
+      updatedAt: "2026-06-27T10:15:00.000Z",
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: amended }));
+
+    render(React.createElement(StreamDetailClient, { stream: activeStream }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Amend$/i }));
+
+    const dialog = screen.getByRole("dialog", { name: /amend stream/i });
+    expect(dialog).toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByLabelText(/Rate \(XLM\/sec\)/i), {
+      target: { value: "250" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: /Save amendment/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("action-status")).toHaveTextContent(/amended successfully/i);
+      expect(screen.getAllByText("250").length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it("hides the Amend button for ended streams", () => {
+    render(React.createElement(StreamDetailClient, { stream: endedStream }));
+    expect(screen.queryByRole("button", { name: /^Amend$/i })).not.toBeInTheDocument();
+  });
 });

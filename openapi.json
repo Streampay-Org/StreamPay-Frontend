@@ -4349,6 +4349,121 @@
         }
       }
     },
+    "/api/streams/{id}/amend": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Client-generated key (UUID recommended) to make the amend request idempotent.",
+          "schema": {
+            "type": "string",
+            "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "amendStream",
+        "summary": "Amend a payment stream's rate and/or end time",
+        "description": "Amends a draft, active, or paused stream's rate and/or end time. For organization-owned streams requiring multi-sig approval, returns 202 with a pending approval record instead of mutating the stream immediately.",
+        "tags": [
+          "Streams v1"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "rate": {
+                    "type": "string",
+                    "description": "New positive stream rate."
+                  },
+                  "endsAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "New ISO-8601 end timestamp (must be in the future and after startedAt)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stream amended successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/StreamV1"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Amendment requires organization multi-sig approval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "approvalRequired": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or invalid Idempotency-Key or malformed JSON."
+          },
+          "403": {
+            "description": "Forbidden: caller is not the stream sender or authorized org member."
+          },
+          "404": {
+            "description": "Stream not found."
+          },
+          "409": {
+            "description": "Conflict: stream status cannot be amended (ended/withdrawn/cancelled) or idempotency key reused with a different body."
+          },
+          "422": {
+            "description": "Validation error: invalid rate or endsAt values."
+          }
+        }
+      }
+    },
     "/api/streams/{id}/pause": {
       "parameters": [
         {

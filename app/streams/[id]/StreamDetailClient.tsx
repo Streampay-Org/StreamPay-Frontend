@@ -9,6 +9,8 @@ import { PaymentTimeline } from "../../components/PaymentTimeline";
 import { ErrorToast } from "../../components/ErrorToast";
 import { ConfirmCancel } from "../../components/ConfirmCancel";
 import { CancelStreamModal } from "../../components/CancelStreamModal";
+import { AmendStreamModal } from "../../components/AmendStreamModal";
+import { canAmend } from "../../lib/state-machine";
 import { SwitchNetwork } from "../../components/SwitchNetwork";
 import { Timestamp } from "../../components/Timestamp";
 import { CopyAddress } from "../../components/CopyAddress";
@@ -89,6 +91,7 @@ export function StreamDetailClient({
   const [current, setCurrent] = useState<Stream>(stream);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDestructiveOpen, setIsDestructiveOpen] = useState(false);
+  const [isAmendOpen, setIsAmendOpen] = useState(false);
   const [error, setError] = useState<StreamPayError | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
@@ -112,6 +115,8 @@ export function StreamDetailClient({
     mutationsDisabled ||
     current.status === "withdrawn" ||
     current.status === "cancelled";
+  const amendDisabled =
+    isProcessing || mutationsDisabled || !canAmend(current.status);
   const destructiveDisabled =
     isProcessing ||
     mutationsDisabled ||
@@ -496,6 +501,17 @@ export function StreamDetailClient({
                 {isProcessing ? "Processing..." : nextAction}
               </button>
 
+              {canAmend(current.status) && (
+                <button
+                  className="button button--secondary detail-action-btn"
+                  type="button"
+                  onClick={() => setIsAmendOpen(true)}
+                  disabled={amendDisabled}
+                >
+                  Amend
+                </button>
+              )}
+
               <Link
                 href={`/streams/${current.id}/receipt`}
                 className="button button--secondary detail-action-btn"
@@ -573,6 +589,22 @@ export function StreamDetailClient({
           autoDismissDelayMs={5000}
         />
       )}
+
+      <AmendStreamModal
+        isOpen={isAmendOpen}
+        onClose={() => setIsAmendOpen(false)}
+        stream={current}
+        onAmended={(updated) => {
+          setCurrent((prev) => ({ ...prev, ...updated }));
+          showStatus(`Stream ${updated.id} amended successfully.`, "success");
+        }}
+        onApprovalRequired={() => {
+          showStatus(
+            `Amendment for stream ${current.id} submitted for approval.`,
+            "success",
+          );
+        }}
+      />
 
       {actionSummary.destructiveAction === "cancel" && (
         <CancelStreamModal
