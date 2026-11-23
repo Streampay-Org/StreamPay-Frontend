@@ -24,6 +24,8 @@
  * server-side rendering does not throw.
  */
 
+import { safeStorage } from "../lib/safeStorage";
+
 export interface WizardDraft {
   /** Stellar address (or partial input) of the intended recipient. */
   recipient: string;
@@ -44,6 +46,20 @@ export interface WizardDraft {
 export const WIZARD_DRAFT_KEY = "streampay.wizard-draft";
 
 /**
+ * Returns `true` when all draft fields are at their pristine/default values.
+ */
+export function isWizardDraftEmpty(
+  draft: Omit<WizardDraft, "savedAt">,
+): boolean {
+  return (
+    draft.recipient.trim() === "" &&
+    draft.amount.trim() === "" &&
+    draft.token === "XLM" &&
+    draft.gasOnRecipient === false
+  );
+}
+
+/**
  * Returns the persisted draft, or `null` when:
  *  - no draft has been saved yet
  *  - the stored JSON is malformed
@@ -51,10 +67,8 @@ export const WIZARD_DRAFT_KEY = "streampay.wizard-draft";
  *  - the code is running server-side
  */
 export function getWizardDraft(): WizardDraft | null {
-  if (typeof window === "undefined") return null;
-
   try {
-    const raw = window.localStorage.getItem(WIZARD_DRAFT_KEY);
+    const raw = safeStorage.getItem(WIZARD_DRAFT_KEY);
     if (!raw) return null;
 
     const parsed: unknown = JSON.parse(raw);
@@ -86,15 +100,16 @@ export function getWizardDraft(): WizardDraft | null {
 /**
  * Persists the current wizard state.  Call this on every field change so
  * the draft is always up-to-date even if the user closes the tab abruptly.
+ * Pristine/empty drafts are never persisted.
  */
 export function saveWizardDraft(
   draft: Omit<WizardDraft, "savedAt">,
 ): void {
-  if (typeof window === "undefined") return;
+  if (isWizardDraftEmpty(draft)) return;
 
   try {
     const payload: WizardDraft = { ...draft, savedAt: Date.now() };
-    window.localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(payload));
+    safeStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(payload));
   } catch {
     // localStorage full or unavailable — fail silently
   }
@@ -102,13 +117,12 @@ export function saveWizardDraft(
 
 /**
  * Removes the persisted draft.  Call this after a successful stream creation
- * so stale data is not re-loaded on the next visit.
+ * or when the user discards the draft so stale data is not re-loaded on the
+ * next visit.
  */
 export function clearWizardDraft(): void {
-  if (typeof window === "undefined") return;
-
   try {
-    window.localStorage.removeItem(WIZARD_DRAFT_KEY);
+    safeStorage.removeItem(WIZARD_DRAFT_KEY);
   } catch {
     // ignore
   }

@@ -1,6 +1,15 @@
 import { NextResponse, NextRequest } from "next/server";
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
 import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
+import {
+  getWalletChallengeStore,
+  InMemoryWalletChallengeStore,
+  setWalletChallengeStoreForTesting,
+  timingSafeEqualStrings,
+  WALLET_CHALLENGE_TTL_MS,
+  WalletChallengeStoreUnavailableError,
+  type WalletChallengeRecord,
+} from "@/app/lib/wallet-challenge-store";
 import { validateCsrfToken, signToken } from "@/app/lib/auth";
 import { getCsrfCookieValue, getCsrfHeaderValue } from "@/lib/csrf";
 import { verifyStellarSignature } from "@/app/lib/wallet-link";
@@ -36,43 +45,7 @@ import {
   walletAuthDuration,
 } from "@/src/metrics/registry";
 
-// ── In-process challenge store ────────────────────────────────────────────────
-
-interface WalletChallengeRecord {
-  id: string;
-  address: string;
-  challenge: string;
-  created_at: string;
-  expires_at: string;
-}
-
-/** Challenge lifetime: 5 minutes from issuance. */
-const WALLET_CHALLENGE_TTL_MS = 5 * 60 * 1000;
-
-/** Live challenges kept per address; the oldest is evicted first. */
-const WALLET_CHALLENGE_PER_ADDRESS_MAX = 5;
-
-/** Default global cap; overridable via the WALLET_CHALLENGE_MAX env var. */
-const DEFAULT_WALLET_CHALLENGE_MAX = 10_000;
-
-/**
- * Challenge id → record, in insertion order. Every record shares the same
- * TTL, so insertion order is also expiry order; pruning relies on that to
- * stop at the first live record instead of scanning the whole store.
- */
-const walletChallengeStore = new Map<string, WalletChallengeRecord>();
-
-/** Address → live challenge ids, in insertion order (oldest first). */
-const walletChallengeIdsByAddress = new Map<string, Set<string>>();
-
-function resolveWalletChallengeMax(): number {
-  const raw = process.env.WALLET_CHALLENGE_MAX;
-  if (!raw) return DEFAULT_WALLET_CHALLENGE_MAX;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : DEFAULT_WALLET_CHALLENGE_MAX;
-}
+// ── Challenge store helpers ───────────────────────────────────────────────────
 
 function createWalletChallengeRecord(
   address: string,
@@ -88,77 +61,32 @@ function createWalletChallengeRecord(
   };
 }
 
-function deleteWalletChallenge(record: WalletChallengeRecord): void {
-  walletChallengeStore.delete(record.id);
-  const ids = walletChallengeIdsByAddress.get(record.address);
-  if (!ids) return;
-  ids.delete(record.id);
-  if (ids.size === 0) walletChallengeIdsByAddress.delete(record.address);
-}
-
-/**
- * Drop expired records. Insertion order matches expiry order (fixed TTL), so
- * this walks only the expired prefix — O(expired) per call, never a full
- * scan of the store on every request.
- */
-function pruneExpiredWalletChallenges(nowMs: number): void {
-  for (const record of walletChallengeStore.values()) {
-    if (Date.parse(record.expires_at) > nowMs) break;
-    deleteWalletChallenge(record);
+function getInMemoryStoreOrThrow(): InMemoryWalletChallengeStore {
+  const store = getWalletChallengeStore();
+  if (!(store instanceof InMemoryWalletChallengeStore)) {
+    throw new Error(
+      "Wallet challenge testing helper requires InMemoryWalletChallengeStore",
+    );
   }
-}
-
-/** Insert a freshly issued record, then enforce the per-address and global caps. */
-function storeWalletChallenge(
-  record: WalletChallengeRecord,
-  nowMs: number,
-): void {
-  pruneExpiredWalletChallenges(nowMs);
-
-  // Per-address cap: keep only the newest WALLET_CHALLENGE_PER_ADDRESS_MAX.
-  const ids =
-    walletChallengeIdsByAddress.get(record.address) ?? new Set<string>();
-  while (ids.size >= WALLET_CHALLENGE_PER_ADDRESS_MAX) {
-    const oldestId = ids.values().next().value;
-    if (oldestId === undefined) break;
-    const oldest = walletChallengeStore.get(oldestId);
-    if (oldest) {
-      deleteWalletChallenge(oldest);
-    } else {
-      ids.delete(oldestId); // stale index entry
-    }
-  }
-
-  walletChallengeStore.set(record.id, record);
-  ids.add(record.id);
-  walletChallengeIdsByAddress.set(record.address, ids);
-
-  // Global cap: evict oldest-first until the store is within budget.
-  const max = resolveWalletChallengeMax();
-  while (walletChallengeStore.size > max) {
-    const oldestId = walletChallengeStore.keys().next().value;
-    if (oldestId === undefined) break;
-    const oldest = walletChallengeStore.get(oldestId);
-    if (oldest) deleteWalletChallenge(oldest);
-  }
+  return store;
 }
 
 export function resetWalletChallengeStoreForTesting(): void {
-  walletChallengeStore.clear();
-  walletChallengeIdsByAddress.clear();
+  const store = getWalletChallengeStore();
+  if (store instanceof InMemoryWalletChallengeStore) {
+    store.clear();
+  }
+  setWalletChallengeStoreForTesting(null);
 }
 
 /** Live record count — used by tests to assert the store stays bounded. */
 export function getWalletChallengeStoreSizeForTesting(): number {
-  return walletChallengeStore.size;
+  return getInMemoryStoreOrThrow().size();
 }
 
 /** Challenge strings held by the store, oldest first — used by tests. */
 export function listWalletChallengesForTesting(): string[] {
-  return Array.from(
-    walletChallengeStore.values(),
-    (record) => record.challenge,
-  );
+  return getInMemoryStoreOrThrow().listChallenges();
 }
 
 export function seedWalletChallengeForTesting(record: {
@@ -167,16 +95,13 @@ export function seedWalletChallengeForTesting(record: {
   expires_at: string;
 }): void {
   const id = randomUUID();
-  walletChallengeStore.set(id, {
+  getInMemoryStoreOrThrow().seed({
     id,
     address: record.address,
     challenge: record.challenge,
     created_at: new Date().toISOString(),
     expires_at: record.expires_at,
   });
-  const ids = walletChallengeIdsByAddress.get(record.address) ?? new Set<string>();
-  ids.add(id);
-  walletChallengeIdsByAddress.set(record.address, ids);
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -394,7 +319,7 @@ async function handleWalletChallengeGet(req: NextRequest) {
             challenge,
             nowMs,
           );
-          storeWalletChallenge(record, nowMs);
+          await getWalletChallengeStore().issue(record);
 
           const body = { challenge, expires_at: record.expires_at };
           const etag = computeStrongEtag(body);
@@ -411,6 +336,21 @@ async function handleWalletChallengeGet(req: NextRequest) {
             headers: { etag, "cache-control": CACHE_CONTROL },
           });
         } catch (error) {
+          if (error instanceof WalletChallengeStoreUnavailableError) {
+            logAccessEvent({
+              method: "GET",
+              path: req.nextUrl.pathname,
+              status: 503,
+              durationMs: Date.now() - startedAt,
+              errorCode: ErrorCode.WALLET_CHALLENGE_FAILED,
+              errorMessage: error.message,
+            });
+            return errorResponse(
+              ErrorCode.WALLET_CHALLENGE_FAILED,
+              "Wallet challenge store is temporarily unavailable.",
+              503,
+            );
+          }
           logAccessEvent({
             method: "GET",
             path: req.nextUrl.pathname,
@@ -437,13 +377,6 @@ async function handleWalletChallengeGet(req: NextRequest) {
       startedAtHr,
     );
   }
-}
-
-function timingSafeEqualStrings(a: string, b: string): boolean {
-  const bufA = Buffer.from(a, "utf-8");
-  const bufB = Buffer.from(b, "utf-8");
-  if (bufA.length !== bufB.length) return false;
-  return timingSafeEqual(bufA, bufB);
 }
 
 // ── POST /api/auth/wallet ─────────────────────────────────────────────────────
@@ -552,16 +485,13 @@ async function handleWalletVerifyPost(req: NextRequest) {
             return errorResponse(ErrorCode.FORBIDDEN, "CSRF token mismatch.", 403);
           }
 
-          // Challenge lookup using constant-time comparison
-          let matched: WalletChallengeRecord | undefined;
-          for (const candidate of walletChallengeStore.values()) {
-            if (timingSafeEqualStrings(candidate.challenge, challenge)) {
-              matched = candidate;
-              break;
-            }
-          }
+          // Atomically look up and consume challenge on first verification attempt
+          const record = await getWalletChallengeStore().consume(
+            address,
+            challenge,
+          );
 
-          if (!matched) {
+          if (!record) {
             logAccessEvent({
               method: "POST",
               path: req.nextUrl.pathname,
@@ -576,10 +506,6 @@ async function handleWalletVerifyPost(req: NextRequest) {
               401,
             );
           }
-
-          // Atomically consume challenge on first verification attempt
-          const record = matched;
-          deleteWalletChallenge(record);
 
           // Challenge issued to a different address
           if (!timingSafeEqualStrings(record.address, address)) {
@@ -652,6 +578,21 @@ async function handleWalletVerifyPost(req: NextRequest) {
             { status: 200 },
           );
         } catch (error) {
+          if (error instanceof WalletChallengeStoreUnavailableError) {
+            logAccessEvent({
+              method: "POST",
+              path: req.nextUrl.pathname,
+              status: 503,
+              durationMs: Date.now() - startedAt,
+              errorCode: ErrorCode.WALLET_VERIFY_FAILED,
+              errorMessage: error.message,
+            });
+            return errorResponse(
+              ErrorCode.WALLET_VERIFY_FAILED,
+              "Wallet challenge store is temporarily unavailable.",
+              503,
+            );
+          }
           logAccessEvent({
             method: "POST",
             path: req.nextUrl.pathname,

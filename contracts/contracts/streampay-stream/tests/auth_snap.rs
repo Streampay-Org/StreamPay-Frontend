@@ -658,3 +658,40 @@ fn auth_snap_initialize_missing_auth_fails() {
     let result = client.try_initialize(&admin);
     assert!(result.is_err());
 }
+
+// ── Two-step recipient transfer ───────────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_propose_recipient_transfer() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let new_recipient = Address::generate(&data.env);
+
+    data.env.mock_auths(&[]);
+    client.propose_recipient_transfer(&id, &new_recipient);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_accept_recipient_transfer() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let new_recipient = Address::generate(&data.env);
+    client.propose_recipient_transfer(&id, &new_recipient);
+
+    data.env.mock_auths(&[]);
+    client.accept_recipient_transfer(&id);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_cancel_recipient_transfer() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let new_recipient = Address::generate(&data.env);
+    client.propose_recipient_transfer(&id, &new_recipient);
+
+    data.env.mock_auths(&[]);
+    client.cancel_recipient_transfer(&id, &data.recipient);
+}
