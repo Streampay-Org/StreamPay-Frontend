@@ -21,6 +21,7 @@ export class InMemoryRateLimitStore implements RateLimitStore {
   constructor(private readonly maxTokensPerBucket = 1000) {
     if (typeof setInterval !== "undefined") {
       this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
+      this.cleanupInterval.unref?.();
     }
   }
 
