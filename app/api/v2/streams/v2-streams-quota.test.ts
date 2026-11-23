@@ -17,7 +17,14 @@
  */
 
 import { POST as createStreamV2 } from "@/app/api/v2/streams/route";
+import { signToken } from "@/app/lib/auth";
+
+// Deterministic test wallet and JWT
+const testWallet = "GTESTWALLET12345";
+const testJwt = signToken(testWallet);
+
 import { resetDb } from "@/app/lib/db";
+import { orgDb, _resetOrgDbForTesting } from "@/app/lib/org-db";
 import {
   InMemoryOrgQuotaStore,
   setOrgQuotaStore,
@@ -37,9 +44,11 @@ function makePostRequest(
   body: unknown = { recipient: "GABC123", rate: "50 XLM/month", schedule: "30 days" },
   headers: Record<string, string> = {},
 ) {
+  // Ensure Authorization header with test JWT is present unless overridden
+  const authHeader = headers["Authorization"] ?? `Bearer ${testJwt}`;
   return new Request("http://localhost/api/v2/streams", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
+    headers: { "Content-Type": "application/json", "Authorization": authHeader, ...headers },
     body: JSON.stringify(body),
   });
 }
