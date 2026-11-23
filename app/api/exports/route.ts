@@ -247,8 +247,8 @@ export async function POST(request: Request) {
       path: "/api/exports",
       status,
       durationMs,
-      actorId,
-      exportJobId,
+      ...(actorId !== undefined ? { actorId } : {}),
+      ...(exportJobId !== undefined ? { exportJobId } : {}),
       ...(errorCode ? { errorCode } : {}),
     });
     recordExportMetrics("POST", status, startedAt);
@@ -375,7 +375,7 @@ export async function GET(request: Request) {
       path: "/api/exports",
       status,
       durationMs,
-      actorId,
+      ...(actorId !== undefined ? { actorId } : {}),
       ...(errorCode ? { errorCode } : {}),
     });
     recordExportMetrics("GET", status, startedAt);

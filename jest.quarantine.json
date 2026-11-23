@@ -18,10 +18,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "app/api/exports/exports.accessLog.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/api/exports/exports.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },

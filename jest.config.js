@@ -17,7 +17,6 @@ const config = {
     "<rootDir>/app/streams/new/recurring.test.tsx",
     "<rootDir>/__tests__/a11y.test.tsx",
     "<rootDir>/app/api/audit/export/route.test.ts",
-    "<rootDir>/app/api/exports/exports.accessLog.test.ts",
     "<rootDir>/app/api/exports/exports.metrics.test.ts",
     "<rootDir>/app/api/exports/exports.test.ts",
     "<rootDir>/app/api/indexer/sse/route.test.ts",
