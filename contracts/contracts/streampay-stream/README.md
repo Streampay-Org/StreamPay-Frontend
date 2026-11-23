@@ -18,6 +18,10 @@ Linear payment streams on Stellar/Soroban.
 | `cancel_stream` | Yes | `stream.sender` | Ends a stream early, refunding unvested funds to sender. |
 | `withdraw` | Yes | `stream.recipient` | Withdraws vested funds to the recipient. |
 | `withdraw_to` | Yes | `stream.recipient` | Withdraws vested funds to a custom destination address (recipient-only auth, destination trustline checked). |
+| `propose_recipient_transfer` | Yes | `stream.recipient` | Proposes transferring the stream's recipient role to a new address (step 1 of two-step transfer). |
+| `accept_recipient_transfer` | Yes | `pending_recipient` | Accepts a pending recipient transfer, updating `stream.recipient` and clearing the previous withdrawer allowlist (step 2). |
+| `cancel_recipient_transfer` | Yes | `stream.recipient` or `stream.sender` | Cancels a pending recipient transfer proposal before acceptance. |
+| `get_pending_recipient` | No | None | Returns the pending recipient transfer target for a stream, if any. |
 | `settle` | Yes | `stream.recipient` | Ends a stream and releases all remaining funds to recipient. |
 | `get_stream` | No | None | Returns the stream record. |
 | `withdrawable` | No | None | Returns the currently withdrawable amount. |
@@ -36,6 +40,9 @@ Linear payment streams on Stellar/Soroban.
 | `set_cooloff_duration` | Yes | `admin` | Sets the per-user cooloff duration (in seconds) between stream creations. |
 | `get_cooloff_duration` | No | None | Returns the current per-user cooloff duration in seconds. |
 | `get_cooloff_until` | No | None | Returns the timestamp until which a sender is blocked by cooloff. |
+| `set_dormancy_grace` | Yes | `admin` | Sets the global dormant-stream grace period in seconds (`0` = disabled). |
+| `get_dormancy_grace` | No | None | Returns the current dormant-stream grace period in seconds (`0` = disabled). |
+| `sweep_dormant_stream` | Yes | `stream.sender` | Reclaims unclaimed vested funds from a dormant stream back to the sender and marks it `Settled`. |
 | `pause_recurring_stream` | Yes | `stream.sender` | Freezes cycle accrual for an active recurring stream. |
 | `resume_recurring_stream` | Yes | `stream.sender` | Resumes a paused recurring stream, excluding the pause span from vesting. |
 | `set_fee_collector` | Yes | `admin` | Sets the address that receives protocol fees. |
