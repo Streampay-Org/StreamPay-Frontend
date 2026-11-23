@@ -22,10 +22,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "app/api/exports/exports.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/api/indexer/sse/route.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
@@ -175,10 +171,6 @@
     },
     {
       "path": "tests/env.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "tests/integration/exports.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {

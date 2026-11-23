@@ -7073,6 +7073,9 @@
           },
           "401": {
             "$ref": "#/components/responses/401"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
           }
         }
       }
