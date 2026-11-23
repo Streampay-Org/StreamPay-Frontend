@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { Tabs, TabDefinition } from '../components/Tabs';
 import { Modal } from '../components/Modal';
+import { ReceiptThemeEditor, type ReceiptThemeEditorHandle } from '../components/settings/ReceiptThemeEditor';
 import {
   NotificationSettings,
   NotificationSettingsHandle,
@@ -42,12 +43,16 @@ export function SettingsPageContent({
 }: SettingsPageContentProps) {
   const [activeTab, setActiveTab] = useState<string>('appearance');
   const [notificationsDirty, setNotificationsDirty] = useState(false);
+  const [receiptsDirty, setReceiptsDirty] = useState(false);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [isSavingFromDialog, setIsSavingFromDialog] = useState(false);
   const [restoreFocusTarget, setRestoreFocusTarget] =
     useState<HTMLElement | null>(null);
 
+  const receiptsActive = activeTab === 'receipts';
+  const isDirty = receiptsActive ? receiptsDirty : notificationsDirty;
+  const receiptThemeRef = useRef<ReceiptThemeEditorHandle>(null);
   const notificationSettingsRef = useRef<NotificationSettingsHandle>(null);
   const pendingConfirmationRef = useRef<
     ((allowed: boolean) => void) | null
@@ -74,7 +79,7 @@ export function SettingsPageContent({
   }, []);
 
   const { confirmNavigation } = useUnsavedChangesGuard({
-    isDirty: notificationsDirty,
+    isDirty,
     onConfirm: requestConfirmation,
   });
 
@@ -93,34 +98,39 @@ export function SettingsPageContent({
   const handleDiscard = useCallback(() => {
     // The user explicitly chose to leave; clear the guard so the incoming tab
     // change is not blocked and a later visit starts from a clean form.
-    setNotificationsDirty(false);
+    if (receiptsActive) setReceiptsDirty(false);
+    else setNotificationsDirty(false);
     settleConfirmation(true);
-  }, [settleConfirmation]);
+  }, [receiptsActive, settleConfirmation]);
 
   const handleSaveAndLeave = useCallback(async () => {
     setConfirmError(null);
     setIsSavingFromDialog(true);
-    const saved = (await notificationSettingsRef.current?.save()) ?? false;
+    const form = receiptsActive ? receiptThemeRef.current : notificationSettingsRef.current;
+    const saved = await form?.save();
     setIsSavingFromDialog(false);
 
     if (saved) {
       // The child reports this too, but it may unmount as part of the pending
       // tab change before its effect runs, so clear the guard here as well.
-      setNotificationsDirty(false);
+      if (receiptsActive) setReceiptsDirty(false);
+      else setNotificationsDirty(false);
       settleConfirmation(true);
     } else {
       setConfirmError(
-        'We could not save your notification preferences. Please try again.'
+        receiptsActive
+          ? 'We could not save your receipt theme. Check the theme fields and try again.'
+          : 'We could not save your notification preferences. Please try again.'
       );
     }
-  }, [settleConfirmation]);
+  }, [receiptsActive, settleConfirmation]);
 
   const handleBeforeTabChange = useCallback(
     (nextTabId: string, origin?: HTMLElement) => {
-      if (!notificationsDirty || nextTabId === activeTab) return true;
+      if (!isDirty || nextTabId === activeTab) return true;
       return confirmNavigation(origin);
     },
-    [activeTab, confirmNavigation, notificationsDirty]
+    [activeTab, confirmNavigation, isDirty]
   );
 
   const settingsTabs: TabDefinition[] = [
@@ -160,6 +170,21 @@ export function SettingsPageContent({
         </section>
       ),
     },
+    {
+      id: 'receipts',
+      label: 'Receipts',
+      content: (
+        <section className="settings-group">
+          <div className="settings-group__header">
+            <h2 className="settings-group__title">Organization receipt themes</h2>
+          </div>
+          <div className="settings-group__content">
+            <ReceiptThemeEditor ref={receiptThemeRef} onDirtyChange={setReceiptsDirty}
+              confirmNavigation={confirmNavigation} />
+          </div>
+        </section>
+      ),
+    },
   ];
 
   return (
@@ -193,12 +218,13 @@ export function SettingsPageContent({
       <Modal
         isOpen={isConfirmOpen}
         onClose={handleCancel}
-        title="You have unsaved notification changes"
+        title={receiptsActive ? "You have unsaved receipt changes" : "You have unsaved notification changes"}
         restoreFocusTarget={restoreFocusTarget}
       >
         <p>
-          Your notification preference changes have not been saved. Save them
-          before leaving, discard them, or cancel to keep editing.
+          {receiptsActive
+            ? 'Save your receipt theme before leaving, discard your edits, or cancel to keep editing.'
+            : 'Your notification preference changes have not been saved. Save them before leaving, discard them, or cancel to keep editing.'}
         </p>
 
         {confirmError && (

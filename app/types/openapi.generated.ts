@@ -220,6 +220,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/streams/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get aggregate stream statistics
+         * @description Returns aggregate counts by stream status and exact BigInt escrowed/released totals per token for all streams visible to the caller in the resolved tenant.
+         */
+        get: operations["getStreamStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/streams/{id}": {
         parameters: {
             query?: never;
@@ -247,7 +267,7 @@ export interface paths {
          * @deprecated
          * @description Partially updates a stream by merging the request body fields. **Deprecated** — there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.
          *
-         *     The `updatedAt` field is always refreshed. Cache is invalidated on success.
+         *     Requires an `If-Match` header carrying the stream's current strong `ETag` (or `*`) for optimistic concurrency control. Returns `428 Precondition Required` when missing (unless relaxed via `STREAMPAY_REQUIRE_IF_MATCH=false`) and `412 Precondition Failed` (with the current `ETag` header) when stale. The `updatedAt` field is always refreshed and cache is invalidated on success.
          */
         post: operations["updateStream"];
         /**
@@ -474,9 +494,6 @@ export interface paths {
         put?: never;
         /**
          * Create a payment stream (v2)
-         * @description Creates a payment stream using the v2 request and response shape. Requires bearer authentication and returns the created stream.
-         */
-        /**
          * @description Creates a v2 payment stream for the authenticated sender and returns its initial representation.
          */
         post: operations["createStreamV2"];
@@ -660,7 +677,7 @@ export interface paths {
         put?: never;
         /**
          * Receive a dead-letter-queue webhook event
-         * @description Accepts failed webhook events for reprocessing. No authentication required (secured at the network/gateway level).
+         * @description Accepts failed webhook events for reprocessing. Requires internal-service HMAC auth or an admin JWT. Structured `{ endpoint, event }` payloads are validated and enqueued idempotently into the outbox (202); legacy unstructured objects receive a 200 acknowledgement.
          */
         post: operations["receiveDlqWebhook"];
         delete?: never;
@@ -678,9 +695,6 @@ export interface paths {
         };
         /**
          * List webhook delivery attempts
-         * @description Returns paginated webhook delivery attempts, including their status, retry count, and related endpoint.
-         */
-        /**
          * @description Lists webhook delivery attempts with pagination for the authenticated caller.
          */
         get: operations["listWebhookDeliveries"];
@@ -1233,6 +1247,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgId}/receipt-theme": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization member wallet address. Must match the bearer token when both are supplied. */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Organization identifier */
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read the organization receipt theme
+         * @description Any organization member can read the theme.
+         */
+        get: operations["getOrgReceiptTheme"];
+        /**
+         * Replace the organization receipt theme
+         * @description Only organization owners can replace the theme. Changes are recorded in the audit log.
+         */
+        put: operations["updateOrgReceiptTheme"];
+        post?: never;
+        /**
+         * Reset the organization receipt theme
+         * @description Only organization owners can reset the theme. The reset restores the default receipt and is recorded in the audit log.
+         */
+        delete: operations["resetOrgReceiptTheme"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgId}/policy": {
         parameters: {
             query?: never;
@@ -1779,6 +1827,31 @@ export interface components {
         };
         UpdateOrgPolicyRequest: {
             policy: components["schemas"]["StreamPolicy"];
+        };
+        OrgReceiptThemeInput: {
+            /** @description Three or six hex digits prefixed with #. Defaults to #1f6feb. */
+            accentColor?: string | null;
+            /** @description Absolute HTTPS URL on an approved host. Empty or null clears the logo. */
+            logoUrl?: string | null;
+            /** @description Plain-text message. The server counts UTF-16 code units. */
+            message?: string | null;
+        };
+        OrgReceiptThemeResponse: {
+            data: {
+                orgId: string;
+                theme: {
+                    accentColor: string;
+                    /** Format: uri */
+                    logoUrl?: string;
+                    message?: string;
+                } | null;
+                canEdit: boolean;
+                /** @description Comma-separated host patterns for editor validation. */
+                logoAllowedHosts: string;
+            };
+            links: {
+                self: string;
+            };
         };
         OrgPolicyResponse: {
             data: {
@@ -2813,6 +2886,72 @@ export interface operations {
             500: components["responses"]["500"];
         };
     };
+    getStreamStats: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Strong ETag from a previous response for conditional 304 revalidation. */
+                "If-None-Match"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Aggregate stream statistics. */
+            200: {
+                headers: {
+                    /** @description Strong ETag of the stats payload. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            counts: {
+                                draft: number;
+                                active: number;
+                                paused: number;
+                                ended: number;
+                                withdrawn: number;
+                                cancelled: number;
+                            };
+                            totals: {
+                                [key: string]: {
+                                    /** @description Total escrowed base units as a base-10 integer string. */
+                                    escrowed: string;
+                                    /** @description Total released base units as a base-10 integer string. */
+                                    released: string;
+                                };
+                            };
+                            /** @description Number of streams skipped from totals due to unparsable amount strings. */
+                            skipped: number;
+                        };
+                        links: {
+                            self: string;
+                        };
+                    };
+                };
+            };
+            /** @description Not Modified — ETag matched If-None-Match. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
     getStream: {
         parameters: {
             query?: never;
@@ -2891,6 +3030,8 @@ export interface operations {
             header: {
                 /** @description Tenant context for multi-tenant isolation. Must be a non-empty string. */
                 "x-tenant-id": string;
+                /** @description Strong ETag from the latest `GET /api/streams/{id}` response (or `*`). Compared using RFC 9110 strong comparison; weak (`W/`) tags never match. */
+                "If-Match": string;
             };
             path: {
                 /** @description Stream identifier. */
@@ -2928,6 +3069,8 @@ export interface operations {
             /** @description Stream updated. */
             200: {
                 headers: {
+                    /** @description Fresh strong entity-tag computed for the updated stream. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2946,6 +3089,44 @@ export interface operations {
                 };
             };
             404: components["responses"]["404"];
+            /** @description Precondition failed — the `If-Match` ETag does not match the current stream state. */
+            412: {
+                headers: {
+                    /** @description Current strong entity-tag of the stream. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "PRECONDITION_FAILED",
+                     *         "message": "Stream has been modified since the provided ETag; re-fetch and retry",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Precondition required — `If-Match` header is missing. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "PRECONDITION_REQUIRED",
+                     *         "message": "If-Match header with the current stream ETag is required for updates",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             /** @description Rate limit exceeded. */
             429: {
                 headers: {
@@ -3614,7 +3795,14 @@ export interface operations {
     };
     listStreamsV2: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum number of streams to return per page. */
+                limit?: number;
+                /** @description Opaque pagination cursor returned by a previous page. */
+                cursor?: string;
+                /** @description Filter streams by lifecycle status. */
+                status?: "draft" | "active" | "paused" | "ended";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3677,19 +3865,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    /**
-                     * @example {
-                     *       "id": "stream_lf3k9z",
-                     *       "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
-                     *       "rate": "120 XLM/month",
-                     *       "status": "draft",
-                     *       "allowed_actions": [
-                     *         "start"
-                     *       ],
-                     *       "created_at": "2024-01-15T10:00:00.000Z",
-                     *       "settlement": null
-                     *     }
-                     */
                     "application/json": components["schemas"]["StreamV2"];
                 };
             };
@@ -4101,7 +4276,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Event accepted. */
+            /** @description Legacy unstructured event accepted. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4113,7 +4288,32 @@ export interface operations {
                     };
                 };
             };
+            /** @description Structured event enqueued (or deduplicated) in the outbox. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example true */
+                        received: boolean;
+                        /** @example true */
+                        enqueued: boolean;
+                        outboxId: string;
+                        /** @example false */
+                        duplicate: boolean;
+                    };
+                };
+            };
             400: components["responses"]["400"];
+            401: components["responses"]["401"];
+            /** @description Malformed structured payload or disallowed endpoint URL. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             500: components["responses"]["500"];
         };
     };
@@ -4746,6 +4946,7 @@ export interface operations {
             };
             400: components["responses"]["400"];
             401: components["responses"]["401"];
+            422: components["responses"]["422"];
         };
     };
     getExportsHealth: {
@@ -5019,6 +5220,170 @@ export interface operations {
                 };
             };
             500: components["responses"]["500"];
+        };
+    };
+    getOrgReceiptTheme: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization member wallet address. Must match the bearer token when both are supplied. */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Organization identifier */
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current theme after the operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgReceiptThemeResponse"];
+                };
+            };
+            /** @description Organization membership or owner access is required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Organization not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    updateOrgReceiptTheme: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization member wallet address. Must match the bearer token when both are supplied. */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Organization identifier */
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrgReceiptThemeInput"];
+            };
+        };
+        responses: {
+            /** @description Current theme after the operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgReceiptThemeResponse"];
+                };
+            };
+            /** @description Malformed JSON */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Organization membership or owner access is required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Organization not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Invalid receipt theme fields */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: {
+                            /** @constant */
+                            code: "VALIDATION_ERROR";
+                            message: string;
+                            request_id: string;
+                            fields: {
+                                [key: string]: string;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+    };
+    resetOrgReceiptTheme: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization member wallet address. Must match the bearer token when both are supplied. */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Organization identifier */
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current theme after the operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgReceiptThemeResponse"];
+                };
+            };
+            /** @description Organization membership or owner access is required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Organization not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
         };
     };
     getOrgPolicy: {
