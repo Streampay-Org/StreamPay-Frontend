@@ -101,6 +101,12 @@ export interface OutboxEntry {
    * Useful for detecting stuck entries in operational dashboards.
    */
   drainAttempts: number;
+
+  /**
+   * Optional idempotency key (e.g. `${event.id}:${endpoint.id}`) used to
+   * prevent duplicate outbox entries when callers retry enqueue requests.
+   */
+  readonly idempotencyKey?: string;
 }
 
 // ── OutboxStore ───────────────────────────────────────────────────────────────
@@ -125,6 +131,9 @@ export interface OutboxStore {
   /** Return entry by id, or undefined if absent. */
   get(id: string): OutboxEntry | undefined;
 
+  /** Return entry by idempotency key, or undefined if absent. */
+  findByIdempotencyKey?(key: string): OutboxEntry | undefined;
+
   /** Return all entries (for tests and observability endpoints). */
   list(): OutboxEntry[];
 
@@ -140,12 +149,16 @@ export interface OutboxStore {
  */
 export class InMemoryOutboxStore implements OutboxStore {
   private readonly entries = new Map<string, OutboxEntry>();
+  private readonly idempotencyIndex = new Map<string, string>();
 
   append(entry: OutboxEntry): void {
     if (this.entries.has(entry.id)) {
       throw new Error(`OutboxStore: entry with id "${entry.id}" already exists`);
     }
     this.entries.set(entry.id, { ...entry });
+    if (entry.idempotencyKey) {
+      this.idempotencyIndex.set(entry.idempotencyKey, entry.id);
+    }
   }
 
   listPending(): OutboxEntry[] {
@@ -173,12 +186,19 @@ export class InMemoryOutboxStore implements OutboxStore {
     return entry ? { ...entry } : undefined;
   }
 
+  findByIdempotencyKey(key: string): OutboxEntry | undefined {
+    const id = this.idempotencyIndex.get(key);
+    if (!id) return undefined;
+    return this.get(id);
+  }
+
   list(): OutboxEntry[] {
     return Array.from(this.entries.values()).map((e) => ({ ...e }));
   }
 
   clear(): void {
     this.entries.clear();
+    this.idempotencyIndex.clear();
   }
 }
 
@@ -234,9 +254,19 @@ export function setOutboxStore(store: OutboxStore): void {
 export function appendToOutbox(params: {
   endpoint: WebhookEndpoint;
   event: WebhookEvent;
+  idempotencyKey?: string;
   store?: OutboxStore;
 }): OutboxEntry {
-  const { endpoint, event, store = _store } = params;
+  const { endpoint, event, idempotencyKey, store = _store } = params;
+
+  if (idempotencyKey) {
+    const existing = store.findByIdempotencyKey
+      ? store.findByIdempotencyKey(idempotencyKey)
+      : store.list().find((e) => e.idempotencyKey === idempotencyKey);
+    if (existing) {
+      return existing;
+    }
+  }
 
   const now = new Date().toISOString();
   const entry: OutboxEntry = {
@@ -248,6 +278,7 @@ export function appendToOutbox(params: {
     createdAt: now,
     updatedAt: now,
     drainAttempts: 0,
+    ...(idempotencyKey ? { idempotencyKey } : {}),
   };
 
   store.append(entry);

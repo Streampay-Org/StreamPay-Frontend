@@ -1,0 +1,43 @@
+.root {
+  position: relative;
+}
+
+.trigger,
+.item {
+  min-block-size: 2.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--surface, transparent);
+  color: var(--foreground);
+  padding: 0.5rem 0.75rem;
+}
+
+.trigger:focus-visible,
+.item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--background);
+}
+
+.menu {
+  position: absolute;
+  z-index: 2;
+  inset-inline-end: 0;
+  display: grid;
+  gap: 0.25rem;
+  min-inline-size: 10rem;
+  margin-block-start: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--background);
+  box-shadow: var(--shadow-md, 0 0.5rem 1.5rem rgb(0 0 0 / 15%));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu,
+  .trigger,
+  .item {
+    transition: none;
+  }
+}
