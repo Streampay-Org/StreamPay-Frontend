@@ -28,6 +28,10 @@ import {
   readJsonBody,
 } from "@/lib/readJsonBody";
 import { resolveRequestId } from "@/lib/requestId";
+import {
+  paginateByKeyset,
+  parseOrgPaginationParams,
+} from "@/app/lib/org-pagination";
 
 const VALID_ROLES: OrgRole[] = ["owner", "pauser", "settler", "viewer"];
 
@@ -44,6 +48,14 @@ function orgNotFoundResponse(orgId: string) {
   return errorResponse("ORG_NOT_FOUND", `Org '${orgId}' not found.`, 404);
 }
 
+function getRequestUrl(request: Request, fallbackPath: string): URL {
+  try {
+    return request.url ? new URL(request.url) : new URL(`http://localhost${fallbackPath}`);
+  } catch {
+    return new URL(`http://localhost${fallbackPath}`);
+  }
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ orgId: string }> },
@@ -57,14 +69,27 @@ export async function GET(
       return orgNotFoundResponse(orgId);
     }
 
+    const url = getRequestUrl(request, `/api/orgs/${orgId}/members`);
+    const parsed = parseOrgPaginationParams(url.searchParams);
+    if (!parsed.ok) {
+      return errorResponse(parsed.code, parsed.message, 422);
+    }
+
+    const { page, hasNext, nextCursor } = paginateByKeyset(
+      org.members,
+      (member) => ({ timestamp: member.addedAt, id: member.walletAddress }),
+      parsed.value,
+    );
+
     logger.info("Org members listed", {
       org_id: orgId,
-      member_count: org.members.length,
+      member_count: page.length,
+      total_members: org.members.length,
     });
 
     return NextResponse.json({
-      data: org.members,
-      meta: { total: org.members.length },
+      data: page,
+      meta: { total: org.members.length, hasNext, nextCursor },
       links: { self: `/api/orgs/${orgId}/members` },
     });
   });
