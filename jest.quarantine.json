@@ -134,10 +134,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "lib/sorobanRetryQueue.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "middleware.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },

@@ -48,7 +48,6 @@ const config = {
     "<rootDir>/app/streams/page.test.tsx",
     "<rootDir>/app/streams/StreamsPageContent.test.tsx",
     "<rootDir>/app/StreamTypeChip.test.tsx",
-    "<rootDir>/lib/sorobanRetryQueue.test.ts",
     "<rootDir>/middleware.test.ts",
     "<rootDir>/tests/contract.test.ts",
     "<rootDir>/tests/env.test.ts",
