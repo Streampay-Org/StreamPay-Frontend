@@ -68,4 +68,6 @@ pub enum Error {
     CooloffActive = 22,
     /// 23: Stream `total_amount` exceeds the configured per-token maximum cap.
     AmountTooLarge = 23,
+    /// 24: No pending recipient transfer proposal exists for the stream.
+    NoPendingTransfer = 24,
 }

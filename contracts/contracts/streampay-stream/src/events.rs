@@ -151,6 +151,36 @@ pub struct DeprecatedEntrypoint {
     pub timestamp: u64,
 }
 
+/// Emitted when a stream's current recipient proposes transferring the stream
+/// to a new recipient (topic: `"stream"`, sub-topic: `"recipient_transfer_proposed"`).
+#[contractevent(topics = ["stream", "recipient_transfer_proposed"], data_format = "vec")]
+pub struct RecipientTransferProposed {
+    pub stream_id: u64,
+    pub old_recipient: Address,
+    pub new_recipient: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when the proposed recipient accepts a recipient transfer
+/// (topic: `"stream"`, sub-topic: `"recipient_transfer_accepted"`).
+#[contractevent(topics = ["stream", "recipient_transfer_accepted"], data_format = "vec")]
+pub struct RecipientTransferAccepted {
+    pub stream_id: u64,
+    pub old_recipient: Address,
+    pub new_recipient: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when a pending recipient transfer is cancelled by the current
+/// recipient or the stream sender (topic: `"stream"`, sub-topic: `"recipient_transfer_cancelled"`).
+#[contractevent(topics = ["stream", "recipient_transfer_cancelled"], data_format = "vec")]
+pub struct RecipientTransferCancelled {
+    pub stream_id: u64,
+    pub old_recipient: Address,
+    pub new_recipient: Address,
+    pub timestamp: u64,
+}
+
 pub fn created(
     env: &Env,
     stream_id: u64,
@@ -306,6 +336,57 @@ pub fn deprecated_entrypoint(env: &Env, caller: &Address, entrypoint: Symbol, ti
     DeprecatedEntrypoint {
         caller: caller.clone(),
         entrypoint,
+        timestamp,
+    }
+    .publish(env);
+}
+
+/// Publishes a [`RecipientTransferProposed`] event.
+pub fn recipient_transfer_proposed(
+    env: &Env,
+    stream_id: u64,
+    old_recipient: &Address,
+    new_recipient: &Address,
+    timestamp: u64,
+) {
+    RecipientTransferProposed {
+        stream_id,
+        old_recipient: old_recipient.clone(),
+        new_recipient: new_recipient.clone(),
+        timestamp,
+    }
+    .publish(env);
+}
+
+/// Publishes a [`RecipientTransferAccepted`] event.
+pub fn recipient_transfer_accepted(
+    env: &Env,
+    stream_id: u64,
+    old_recipient: &Address,
+    new_recipient: &Address,
+    timestamp: u64,
+) {
+    RecipientTransferAccepted {
+        stream_id,
+        old_recipient: old_recipient.clone(),
+        new_recipient: new_recipient.clone(),
+        timestamp,
+    }
+    .publish(env);
+}
+
+/// Publishes a [`RecipientTransferCancelled`] event.
+pub fn recipient_transfer_cancelled(
+    env: &Env,
+    stream_id: u64,
+    old_recipient: &Address,
+    new_recipient: &Address,
+    timestamp: u64,
+) {
+    RecipientTransferCancelled {
+        stream_id,
+        old_recipient: old_recipient.clone(),
+        new_recipient: new_recipient.clone(),
         timestamp,
     }
     .publish(env);

@@ -13,6 +13,17 @@ and must never be reused — see the module rustdoc for details.
 ## [Unreleased]
 
 ### Added
+- **Two-step recipient transfer.** Added `propose_recipient_transfer`,
+  `accept_recipient_transfer`, `cancel_recipient_transfer`, and
+  `get_pending_recipient` to safely rotate a stream's recipient address.
+  The current recipient proposes a new recipient (rejecting self-transfer,
+  sender-as-recipient, missing trustline, and terminal streams; overwriting any
+  prior proposal), the proposed address accepts (updating `stream.recipient`,
+  clearing the proposal and previous withdrawer allowlist, and preserving
+  already-released amounts and fee accounting), and either the current recipient
+  or sender can cancel before acceptance. Appended `Error::NoPendingTransfer = 24`
+  and added `recipient_transfer_proposed`, `recipient_transfer_accepted`, and
+  `recipient_transfer_cancelled` events.
 - **Split stream pause/resume.** `pause_split_stream` and
   `resume_split_stream` let a split stream's sender freeze and restart
   accrual for every recipient. Pausing records `pause_time`; resuming adds the

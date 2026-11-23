@@ -1470,6 +1470,152 @@ impl Contract {
         Ok(storage::get_withdrawer_allowlist(&env, stream_id))
     }
 
+    /// Proposes transferring a stream's recipient role to `new_recipient`.
+    ///
+    /// This is step 1 of the two-step recipient transfer flow. Only the
+    /// stream's current recipient may propose a transfer. Calling this again
+    /// while a proposal is already pending overwrites the previous proposal.
+    /// Proposals are permitted on `Draft`, `Active`, and `Paused` streams,
+    /// and rejected on terminal (`Settled`, `Cancelled`) streams.
+    ///
+    /// @param `stream_id`     — Numeric ID of the stream.
+    /// @param `new_recipient` — Proposed new recipient address.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the contract is globally paused.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::InvalidState`] if the stream is `Settled` or `Cancelled`.
+    /// @custom:error [`Error::SelfStream`] if `new_recipient` equals the current recipient or the sender.
+    /// @custom:error [`Error::RecipientTrustlineMissing`] if `new_recipient` cannot hold the stream token.
+    ///
+    /// @custom:auth Requires authorisation from the stream's current `recipient`.
+    pub fn propose_recipient_transfer(
+        env: Env,
+        stream_id: u64,
+        new_recipient: Address,
+    ) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        let stream = get_existing_stream(&env, stream_id)?;
+        stream.recipient.require_auth();
+
+        if stream.status == StreamStatus::Settled || stream.status == StreamStatus::Cancelled {
+            return Err(Error::InvalidState);
+        }
+
+        if new_recipient == stream.recipient || new_recipient == stream.sender {
+            return Err(Error::SelfStream);
+        }
+
+        require_recipient_trustline(&env, &stream.token, &new_recipient)?;
+
+        storage::set_pending_recipient(&env, stream_id, &new_recipient);
+        events::recipient_transfer_proposed(
+            &env,
+            stream_id,
+            &stream.recipient,
+            &new_recipient,
+            env.ledger().timestamp(),
+        );
+        Ok(())
+    }
+
+    /// Accepts a pending recipient transfer for `stream_id`.
+    ///
+    /// This is step 2 of the two-step recipient transfer flow. Only the
+    /// proposed `new_recipient` may accept. On acceptance:
+    /// - `stream.recipient` is updated to the new address (which also updates
+    ///   all recipient-indexed listing views).
+    /// - The pending proposal is cleared.
+    /// - The previous recipient's per-stream withdrawer allowlist is cleared so
+    ///   delegated withdrawers of the old recipient cannot withdraw the new
+    ///   recipient's funds.
+    /// - Already-released funds remain released; remaining vesting accrues to
+    ///   the new recipient.
+    ///
+    /// @param `stream_id` — Numeric ID of the stream.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the contract is globally paused.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::InvalidState`] if the stream is `Settled` or `Cancelled`.
+    /// @custom:error [`Error::NoPendingTransfer`] if no transfer proposal is pending.
+    /// @custom:error [`Error::RecipientTrustlineMissing`] if the pending recipient cannot hold the stream token.
+    ///
+    /// @custom:auth Requires authorisation from the pending recipient.
+    pub fn accept_recipient_transfer(env: Env, stream_id: u64) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        let mut stream = get_existing_stream(&env, stream_id)?;
+
+        if stream.status == StreamStatus::Settled || stream.status == StreamStatus::Cancelled {
+            return Err(Error::InvalidState);
+        }
+
+        let new_recipient =
+            storage::get_pending_recipient(&env, stream_id).ok_or(Error::NoPendingTransfer)?;
+        new_recipient.require_auth();
+
+        require_recipient_trustline(&env, &stream.token, &new_recipient)?;
+
+        let old_recipient = stream.recipient.clone();
+        let now = env.ledger().timestamp();
+        stream.recipient = new_recipient.clone();
+        stream.last_update = now;
+
+        storage::set_stream(&env, stream_id, &stream);
+        storage::clear_pending_recipient(&env, stream_id);
+        storage::clear_withdrawer_allowlist(&env, stream_id);
+
+        events::recipient_transfer_accepted(&env, stream_id, &old_recipient, &new_recipient, now);
+        Ok(())
+    }
+
+    /// Cancels a pending recipient transfer proposal for `stream_id`.
+    ///
+    /// Either the current `recipient` or the stream `sender` may cancel an
+    /// unaccepted proposal.
+    ///
+    /// @param `stream_id` — Numeric ID of the stream.
+    /// @param `caller`    — Address cancelling the proposal (must be `stream.recipient` or `stream.sender`).
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the contract is globally paused.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::Unauthorized`] if `caller` is neither the current recipient nor the sender.
+    /// @custom:error [`Error::NoPendingTransfer`] if no transfer proposal is pending.
+    ///
+    /// @custom:auth Requires authorisation from `caller`.
+    pub fn cancel_recipient_transfer(
+        env: Env,
+        stream_id: u64,
+        caller: Address,
+    ) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        let stream = get_existing_stream(&env, stream_id)?;
+
+        if caller != stream.recipient && caller != stream.sender {
+            return Err(Error::Unauthorized);
+        }
+        caller.require_auth();
+
+        let pending =
+            storage::get_pending_recipient(&env, stream_id).ok_or(Error::NoPendingTransfer)?;
+        storage::clear_pending_recipient(&env, stream_id);
+
+        events::recipient_transfer_cancelled(
+            &env,
+            stream_id,
+            &stream.recipient,
+            &pending,
+            env.ledger().timestamp(),
+        );
+        Ok(())
+    }
+
+    /// Returns the pending recipient transfer target for `stream_id`, if any.
+    ///
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    pub fn get_pending_recipient(env: Env, stream_id: u64) -> Result<Option<Address>, Error> {
+        get_existing_stream(&env, stream_id)?;
+        Ok(storage::get_pending_recipient(&env, stream_id))
+    }
+
     /// Pauses an active stream, freezing accrual while preserving vested funds.
     ///
     /// Only the stream sender may call this. On pause, status is set to Paused
@@ -1597,6 +1743,7 @@ impl Contract {
         stream.last_update = now;
 
         limits::decrement_sender_stream_count(&env, &stream.sender);
+        storage::clear_pending_recipient(&env, stream_id);
         storage::set_stream(&env, stream_id, &stream);
         events::settled(
             &env,
@@ -1676,6 +1823,7 @@ impl Contract {
         stream.last_update = now;
 
         limits::decrement_sender_stream_count(&env, &stream.sender);
+        storage::clear_pending_recipient(&env, stream_id);
         storage::set_stream(&env, stream_id, &stream);
 
         events::cancelled(

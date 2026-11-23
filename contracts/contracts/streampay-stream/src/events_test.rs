@@ -961,3 +961,103 @@ fn full_lifecycle_emits_events_in_order() {
         );
     }
 }
+
+// ── recipient transfer events ────────────────────────────────────────────────
+
+#[test]
+fn recipient_transfer_proposed_event_emitted() {
+    let (data, client) = setup_evt();
+    let id = make_active_stream(&data, &client);
+    let new_recipient = Address::generate(&data.env);
+    drain_events(&data);
+
+    data.env.ledger().set_timestamp(1_120);
+    client.propose_recipient_transfer(&id, &new_recipient);
+
+    let evts = data.env.events().all();
+    assert_eq!(evts.len(), 1);
+    let (_, topics, payload) = evts.first().unwrap();
+    assert_eq!(
+        topics.get_unchecked(0),
+        Symbol::new(&data.env, "stream").into_val(&data.env)
+    );
+    assert_eq!(
+        topics.get_unchecked(1),
+        Symbol::new(&data.env, "recipient_transfer_proposed").into_val(&data.env)
+    );
+    let expected: soroban_sdk::Val = vec![
+        &data.env,
+        id.into_val(&data.env),
+        data.recipient.into_val(&data.env),
+        new_recipient.into_val(&data.env),
+        1_120u64.into_val(&data.env),
+    ]
+    .into_val(&data.env);
+    assert_eq!(payload, expected);
+}
+
+#[test]
+fn recipient_transfer_accepted_event_emitted() {
+    let (data, client) = setup_evt();
+    let id = make_active_stream(&data, &client);
+    let new_recipient = Address::generate(&data.env);
+    client.propose_recipient_transfer(&id, &new_recipient);
+    drain_events(&data);
+
+    data.env.ledger().set_timestamp(1_130);
+    client.accept_recipient_transfer(&id);
+
+    let evts = data.env.events().all();
+    assert_eq!(evts.len(), 1);
+    let (_, topics, payload) = evts.first().unwrap();
+    assert_eq!(
+        topics.get_unchecked(0),
+        Symbol::new(&data.env, "stream").into_val(&data.env)
+    );
+    assert_eq!(
+        topics.get_unchecked(1),
+        Symbol::new(&data.env, "recipient_transfer_accepted").into_val(&data.env)
+    );
+    let expected: soroban_sdk::Val = vec![
+        &data.env,
+        id.into_val(&data.env),
+        data.recipient.into_val(&data.env),
+        new_recipient.into_val(&data.env),
+        1_130u64.into_val(&data.env),
+    ]
+    .into_val(&data.env);
+    assert_eq!(payload, expected);
+}
+
+#[test]
+fn recipient_transfer_cancelled_event_emitted() {
+    let (data, client) = setup_evt();
+    let id = make_active_stream(&data, &client);
+    let new_recipient = Address::generate(&data.env);
+    client.propose_recipient_transfer(&id, &new_recipient);
+    drain_events(&data);
+
+    data.env.ledger().set_timestamp(1_140);
+    client.cancel_recipient_transfer(&id, &data.sender);
+
+    let evts = data.env.events().all();
+    assert_eq!(evts.len(), 1);
+    let (_, topics, payload) = evts.first().unwrap();
+    assert_eq!(
+        topics.get_unchecked(0),
+        Symbol::new(&data.env, "stream").into_val(&data.env)
+    );
+    assert_eq!(
+        topics.get_unchecked(1),
+        Symbol::new(&data.env, "recipient_transfer_cancelled").into_val(&data.env)
+    );
+    let expected: soroban_sdk::Val = vec![
+        &data.env,
+        id.into_val(&data.env),
+        data.recipient.into_val(&data.env),
+        new_recipient.into_val(&data.env),
+        1_140u64.into_val(&data.env),
+    ]
+    .into_val(&data.env);
+    assert_eq!(payload, expected);
+}

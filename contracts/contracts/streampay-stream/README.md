@@ -18,6 +18,10 @@ Linear payment streams on Stellar/Soroban.
 | `cancel_stream` | Yes | `stream.sender` | Ends a stream early, refunding unvested funds to sender. |
 | `withdraw` | Yes | `stream.recipient` | Withdraws vested funds to the recipient. |
 | `withdraw_to` | Yes | `stream.recipient` | Withdraws vested funds to a custom destination address (recipient-only auth, destination trustline checked). |
+| `propose_recipient_transfer` | Yes | `stream.recipient` | Proposes transferring the stream's recipient role to a new address (step 1 of two-step transfer). |
+| `accept_recipient_transfer` | Yes | `pending_recipient` | Accepts a pending recipient transfer, updating `stream.recipient` and clearing the previous withdrawer allowlist (step 2). |
+| `cancel_recipient_transfer` | Yes | `stream.recipient` or `stream.sender` | Cancels a pending recipient transfer proposal before acceptance. |
+| `get_pending_recipient` | No | None | Returns the pending recipient transfer target for a stream, if any. |
 | `settle` | Yes | `stream.recipient` | Ends a stream and releases all remaining funds to recipient. |
 | `get_stream` | No | None | Returns the stream record. |
 | `withdrawable` | No | None | Returns the currently withdrawable amount. |
