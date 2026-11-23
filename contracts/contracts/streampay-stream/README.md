@@ -18,6 +18,11 @@ Linear payment streams on Stellar/Soroban.
 | `start_stream` | Yes | `stream.sender` | Activates a draft stream, anchoring its time bounds. |
 | `pause` | Yes | `stream.sender` | Freezes accrual for an active stream. |
 | `resume` | Yes | `stream.sender` | Resumes a paused stream, extending the end time. |
+| `set_operator` | Yes | `stream.sender` | Adds a pause/resume operator to a stream (bounded list; sender rejected). |
+| `remove_operator` | Yes | `stream.sender` | Removes a pause/resume operator from a stream, immediately revoking access. |
+| `get_operators` | No | None | Returns the current pause/resume operator list for a stream. |
+| `pause_as` | Yes | `stream.sender` or operator | Pauses an active stream on behalf of the sender or an authorized operator. |
+| `resume_as` | Yes | `stream.sender` or operator | Resumes a paused stream on behalf of the sender or an authorized operator. |
 | `cancel_stream` | Yes | `stream.sender` | Ends a stream early, refunding unvested funds to sender. |
 | `withdraw` | Yes | `stream.recipient` | Withdraws vested funds to the recipient. |
 | `withdraw_to` | Yes | `stream.recipient` | Withdraws vested funds to a custom destination address (recipient-only auth, destination trustline checked). |

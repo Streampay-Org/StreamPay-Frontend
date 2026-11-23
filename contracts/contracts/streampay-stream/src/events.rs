@@ -586,6 +586,26 @@ pub struct DormantSwept {
     pub timestamp: u64,
 }
 
+/// Emitted when a pause/resume operator is added to a stream
+/// (topic: `"stream"`, sub-topic: `"operator_set"`).
+#[contractevent(topics = ["stream", "operator_set"], data_format = "vec")]
+pub struct OperatorSet {
+    pub stream_id: u64,
+    pub sender: Address,
+    pub operator: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when a pause/resume operator is removed from a stream
+/// (topic: `"stream"`, sub-topic: `"operator_removed"`).
+#[contractevent(topics = ["stream", "operator_removed"], data_format = "vec")]
+pub struct OperatorRemoved {
+    pub stream_id: u64,
+    pub sender: Address,
+    pub operator: Address,
+    pub timestamp: u64,
+}
+
 /// Publishes a [`DormancyGraceSet`] event.
 pub fn dormancy_grace_set(env: &Env, admin: &Address, seconds: u64, timestamp: u64) {
     DormancyGraceSet {
@@ -612,6 +632,40 @@ pub fn dormant_swept(
         gross_amount,
         net_amount,
         fee_amount,
+        timestamp,
+    }
+    .publish(env);
+}
+
+/// Publishes an [`OperatorSet`] event.
+pub fn operator_set(
+    env: &Env,
+    stream_id: u64,
+    sender: &Address,
+    operator: &Address,
+    timestamp: u64,
+) {
+    OperatorSet {
+        stream_id,
+        sender: sender.clone(),
+        operator: operator.clone(),
+        timestamp,
+    }
+    .publish(env);
+}
+
+/// Publishes an [`OperatorRemoved`] event.
+pub fn operator_removed(
+    env: &Env,
+    stream_id: u64,
+    sender: &Address,
+    operator: &Address,
+    timestamp: u64,
+) {
+    OperatorRemoved {
+        stream_id,
+        sender: sender.clone(),
+        operator: operator.clone(),
         timestamp,
     }
     .publish(env);

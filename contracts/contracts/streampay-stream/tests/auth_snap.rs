@@ -695,3 +695,56 @@ fn auth_snap_cancel_recipient_transfer() {
     data.env.mock_auths(&[]);
     client.cancel_recipient_transfer(&id, &data.recipient);
 }
+
+// ── Per-stream pause/resume operators ─────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_set_operator() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let operator = Address::generate(&data.env);
+
+    data.env.mock_auths(&[]);
+    client.set_operator(&id, &operator);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_remove_operator() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let operator = Address::generate(&data.env);
+    client.set_operator(&id, &operator);
+
+    data.env.mock_auths(&[]);
+    client.remove_operator(&id, &operator);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_pause_as() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let operator = Address::generate(&data.env);
+    client.set_operator(&id, &operator);
+    data.env.ledger().set_timestamp(1_600);
+
+    data.env.mock_auths(&[]);
+    client.pause_as(&operator, &id);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_resume_as() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let operator = Address::generate(&data.env);
+    client.set_operator(&id, &operator);
+    data.env.ledger().set_timestamp(1_600);
+    client.pause_as(&operator, &id);
+    data.env.ledger().set_timestamp(1_700);
+
+    data.env.mock_auths(&[]);
+    client.resume_as(&operator, &id);
+}
