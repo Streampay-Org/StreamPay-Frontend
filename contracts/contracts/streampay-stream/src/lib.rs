@@ -731,6 +731,40 @@ impl Contract {
         cooloff::get_cooloff_duration(&env)
     }
 
+    /// Sets the global dormant-stream grace period in seconds.
+    ///
+    /// After a stream reaches `end_time`, if the recipient does not withdraw
+    /// for at least `seconds` after `max(end_time, last_withdraw_time)`, the
+    /// stream sender may reclaim the unclaimed vested balance via
+    /// [`Contract::sweep_dormant_stream`].
+    ///
+    /// A value of `0` disables dormant-stream sweeping (the default).
+    ///
+    /// @param `admin`   — Must match the admin set at initialisation.
+    /// @param `seconds` — Grace period in seconds. `0` disables sweeping.
+    ///
+    /// @custom:error [`Error::Unauthorized`] if `admin` is not the initialised admin.
+    /// @custom:error [`Error::NotFound`] if the contract has not been initialised.
+    ///
+    /// @custom:auth Requires authorisation from `admin`.
+    pub fn set_dormancy_grace(env: Env, admin: Address, seconds: u64) -> Result<(), Error> {
+        require_admin(&env, &admin)?;
+        storage::set_dormancy_grace(&env, seconds);
+        events::dormancy_grace_set(&env, &admin, seconds, env.ledger().timestamp());
+        Ok(())
+    }
+
+    /// Returns the current global dormant-stream grace period in seconds.
+    ///
+    /// A return value of `0` means dormant-stream sweeping is disabled (default).
+    ///
+    /// @return The dormancy grace period in seconds.
+    ///
+    /// @custom:error This entrypoint is read-only and never returns an error.
+    pub fn get_dormancy_grace(env: Env) -> u64 {
+        storage::get_dormancy_grace(&env)
+    }
+
     /// Returns the ledger timestamp until which `sender` is blocked from
     /// creating a new stream.
     ///
@@ -969,6 +1003,7 @@ impl Contract {
     /// @custom:error [`Error::InvalidTimeRange`] if `end_time <= start_time` or `start_time < now` (active only).
     ///
     /// @custom:auth Requires authorisation from `sender`.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_stream(
         env: Env,
         sender: Address,
@@ -978,6 +1013,53 @@ impl Contract {
         start_time: u64,
         end_time: u64,
         fee_bps: u32,
+    ) -> Result<u64, Error> {
+        Self::create_stream_with_cliff(
+            env,
+            sender,
+            recipient,
+            token,
+            total_amount,
+            start_time,
+            end_time,
+            fee_bps,
+            0,
+        )
+    }
+
+    /// Creates a funded stream with an optional cliff timestamp and escrows
+    /// `total_amount` from `sender`.
+    ///
+    /// This is an additive entrypoint alongside [`Contract::create_stream`] to
+    /// preserve ABI compatibility for existing callers and snapshots. Passing
+    /// `cliff_time = 0` behaves identically to [`Contract::create_stream`].
+    ///
+    /// When `cliff_time > 0`, it must satisfy
+    /// `start_time <= cliff_time <= end_time`; otherwise
+    /// [`Error::InvalidTimeRange`] is returned. Before the cliff is reached,
+    /// `withdrawable` returns `0`. At and after the cliff, vesting jumps to
+    /// the linear accrued amount for the active elapsed time and reaches
+    /// `total_amount` at `end_time`.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the global pause flag is set.
+    /// @custom:error [`Error::InvalidAmount`] if `total_amount <= 0`.
+    /// @custom:error [`Error::SelfStream`] if `sender == recipient`.
+    /// @custom:error [`Error::TokenNotAllowed`] if the token has been blocked by the admin.
+    /// @custom:error [`Error::InvalidTimeRange`] if `end_time <= start_time`, `start_time < now`,
+    /// or `cliff_time != 0 && (cliff_time < start_time || cliff_time > end_time)`.
+    ///
+    /// @custom:auth Requires authorisation from `sender`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_stream_with_cliff(
+        env: Env,
+        sender: Address,
+        recipient: Address,
+        token: Address,
+        total_amount: i128,
+        start_time: u64,
+        end_time: u64,
+        fee_bps: u32,
+        cliff_time: u64,
     ) -> Result<u64, Error> {
         require_not_paused(&env)?;
         sender.require_auth();
@@ -1016,6 +1098,10 @@ impl Contract {
             return Err(Error::InvalidTimeRange);
         }
 
+        if cliff_time != 0 && (cliff_time < start_time || cliff_time > end_time) {
+            return Err(Error::InvalidTimeRange);
+        }
+
         let duration = end_time
             .checked_sub(start_time)
             .ok_or(Error::InvalidTimeRange)?;
@@ -1039,6 +1125,7 @@ impl Contract {
             paused_at: 0,
             total_paused_duration: 0,
             fee_bps,
+            cliff_time,
         };
 
         storage::set_stream(&env, id, &stream);
@@ -1057,6 +1144,7 @@ impl Contract {
             stream.total_amount,
             fee_bps,
             duration,
+            cliff_time,
             now,
         );
 
@@ -1132,6 +1220,7 @@ impl Contract {
             paused_at: 0,
             total_paused_duration: 0,
             fee_bps: 0,
+            cliff_time: 0,
         };
 
         storage::set_stream(&env, id, &stream);
@@ -1145,6 +1234,7 @@ impl Contract {
             stream.total_amount,
             0,
             duration,
+            0,
             now,
         );
 
@@ -1342,14 +1432,6 @@ impl Contract {
         let recipient = stream.recipient.clone();
         let ts = execute_withdraw(&env, stream_id, &mut stream, amount, &recipient)?;
 
-        // Resolve the effective fee: explicit per-stream fee, then the token
-        // override, then the global default.  If no fee collector has been
-        // configured the full `amount` goes to the recipient regardless of the
-        // effective fee.
-        let effective_fee_bps =
-            fees::resolve_stream_fee_bps(&env, stream_id, &stream.token, stream.fee_bps);
-        let fee_result = fees::apply_fee(amount, effective_fee_bps)?;
-                    effective_fee_bps,
         events::withdrawn(&env, stream_id, &stream.recipient, amount, ts);
         if stream.status == StreamStatus::Settled {
             events::settled(&env, stream_id, &stream.recipient, stream.total_amount, ts);
@@ -1754,6 +1836,133 @@ impl Contract {
         );
 
         Ok(())
+    }
+
+    /// Reclaims unclaimed vested funds from a dormant stream back to the
+    /// stream's `sender` and marks the stream `Settled`.
+    ///
+    /// A stream is dormant when:
+    /// 1. The global `DormancyGrace` period is non-zero.
+    /// 2. The stream is in `Active` or `Ended` status and `now >= end_time`.
+    /// 3. There is a positive withdrawable balance (`withdrawable > 0`).
+    /// 4. `now >= max(end_time, last_withdraw_time) + grace`.
+    ///
+    /// Protocol fee handling is consistent with [`Contract::withdraw`]: if the
+    /// stream has a non-zero `fee_bps` and a fee collector is configured, the
+    /// fee is transferred to the collector and the net amount is returned to
+    /// `sender`. If no fee collector is configured, the full unclaimed amount
+    /// is returned to `sender`.
+    ///
+    /// @param `stream_id` — Numeric ID of the dormant stream to sweep.
+    ///
+    /// @return The gross unclaimed amount swept (before protocol fee deduction).
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the contract is globally paused.
+    /// @custom:error [`Error::DormancyDisabled`] if `DormancyGrace == 0`.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::AlreadySettled`] if the stream is already `Settled`.
+    /// @custom:error [`Error::InvalidState`] if the stream is `Draft`, `Paused`, or `Cancelled`.
+    /// @custom:error [`Error::NotDormant`] if `now < end_time`, nothing is withdrawable,
+    ///               or the dormancy grace window has not yet elapsed.
+    ///
+    /// @custom:auth Requires authorisation from the stream's `sender`.
+    pub fn sweep_dormant_stream(env: Env, stream_id: u64) -> Result<i128, Error> {
+        require_not_paused(&env)?;
+
+        let grace = storage::get_dormancy_grace(&env);
+        if grace == 0 {
+            return Err(Error::DormancyDisabled);
+        }
+
+        let mut stream = get_existing_stream(&env, stream_id)?;
+        stream.sender.require_auth();
+
+        if stream.status == StreamStatus::Settled {
+            return Err(Error::AlreadySettled);
+        }
+
+        if stream.status != StreamStatus::Active && stream.status != StreamStatus::Ended {
+            return Err(Error::InvalidState);
+        }
+
+        let now = env.ledger().timestamp();
+        if now < stream.end_time {
+            return Err(Error::NotDormant);
+        }
+
+        let sweep_amount = release::withdrawable(&stream, now)?;
+        if sweep_amount <= 0 {
+            return Err(Error::NotDormant);
+        }
+
+        let last_withdraw = storage::get_last_withdraw_time(&env, stream_id);
+        let reference_time = core::cmp::max(stream.end_time, last_withdraw);
+        let dormant_at = reference_time.checked_add(grace).ok_or(Error::NotDormant)?;
+        if now < dormant_at {
+            return Err(Error::NotDormant);
+        }
+
+        // Fee split consistent with `execute_withdraw`.
+        let fee_result = fees::apply_fee(sweep_amount, stream.fee_bps)?;
+        let maybe_collector = fees::get_fee_collector(&env);
+
+        let (net_to_sender, fee_paid) = match maybe_collector {
+            Some(ref collector) if fee_result.fee_amount > 0 => {
+                #[allow(clippy::needless_borrows_for_generic_args)]
+                token::Client::new(&env, &stream.token).transfer(
+                    &env.current_contract_address(),
+                    &stream.sender,
+                    &fee_result.net_amount,
+                );
+                #[allow(clippy::needless_borrows_for_generic_args)]
+                token::Client::new(&env, &stream.token).transfer(
+                    &env.current_contract_address(),
+                    collector,
+                    &fee_result.fee_amount,
+                );
+                events::fee_charged(
+                    &env,
+                    stream_id,
+                    fee_result.fee_amount,
+                    stream.fee_bps,
+                    collector,
+                    now,
+                );
+                (fee_result.net_amount, fee_result.fee_amount)
+            }
+            _ => {
+                // No collector configured or zero fee: return full sweep_amount to sender.
+                #[allow(clippy::needless_borrows_for_generic_args)]
+                token::Client::new(&env, &stream.token).transfer(
+                    &env.current_contract_address(),
+                    &stream.sender,
+                    &sweep_amount,
+                );
+                (sweep_amount, 0)
+            }
+        };
+
+        stream.released_amount = stream
+            .released_amount
+            .checked_add(sweep_amount)
+            .ok_or(Error::Overflow)?;
+        stream.status = StreamStatus::Settled;
+        stream.last_update = now;
+
+        limits::decrement_sender_stream_count(&env, &stream.sender);
+        storage::set_stream(&env, stream_id, &stream);
+
+        events::dormant_swept(
+            &env,
+            stream_id,
+            &stream.sender,
+            sweep_amount,
+            net_to_sender,
+            fee_paid,
+            now,
+        );
+
+        Ok(sweep_amount)
     }
 
     /// Cancels an active, paused, or draft stream, returning unvested funds to
@@ -2710,6 +2919,7 @@ fn execute_withdraw(
     }
 
     storage::set_stream(env, stream_id, stream);
+    storage::set_last_withdraw_time(env, stream_id, now);
     Ok(stream.last_update)
 }
 
@@ -2839,6 +3049,7 @@ fn withdraw_inner(
     }
 
     storage::set_stream(env, stream_id, &stream);
+    storage::set_last_withdraw_time(env, stream_id, now);
     let ts = stream.last_update;
     events::withdrawn(env, stream_id, &stream.recipient, amount, ts);
     if stream.status == StreamStatus::Settled {
@@ -3153,5 +3364,64 @@ mod claim_drip_test {
         let result = client.try_claim_drip(&9999u64);
         let err = result.expect_err("claim_drip on missing stream should fail");
         assert_eq!(err, Ok(Error::NotFound));
+    }
+
+    // ── Cliff stream tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn create_stream_with_cliff_rejects_invalid_cliff_times() {
+        let (env, client) = setup();
+        let (sender, recipient) = addresses(&env);
+        let (token, _) = token_and_client(&env, &sender);
+
+        client.initialize(&sender);
+        env.ledger().set_timestamp(1_000);
+
+        // cliff_time < start_time (non-zero)
+        let res_before = client.try_create_stream_with_cliff(
+            &sender, &recipient, &token, &1000i128, &1_100u64, &2_100u64, &0u32, &1_050u64,
+        );
+        assert_eq!(res_before.expect_err("cliff before start"), Ok(Error::InvalidTimeRange));
+
+        // cliff_time > end_time
+        let res_after = client.try_create_stream_with_cliff(
+            &sender, &recipient, &token, &1000i128, &1_100u64, &2_100u64, &0u32, &2_200u64,
+        );
+        assert_eq!(res_after.expect_err("cliff after end"), Ok(Error::InvalidTimeRange));
+    }
+
+    #[test]
+    fn create_stream_with_cliff_withholds_until_cliff_then_vests_linearly() {
+        let (env, client) = setup();
+        let (sender, recipient) = addresses(&env);
+        let (token, _) = token_and_client(&env, &sender);
+
+        client.initialize(&sender);
+        env.ledger().set_timestamp(1_000);
+
+        let id = client.create_stream_with_cliff(
+            &sender, &recipient, &token, &1000i128, &1_000u64, &2_000u64, &0u32, &1_500u64,
+        );
+
+        let stream = client.get_stream(&id);
+        assert_eq!(stream.cliff_time, 1_500);
+
+        // Before cliff: withdrawable is 0 and withdraw fails with OverWithdraw
+        env.ledger().set_timestamp(1_499);
+        assert_eq!(client.withdrawable(&id), 0);
+        let err = client
+            .try_withdraw(&recipient, &id, &1i128)
+            .expect_err("withdraw before cliff should fail");
+        assert_eq!(err, Ok(Error::OverWithdraw));
+
+        // At cliff: jumps to linear amount (500) and withdraw succeeds
+        env.ledger().set_timestamp(1_500);
+        assert_eq!(client.withdrawable(&id), 500);
+        client.withdraw(&recipient, &id, &500i128);
+        assert_eq!(client.withdrawable(&id), 0);
+
+        // At end_time: remaining 500 is withdrawable
+        env.ledger().set_timestamp(2_000);
+        assert_eq!(client.withdrawable(&id), 500);
     }
 }
