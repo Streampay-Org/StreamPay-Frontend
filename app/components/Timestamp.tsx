@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import {
+  getMinuteTickerServerSnapshot,
+  getMinuteTickerSnapshot,
+  notifyMinuteTicker,
+  subscribeToMinuteTicker,
+} from "../lib/minute-ticker";
 
 const LONG_PRESS_DELAY_MS = 450;
 const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000;
@@ -11,9 +17,10 @@ let clockSkewMs = 0;
 
 export function setClockSkew(offsetMs: number): void {
   clockSkewMs = Number.isFinite(offsetMs) ? offsetMs : 0;
+  notifyMinuteTicker();
 }
 
-function getAdjustedNow(now: Date = new Date()): Date {
+export function getAdjustedNow(now: Date = new Date()): Date {
   return new Date(now.getTime() + clockSkewMs);
 }
 
@@ -107,15 +114,13 @@ export function Timestamp({ iso, className }: TimestampProps) {
   const tooltipId = useId();
   const longPressTimerRef = useRef<number | null>(null);
   const [isTooltipVisible, setIsTooltipVisible] = useState(false);
-  const [now, setNow] = useState<Date>(() => getAdjustedNow());
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setNow(getAdjustedNow());
-    }, 60000);
-
-    return () => window.clearInterval(interval);
-  }, []);
+  useSyncExternalStore(
+    subscribeToMinuteTicker,
+    getMinuteTickerSnapshot,
+    getMinuteTickerServerSnapshot
+  );
+  const now = getAdjustedNow();
 
   useEffect(() => {
     return () => {
