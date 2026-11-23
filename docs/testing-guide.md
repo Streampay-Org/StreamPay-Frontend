@@ -47,6 +47,14 @@ To force a fresh cache, delete the entry in the repository's GitHub Actions
 caches or bump the `nextjs-` key prefix (and its restore-key prefixes) in the
 workflow.
 
+## OpenAPI lint
+
+Run the pinned Spectral CLI against the repository ruleset:
+
+```bash
+npx --yes @stoplight/spectral-cli@6 lint openapi.json --ruleset .spectral.yaml
+```
+
 ## Conventions
 
 - Prefer black-box assertions against module exports — internal helpers
