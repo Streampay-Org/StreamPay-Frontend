@@ -39,7 +39,6 @@ const config = {
     "<rootDir>/app/api/v2/streams/v2-streams-quota.test.ts",
     "<rootDir>/app/api/webhooks/deliveries/route.test.ts",
     "<rootDir>/app/api/webhooks/health/route.test.ts",
-    "<rootDir>/app/components/EmptyState.test.tsx",
     "<rootDir>/app/components/ReceiptShareCard.test.tsx",
     "<rootDir>/app/dashboard/IndexerStatus.test.tsx",
     "<rootDir>/app/lib/config/config.test.ts",
