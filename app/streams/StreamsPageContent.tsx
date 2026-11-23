@@ -26,6 +26,7 @@ import { TagChips } from "../components/TagChips";
 import { safeStorage } from "../lib/safeStorage";
 import { mockStreams } from "./fixtures";
 import { sortStreams } from "./sortStreams";
+import { useRovingGrid } from "./useRovingGrid";
 
 const SORT_STORAGE_KEY = "streampay-streams-sort";
 
@@ -110,6 +111,7 @@ function StreamListSkeleton({ count = 3 }: { count?: number }) {
             key={i}
             data-testid="stream-row-skeleton"
             className="stream-row stream-row--skeleton"
+            aria-hidden="true"
             /* Stagger the skeleton shimmer enter to mirror the cascade */
             style={{ animationDelay: `${i * 80}ms` }}
           >
@@ -214,6 +216,11 @@ export function StreamsPageContent({
   const isPopulated = !isLoading && !isError && !isEmpty;
 
   const populatedCount = streamListCopy.populatedCount(streams.length);
+  const rowIds = sortedStreams.map((stream) => stream.id);
+  const { gridProps, getCellProps, registerCell } = useRovingGrid({
+    rowIds,
+    columnCount: 4,
+  });
 
   /* ── Toolbar visibility ── */
   const showToolbar = isPopulated;
@@ -338,11 +345,22 @@ export function StreamsPageContent({
           <section
             aria-label="Streams list"
             className={`stream-list${density === "compact" ? " stream-list--compact" : ""}`}
+            {...gridProps}
           >
+            <div className="stream-grid__header sr-only" role="row" aria-rowindex={1}>
+              {["Recipient", "Rate and status", "Progress", "Actions"].map(
+                (label, index) => (
+                  <div key={label} role="columnheader" aria-colindex={index + 1}>
+                    {label}
+                  </div>
+                ),
+              )}
+            </div>
             {sortedStreams.map((stream, index) => (
               <div
                 key={stream.id}
                 className="stream-cascade-item"
+                role="presentation"
                 style={
                   /* Index is passed via a CSS custom property so the
                      animation-delay calculation stays in CSS-land.     */
@@ -352,6 +370,12 @@ export function StreamsPageContent({
                 <StreamRow
                   stream={stream}
                   density={density === "compact" ? "compact" : "cozy"}
+                  gridMode
+                  rowIndex={index + 2}
+                  gridCellProps={(columnIndex) => ({
+                    ...getCellProps(index, columnIndex),
+                    ref: (element) => registerCell(index, columnIndex, element),
+                  })}
                 />
               </div>
             ))}

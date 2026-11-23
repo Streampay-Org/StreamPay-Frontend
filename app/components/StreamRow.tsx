@@ -16,6 +16,8 @@ import { KbdHint } from "../../src/components/KbdHint";
 import { colorFromId } from "../utils/colorFromId";
 import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
 import { Skeleton } from "./Skeleton";
+import { RowActionsMenu } from "./RowActionsMenu";
+import type { RovingGridCellProps } from "../streams/useRovingGrid";
 
 const SWIPE_CANCEL_THRESHOLD = 80;
 const SWIPE_CANCEL_MAX = 160;
@@ -42,6 +44,11 @@ export type StreamRowData = {
 type StreamRowProps = {
   stream: StreamRowData;
   density?: "cozy" | "compact";
+  /** Adds row/cell semantics when the row is rendered inside the streams grid. */
+  gridMode?: boolean;
+  /** One-based row index used by the parent ARIA grid. */
+  rowIndex?: number;
+  gridCellProps?: (columnIndex: number) => RovingGridCellProps;
   /**
    * When true, renders a themed skeleton placeholder matching the StreamRow
    * layout — shimmer blocks for identity, meta, progress bar, and action
@@ -63,7 +70,14 @@ type StreamRowProps = {
  *     (Issue #1038); used to gate swipe transitions and animation fallbacks.
  */
 
-export function StreamRow({ stream, density = "cozy", loading = false }: StreamRowProps) {
+export function StreamRow({
+  stream,
+  density = "cozy",
+  loading = false,
+  gridMode = false,
+  rowIndex,
+  gridCellProps,
+}: StreamRowProps) {
   // ── Loading skeleton (early return before any hooks) ───────────────────────
   if (loading) {
     const compact = density === "compact";
@@ -168,7 +182,7 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
     await handleAction();
   };
 
-  const handleAction = async () => {
+  const handleAction = async (actionOverride?: string) => {
     if (isIncidentMode) {
       setErrorMsg(
         "On-chain operations are temporarily paused during incident mode.",
@@ -181,7 +195,7 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
     setSrAnnouncement("");
 
     try {
-      const actionRoute = stream.nextAction.toLowerCase();
+      const actionRoute = (actionOverride ?? stream.nextAction).toLowerCase();
 
       await fetchWithIdempotency(`/api/streams/${stream.id}/${actionRoute}`, {
         method: "POST",
@@ -193,7 +207,7 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
         }),
       });
 
-      const successMessage = `${stream.nextAction} operation completed successfully for ${stream.recipient}.`;
+      const successMessage = `${actionOverride ?? stream.nextAction} operation completed successfully for ${stream.recipient}.`;
       setSrAnnouncement(successMessage);
 
       setTimeout(() => {
@@ -273,6 +287,8 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
 
   return (
     <article
+      role={gridMode ? "row" : undefined}
+      aria-rowindex={gridMode ? rowIndex : undefined}
       className={[
         "stream-row",
         `stream-row--${stream.status}`,
@@ -315,9 +331,17 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
         style={{ backgroundColor: colorFromId(stream.id) }}
       />
 
-      <LiveRegion message={srAnnouncement} />
+      <div role={gridMode ? "presentation" : undefined}>
+        <LiveRegion message={srAnnouncement} />
+      </div>
 
-      <div className="stream-row__primary">
+      <div
+        className="stream-row__primary"
+        {...(gridCellProps?.(0) ?? {})}
+        role={gridMode ? "gridcell" : undefined}
+        aria-colindex={gridMode ? 1 : undefined}
+        data-grid-cell={gridMode ? "identity" : undefined}
+      >
         <div className="stream-row__identity">
           <RecipientAvatar recipient={stream.recipient} />
           <div>
@@ -330,7 +354,13 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
         <StatusBadge status={stream.status} />
       </div>
 
-      <div className="stream-row__meta">
+      <div
+        className="stream-row__meta"
+        {...(gridCellProps?.(1) ?? {})}
+        role={gridMode ? "gridcell" : undefined}
+        aria-colindex={gridMode ? 2 : undefined}
+        data-grid-cell={gridMode ? "meta" : undefined}
+      >
         <div>
           <dt>Rate</dt>
           <dd
@@ -363,24 +393,41 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
           )}
       </div>
 
-      {stream.status !== "draft" && (
-        <StreamProgress
-          status={stream.status}
-          accruedAmount={stream.accruedAmount}
-          totalAmount={stream.totalAmount}
-          startedAt={stream.startedAt}
-          endsAt={stream.endsAt}
-          className="stream-row__progress"
-        />
-      )}
+      <div
+        {...(gridCellProps?.(2) ?? {})}
+        role={gridMode ? "gridcell" : undefined}
+        aria-colindex={gridMode ? 3 : undefined}
+        data-grid-cell={gridMode ? "progress" : undefined}
+      >
+        {stream.status !== "draft" ? (
+          <StreamProgress
+            status={stream.status}
+            accruedAmount={stream.accruedAmount}
+            totalAmount={stream.totalAmount}
+            startedAt={stream.startedAt}
+            endsAt={stream.endsAt}
+            className="stream-row__progress"
+            withinGrid={gridMode}
+          />
+        ) : (
+          <span className="sr-only">Progress is not applicable to draft streams.</span>
+        )}
+      </div>
 
-      <div className="stream-row__action-wrap">
+      <div
+        className="stream-row__action-wrap"
+        {...(gridCellProps?.(3) ?? {})}
+        role={gridMode ? "gridcell" : undefined}
+        aria-colindex={gridMode ? 4 : undefined}
+        data-grid-cell={gridMode ? "actions" : undefined}
+      >
         <button
           ref={actionButtonRef}
           className={`button button--secondary stream-row__action ${isProcessing ? "button--busy" : ""}`}
           type="button"
           onClick={handleAction}
           disabled={isProcessing || isIncidentMode}
+          tabIndex={gridMode ? -1 : undefined}
           aria-busy={isProcessing}
           aria-live="assertive"
         >
@@ -394,6 +441,20 @@ export function StreamRow({ stream, density = "cozy", loading = false }: StreamR
           )}
         </button>
         <KbdHint keys={["Enter"]} label={stream.nextAction} aria-hidden />
+        {gridMode && (
+          <RowActionsMenu
+            primaryLabel={stream.nextAction}
+            onPrimaryAction={() => void handleAction()}
+            onCancel={() => void handleAction("cancel")}
+            cancelDisabled={
+              isProcessing ||
+              stream.status === "cancelled" ||
+              stream.status === "ended" ||
+              stream.status === "withdrawn"
+            }
+            disabled={isProcessing || isIncidentMode}
+          />
+        )}
         {errorMsg && (
           <p className="detail-incident-warning" role="alert">
             {errorMsg}
