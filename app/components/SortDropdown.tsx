@@ -12,6 +12,13 @@ const SORT_LABELS: Record<SortOption, string> = {
   "rate-desc": "Rate high–low",
 };
 
+export function isSortOption(value: unknown): value is SortOption {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(SORT_LABELS, value)
+  );
+}
+
 type SortDropdownProps = {
   value: SortOption;
   onChange: (value: SortOption) => void;

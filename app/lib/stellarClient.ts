@@ -493,57 +493,29 @@ export function createResilientStellarClient(
   getCircuitMetrics: () => CircuitBreakerMetrics;
   getCircuitState: () => CircuitState;
 } {
-  const resolved = resolveOptions(options);
-  const client = new ResilientStellarClient(resolved, resolveFetcher(fetcher));
-
-  return {
-    readAccount: client.readAccount.bind(client),
-    readBalances: client.readBalances.bind(client),
-    writeJson: client.writeJson.bind(client),
-    getCircuitMetrics: client.getCircuitMetrics.bind(client),
-    getCircuitState: client.getCircuitState.bind(client),
-  };
-}
-
-function resolveOptions(options: ResilientClientOptions): ResolvedOptions {
-  if (!options.tenant?.trim()) {
-    throw new Error("Resilient client tenant is required.");
-  }
-
-  return {
-    tenant: options.tenant.trim(),
-    network: options.network?.trim(),
+  const resolved: ResolvedOptions = {
+    tenant: options.tenant,
+    network: options.network,
     timeoutMs: options.timeoutMs ?? DEFAULT_RESILIENCE_OPTIONS.timeoutMs,
     maxConcurrent: options.maxConcurrent ?? DEFAULT_RESILIENCE_OPTIONS.maxConcurrent,
-    circuitBreaker: {
-      failureThreshold:
-        options.circuitBreaker?.failureThreshold ??
-        DEFAULT_RESILIENCE_OPTIONS.circuitBreaker.failureThreshold,
-      successThreshold:
-        options.circuitBreaker?.successThreshold ??
-        DEFAULT_RESILIENCE_OPTIONS.circuitBreaker.successThreshold,
-      openDurationMs:
-        options.circuitBreaker?.openDurationMs ??
-        DEFAULT_RESILIENCE_OPTIONS.circuitBreaker.openDurationMs,
-      halfOpenMaxInFlight:
-        options.circuitBreaker?.halfOpenMaxInFlight ??
-        DEFAULT_RESILIENCE_OPTIONS.circuitBreaker.halfOpenMaxInFlight,
-    },
-    cache: {
-      accountTtlMs: options.cache?.accountTtlMs ?? DEFAULT_RESILIENCE_OPTIONS.cache.accountTtlMs,
-      balanceTtlMs: options.cache?.balanceTtlMs ?? DEFAULT_RESILIENCE_OPTIONS.cache.balanceTtlMs,
-      staleTtlMs: options.cache?.staleTtlMs ?? DEFAULT_RESILIENCE_OPTIONS.cache.staleTtlMs,
-    },
+    circuitBreaker: { ...DEFAULT_RESILIENCE_OPTIONS.circuitBreaker, ...options.circuitBreaker },
+    cache: { ...DEFAULT_RESILIENCE_OPTIONS.cache, ...options.cache },
     clock: options.clock ?? systemClock,
+  };
+
+  const client = new ResilientStellarClient(resolved, fetcher ?? ((input, init) => fetch(input, init)));
+
+  return {
+    readAccount: (request) => client.readAccount(request),
+    readBalances: (request) => client.readBalances(request),
+    writeJson: (request) => client.writeJson(request),
+    getCircuitMetrics: () => client.getCircuitMetrics(),
+    getCircuitState: () => client.getCircuitState(),
   };
 }
 
-function resolveFetcher(fetcher?: Fetcher): Fetcher {
-  if (fetcher) return fetcher;
-  if (typeof fetch !== "function") {
-    throw new Error("Global fetch is not available.");
-  }
-  return fetch as Fetcher;
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function withTimeout<T>(
@@ -551,41 +523,33 @@ async function withTimeout<T>(
   timeoutMs: number,
   controller?: AbortController,
 ): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-  return new Promise<T>((resolve, reject) => {
-    timeoutId = setTimeout(() => {
-      if (controller) controller.abort();
-      reject(new TimeoutError("Request timed out.", timeoutMs));
-    }, timeoutMs);
-
-    promise
-      .then(resolve)
-      .catch(reject)
-      .finally(() => {
-        if (timeoutId) clearTimeout(timeoutId);
-      });
-  });
-}
-
-async function safeErrorText(response: ResponseLike): Promise<string> {
-  if (!response.text) {
-    return `HTTP ${response.status}`;
-  }
-
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const text = await response.text();
-    return text || `HTTP ${response.status}`;
-  } catch {
-    return `HTTP ${response.status}`;
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller?.abort();
+          reject(new TimeoutError("Request timed out.", timeoutMs));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
 function isAbortError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  return "name" in error && (error as { name?: string }).name === "AbortError";
+  return error instanceof Error && error.name === "AbortError";
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function safeErrorText(response: ResponseLike): Promise<string> {
+  try {
+    if (response.text) {
+      return await response.text();
+    }
+  } catch {
+    // ignore body read failures
+  }
+  return `HTTP ${response.status}`;
 }

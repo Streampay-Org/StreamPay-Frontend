@@ -2,8 +2,12 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { ReceiptShareCard, maskAddress } from "./ReceiptShareCard";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import {
+  ReceiptShareCard,
+  maskAddress,
+  COPY_FEEDBACK_MS,
+} from "./ReceiptShareCard";
 
 const RECIPIENT = "GABCDEF1234567890XYZ";
 const MASKED_RECIPIENT = "GABC…0XYZ";
@@ -139,15 +143,17 @@ describe("ReceiptShareCard", () => {
     const copyBtn = screen.getByRole("button", { name: "Copy share text" });
     fireEvent.click(copyBtn);
 
-    await waitFor(() => {
-      expect(copyBtn).toHaveTextContent("Copied");
+    await act(async () => {
+      await Promise.resolve();
     });
 
-    jest.advanceTimersByTime(2000);
+    expect(copyBtn).toHaveTextContent("Copied");
 
-    await waitFor(() => {
-      expect(copyBtn).toHaveTextContent("Copy");
+    act(() => {
+      jest.advanceTimersByTime(COPY_FEEDBACK_MS);
     });
+
+    expect(copyBtn).toHaveTextContent("Copy");
   });
 
   it("renders the brand wordmark and tagline", () => {
@@ -396,20 +402,22 @@ describe("ReceiptShareCard aria-live announcements", () => {
     const copyBtn = screen.getByRole("button", { name: "Copy share text" });
     fireEvent.click(copyBtn);
 
-    await waitFor(() => {
-      expect(copyBtn).toHaveTextContent("Copied");
+    await act(async () => {
+      await Promise.resolve();
     });
 
-    jest.advanceTimersByTime(2000);
+    expect(copyBtn).toHaveTextContent("Copied");
 
-    await waitFor(() => {
-      expect(copyBtn).toHaveTextContent("Copy");
+    act(() => {
+      jest.advanceTimersByTime(COPY_FEEDBACK_MS);
     });
+
+    expect(copyBtn).toHaveTextContent("Copy");
 
     // The announcement text itself persists (screen readers already spoke
     // it) — only the visible button label reverts.
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Share text copied to clipboard.",
-    );
+    const region = screen.getByRole("status");
+    expect(region).toHaveAttribute("aria-live", "polite");
+    expect(region).toHaveTextContent("Share text copied to clipboard.");
   });
 });

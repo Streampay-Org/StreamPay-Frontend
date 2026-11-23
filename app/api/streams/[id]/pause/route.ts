@@ -58,6 +58,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { idempotencyKeyErrorResponse, validateIdempotencyKey } from "@/app/lib/idempotency";
 import {
   checkIdempotency,
   computeFingerprint,
@@ -66,7 +67,7 @@ import {
   setIdempotency,
   withLock,
 } from "@/app/lib/db";
-import { streamsRateLimit } from "@/src/middleware/rateLimit";
+import { streamsRateLimit, withRateLimitHeaders } from "@/src/middleware/rateLimit";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { nextActionFor, transition } from "@/app/lib/state-machine";
 import { enforceStreamRbac, resolveActorAddress } from "@/app/lib/org-policy";
@@ -114,7 +115,15 @@ export async function POST(
     return rateCheck.response;
   }
 
-  const idempotencyKey = getHeader(req, "Idempotency-Key");
+  const rawIdempotencyKey = getHeader(req, "Idempotency-Key");
+  let idempotencyKey: string | null = null;
+  if (rawIdempotencyKey !== null) {
+    const keyValidation = validateIdempotencyKey(rawIdempotencyKey);
+    if (!keyValidation.ok) {
+      return idempotencyKeyErrorResponse(keyValidation.reason);
+    }
+    idempotencyKey = keyValidation.key;
+  }
   const token = idempotencyKey
     ? idempotencyToken(`streams.pause.${id}`, idempotencyKey)
     : null;
@@ -136,11 +145,14 @@ export async function POST(
           { status: 409 },
         );
       }
-      return NextResponse.json(cached.body, { status: cached.status });
+      return withRateLimitHeaders(
+        NextResponse.json(cached.body, { status: cached.status }),
+        rateCheck.headers,
+      );
     }
   }
 
-  return withLock(id, async () => {
+  const response = await withLock(id, async () => {
     // Post-lock idempotency check — guards against races between concurrent
     // requests that both passed the pre-lock check simultaneously.
     if (token) {
@@ -277,4 +289,5 @@ export async function POST(
 
     return NextResponse.json(responseBody);
   });
+  return withRateLimitHeaders(response, rateCheck.headers);
 }

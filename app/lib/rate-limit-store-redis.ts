@@ -308,6 +308,7 @@ export class RedisRateLimitStore implements RateLimitStore {
           allowed: true,
           remaining: limit - 1,
           resetAt: Math.floor((now + windowMs) / 1000),
+          degraded: true,
         };
       }
 

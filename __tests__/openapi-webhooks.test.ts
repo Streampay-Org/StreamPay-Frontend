@@ -1,123 +1,166 @@
 /**
- * OpenAPI examples coverage for /api/webhooks (issue #1115).
+ * OpenAPI specification coverage for all webhook routes under app/api/webhooks.
  */
-import { readFileSync } from 'fs';
-import { join } from 'path';
-import yaml from 'js-yaml';
+import { readdirSync, readFileSync } from 'fs';
+import path from 'path';
 
-function loadOpenApiYaml(): any {
-  const raw = readFileSync(join(__dirname, '..', 'src', 'openapi.yaml'), 'utf8');
-  return yaml.load(raw);
+const REPO_ROOT = path.resolve(__dirname, '..');
+const OPENAPI_SPEC_PATH = path.resolve(__dirname, '..', 'openapi.json');
+const WEBHOOKS_APP_DIR = path.resolve(REPO_ROOT, 'app', 'api', 'webhooks');
+
+interface OpenApiSpec {
+  paths?: Record<string, Record<string, OpenApiOperation>>;
+  components?: {
+    responses?: Record<string, OpenApiResponse>;
+    schemas?: Record<string, unknown>;
+  };
 }
 
-describe('OpenAPI examples /api/webhooks', () => {
-  const spec = loadOpenApiYaml();
+interface OpenApiOperation {
+  operationId?: string;
+  responses?: Record<string, OpenApiResponse>;
+}
 
-  it('declares /api/webhooks with GET and POST', () => {
-    const path = spec.paths['/api/webhooks'];
-    expect(path).toBeDefined();
-    expect(path.get).toBeDefined();
-    expect(path.post).toBeDefined();
+interface OpenApiResponse {
+  $ref?: string;
+  description?: string;
+  content?: Record<
+    string,
+    {
+      schema?: { $ref?: string };
+    }
+  >;
+}
+
+interface DiscoveredOperation {
+  routeFile: string;
+  specPath: string;
+  method: string;
+}
+
+function loadOpenApiSpec(): OpenApiSpec {
+  return JSON.parse(readFileSync(OPENAPI_SPEC_PATH, 'utf8')) as OpenApiSpec;
+}
+
+function findWebhookRouteFiles(dir: string): string[] {
+  const results: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...findWebhookRouteFiles(fullPath));
+    } else if (entry.name === 'route.ts') {
+      results.push(fullPath);
+    }
+  }
+  return results.sort();
+}
+
+function routeFileToSpecPath(routeFile: string): string {
+  const relDir = path.relative(WEBHOOKS_APP_DIR, path.dirname(routeFile));
+  if (!relDir) {
+    return '/api/webhooks';
+  }
+  const segments = relDir
+    .split(path.sep)
+    .map((seg) => seg.replace(/^\[(.+)\]$/, '{$1}'));
+  return `/api/webhooks/${segments.join('/')}`;
+}
+
+function extractExportedMethods(routeFile: string): string[] {
+  const source = readFileSync(routeFile, 'utf8');
+  const methods: string[] = [];
+  const regex = /export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE)\b/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(source)) !== null) {
+    methods.push(match[1].toLowerCase());
+  }
+  return methods;
+}
+
+function discoverWebhookOperations(): DiscoveredOperation[] {
+  const routeFiles = findWebhookRouteFiles(WEBHOOKS_APP_DIR);
+  const operations: DiscoveredOperation[] = [];
+
+  for (const routeFile of routeFiles) {
+    const specPath = routeFileToSpecPath(routeFile);
+    const methods = extractExportedMethods(routeFile);
+    for (const method of methods) {
+      operations.push({
+        routeFile: path.relative(REPO_ROOT, routeFile),
+        specPath,
+        method,
+      });
+    }
+  }
+
+  return operations;
+}
+
+function resolveResponse(
+  spec: OpenApiSpec,
+  response: OpenApiResponse | undefined,
+): OpenApiResponse | undefined {
+  if (!response) return undefined;
+  if (response.$ref?.startsWith('#/components/responses/')) {
+    const key = response.$ref.slice('#/components/responses/'.length);
+    return spec.components?.responses?.[key];
+  }
+  return response;
+}
+
+/**
+ * Expected status codes returned by each webhook handler.
+ */
+const EXPECTED_STATUS_CODES: Record<string, string[]> = {
+  'GET /api/webhooks': ['200', '429', '500'],
+  'POST /api/webhooks': ['200', '400', '413', '429', '500'],
+  'GET /api/webhooks/deliveries': ['200', '400', '422', '500'],
+  'POST /api/webhooks/dlq': ['200', '400', '500'],
+  'POST /api/webhooks/dlq/{dlqId}/replay': ['200', '401', '404', '502'],
+  'GET /api/webhooks/health': ['200', '500'],
+  'POST /api/webhooks/rotate': ['200', '400', '403', '422'],
+};
+
+const discoveredOperations = discoverWebhookOperations();
+
+describe('OpenAPI coverage for /api/webhooks routes', () => {
+  const spec = loadOpenApiSpec();
+
+  it('discovers a non-empty set of webhook route operations', () => {
+    expect(discoveredOperations.length).toBeGreaterThanOrEqual(7);
   });
 
-  it('GET 200 includes Prometheus metricsSample example', () => {
-    const examples =
-      spec.paths['/api/webhooks'].get.responses['200'].content['text/plain']
-        .examples;
-    expect(examples.metricsSample.value).toContain('webhook_requests_total');
+  it('defines the shared ErrorEnvelope schema', () => {
+    expect(spec.components?.schemas?.ErrorEnvelope).toBeDefined();
   });
 
-  it('POST requestBody and 200 success examples are present', () => {
-    const post = spec.paths['/api/webhooks'].post;
-    expect(
-      post.requestBody.content['application/json'].examples.paymentReceived
-        .value.eventType,
-    ).toBe('payment.received');
-    expect(
-      post.responses['200'].content['application/json'].examples.accepted.value,
-    ).toEqual({ success: true });
-  });
+  it.each(discoveredOperations)(
+    '$method $specPath ($routeFile) is documented with expected responses and ErrorEnvelope on errors',
+    ({ specPath, method }) => {
+      const pathItem = spec.paths?.[specPath];
+      expect(pathItem).toBeDefined();
 
-  it('POST 400 example uses INVALID_INPUT envelope', () => {
-    const example =
-      spec.paths['/api/webhooks'].post.responses['400'].content[
-        'application/json'
-      ].examples.missingEventType.value;
-    expect(example.error.code).toBe('INVALID_INPUT');
-    expect(example.error.request_id).toMatch(/^req_/);
-  });
+      const operation = pathItem?.[method];
+      expect(operation).toBeDefined();
+      expect(operation?.responses).toBeDefined();
 
-  it('declares /api/webhooks/dlq POST examples', () => {
-    const dlq = spec.paths['/api/webhooks/dlq'].post;
-    expect(
-      dlq.requestBody.content['application/json'].examples.deadLetter,
-    ).toBeDefined();
-    expect(
-      dlq.responses['200'].content['application/json'].examples.received.value,
-    ).toEqual({ received: true });
-  });
+      const key = `${method.toUpperCase()} ${specPath}`;
+      const expectedCodes = EXPECTED_STATUS_CODES[key];
+      expect(expectedCodes).toBeDefined();
 
-  it('declares /api/webhooks/deliveries GET examples', () => {
-    const deliveries = spec.paths['/api/webhooks/deliveries'].get;
-    const example =
-      deliveries.responses['200'].content['application/json'].examples
-        .deliveriesList.value;
-    expect(example).toEqual(
-      expect.objectContaining({
-        deliveries: expect.any(Array),
-        cursor: null,
-        limit: 20,
-      }),
-    );
-  });
+      for (const code of expectedCodes) {
+        const rawResponse = operation?.responses?.[code];
+        expect(rawResponse).toBeDefined();
 
-  it('declares /api/webhooks/health with GET', () => {
-    const health = spec.paths['/api/webhooks/health'];
-    expect(health).toBeDefined();
-    expect(health.get).toBeDefined();
-  });
-
-  it('/api/webhooks/health healthy example has expected shape', () => {
-    const health = spec.paths['/api/webhooks/health'].get;
-    const example =
-      health.responses['200'].content['application/json'].examples.healthy
-        .value;
-    expect(example.status).toBe('ok');
-    expect(example).toHaveProperty('checked_at');
-    expect(example.subscriptions).toEqual(
-      expect.objectContaining({
-        total: expect.any(Number),
-        active: expect.any(Number),
-        degraded: expect.any(Number),
-        disabled: expect.any(Number),
-      }),
-    );
-    expect(example.delivery_stats).toEqual(
-      expect.objectContaining({
-        total: expect.any(Number),
-        delivered: expect.any(Number),
-        failed: expect.any(Number),
-        pending: expect.any(Number),
-        dlq: expect.any(Number),
-        success_rate_pct: expect.any(Number),
-      }),
-    );
-  });
-
-  it('/api/webhooks/health degraded example returns degraded status', () => {
-    const health = spec.paths['/api/webhooks/health'].get;
-    const example =
-      health.responses['200'].content['application/json'].examples.degraded
-        .value;
-    expect(example.status).toBe('degraded');
-  });
-
-  it('/api/webhooks/health 500 error uses INTERNAL_SERVER_ERROR envelope', () => {
-    const health = spec.paths['/api/webhooks/health'].get;
-    const example =
-      health.responses['500'].content['application/json'].examples
-        .internalError.value;
-    expect(example.error.code).toBe('INTERNAL_SERVER_ERROR');
-    expect(example.error.request_id).toMatch(/^req_/);
-  });
+        const statusNum = Number(code);
+        if (statusNum >= 400) {
+          const resolved = resolveResponse(spec, rawResponse);
+          expect(resolved).toBeDefined();
+          expect(
+            resolved?.content?.['application/json']?.schema?.$ref,
+          ).toBe('#/components/schemas/ErrorEnvelope');
+        }
+      }
+    },
+  );
 });

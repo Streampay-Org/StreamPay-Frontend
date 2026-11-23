@@ -967,6 +967,373 @@
             "example": "2026-01-15T00:00:00.000Z"
           }
         }
+      },
+      "CancelOutcomePreview": {
+        "type": "object",
+        "required": [
+          "action",
+          "allowed",
+          "currentStatus",
+          "nextStatus",
+          "token",
+          "totalAmount",
+          "releasedAmount",
+          "vestedAmount",
+          "recipientPayout",
+          "senderRefund",
+          "escrowDrained",
+          "asOf"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "cancel"
+            ]
+          },
+          "allowed": {
+            "type": "boolean"
+          },
+          "currentStatus": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn",
+              "cancelled"
+            ]
+          },
+          "nextStatus": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn",
+              "cancelled"
+            ]
+          },
+          "token": {
+            "type": "string"
+          },
+          "totalAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "releasedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "vestedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "recipientPayout": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "senderRefund": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "escrowDrained": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SettleOutcomePreview": {
+        "type": "object",
+        "required": [
+          "action",
+          "allowed",
+          "currentStatus",
+          "nextStatus",
+          "token",
+          "totalAmount",
+          "releasedAmount",
+          "vestedAmount",
+          "withdrawableAmount",
+          "unvestedAmount",
+          "asOf"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "settle"
+            ]
+          },
+          "allowed": {
+            "type": "boolean"
+          },
+          "currentStatus": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn",
+              "cancelled"
+            ]
+          },
+          "nextStatus": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn",
+              "cancelled"
+            ]
+          },
+          "token": {
+            "type": "string"
+          },
+          "totalAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "releasedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "vestedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "withdrawableAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "unvestedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WithdrawOutcomePreview": {
+        "type": "object",
+        "required": [
+          "action",
+          "allowed",
+          "currentStatus",
+          "nextStatus",
+          "token",
+          "totalAmount",
+          "releasedAmount",
+          "vestedAmount",
+          "withdrawableAmount",
+          "amountPaidOut",
+          "newReleasedAmount",
+          "remainingEscrow",
+          "asOf"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "withdraw"
+            ]
+          },
+          "allowed": {
+            "type": "boolean"
+          },
+          "currentStatus": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn",
+              "cancelled"
+            ]
+          },
+          "nextStatus": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "paused",
+              "ended",
+              "withdrawn",
+              "cancelled"
+            ]
+          },
+          "token": {
+            "type": "string"
+          },
+          "totalAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "releasedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "vestedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "withdrawableAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "amountPaidOut": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "newReleasedAmount": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "remainingEscrow": {
+            "type": "string",
+            "description": "Raw i128 units as string."
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OrgRole": {
+        "type": "string",
+        "enum": [
+          "owner",
+          "pauser",
+          "settler",
+          "viewer"
+        ]
+      },
+      "StreamPolicy": {
+        "type": "object",
+        "required": [
+          "policyVersion",
+          "canStart",
+          "canPause",
+          "canResume",
+          "canSettle",
+          "canStop",
+          "canWithdraw",
+          "requireApprovals"
+        ],
+        "properties": {
+          "policyVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "canStart": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canPause": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canResume": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canSettle": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canStop": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "canWithdraw": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgRole"
+            }
+          },
+          "requireApprovals": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ]
+          }
+        }
+      },
+      "UpdateOrgPolicyRequest": {
+        "type": "object",
+        "required": [
+          "policy"
+        ],
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/StreamPolicy"
+          }
+        }
+      },
+      "OrgPolicyResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "links"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "orgId",
+              "policy",
+              "updatedAt"
+            ],
+            "properties": {
+              "orgId": {
+                "type": "string"
+              },
+              "policy": {
+                "$ref": "#/components/schemas/StreamPolicy"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "links": {
+            "type": "object",
+            "required": [
+              "self"
+            ],
+            "properties": {
+              "self": {
+                "type": "string"
+              }
+            }
+          }
+        }
       }
     },
     "responses": {
@@ -1229,7 +1596,7 @@
       "get": {
         "operationId": "listActivity",
         "summary": "List activity events",
-        "description": "Returns a paginated, cursor-based list of activity events for the authenticated caller. Only events for streams the caller sends or receives, plus the caller's own wallet events, are returned. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId and event type.",
+        "description": "Returns a paginated, cursor-based list of activity events for the authenticated caller. Only events for streams the caller sends or receives, plus the caller's own wallet events, are returned. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId, event type, and an inclusive from/to date range.",
         "tags": [
           "Activity"
         ],
@@ -1272,6 +1639,40 @@
             "description": "Filter events by a known type (e.g. stream.created, wallet.connected).",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Inclusive lower bound for event timestamps. Accepts an ISO date (YYYY-MM-DD, treated as 00:00:00 UTC) or an ISO datetime.",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              ]
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Inclusive upper bound for event timestamps. Accepts an ISO date (YYYY-MM-DD, treated as 23:59:59.999 UTC) or an ISO datetime.",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              ]
             }
           }
         ],
@@ -1321,7 +1722,7 @@
             }
           },
           "422": {
-            "description": "Unprocessable entity — invalid limit (INVALID_LIMIT), type, streamId, or cursor.",
+            "description": "Unprocessable entity — invalid limit (INVALID_LIMIT), type, streamId, cursor, or date range (INVALID_DATE_RANGE).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1455,7 +1856,8 @@
             "schema": {
               "type": "string",
               "pattern": "^G[A-Z2-7]{55}$",
-              "example": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG"
+              "example": "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ"
+              "example": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
             }
           }
         ],
@@ -1648,6 +2050,7 @@
                     "summary": "Successful token issuance",
                     "value": {
                       "token": "tok_R0FCQzEyMzQ1Njc4OTA",
+                      "token_type": "Bearer",
                       "expires_at": "2024-01-16T10:00:00.000Z"
                     }
                   }
@@ -1799,6 +2202,71 @@
                         "request_id": "req_01HZ9ABCDEF"
                       }
                     }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "summary": "Revoke the presented bearer token",
+        "description": "Adds the token's `jti` to the access-token denylist until the token's own `exp`. Every route that authenticates with `tryAuthenticateRequest` rejects the token afterwards. Repeated logout calls with the same token are safe. Tokens issued before revocation existed carry no `jti` and simply expire on their own.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "204": {
+            "description": "Token revoked, or already revoked (idempotent)."
+          },
+          "401": {
+            "description": "Missing, malformed, or expired bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "Missing or invalid authorization header",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "IP rate limit exceeded for logout (5 req/min per IP).",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the client may retry.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "rate_limit_exceeded",
+                    "message": "Too many requests. Please try again later.",
+                    "request_id": "req_01HZ9ABCDEF"
                   }
                 }
               }
@@ -2158,9 +2626,6 @@
                         "self": "/api/v1/streams/stream-abc12345"
                       }
                     }
-                  },
-                  "links": {
-                    "self": "/api/v1/streams/stream-abc12345"
                   }
                 }
               }
@@ -2956,6 +3421,113 @@
         }
       }
     },
+    "/api/streams/stats": {
+      "get": {
+        "tags": ["Streams"],
+        "summary": "Get aggregate stream statistics",
+        "description": "Returns aggregate counts by stream status and exact BigInt escrowed/released totals per token for all streams visible to the caller in the resolved tenant.",
+        "operationId": "getStreamStats",
+        "parameters": [
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Strong ETag from a previous response for conditional 304 revalidation.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aggregate stream statistics.",
+            "headers": {
+              "ETag": {
+                "description": "Strong ETag of the stats payload.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "links"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["counts", "totals", "skipped"],
+                      "properties": {
+                        "counts": {
+                          "type": "object",
+                          "required": ["draft", "active", "paused", "ended", "withdrawn", "cancelled"],
+                          "properties": {
+                            "draft": { "type": "integer", "minimum": 0 },
+                            "active": { "type": "integer", "minimum": 0 },
+                            "paused": { "type": "integer", "minimum": 0 },
+                            "ended": { "type": "integer", "minimum": 0 },
+                            "withdrawn": { "type": "integer", "minimum": 0 },
+                            "cancelled": { "type": "integer", "minimum": 0 }
+                          }
+                        },
+                        "totals": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "required": ["escrowed", "released"],
+                            "properties": {
+                              "escrowed": {
+                                "type": "string",
+                                "pattern": "^\\d+$",
+                                "description": "Total escrowed base units as a base-10 integer string."
+                              },
+                              "released": {
+                                "type": "string",
+                                "pattern": "^\\d+$",
+                                "description": "Total released base units as a base-10 integer string."
+                              }
+                            }
+                          }
+                        },
+                        "skipped": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Number of streams skipped from totals due to unparsable amount strings."
+                        }
+                      }
+                    },
+                    "links": {
+                      "type": "object",
+                      "required": ["self"],
+                      "properties": {
+                        "self": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Not Modified — ETag matched If-None-Match."
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
     "/api/streams/{id}": {
       "parameters": [
         {
@@ -3116,10 +3688,22 @@
       "post": {
         "operationId": "updateStream",
         "summary": "Update a payment stream (v1, deprecated)",
-        "description": "Partially updates a stream by merging the request body fields. **Deprecated** — there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.\n\nThe `updatedAt` field is always refreshed. Cache is invalidated on success.",
+        "description": "Partially updates a stream by merging the request body fields. **Deprecated** — there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.\n\nRequires an `If-Match` header carrying the stream's current strong `ETag` (or `*`) for optimistic concurrency control. Returns `428 Precondition Required` when missing (unless relaxed via `STREAMPAY_REQUIRE_IF_MATCH=false`) and `412 Precondition Failed` (with the current `ETag` header) when stale. The `updatedAt` field is always refreshed and cache is invalidated on success.",
         "deprecated": true,
         "tags": [
           "Streams v1"
+        ],
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "Strong ETag from the latest `GET /api/streams/{id}` response (or `*`). Compared using RFC 9110 strong comparison; weak (`W/`) tags never match.",
+            "schema": {
+              "type": "string",
+              "example": "\"5f9c1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab\""
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -3163,6 +3747,15 @@
         "responses": {
           "200": {
             "description": "Stream updated.",
+            "headers": {
+              "ETag": {
+                "description": "Fresh strong entity-tag computed for the updated stream.",
+                "schema": {
+                  "type": "string",
+                  "example": "\"a1b2c3d4e5f6...\""
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -3247,6 +3840,49 @@
           },
           "404": {
             "$ref": "#/components/responses/404"
+          },
+          "412": {
+            "description": "Precondition failed — the `If-Match` ETag does not match the current stream state.",
+            "headers": {
+              "ETag": {
+                "description": "Current strong entity-tag of the stream.",
+                "schema": {
+                  "type": "string",
+                  "example": "\"5f9c1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab\""
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "PRECONDITION_FAILED",
+                    "message": "Stream has been modified since the provided ETag; re-fetch and retry",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition required — `If-Match` header is missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "PRECONDITION_REQUIRED",
+                    "message": "If-Match header with the current stream ETag is required for updates",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
           },
           "429": {
             "description": "Rate limit exceeded.",
@@ -4376,6 +5012,44 @@
             "bearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "description": "Maximum number of streams to return per page."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque pagination cursor returned by a previous page."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "active",
+                "paused",
+                "ended"
+              ]
+            },
+            "description": "Filter streams by lifecycle status."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Paginated stream list.",
@@ -4435,8 +5109,9 @@
                           "allowed_actions": [],
                           "created_at": "2024-01-15T10:00:00.000Z",
                           "settlement": {
+                            "tx_hash": "c3f8a12e4b76",
                             "settled_at": "2024-02-01T12:00:00.000Z",
-                            "amount": "360 XLM",
+                            "amount": "3600000000",
                             "currency": "XLM"
                           }
                         }
@@ -4454,7 +5129,42 @@
                   "empty-list": {
                     "summary": "No streams for this user",
                     "value": {
-                      "streams": []
+                      "streams": [],
+                      "meta": {
+                        "hasNext": false,
+                        "nextCursor": null,
+                        "total": 0
+                      },
+                      "links": {
+                        "self": "/api/v2/streams?limit=20"
+                      }
+                    }
+                  },
+                  "paginated-first-page": {
+                    "summary": "First page with more results available",
+                    "value": {
+                      "streams": [
+                        {
+                          "id": "stream_lf3k9z",
+                          "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                          "rate": "120 XLM/month",
+                          "status": "active",
+                          "allowed_actions": [
+                            "pause",
+                            "stop"
+                          ],
+                          "created_at": "2024-01-15T10:00:00.000Z",
+                          "settlement": null
+                        }
+                      ],
+                      "meta": {
+                        "hasNext": true,
+                        "nextCursor": "eyJpZCI6InN0cmVhbV9sZjNrOXoifQ==",
+                        "total": 25
+                      },
+                      "links": {
+                        "self": "/api/v2/streams?limit=1"
+                      }
                     }
                   }
                 }
@@ -4472,6 +5182,8 @@
       "post": {
         "operationId": "createStreamV2",
         "summary": "Create a payment stream (v2)",
+        "description": "Creates a payment stream using the v2 request and response shape. Requires bearer authentication and returns the created stream.",
+        "description": "Creates a v2 payment stream for the authenticated sender and returns its initial representation.",
         "tags": [
           "Streams"
         ],
@@ -4553,16 +5265,35 @@
                 "schema": {
                   "$ref": "#/components/schemas/StreamV2"
                 },
-                "example": {
-                  "id": "stream_lf3k9z",
-                  "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
-                  "rate": "120 XLM/month",
-                  "status": "draft",
-                  "allowed_actions": [
-                    "start"
-                  ],
-                  "created_at": "2024-01-15T10:00:00.000Z",
-                  "settlement": null
+                "examples": {
+                  "draft-xlm": {
+                    "summary": "Created draft stream in XLM",
+                    "value": {
+                      "id": "stream_lf3k9z",
+                      "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                      "rate": "120 XLM/month",
+                      "status": "draft",
+                      "allowed_actions": [
+                        "start"
+                      ],
+                      "created_at": "2024-01-15T10:00:00.000Z",
+                      "settlement": null
+                    }
+                  },
+                  "draft-usdc": {
+                    "summary": "Created draft stream in USDC",
+                    "value": {
+                      "id": "stream_usdc01",
+                      "recipient": "GDEF1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFGH",
+                      "rate": "500 USDC/week",
+                      "status": "draft",
+                      "allowed_actions": [
+                        "start"
+                      ],
+                      "created_at": "2024-01-15T10:00:00.000Z",
+                      "settlement": null
+                    }
+                  }
                 }
               }
             }
@@ -4857,8 +5588,9 @@
                         "allowed_actions": [],
                         "created_at": "2024-01-15T10:00:00.000Z",
                         "settlement": {
+                          "tx_hash": "c3f8a12e4b76",
                           "settled_at": "2024-02-01T12:00:00.000Z",
-                          "amount": "360 XLM",
+                          "amount": "3600000000",
                           "currency": "XLM"
                         }
                       },
@@ -5245,8 +5977,9 @@
                       "allowed_actions": [],
                       "created_at": "2024-01-15T10:00:00.000Z",
                       "settlement": {
+                        "tx_hash": "c3f8a12e4b76",
                         "settled_at": "2024-02-01T12:00:00.000Z",
-                        "amount": "360 XLM",
+                        "amount": "3600000000",
                         "currency": "XLM"
                       }
                     }
@@ -5261,8 +5994,10 @@
                       "allowed_actions": [],
                       "created_at": "2024-01-20T09:00:00.000Z",
                       "settlement": {
+                        "tx_hash": "000000000000",
+                        "tx_hash": "a9d2c17e5f43",
                         "settled_at": "2024-01-20T09:05:00.000Z",
-                        "amount": "0 XLM",
+                        "amount": "0",
                         "currency": "XLM"
                       }
                     }
@@ -5315,11 +6050,45 @@
         }
       }
     },
-    "/api/webhooks/dlq": {
+    "/api/webhooks": {
+      "get": {
+        "operationId": "getWebhookMetrics",
+        "summary": "Retrieve Prometheus metrics for webhook processing",
+        "description": "Returns Prometheus text-format metrics for webhook requests and durations.",
+        "security": [],
+        "tags": [
+          "Webhooks"
+        ],
+        "responses": {
+          "200": {
+            "description": "Prometheus metrics payload.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests — rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
       "post": {
-        "operationId": "receiveDlqWebhook",
-        "summary": "Receive a dead-letter-queue webhook event",
-        "description": "Accepts failed webhook events for reprocessing. No authentication required (secured at the network/gateway level).",
+        "operationId": "receiveWebhook",
+        "summary": "Receive an incoming webhook event",
+        "description": "Validates and accepts an incoming webhook event payload.",
         "security": [],
         "tags": [
           "Webhooks"
@@ -5330,7 +6099,106 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "Arbitrary webhook event payload.",
+                "required": [
+                  "eventType"
+                ],
+                "properties": {
+                  "eventType": {
+                    "type": "string",
+                    "enum": ["second", "minute", "hour", "day", "week", "month", "year"],
+                    "description": "Payment interval.",
+                    "example": "month"
+                  },
+                  "token": {
+                    "type": "string",
+                    "description": "Stellar asset code (optional, defaults to XLM).",
+                    "example": "XLM"
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "description": "Optional organization that owns this stream and whose configured quota applies.",
+                    "example": "org-acme"
+                    "example": "payment.received"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook event accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "429": {
+            "description": "Too many requests — rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": { "$ref": "#/components/responses/422" },
+          "429": {
+            "description": "Rate limit or configured stream quota exceeded. Retry-After is set for rate limits and monthly-volume quota rejections.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the client may retry. Present for rate limits and monthly-volume quota rejections.",
+                "schema": { "type": "integer" }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "error": {
+                    "code": "QUOTA_ACTIVE_STREAMS_EXCEEDED",
+                    "message": "The user has 2 active streams; the configured limit is 2.",
+                    "request_id": "req_01HZ9ABCDEF"
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/webhooks/dlq": {
+      "post": {
+        "operationId": "receiveDlqWebhook",
+        "summary": "Receive a dead-letter-queue webhook event",
+        "description": "Accepts failed webhook events for reprocessing. Requires internal-service HMAC auth or an admin JWT. Structured `{ endpoint, event }` payloads are validated and enqueued idempotently into the outbox (202); legacy unstructured objects receive a 200 acknowledgement.",
+        "tags": [
+          "Webhooks"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Structured `{ endpoint, event }` payload for outbox reprocessing, or a legacy generic JSON object.",
                 "example": {
                   "event": "payment.failed",
                   "id": "evt_001"
@@ -5341,7 +6209,7 @@
         },
         "responses": {
           "200": {
-            "description": "Event accepted.",
+            "description": "Legacy unstructured event accepted.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5359,8 +6227,47 @@
               }
             }
           },
+          "202": {
+            "description": "Structured event enqueued (or deduplicated) in the outbox.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "received",
+                    "enqueued",
+                    "outboxId",
+                    "duplicate"
+                  ],
+                  "properties": {
+                    "received": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "enqueued": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "outboxId": {
+                      "type": "string"
+                    },
+                    "duplicate": {
+                      "type": "boolean",
+                      "example": false
+                    }
+                  }
+                }
+              }
+            }
+          },
           "400": {
             "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "422": {
+            "description": "Malformed structured payload or disallowed endpoint URL."
           },
           "500": {
             "$ref": "#/components/responses/500"
@@ -5372,6 +6279,8 @@
       "get": {
         "operationId": "listWebhookDeliveries",
         "summary": "List webhook delivery attempts",
+        "description": "Returns paginated webhook delivery attempts, including their status, retry count, and related endpoint.",
+        "description": "Lists webhook delivery attempts with pagination for the authenticated caller.",
         "security": [],
         "tags": [
           "Webhooks"
@@ -5433,8 +6342,175 @@
           "400": {
             "$ref": "#/components/responses/400"
           },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
           "500": {
             "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/webhooks/dlq/{dlqId}/replay": {
+      "post": {
+        "operationId": "replayDlqWebhook",
+        "summary": "Replay a dead-lettered webhook delivery",
+        "description": "Idempotently re-enqueues a dead-lettered webhook delivery through the delivery worker. Requires internal-service HMAC authentication or an admin JWT.",
+        "tags": [
+          "Webhooks"
+        ],
+        "parameters": [
+          {
+            "name": "dlqId",
+            "in": "path",
+            "required": true,
+            "description": "Identifier of the dead-letter queue entry to replay.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "DLQ entry replayed (or already replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "links"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "dlqId",
+                        "deliveryId",
+                        "alreadyReplayed",
+                        "endpointId",
+                        "endpointUrl",
+                        "eventId",
+                        "eventType",
+                        "replayedAt"
+                      ],
+                      "properties": {
+                        "dlqId": {
+                          "type": "string"
+                        },
+                        "deliveryId": {
+                          "type": "string"
+                        },
+                        "alreadyReplayed": {
+                          "type": "boolean"
+                        },
+                        "endpointId": {
+                          "type": "string"
+                        },
+                        "endpointUrl": {
+                          "type": "string"
+                        },
+                        "eventId": {
+                          "type": "string"
+                        },
+                        "eventType": {
+                          "type": "string"
+                        },
+                        "replayedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "links": {
+                      "type": "object",
+                      "properties": {
+                        "dlq": {
+                          "type": "string"
+                        },
+                        "delivery": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "502": {
+            "description": "Bad gateway — worker failed to enqueue the replay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhooks/rotate": {
+      "post": {
+        "operationId": "rotateWebhookSecret",
+        "summary": "Rotate the active webhook signing secret",
+        "description": "Rotates the active webhook signing secret. Requires admin authentication.",
+        "tags": [
+          "Webhooks"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "secret"
+                ],
+                "properties": {
+                  "secret": {
+                    "type": "string",
+                    "description": "New webhook signing secret."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook signing secret rotated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
           }
         }
       }
@@ -5471,6 +6547,7 @@
                         "failed": 2,
                         "pending": 0,
                         "dlq": 0,
+                        "stale": 0,
                         "success_rate_pct": 99.87
                       }
                     }
@@ -5492,7 +6569,8 @@
                         "failed": 8,
                         "pending": 2,
                         "dlq": 3,
-                        "success_rate_pct": 99.33
+                        "stale": 1,
+                        "success_rate_pct": 99.27
                       }
                     }
                   },
@@ -5513,7 +6591,8 @@
                         "failed": 50,
                         "pending": 30,
                         "dlq": 15,
-                        "success_rate_pct": 60
+                        "stale": 5,
+                        "success_rate_pct": 64.86
                       }
                     }
                   }
@@ -5525,6 +6604,9 @@
             "description": "Failed to retrieve health stats",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
                 "examples": {
                   "internalError": {
                     "summary": "Unexpected error retrieving health",
@@ -6253,6 +7335,41 @@
           "content": {
             "application/json": {
               "schema": {
+                "type": "object",
+                "required": ["recipient", "rate", "schedule"],
+                "properties": {
+                  "recipient": {
+                    "type": "string",
+                    "description": "Stellar public key of the recipient (56-character G… address).",
+                    "example": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG"
+                  },
+                  "rate": {
+                    "type": "string",
+                    "description": "Positive decimal payment amount per schedule interval (max 7 decimal places).",
+                    "example": "120"
+                  },
+                  "schedule": {
+                    "type": "string",
+                    "enum": ["second", "minute", "hour", "day", "week", "month", "year"],
+                    "description": "Payment interval.",
+                    "example": "month"
+                  },
+                  "token": {
+                    "type": "string",
+                    "description": "Stellar asset code (optional, defaults to XLM).",
+                    "example": "XLM"
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "description": "Optional organization that owns this stream and whose configured quota applies.",
+                    "example": "org-acme"
+                  }
+                }
+              },
+              "example": {
+                "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                "rate": "120",
+                "schedule": "month"
                 "type": "object"
               }
             }
@@ -6269,11 +7386,39 @@
               }
             }
           },
+          "400": { "$ref": "#/components/responses/400" },
+          "401": { "$ref": "#/components/responses/401" },
+          "422": { "$ref": "#/components/responses/422" },
+          "429": {
+            "description": "Daily creation limit or configured stream quota exceeded. Retry-After indicates when the applicable quota resets.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the daily limit resets at UTC midnight or monthly volume quota resets at the next UTC month.",
+                "schema": { "type": "integer" }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "error": {
+                    "code": "QUOTA_MONTHLY_VOLUME_EXCEEDED",
+                    "message": "The user has used 1000000000 of 1000000000 monthly XLM stroops.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": { "$ref": "#/components/responses/500" }
           "400": {
             "$ref": "#/components/responses/400"
           },
           "401": {
             "$ref": "#/components/responses/401"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
           }
         }
       }
@@ -6404,6 +7549,472 @@
           }
         }
       }
+    },
+    "/api/streams/{id}/cancel/preview": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "x-tenant-id",
+          "in": "header",
+          "required": false,
+          "description": "Optional tenant identifier for tenant-scoped stream visibility.",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "Actor-Wallet-Address",
+          "in": "header",
+          "required": false,
+          "description": "Caller wallet address (fallback when allowed for org policy evaluation).",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "previewCancelStream",
+        "summary": "Preview cancellation payout split for a stream",
+        "description": "Read-only preview of cancelling an active or paused stream. Returns the exact recipient payout and sender refund without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.",
+        "tags": [
+          "Streams v1"
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancellation outcome preview computed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CancelOutcomePreview"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "description": "Forbidden: caller is not authorized to preview this stream action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict: illegal state transition or terminal stream state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/streams/{id}/settle/preview": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "x-tenant-id",
+          "in": "header",
+          "required": false,
+          "description": "Optional tenant identifier for tenant-scoped stream visibility.",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "Actor-Wallet-Address",
+          "in": "header",
+          "required": false,
+          "description": "Caller wallet address (fallback when allowed for org policy evaluation).",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "previewSettleStream",
+        "summary": "Preview settlement outcome for a stream",
+        "description": "Read-only preview of settling an active or paused stream. Returns the resulting status and escrow amounts without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.",
+        "tags": [
+          "Streams v1"
+        ],
+        "responses": {
+          "200": {
+            "description": "Settlement outcome preview computed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SettleOutcomePreview"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "description": "Forbidden: caller is not authorized to preview this stream action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict: illegal state transition or terminal stream state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/streams/{id}/withdraw/preview": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "x-tenant-id",
+          "in": "header",
+          "required": false,
+          "description": "Optional tenant identifier for tenant-scoped stream visibility.",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "Actor-Wallet-Address",
+          "in": "header",
+          "required": false,
+          "description": "Caller wallet address (fallback when allowed for org policy evaluation).",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "amount",
+          "in": "query",
+          "required": false,
+          "description": "Optional withdrawal amount in raw i128 units. Omit to preview withdrawing the full withdrawable balance.",
+          "schema": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "previewWithdrawStream",
+        "summary": "Preview withdrawal outcome for a stream",
+        "description": "Read-only preview of withdrawing from an ended stream. Computes the exact payout and updated released amount without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.",
+        "tags": [
+          "Streams v1"
+        ],
+        "responses": {
+          "200": {
+            "description": "Withdrawal outcome preview computed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WithdrawOutcomePreview"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "description": "Forbidden: caller is not authorized to preview this stream action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "Conflict: illegal state transition or terminal stream state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/policy": {
+      "get": {
+        "summary": "Get organization stream policy",
+        "description": "Returns the current StreamPolicy for the specified organization along with a strong ETag header.",
+        "operationId": "getOrgPolicy",
+        "tags": [
+          "Organizations"
+        ],
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization identifier"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization stream policy",
+            "headers": {
+              "ETag": {
+                "description": "Strong entity tag for optimistic concurrency control",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgPolicyResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace organization stream policy",
+        "description": "Replaces the StreamPolicy for an organization. Restricted to organization owners. Supports optimistic concurrency via the If-Match header and records an audit log entry.",
+        "operationId": "updateOrgPolicy",
+        "tags": [
+          "Organizations"
+        ],
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Organization identifier"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ETag returned by GET /api/orgs/{orgId}/policy for optimistic concurrency control"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrgPolicyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated organization stream policy",
+            "headers": {
+              "ETag": {
+                "description": "Updated strong entity tag",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgPolicyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid policy payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not an authenticated owner of the organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "412": {
+          "409": {
+            "description": "Optimistic concurrency conflict (If-Match ETag mismatch)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "tags": [
@@ -6434,6 +8045,10 @@
     {
       "name": "Notifications",
       "description": "User notification channel and event preferences"
+    },
+    {
+      "name": "Organizations",
+      "description": "Organization membership and stream policy"
     },
     {
       "name": "Streams",

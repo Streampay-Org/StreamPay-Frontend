@@ -3,7 +3,7 @@ import { registry, webhookCounter, webhookDuration } from "@/src/metrics/registr
 import { logger } from "@/app/lib/logger";
 import { webhookPayloadSchema } from "@/src/validators/webhooks";
 import { withRouteTimeout } from "@/src/middleware/timeout";
-import { applyRateLimit } from "@/src/middleware/rateLimit";
+import { applyRateLimit, withRateLimitHeaders } from "@/src/middleware/rateLimit";
 import {
   buildLimitsConfig,
   createBodySizeTooLargeResponse,
@@ -20,17 +20,20 @@ import { resolveRequestId } from "@/lib/requestId";
 // Prometheus metrics endpoint
 async function handleWebhooksGet(request: Request) {
   // Per-user rate limit — identity: API key > JWT wallet sub > IP.
-  const rateLimited = await applyRateLimit(request, 'webhooks', 'GET');
-  if (rateLimited) return rateLimited;
+  const rateLimitResult = await applyRateLimit(request, 'webhooks', 'GET');
+  if (!rateLimitResult.allowed) return rateLimitResult.response;
 
   try {
     const metrics = await registry.metrics();
-    return new NextResponse(metrics, {
-      status: 200,
-      headers: {
-        "Content-Type": registry.contentType,
-      },
-    });
+    return withRateLimitHeaders(
+      new NextResponse(metrics, {
+        status: 200,
+        headers: {
+          "Content-Type": registry.contentType,
+        },
+      }),
+      rateLimitResult.headers,
+    );
   } catch (error) {
     logger.error("Failed to generate metrics", { error });
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
@@ -45,8 +48,8 @@ export async function GET(request: Request) {
 async function handleWebhooksPost(req: NextRequest) {
   // Per-user rate limit before body parse / processing so exhausted callers
   // cannot spend CPU on validation or metrics work.
-  const rateLimited = await applyRateLimit(req, 'webhooks', 'POST');
-  if (rateLimited) return rateLimited;
+  const rateLimitResult = await applyRateLimit(req, 'webhooks', 'POST');
+  if (!rateLimitResult.allowed) return rateLimitResult.response;
 
   const start = process.hrtime();
   let status = 200;
@@ -110,7 +113,7 @@ async function handleWebhooksPost(req: NextRequest) {
 
     // TODO: Process webhook body...
 
-    return NextResponse.json({ success: true }, { status });
+    return withRateLimitHeaders(NextResponse.json({ success: true }, { status }), rateLimitResult.headers);
   } catch (error) {
     status = 500;
     logger.error("Webhook processing error", { error });

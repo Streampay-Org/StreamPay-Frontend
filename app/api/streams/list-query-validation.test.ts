@@ -367,7 +367,7 @@ describe("GET /api/streams query validation", () => {
         new Request("http://localhost/api/streams", {
           headers: {
             "x-tenant-id": "tenant-a",
-            "Actor-Wallet-Address": WALLET_RECIP_W,
+            authorization: `Bearer ${signToken(WALLET_RECIP_W)}`,
           },
         }),
       );
@@ -402,7 +402,7 @@ describe("GET /api/streams query validation", () => {
         new Request("http://localhost/api/streams", {
           headers: {
             "x-tenant-id": "tenant-a",
-            "Actor-Wallet-Address": acmeMemberWallet,
+            authorization: `Bearer ${signToken(acmeMemberWallet)}`,
           },
         }),
       );
@@ -420,7 +420,7 @@ describe("GET /api/streams query validation", () => {
         new Request("http://localhost/api/streams", {
           headers: {
             "x-tenant-id": "tenant-a",
-            "Actor-Wallet-Address": adminWallet,
+            authorization: `Bearer ${signToken(adminWallet)}`,
           },
         }),
       );
@@ -468,7 +468,7 @@ describe("GET /api/streams query validation", () => {
         new Request("http://localhost/api/streams", {
           headers: {
             "x-tenant-id": "tenant-a",
-            "Actor-Wallet-Address": WALLET_SENDER_A,
+            authorization: `Bearer ${signToken(WALLET_SENDER_A)}`,
           },
         }),
       );
@@ -534,7 +534,7 @@ describe("GET /api/streams query validation", () => {
         new Request(`http://localhost/api/streams?cursor=${encodeURIComponent(sameTenantCursor)}`, {
           headers: {
             "x-tenant-id": "tenant-a",
-            "Actor-Wallet-Address": WALLET_RECIP_W,
+            authorization: `Bearer ${signToken(WALLET_RECIP_W)}`,
           },
         }),
       );
@@ -550,7 +550,7 @@ describe("GET /api/streams query validation", () => {
         new Request("http://localhost/api/streams", {
           headers: {
             "x-tenant-id": "tenant-a",
-            "Actor-Wallet-Address": WALLET_SENDER_A,
+            authorization: `Bearer ${signToken(WALLET_SENDER_A)}`,
           },
         }),
       );
@@ -558,7 +558,7 @@ describe("GET /api/streams query validation", () => {
         new Request("http://localhost/api/streams", {
           headers: {
             "x-tenant-id": "tenant-a",
-            "Actor-Wallet-Address": WALLET_RECIP_W,
+            authorization: `Bearer ${signToken(WALLET_RECIP_W)}`,
           },
         }),
       );

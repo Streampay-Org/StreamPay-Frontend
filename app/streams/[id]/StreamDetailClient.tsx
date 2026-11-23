@@ -368,7 +368,7 @@ export function StreamDetailClient({
               <div>
                 <dt>Recipient Address</dt>
                 <dd>
-                  <CopyAddress value={current.recipient} />
+                  <CopyAddress value={current.recipient} explorer={{ kind: "account", network }} />
                 </dd>
               </div>
               <div>

@@ -35,6 +35,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { idempotencyKeyErrorResponse, validateIdempotencyKey } from "@/app/lib/idempotency";
 import {
   checkIdempotency,
   computeFingerprint,
@@ -58,6 +59,7 @@ import {
   buildCancellationRecord,
 } from "@/app/lib/cancel-stream";
 import { escrowNow, resolveEscrowState } from "@/app/lib/escrow-state";
+import { buildCancelInput } from "@/app/lib/stream-outcome-preview";
 import { webhookOutboxStore, toWebhookEvent } from "@/app/lib/webhook-outbox";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -104,7 +106,15 @@ export async function POST(
 
   // ── Idempotency ────────────────────────────────────────────────────────────
   const actorAddress    = getHeader(request, "Actor-Wallet-Address");
-  const idempotencyKey  = getHeader(request, "Idempotency-Key");
+  const rawIdempotencyKey = getHeader(request, "Idempotency-Key");
+  let idempotencyKey: string | null = null;
+  if (rawIdempotencyKey !== null) {
+    const keyValidation = validateIdempotencyKey(rawIdempotencyKey);
+    if (!keyValidation.ok) {
+      return idempotencyKeyErrorResponse(keyValidation.reason);
+    }
+    idempotencyKey = keyValidation.key;
+  }
   const idemToken       = idempotencyKey
     ? idempotencyToken(`streams.cancel.${id}`, idempotencyKey)
     : null;
@@ -221,14 +231,8 @@ export async function POST(
     const token  = stream.token ?? "XLM";
 
     // ── Compute split ─────────────────────────────────────────────────────────
-    const cancelResult = computeCancellationSplit(stream, {
-      totalAmount:      escrow.total,
-      releasedAmount:   escrow.released,
-      vestedAmount:     escrow.vested,
-      token,
-      senderAddress:    stream.senderAddress!,
-      recipientAddress: stream.recipient,
-    });
+    const cancelInput = buildCancelInput(stream, escrow);
+    const cancelResult = computeCancellationSplit(stream, cancelInput);
 
     if (!cancelResult.ok) {
       const httpStatus = cancelResult.code === "ALREADY_TERMINAL" ? 409 : 422;
@@ -248,14 +252,7 @@ export async function POST(
     // ── Build cancellation record ─────────────────────────────────────────────
     const cancellation = {
       ...buildCancellationRecord(
-        {
-          totalAmount:      escrow.total,
-          releasedAmount:   escrow.released,
-          vestedAmount:     escrow.vested,
-          token,
-          senderAddress:    stream.senderAddress!,
-          recipientAddress: stream.recipient,
-        },
+        cancelInput,
         split,
         recipientTxHash,
         senderTxHash,

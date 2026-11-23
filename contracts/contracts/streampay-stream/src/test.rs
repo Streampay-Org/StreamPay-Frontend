@@ -1997,6 +1997,9 @@ fn vested_amount_extreme_values_overflow() {
         status: StreamStatus::Active,
         paused_at: 0,
         total_paused_duration: 0,
+        cliff_time: 0,
+        fee_bps: 0,
+        curve: crate::storage::ReleaseCurve::Linear,
     };
 
     let result = release::vested_amount(&stream, 500);
@@ -2727,4 +2730,167 @@ fn pause_stream_rejects_non_active_or_unauthorized() {
         data.client.try_resume_stream(&stream_id),
         Error::InvalidState
     );
+}
+
+// ── Milestone release schedule tests ─────────────────────────────────────────
+
+#[test]
+fn create_stream_with_milestones_vests_in_steps_and_settles() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    StellarAssetClient::new(&env, &token).mint(&sender, &100_000);
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
+
+    let mut milestones = soroban_sdk::Vec::new(&env);
+    milestones.push_back(crate::Milestone {
+        time: 1_200,
+        cumulative_bps: 2_500,
+    });
+    milestones.push_back(crate::Milestone {
+        time: 1_500,
+        cumulative_bps: 6_000,
+    });
+    milestones.push_back(crate::Milestone {
+        time: 2_000,
+        cumulative_bps: 10_000,
+    });
+
+    let stream_id = client.create_stream_with_milestones(
+        &sender,
+        &recipient,
+        &token,
+        &10_000i128,
+        &1_000u64,
+        &2_000u64,
+        &0u32,
+        &milestones,
+    );
+
+    // Before first milestone: 0 withdrawable
+    env.ledger().set_timestamp(1_199);
+    assert_eq!(client.withdrawable(&stream_id), 0);
+
+    // At first milestone: 25% = 2_500
+    env.ledger().set_timestamp(1_200);
+    assert_eq!(client.withdrawable(&stream_id), 2_500);
+    client.withdraw(&recipient, &stream_id, &2_500i128);
+    assert_eq!(client.withdrawable(&stream_id), 0);
+
+    // Between 1st and 2nd milestone: still 0 additional
+    env.ledger().set_timestamp(1_499);
+    assert_eq!(client.withdrawable(&stream_id), 0);
+
+    // At 2nd milestone: 60% = 6_000 cumulative -> 3_500 withdrawable
+    env.ledger().set_timestamp(1_500);
+    assert_eq!(client.withdrawable(&stream_id), 3_500);
+
+    // At end_time: 100% = 10_000 cumulative -> 7_500 remaining
+    env.ledger().set_timestamp(2_000);
+    assert_eq!(client.withdrawable(&stream_id), 7_500);
+    client.withdraw(&recipient, &stream_id, &7_500i128);
+
+    let stream = client.get_stream(&stream_id);
+    assert_eq!(stream.status, StreamStatus::Settled);
+    assert_eq!(stream.released_amount, 10_000);
+}
+
+#[test]
+fn create_stream_with_milestones_rejects_invalid_schedule() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    StellarAssetClient::new(&env, &token).mint(&sender, &100_000);
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
+
+    // Empty schedule
+    let empty: soroban_sdk::Vec<crate::Milestone> = soroban_sdk::Vec::new(&env);
+    let res = client.try_create_stream_with_milestones(
+        &sender,
+        &recipient,
+        &token,
+        &10_000i128,
+        &1_000u64,
+        &2_000u64,
+        &0u32,
+        &empty,
+    );
+    assert_eq!(res, Err(Ok(Error::InvalidSchedule)));
+
+    // Schedule not ending at 10_000 bps
+    let mut bad_bps = soroban_sdk::Vec::new(&env);
+    bad_bps.push_back(crate::Milestone {
+        time: 2_000,
+        cumulative_bps: 9_000,
+    });
+    let res = client.try_create_stream_with_milestones(
+        &sender,
+        &recipient,
+        &token,
+        &10_000i128,
+        &1_000u64,
+        &2_000u64,
+        &0u32,
+        &bad_bps,
+    );
+    assert_eq!(res, Err(Ok(Error::InvalidSchedule)));
+}
+
+#[test]
+fn amend_stream_rejects_milestone_stream_with_invalid_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    StellarAssetClient::new(&env, &token).mint(&sender, &100_000);
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
+
+    let mut milestones = soroban_sdk::Vec::new(&env);
+    milestones.push_back(crate::Milestone {
+        time: 2_000,
+        cumulative_bps: 10_000,
+    });
+
+    let stream_id = client.create_stream_with_milestones(
+        &sender,
+        &recipient,
+        &token,
+        &10_000i128,
+        &1_000u64,
+        &2_000u64,
+        &0u32,
+        &milestones,
+    );
+
+    let res = client.try_amend_stream(&stream_id, &5i128, &3_000u64);
+    assert_eq!(res, Err(Ok(Error::InvalidState)));
 }

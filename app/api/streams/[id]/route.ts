@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { db } from "@/app/lib/db";
-import { computeETag, ifNoneMatchMatches } from "@/app/lib/etag";
+import { db, withLock } from "@/app/lib/db";
+import { computeETag, ifMatchSatisfied, ifNoneMatchMatches } from "@/app/lib/etag";
 import { getCorrelationContext } from "@/app/lib/logger";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
@@ -46,13 +46,40 @@ function buildCacheHeaders(etag: string, cacheStatus: "HIT" | "MISS"): Record<st
   };
 }
 
-function createErrorResponse(code: string, message: string, status: number) {
-  const context = getCorrelationContext();
-  return NextResponse.json({ error: { code, message, request_id: context?.request_id } }, { status });
+/**
+ * Whether `POST /api/streams/:id` requires an `If-Match` header (returning
+ * `428 Precondition Required` when absent).
+ *
+ * Enforced by default. Set `STREAMPAY_REQUIRE_IF_MATCH=false` (or `"0"`)
+ * during client migration windows to allow updates without `If-Match`;
+ * when `If-Match` IS supplied, it is always validated against the current ETag
+ * and returns `412 Precondition Failed` on mismatch.
+ */
+function isIfMatchRequired(): boolean {
+  const raw = process.env.STREAMPAY_REQUIRE_IF_MATCH?.trim().toLowerCase();
+  return raw !== "false" && raw !== "0";
 }
 
-function errorResponse(code: string, message: string, status: number) {
-  return createErrorResponse(code, message, status);
+function createErrorResponse(
+  code: string,
+  message: string,
+  status: number,
+  headers?: Record<string, string>
+) {
+  const context = getCorrelationContext();
+  return NextResponse.json(
+    { error: { code, message, request_id: context?.request_id } },
+    { status, headers }
+  );
+}
+
+function errorResponse(
+  code: string,
+  message: string,
+  status: number,
+  headers?: Record<string, string>
+) {
+  return createErrorResponse(code, message, status, headers);
 }
 
 function getRequestUrl(request: Request, fallbackPath: string): URL {
@@ -95,7 +122,7 @@ export async function GET(
 
   // Network-scoped cache check: a testnet entry cannot leak into a mainnet request.
   const cachedStream = streamCache.get(tenant, id, currentNetwork());
-  let stream: any | null = null;
+  let stream: Stream | null = null;
   let cacheStatus: "HIT" | "MISS" = "MISS";
 
   if (cachedStream) {
@@ -150,40 +177,68 @@ export async function POST(
     return errorResponse("MISSING_TENANT", "Tenant ID header is required", 400);
   }
 
-  const stream = db.streams.findOne ? db.streams.findOne(tenant, id) : null;
-  if (!stream) {
-    return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
-  }
+  const ifMatch = request.headers.get("if-match");
+  const requireIfMatch = isIfMatchRequired();
 
-  let body;
-  try {
-    body = await request.json();
-  } catch {
-    return errorResponse("INVALID_REQUEST", "Request body must be valid JSON", 400);
-  }
+  return withLock(id, async () => {
+    const stream = db.streams.findOne ? db.streams.findOne(tenant, id) : null;
+    if (!stream) {
+      return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
+    }
 
-  const updatedStream = {
-    ...stream,
-    ...body,
-    updatedAt: new Date().toISOString(),
-  };
+    const currentEtag = computeETag(tenant, stream);
 
-  db.streams.set(id, updatedStream);
+    if (!ifMatch || ifMatch.trim() === "") {
+      if (requireIfMatch) {
+        return errorResponse(
+          "PRECONDITION_REQUIRED",
+          "If-Match header with the current stream ETag is required for updates",
+          428
+        );
+      }
+    } else if (!ifMatchSatisfied(ifMatch, currentEtag)) {
+      return errorResponse(
+        "PRECONDITION_FAILED",
+        "Stream has been modified since the provided ETag; re-fetch and retry",
+        412,
+        { ETag: currentEtag }
+      );
+    }
 
-  publishStreamChange({
-    action: inferStreamChangeAction(stream, updatedStream as Stream),
-    actor: request.headers.get("Actor-Wallet-Address") ?? undefined,
-    after: updatedStream as Stream,
-    before: stream,
-    correlationId: getCorrelationContext()?.correlation_id,
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return errorResponse("INVALID_REQUEST", "Request body must be valid JSON", 400);
+    }
+
+    const updatedStream = {
+      ...stream,
+      ...body,
+      updatedAt: new Date().toISOString(),
+    };
+
+    db.streams.set(id, updatedStream);
+
+    publishStreamChange({
+      action: inferStreamChangeAction(stream, updatedStream as Stream),
+      actor: request.headers.get("Actor-Wallet-Address") ?? undefined,
+      after: updatedStream as Stream,
+      before: stream,
+      correlationId: getCorrelationContext()?.correlation_id,
+    });
+
+    // Invalidate the network-scoped cache entry BEFORE returning so the next
+    // GET rebuilds from the persistence store with a fresh ETag. This also
+    // implicitly stales any ETag the client was holding for this resource.
+    streamCache.invalidate(tenant, id, currentNetwork());
+
+    const newEtag = computeETag(tenant, updatedStream);
+    return NextResponse.json(
+      { data: updatedStream },
+      { headers: { ETag: newEtag } }
+    );
   });
-
-  // Invalidate the network-scoped cache entry BEFORE returning so the next
-  // GET rebuilds from the persistence store with a fresh ETag. This also
-  // implicitly stales any ETag the client was holding for this resource.
-  streamCache.invalidate(tenant, id, currentNetwork());
-
-  return NextResponse.json({ data: updatedStream });
 }
 
 export async function DELETE(request: Request, { params }: Context) {

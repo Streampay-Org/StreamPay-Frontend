@@ -9,6 +9,24 @@ import {
   setIdempotency,
   withLock,
 } from "@/app/lib/db";
+import { getCorrelationContext, logger } from "@/app/lib/logger";
+import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
+import { getLimitForRoute } from "@/app/lib/rate-limit-config";
+import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
+import { checkTokenAllowed, normaliseToken } from "@/app/lib/token-allowlist";
+import { checkCreationQuota } from "@/app/lib/quota-enforcement";
+import {
+  creationQuotaResponse,
+  quotaUserId,
+  rateToStroops,
+  withStreamCreationQuotaLock,
+} from "@/app/lib/stream-create-core";
+import { recordCreationQuotaRejection } from "@/app/lib/org-quota-metrics";
+import { orgDb } from "@/app/lib/org-db";
+import {
+  idempotencyKeyErrorResponse,
+  validateIdempotencyKey,
+} from "@/app/lib/idempotency";
 import {
   decodeStreamCursor,
   encodeStreamCursor,
@@ -22,7 +40,7 @@ import {
   withCorrelationContext,
 } from "@/app/lib/logger";
 import { logAccessEvent } from "@/src/middleware/accessLog";
-import { streamsRateLimit } from "@/src/middleware/rateLimit";
+import { streamsRateLimit, withRateLimitHeaders } from "@/src/middleware/rateLimit";
 import {
   validateListStreamsQuery,
 } from "@/app/lib/stream-validation";
@@ -255,10 +273,13 @@ async function handleStreamsGet(request: Request) {
 
     if (isIfNoneMatchMatch(etag, getHeader(request, "if-none-match"))) {
       status = 304;
-      return new NextResponse(null, {
-        status,
-        headers: createCacheHeaders(etag),
-      });
+      return withRateLimitHeaders(
+        new NextResponse(null, {
+          status,
+          headers: createCacheHeaders(etag),
+        }),
+        rateLimitResult.headers,
+      );
     }
 
     logger.info("Streams listed successfully", {
@@ -271,7 +292,7 @@ async function handleStreamsGet(request: Request) {
       response.headers.set(name, value);
     }
     status = 200;
-    return response;
+    return withRateLimitHeaders(response, rateLimitResult.headers);
   } catch (error) {
     status = 500;
     logger.error("Streams list failed", { error });
@@ -304,9 +325,76 @@ async function handleStreamsPost(request: Request) {
       return rateLimitResult.response;
     }
 
-    const idempotencyKey = getHeader(request, "Idempotency-Key");
+    const rawIdempotencyKey = getHeader(request, "Idempotency-Key");
+    let idempotencyKey: string | null = null;
+    if (rawIdempotencyKey !== null) {
+      const keyValidation = validateIdempotencyKey(rawIdempotencyKey);
+      if (!keyValidation.ok) {
+        status = 400;
+        return idempotencyKeyErrorResponse(keyValidation.reason);
+      }
+      idempotencyKey = keyValidation.key;
+    }
     const token = idempotencyKey ? idempotencyToken("streams.create", idempotencyKey) : null;
 
+  const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
+  const now = new Date().toISOString();
+  const newStream: Stream = {
+    createdAt: now,
+    id,
+    nextAction: "start",
+    rate: rateValue,
+    recipient: recipientValue,
+    schedule: scheduleValue,
+    status: "draft",
+    updatedAt: now,
+    token: normalisedToken,
+  };
+
+  const userId = quotaUserId(identity);
+  const orgId = typeof body.orgId === "string" && body.orgId.trim()
+    ? body.orgId.trim()
+    : undefined;
+
+  return withStreamCreationQuotaLock(async () => {
+    if (token) {
+      const cached = checkIdempotency(idempotencyStore, token, fingerprint);
+      if (cached) {
+        if (!cached.ok) {
+          return NextResponse.json(
+            { error: { code: "IDEMPOTENCY_CONFLICT", message: "Idempotency key has been used with a different request." } },
+            { status: 409 },
+          );
+        }
+        return NextResponse.json(cached.body, { status: cached.status });
+      }
+    }
+
+    const quota = checkCreationQuota({
+      userId,
+      orgId,
+      amountStroops: rateToStroops(rateValue, normalisedToken),
+      now: new Date(now),
+    });
+    if (!quota.allowed) {
+      recordCreationQuotaRejection(quota.scope, quota.subject, quota.code);
+      return creationQuotaResponse(quota);
+    }
+
+    const storedStream: Stream = {
+      ...newStream,
+      ...(userId ? { senderAddress: userId } : {}),
+    };
+    streamRepository.streams.set(id, storedStream);
+    if (orgId) orgDb.streamOwnership.set(id, orgId);
+
+    const payload = { data: newStream, links: { self: `/api/v1/streams/${id}` } };
+    if (token) {
+      setIdempotency(idempotencyStore, token, fingerprint, 201, payload);
+    }
+
+    return NextResponse.json(payload, { status: 201 });
+  });
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -403,7 +491,8 @@ async function handleStreamsPost(request: Request) {
       return NextResponse.json(payload, { status: 201 });
     };
 
-    return token ? await withLock(`create:${token}`, createOnce) : await createOnce();
+    const response = token ? await withLock(`create:${token}`, createOnce) : await createOnce();
+    return withRateLimitHeaders(response, rateLimitResult.headers);
   } catch (error) {
     status = 500;
     logger.error("Stream creation failed", { error });

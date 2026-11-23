@@ -1,12 +1,18 @@
 /** @jest-environment node */
 import { GET, DELETE } from "./route";
 import { db, resetDb } from "@/app/lib/db";
+import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
 
 describe("GET /api/v2/streams/:id - weak ETag and If-None-Match cache revalidation", () => {
   const streamId = "stream-ada";
 
   beforeEach(() => {
+    resetRateLimitStore();
     resetDb();
+  });
+
+  afterEach(() => {
+    resetRateLimitStore();
   });
 
   it("returns 200 OK with stream data and ETag header on first request", async () => {

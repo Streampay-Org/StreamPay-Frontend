@@ -6,11 +6,14 @@ import {
   logger,
   withCorrelationContext,
 } from "@app/lib/logger";
+import { getWebhookSubscriptionStore } from "@app/lib/webhook-store";
+import { webhookDeliveryStore } from "@app/lib/webhook-delivery-store";
 import {
+  computeSuccessRatePct,
   deriveHealthStatus,
+  getSubscriptionStats,
   type WebhookDeliveryStats,
   type WebhookHealthResponse,
-  type WebhookSubscriptionStats,
 } from "./health";
 
 type WebhookDeliveryStatsWithStale = WebhookDeliveryStats & { stale: number };
@@ -25,25 +28,23 @@ export async function GET(request?: Request | NextRequest) {
         WEBHOOK_TIMEOUT_MS,
         request ?? {},
         async () => {
-          // TODO: Replace placeholder counts with real data-layer queries.
-          // The stale count must be derived from pending deliveries whose last
-          // attempt is older than WEBHOOK_TIMEOUT_MS. This is critical to
-          // distinguish stale (potentially stuck) deliveries from hard failures.
-          const subscriptions: WebhookSubscriptionStats = {
-            total: 0,
-            active: 0,
-            degraded: 0,
-            disabled: 0,
-          };
+          const now = new Date();
+          const subscriptions = await getSubscriptionStats(
+            getWebhookSubscriptionStore(),
+            webhookDeliveryStore,
+          );
+          const rawStats = webhookDeliveryStore.getDeliveryHealthStats(
+            now,
+            WEBHOOK_TIMEOUT_MS,
+          );
 
           const delivery_stats: WebhookDeliveryStatsWithStale = {
-            total: 0,
-            delivered: 0,
-            failed: 0,
-            pending: 0,
-            dlq: 0,
-            stale: 0,
-            success_rate_pct: 100,
+            ...rawStats,
+            success_rate_pct: computeSuccessRatePct(
+              rawStats.delivered,
+              rawStats.failed,
+              rawStats.dlq,
+            ),
           };
 
           const baseStatus = deriveHealthStatus(subscriptions, delivery_stats);
@@ -55,7 +56,7 @@ export async function GET(request?: Request | NextRequest) {
               ? "degraded"
               : baseStatus;
 
-          const checked_at = new Date().toISOString();
+          const checked_at = now.toISOString();
 
           const body: WebhookHealthResponse = {
             status,
