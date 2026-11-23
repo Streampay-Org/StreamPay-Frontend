@@ -98,11 +98,147 @@ streampay_metrics_up 1
 | `streampay_requests_total` | counter | Total requests observed per route |
 | `streampay_rate_limit_throttled_total` | counter | Throttled requests per route and limit type |
 | `streampay_metrics_up` | gauge | Whether the metrics endpoint is serving (always 1) |
+| `webhook_requests_total` | counter | Total `/api/webhooks` requests, labelled by status and event type |
+| `webhook_request_duration_seconds` | histogram | Latency of `/api/webhooks` handlers, labelled by status and event type |
+| `export_requests_total` | counter | Total `/api/exports` requests, labelled by status and method |
+| `export_request_duration_seconds` | histogram | Latency of `/api/exports` handlers, labelled by status and method |
+| `wallet_auth_requests_total` | counter | Per-endpoint `/api/auth/wallet` request counter (see below) |
+| `wallet_auth_request_duration_seconds` | histogram | Per-endpoint `/api/auth/wallet` latency histogram (see below) |
+| `process_*`, `nodejs_*` | various | Default Node.js process metrics from `prom-client` |
 
 ### Labels
 
 - `route`: The API route path (e.g., `/api/streams`, `/api/streams/123`)
 - `limit_type`: The type of rate limit that was applied (e.g., `org`, `rate`)
+- `status`: HTTP status code (export/webhook endpoint metrics)
+- `method`: HTTP method (`GET` / `POST`) for export endpoint metrics
+- `event_type`: Webhook event type label
+
+## Per-endpoint metrics for `/api/auth/wallet`
+
+Two new metrics back per-endpoint observability of the wallet authentication
+endpoint:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `wallet_auth_requests_total` | counter | Total number of `/api/auth/wallet` requests, labelled by method, operation, and HTTP status. |
+| `wallet_auth_request_duration_seconds` | histogram | Wall-clock duration of every `/api/auth/wallet` request in seconds, labelled by method, operation, and HTTP status. Bucket set: `[0.005, 0.025, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]`. |
+
+### Labels
+
+| Label | Values | Notes |
+|-------|--------|-------|
+| `method` | `GET`, `POST` | HTTP method that served the request. |
+| `operation` | `challenge`, `verify` | `GET /api/auth/wallet` is recorded as `challenge`; `POST /api/auth/wallet` as `verify`. |
+| `status` | HTTP status code as string (`"200"`, `"304"`, `"401"`, `"403"`, `"422"`, `"429"`, `"500"`, `"504"`, …) | Final HTTP status returned to the client. |
+
+Label cardinality is intentionally bounded: `2 × 2 × ≤10` distinct time
+series for typical traffic. Every handler code path — including the
+pre-`withTimeout` rate-limit fast-path, conditional `304 Not Modified`
+responses, validation errors, CSRF mismatches, signature-verification
+failures, unhandled 500s, and 504 deadlines — produces exactly one counter
+increment and one histogram observation.
+
+### Example PromQL queries
+
+**Challenge issuance success rate:**
+```promql
+sum(rate(wallet_auth_requests_total{method="GET",operation="challenge",status="200"}[5m]))
+/
+sum(rate(wallet_auth_requests_total{method="GET",operation="challenge"}[5m]))
+```
+
+**p99 verify latency:**
+```promql
+histogram_quantile(
+  0.99,
+  sum by (le) (
+    rate(wallet_auth_request_duration_seconds_bucket{method="POST",operation="verify"}[5m])
+  )
+)
+```
+
+**Throttle rate by endpoint:**
+```promql
+sum by (method, operation) (
+  rate(wallet_auth_requests_total{status="429"}[5m])
+)
+```
+
+**Failed verify responses by reason (label breakdown):**
+```promql
+sum by (status) (
+  rate(wallet_auth_requests_total{method="POST",operation="verify"}[5m])
+)
+```
+
+### Notes
+
+- These metrics are emitted from `app/api/auth/wallet/route.ts` and live on
+  the shared `prom-client` registry, so they are concatenated into the body
+  returned by `GET /api/metrics` alongside the `streampay_*` series.
+- The histogram buckets were sized to span the wallet route's per-request
+  deadline (5 s default) plus headroom for the sub-millisecond
+  rate-limit-exceeded fast-path and 504 timeouts.
+
+## Per-endpoint metrics for `/api/exports`
+
+Two metrics back per-endpoint observability of the exports API:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `export_requests_total` | counter | Total number of `/api/exports` requests, labelled by HTTP status and method. |
+| `export_request_duration_seconds` | histogram | Wall-clock duration of every `/api/exports` request in seconds, labelled by HTTP status and method. Bucket set: `[0.1, 0.5, 1, 2, 5, 15]` (the 15 s bucket matches the exports timeout budget). |
+
+### Labels
+
+| Label | Values | Notes |
+|-------|--------|-------|
+| `status` | HTTP status code as string (`"200"`, `"201"`, `"304"`, `"401"`, `"422"`, `"429"`, `"500"`, …) | Final HTTP status returned to the client. |
+| `method` | `GET`, `POST` | HTTP method that served the request. |
+
+Every handler code path — including the pre-validation `401` fast-path, the
+`422` validation envelope, the `429` rate-limit response and unhandled
+`500`s — produces exactly one counter increment and one histogram
+observation.
+
+### Example PromQL queries
+
+**Export create success rate:**
+```promql
+sum(rate(export_requests_total{method="POST",status="201"}[5m]))
+/
+sum(rate(export_requests_total{method="POST"}[5m]))
+```
+
+**p99 list latency:**
+```promql
+histogram_quantile(
+  0.99,
+  sum by (le) (
+    rate(export_request_duration_seconds_bucket{method="GET"}[5m])
+  )
+)
+```
+
+**Rejected requests by status:**
+```promql
+sum by (status) (
+  rate(export_requests_total{status!~"2.."}[5m])
+)
+```
+
+### Notes
+
+- These metrics are emitted from `app/api/exports/route.ts` and live on the
+  shared `prom-client` registry, so they are concatenated into the body
+  returned by `GET /api/metrics` alongside the `streampay_*` series.
+- The focused suite lives at `app/api/exports/exports.metrics.test.ts` and
+  is no longer quarantined in `jest.config.js`:
+
+```bash
+npm test app/api/exports/exports.metrics.test.ts
+```
 
 ## Usage Examples
 
@@ -229,6 +365,14 @@ Run tests with:
 npm test app/api/metrics/route.test.ts
 ```
 
+Per-endpoint wallet metric tests live at `__tests__/wallet-metrics.test.ts`
+and cover every observed HTTP status (200, 304, 422, 429, 403), histogram
+buckets, and isolation between the `GET`/`POST` time series:
+
+```bash
+npm test __tests__/wallet-metrics.test.ts
+```
+
 ## Rate Limiting
 
 Currently, no rate limiting is implemented for the metrics endpoint. Consider adding rate limiting if the endpoint is abused or if Prometheus scraping frequency is too high.
@@ -245,6 +389,11 @@ Potential improvements for the metrics endpoint:
 6. **Metrics Filtering**: Allow filtering metrics by query parameters
 7. **Health Status**: Include application health status in metrics
 8. **Streaming**: Support for streaming metrics updates
+9. **Per-endpoint rollout**: Extend the same `Counter` + `Histogram` pattern
+   to other critical routes (e.g. `/api/streams`, `/api/exports`,
+   `/api/reconciliation`) so Grafana dashboards have uniform labels.
+10. **Alerting rules**: Wire PromQL alerts on `wallet_auth_*` for repeated
+    5xx, abnormal 429 spikes, and p99 verify latency regressions.
 
 ## Related Documentation
 

@@ -37,12 +37,104 @@ export function isValidAccentColor(value: string | null | undefined): boolean {
   return typeof value === "string" && HEX_COLOR.test(value.trim());
 }
 
-/** True only for absolute https URLs (blocks http, data:, javascript:, …). */
+/**
+ * Environment variable holding the comma-separated allowlist of hostnames
+ * permitted for recipient receipt logo URLs.
+ *
+ * Supports exact hostnames (e.g. "cdn.example.com") and subdomain wildcards
+ * (e.g. "*.example.com"). Matching is case-insensitive and performed against
+ * the parsed URL hostname.
+ *
+ * Fail-closed: when unset or empty, no logo URLs are allowed.
+ */
+export const RECEIPT_LOGO_ALLOWED_HOSTS_ENV = "RECEIPT_LOGO_ALLOWED_HOSTS";
+
+type AllowedHostRule =
+  | { type: "exact"; host: string }
+  | { type: "wildcard"; suffix: string };
+
+function normalizeHostPattern(raw: string): AllowedHostRule | null {
+  const trimmed = raw.trim().toLowerCase();
+  if (!trimmed) return null;
+
+  const isWildcard = trimmed.startsWith("*.");
+  const candidate = isWildcard ? trimmed.slice(2) : trimmed;
+
+  if (
+    !candidate ||
+    candidate.includes("*") ||
+    candidate.includes("/") ||
+    candidate.includes(":")
+  ) {
+    return null;
+  }
+
+  try {
+    const normalized = new URL(`https://${candidate}`).hostname.replace(/\.$/, "");
+    if (!normalized) return null;
+    if (isWildcard) {
+      return { type: "wildcard", suffix: `.${normalized}` };
+    }
+    return { type: "exact", host: normalized };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads and parses the `RECEIPT_LOGO_ALLOWED_HOSTS` environment variable.
+ * Returns an empty array when unset or empty (fail-closed).
+ */
+export function getAllowedLogoHosts(
+  rawValue: string | undefined = process.env[RECEIPT_LOGO_ALLOWED_HOSTS_ENV],
+): AllowedHostRule[] {
+  if (!rawValue) return [];
+  const rules: AllowedHostRule[] = [];
+  for (const entry of rawValue.split(",")) {
+    const rule = normalizeHostPattern(entry);
+    if (rule) rules.push(rule);
+  }
+  return rules;
+}
+
+function isHostAllowed(hostname: string, rules: AllowedHostRule[]): boolean {
+  const normalizedHost = hostname.toLowerCase().replace(/\.$/, "");
+  if (!normalizedHost) return false;
+
+  for (const rule of rules) {
+    if (rule.type === "exact" && normalizedHost === rule.host) {
+      return true;
+    }
+    if (
+      rule.type === "wildcard" &&
+      normalizedHost.length > rule.suffix.length &&
+      normalizedHost.endsWith(rule.suffix)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * True only for absolute https URLs without embedded credentials or
+ * non-default ports whose hostname matches `RECEIPT_LOGO_ALLOWED_HOSTS`.
+ *
+ * Fail-closed: returns `false` when `RECEIPT_LOGO_ALLOWED_HOSTS` is unset
+ * or empty so arbitrary third-party hosts cannot be used as tracking pixels.
+ */
 export function isSafeLogoUrl(value: string | null | undefined): boolean {
   if (typeof value !== "string" || value.trim() === "") return false;
+
+  const rules = getAllowedLogoHosts();
+  if (rules.length === 0) return false;
+
   try {
     const url = new URL(value.trim());
-    return url.protocol === "https:";
+    if (url.protocol !== "https:") return false;
+    if (url.username !== "" || url.password !== "") return false;
+    if (url.port !== "") return false;
+    return isHostAllowed(url.hostname, rules);
   } catch {
     return false;
   }

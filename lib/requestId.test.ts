@@ -1,4 +1,3 @@
-/** @jest-environment node */
 
 /**
  * Tests for X-Request-Id propagation utilities (lib/requestId.ts).
@@ -10,6 +9,7 @@
  *  - applyRequestIdPolicy: stamps both request and response headers
  */
 
+/** @jest-environment node */
 import {
   REQUEST_ID_HEADER,
   generateRequestId,
@@ -17,12 +17,22 @@ import {
   resolveRequestId,
   applyRequestIdPolicy,
 } from './requestId';
+import { webcrypto } from 'node:crypto';
 
 // ---------------------------------------------------------------------------
 // generateRequestId
 // ---------------------------------------------------------------------------
 
 describe('generateRequestId', () => {
+  beforeAll(() => {
+    // `crypto.randomUUID` must be available globally in the node test
+    // environment. jsdom provides it, but the node environment does not,
+    // so we polyfill it from node:crypto when absent.
+    if (typeof globalThis.crypto?.randomUUID !== 'function') {
+      (globalThis as any).crypto = webcrypto;
+    }
+  });
+
   it('returns a string with the req_ prefix', () => {
     const id = generateRequestId();
     expect(id).toMatch(/^req_/);
@@ -67,6 +77,11 @@ describe('isValidRequestId', () => {
   it('accepts a value of exactly 128 characters', () => {
     const atLimit = 'a'.repeat(128);
     expect(isValidRequestId(atLimit)).toBe(true);
+  });
+
+  it('rejects a value of 129 printable characters', () => {
+    const overLimit = 'a'.repeat(129);
+    expect(isValidRequestId(overLimit)).toBe(false);
   });
 
   it('rejects a value containing whitespace', () => {
@@ -173,26 +188,49 @@ describe('applyRequestIdPolicy', () => {
 // The unit tests above cover the requestId utilities directly.
 // ---------------------------------------------------------------------------
 
-describe.skip('middleware request-id propagation (integration)', () => {
+describe('middleware request-id propagation (integration)', () => {
   let middleware: (req: Request) => Promise<Response>;
+
+  beforeAll(() => {
+    if (typeof globalThis.crypto?.randomUUID !== 'function') {
+      (globalThis as any).crypto = webcrypto;
+    }
+  });
+
+  const ENV_KEYS = [
+    'STELLAR_NETWORK',
+    'JWT_SECRET',
+    'NODE_ENV',
+    'ALLOWED_ORIGINS',
+    'CI',
+    'GITHUB_ACTIONS',
+  ] as const;
+  let savedEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
 
   beforeEach(async () => {
     jest.resetModules();
 
+    savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
     (process.env as any).STELLAR_NETWORK = 'testnet';
     (process.env as any).JWT_SECRET = 'test-secret-at-least-32-characters-long';
     (process.env as any).NODE_ENV = 'production';
     (process.env as any).ALLOWED_ORIGINS = 'https://allowed.example.com';
+    // Simulate a production deployment rather than a CI runner: the config
+    // validator (correctly) refuses non-dev secrets when CI is detected.
+    delete (process.env as any).CI;
+    delete (process.env as any).GITHUB_ACTIONS;
 
+    jest.resetModules();
     const mod = await import('../middleware');
     middleware = mod.middleware as any;
   });
 
   afterEach(() => {
-    delete (process.env as any).STELLAR_NETWORK;
-    delete (process.env as any).JWT_SECRET;
-    delete (process.env as any).NODE_ENV;
-    delete (process.env as any).ALLOWED_ORIGINS;
+    for (const key of ENV_KEYS) {
+      const value = savedEnv[key];
+      if (value === undefined) delete (process.env as any)[key];
+      else (process.env as any)[key] = value;
+    }
   });
 
   it('echoes a valid incoming X-Request-Id back on the response', async () => {
@@ -229,5 +267,69 @@ describe.skip('middleware request-id propagation (integration)', () => {
     const id = response.headers.get(REQUEST_ID_HEADER);
     expect(id).toMatch(/^req_/);
     expect(id).not.toBe('not valid!');
+  });
+
+  it('includes request-id on CORS rejection responses', async () => {
+    const request = new Request('https://api.example.com/api/health', {
+      method: 'GET',
+      headers: {
+        origin: 'https://evil.example.com',
+        [REQUEST_ID_HEADER]: 'req_cors_test_123',
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get(REQUEST_ID_HEADER)).toBe('req_cors_test_123');
+  });
+
+  it('includes request-id on body-size 413 responses', async () => {
+    const request = new Request('http://localhost/api/v2/streams', {
+      method: 'POST',
+      headers: {
+        'content-length': String(256 * 1024 + 1),
+        [REQUEST_ID_HEADER]: 'req_size_test_456',
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).toBe(413);
+    expect(response.headers.get(REQUEST_ID_HEADER)).toBe('req_size_test_456');
+  });
+
+  it('includes request-id on CSRF rejection responses', async () => {
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'POST',
+      headers: {
+        origin: 'https://allowed.example.com',
+        [REQUEST_ID_HEADER]: 'req_csrf_test_789',
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).toBe(403);
+    const body = await response.json();
+    expect(body.error.code).toBe('CSRF_TOKEN_INVALID');
+    expect(response.headers.get(REQUEST_ID_HEADER)).toBe('req_csrf_test_789');
+  });
+
+  it('generates request-id on success when none provided', async () => {
+    const token = 'a'.repeat(64);
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'POST',
+      headers: {
+        origin: 'https://allowed.example.com',
+        cookie: `csrf-token=${token}`,
+        'x-csrf-token': token,
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).not.toBe(403);
+    expect(response.headers.get(REQUEST_ID_HEADER)).toMatch(/^req_/);
   });
 });

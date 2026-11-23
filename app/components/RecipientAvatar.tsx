@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { getRecipientIdenticon } from "../lib/identicon";
 
@@ -34,10 +34,11 @@ export function RecipientAvatar({ recipient, size = 36, className = "" }: Recipi
     <span
       className={`recipient-avatar ${className}`.trim()}
       aria-hidden="true"
+      data-palette-index={paletteIndex}
       style={{
         // Read from the fixed CSS palette so light/dark themes and contrast
         // are handled entirely in `globals.css`, not computed in JS.
-        background: `var(--identicon-${paletteIndex}-bg)`,
+        backgroundColor: `var(--identicon-${paletteIndex}-bg)`,
         color: `var(--identicon-${paletteIndex}-fg)`,
         width: size,
         height: size,

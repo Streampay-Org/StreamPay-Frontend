@@ -19,6 +19,45 @@ lifecycle:
 The contract exposes stable `#[contracterror]` codes from
 `contracts/streampay-stream/src/error.rs` for backend error mapping.
 
+## Split streams
+
+`streampay-stream` also supports multi-recipient split streams. A split stream
+escrows one `total_amount` and releases it proportionally by recipient weight:
+
+- `create_split_stream(sender, token, total_amount, start_time, end_time, recipients, weights)`
+  funds the escrow and returns the new split stream id.
+- `withdraw_split(stream_id, recipient, amount)` pays a recipient their vested,
+  not-yet-withdrawn share.
+- `pause_split_stream(stream_id)` freezes accrual for every recipient at the
+  pause timestamp. Only the sender may call it, and the stream must be `Active`.
+- `resume_split_stream(stream_id)` restarts accrual and extends `end_time` by
+  the paused span so the unstreamed time is preserved. Only the sender may call
+  it, and the stream must be `Paused`.
+- `cancel_split_stream(stream_id)` pays each recipient their frozen or accrued
+  share and returns the remainder to the sender.
+
+Both pause and resume are blocked by the contract-wide pause flag and emit
+`split_pa` / `split_re` events.
+
+## Storage migrations
+
+`migrate(admin)` advances the contract's storage layout one version at a time.
+`storage_version()` reports the current version (`0` before the first
+migration).
+
+| Version | Layout |
+|---|---|
+| `0` | Unset — pre-migration contract. |
+| `1` | Initial layout marker. |
+| `2` | Pause bookkeeping normalised on split and recurring records. |
+
+Version 2 rewrites split and recurring records in batches of 50 ids per call so
+a large dataset cannot exceed the Soroban per-transaction budget. When a batch
+limit is reached the version stays at the previous value; call `migrate` again
+until `storage_version()` returns `2`. Re-running `migrate` at the latest
+version is a no-op. Only the admin may migrate, and the global pause flag does
+not block migration.
+
 ## Deploy
 
 Deploy the contract to Stellar testnet with:

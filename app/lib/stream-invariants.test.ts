@@ -1,6 +1,6 @@
 import * as fc from 'fast-check';
 import { 
-  checkConservationOfValue, 
+  checkSumOfVestedEqualsPrincipal, 
   checkNonNegativeBalances, 
   applyStreamEvent, 
   StreamState,
@@ -12,7 +12,7 @@ describe('Stream Invariants (Property-based)', () => {
   const isHeavyMode = process.env.TEST_MODE === 'heavy';
   const numRuns = isHeavyMode ? 10000 : 1000;
 
-  it(`should maintain conservation of value (${numRuns} runs)`, () => {
+  it(`should maintain Sum of vested = principal invariant (${numRuns} runs)`, () => {
     fc.assert(
       fc.property(
         fc.array(
@@ -35,7 +35,7 @@ describe('Stream Invariants (Property-based)', () => {
             state = applyStreamEvent(state, event);
             
             // Assert invariants
-            if (!checkConservationOfValue(state)) return false;
+            if (!checkSumOfVestedEqualsPrincipal(state)) return false;
             if (!checkNonNegativeBalances(state)) return false;
           }
           return true;

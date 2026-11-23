@@ -195,6 +195,29 @@ describe("POST /api/internal/reconciliation", () => {
     expect(payload.error.code).toBe("INVALID_REQUEST");
   });
 
+  it("rejects non-boolean dryRun field", async () => {
+    const body = JSON.stringify({ dryRun: "not-a-boolean" });
+    const response = await POST(
+      new Request("http://localhost/api/internal/reconciliation", {
+        body,
+        headers: createInternalServiceRequestHeaders({
+          body,
+          keyId: "current",
+          method: "POST",
+          secret: authConfig.keys.current,
+          serviceName: "reconciliation-worker",
+          timestampMs: Date.now(),
+          url: "http://localhost/api/internal/reconciliation",
+        }),
+        method: "POST",
+      })
+    );
+
+    const payload = await response.json();
+    expect(response.status).toBe(400);
+    expect(payload.error.code).toBe("INVALID_REQUEST");
+  });
+
   it("returns 404 for a completely non-existent streamId", async () => {
     const body = JSON.stringify({ dryRun: true, streamId: "non-existent-stream-id" });
     const response = await POST(

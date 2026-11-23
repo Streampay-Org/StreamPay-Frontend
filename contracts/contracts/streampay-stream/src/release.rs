@@ -98,6 +98,7 @@ mod tests {
             status: StreamStatus::Active,
             paused_at: 0,
             total_paused_duration: 0,
+            fee_bps: 0,
         }
     }
 

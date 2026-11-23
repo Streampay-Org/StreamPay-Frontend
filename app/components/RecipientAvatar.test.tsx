@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @jest-environment jsdom
  */
 import React from "react";
@@ -21,16 +21,16 @@ describe("RecipientAvatar", () => {
   it("renders the same recipient with the same colour every time", () => {
     const { container: first } = render(<RecipientAvatar recipient="Kemi Onboarding Support" />);
     const { container: second } = render(<RecipientAvatar recipient="Kemi Onboarding Support" />);
-    const firstBg = (first.querySelector(".recipient-avatar") as HTMLElement).style.background;
-    const secondBg = (second.querySelector(".recipient-avatar") as HTMLElement).style.background;
-    expect(firstBg).toBe(secondBg);
+    const firstIdx = (first.querySelector(".recipient-avatar") as HTMLElement).dataset.paletteIndex;
+    const secondIdx = (second.querySelector(".recipient-avatar") as HTMLElement).dataset.paletteIndex;
+    expect(firstIdx).toBe(secondIdx);
   });
 
   it("uses the palette index computed by the identicon util", () => {
     const { paletteIndex } = getRecipientIdenticon("Yusuf QA Partnership");
     const { container } = render(<RecipientAvatar recipient="Yusuf QA Partnership" />);
     const badge = container.querySelector(".recipient-avatar") as HTMLElement;
-    expect(badge.style.background).toBe(`var(--identicon-${paletteIndex}-bg)`);
+    expect(badge.dataset.paletteIndex).toBe(String(paletteIndex));
   });
 
   it("respects a custom size", () => {

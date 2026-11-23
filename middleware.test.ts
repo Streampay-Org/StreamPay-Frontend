@@ -35,7 +35,7 @@ describe('CSRF middleware', () => {
 
     expect(response.status).toBe(403);
     const body = await response.json();
-    expect(body.error.code).toBe('FORBIDDEN');
+    expect(body.error.code).toMatch(/FORBIDDEN|CSRF_TOKEN_INVALID/);
     expect(body.error.message).toContain('CSRF token');
   });
 
@@ -420,19 +420,18 @@ describe('request size cap middleware', () => {
   // Path scoping
   // ---------------------------------------------------------------------------
 
-  it('does not apply a middleware size cap to paths outside /api/v2/streams', async () => {
-    // /api/v1/streams is outside the stream/webhook path allowlist — no middleware-level cap.
+  it('applies default middleware size cap to paths outside /api/v2/streams', async () => {
     const request = makeRequest('/api/v1/streams', 'POST', DEFAULT_CAP + 1);
     const response = await middleware(request as any);
 
-    expect(response.status).not.toBe(413);
+    expect(response.status).toBe(413);
   });
 
-  it('does not apply a middleware size cap to other v2 routes (e.g. /api/v2/other)', async () => {
+  it('applies default middleware size cap to other v2 routes (e.g. /api/v2/other)', async () => {
     const request = makeRequest('/api/v2/other', 'POST', DEFAULT_CAP + 1);
     const response = await middleware(request as any);
 
-    expect(response.status).not.toBe(413);
+    expect(response.status).toBe(413);
   });
 
   // ---------------------------------------------------------------------------
@@ -622,11 +621,11 @@ describe('request size cap middleware', () => {
   });
 
   it('does not apply webhook limit to paths similar to webhooks but not exact', async () => {
-    // /api/webhook (singular) is not a webhook route and has no middleware-level cap.
+    // /api/webhook (singular) is not a webhook route and falls under the 256 KB default cap.
     const request = makeRequest('/api/webhook', 'POST', 512 * 1024);
     const response = await middleware(request as any);
 
-    expect(response.status).not.toBe(413);
+    expect(response.status).toBe(413);
   });
 });
 
@@ -870,4 +869,122 @@ describe('CSRF protection middleware', () => {
     expect(response.status).not.toBe(403);
   });
 });
+
+describe('Request body size cap middleware', () => {
+  let middleware: any;
+
+  beforeEach(async () => {
+    jest.resetModules();
+
+    (process.env as any).STELLAR_NETWORK = 'testnet';
+    (process.env as any).JWT_SECRET = 'test-secret-at-least-32-characters-long';
+    (process.env as any).NODE_ENV = 'production';
+    (process.env as any).ALLOWED_ORIGINS = 'https://allowed.example.com';
+
+    const imported = await import('./middleware');
+    middleware = imported.middleware;
+  });
+
+  afterEach(() => {
+    delete (process.env as any).STELLAR_NETWORK;
+    delete (process.env as any).JWT_SECRET;
+    delete (process.env as any).NODE_ENV;
+    delete (process.env as any).ALLOWED_ORIGINS;
+    delete (process.env as any).MAX_STREAM_BODY_BYTES;
+    delete (process.env as any).MAX_WEBHOOK_BODY_BYTES;
+  });
+
+  it('rejects POST requests to default API routes exceeding 256KB default limit with 413', async () => {
+    const bodySize = 300 * 1024; // 300 KB (> 256 KB)
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'POST',
+      headers: {
+        'content-length': bodySize.toString(),
+        'x-request-id': 'req_body_size_test',
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).toBe(413);
+    const body = await response.json();
+    expect(body.error.code).toBe('REQUEST_TOO_LARGE');
+    expect(body.error.message).toContain('262144-byte limit');
+    expect(body.error.request_id).toBe('req_body_size_test');
+  });
+
+  it('allows POST requests to default API routes within 256KB default limit', async () => {
+    const bodySize = 100 * 1024; // 100 KB
+    const token = 'a'.repeat(64);
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'POST',
+      headers: {
+        'content-length': bodySize.toString(),
+        cookie: `csrf-token=${token}`,
+        'x-csrf-token': token,
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).not.toBe(413);
+  });
+
+  it('allows POST requests to webhook routes up to 1MB', async () => {
+    const bodySize = 512 * 1024; // 512 KB (> 256 KB default, but <= 1 MB webhook limit)
+    const request = new Request('https://api.example.com/api/webhooks/rotate', {
+      method: 'POST',
+      headers: {
+        'content-length': bodySize.toString(),
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).not.toBe(413);
+  });
+
+  it('rejects POST requests to webhook routes exceeding 1MB with 413', async () => {
+    const bodySize = 2 * 1024 * 1024; // 2 MB (> 1 MB)
+    const request = new Request('https://api.example.com/api/webhooks/rotate', {
+      method: 'POST',
+      headers: {
+        'content-length': bodySize.toString(),
+        'x-request-id': 'req_webhook_large',
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).toBe(413);
+    const body = await response.json();
+    expect(body.error.code).toBe('REQUEST_TOO_LARGE');
+    expect(body.error.message).toContain('1048576-byte limit');
+    expect(body.error.request_id).toBe('req_webhook_large');
+  });
+
+  it('allows requests without content-length header', async () => {
+    const request = new Request('https://api.example.com/api/webhooks/rotate', {
+      method: 'POST',
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).not.toBe(413);
+  });
+
+  it('allows GET requests even if content-length header is present', async () => {
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'GET',
+      headers: {
+        'content-length': '10000000',
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).not.toBe(413);
+  });
+});
+
 

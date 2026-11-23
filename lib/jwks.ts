@@ -104,7 +104,7 @@ export function generateKeyPair(kid?: string): ManagedKeyPair {
     publicExponent: RSA_PUBLIC_EXPONENT,
     publicKeyEncoding: { type: 'spki', format: 'pem' },
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-  }) as unknown as { publicKey: string; privateKey: string };
+  });
 
   return {
     kid: resolvedKid,

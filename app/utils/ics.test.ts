@@ -64,7 +64,7 @@ describe('ICS Utilities', () => {
       
       expect(uid).toContain(streamId);
       expect(uid).toContain('@streampay.io');
-      expect(uid).toMatch(/^\w+-\d+@streampay\.io$/);
+      expect(uid).toMatch(/^[a-zA-Z0-9_-]+-\d+@streampay\.io$/);
     });
 
     it('should generate different UIDs for different timestamps', () => {
@@ -147,7 +147,10 @@ describe('ICS Utilities', () => {
         'stream-123',
         '10 XLM / day',
         pastDate.toISOString(),
-        'active'
+        'active',
+        'XLM',
+        52,
+        false
       );
       
       // All events should be in the future

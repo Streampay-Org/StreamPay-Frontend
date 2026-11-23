@@ -6,7 +6,9 @@ import React, { useState, useMemo } from "react";
 const calculateNextPayments = (startDate: string, frequency: string, count: number) => {
   if (!startDate) return [];
   const dates = [];
-  const current = new Date(startDate);
+  const parts = startDate.split("-").map(Number);
+  if (parts.length < 3 || parts.some(isNaN)) return [];
+  const current = new Date(parts[0], parts[1] - 1, parts[2]);
   
   for (let i = 0; i < count; i++) {
     dates.push(new Date(current));

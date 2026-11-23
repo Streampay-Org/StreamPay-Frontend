@@ -57,7 +57,17 @@ use crate::storage as store;
 pub enum AdminKey {
     /// Monotonic counter; value is the **next** nonce the admin must supply.
     AdminNonce,
+    /// Timestamp of the last successful admin action (for cooldown enforcement).
+    LastActionTime,
 }
+
+// ---------------------------------------------------------------------------
+// Cooldown constant
+// ---------------------------------------------------------------------------
+
+/// The minimum time (in seconds) that must elapse between admin actions.
+/// Used to enforce a rate limit on privileged overrides.
+pub const ADMIN_COOLDOWN_SECONDS: u64 = 86_400; // 24 hours
 
 // ---------------------------------------------------------------------------
 // TTL constants (mirrors instance-storage cadence from storage.rs)
@@ -75,10 +85,7 @@ fn extend_nonce_ttl(env: &Env) {
         .ledger()
         .sequence()
         .saturating_add(NONCE_TTL_MIN_REMAINING);
-    let target = env
-        .ledger()
-        .sequence()
-        .saturating_add(NONCE_TTL_EXTEND_TO);
+    let target = env.ledger().sequence().saturating_add(NONCE_TTL_EXTEND_TO);
     env.storage().instance().extend_ttl(threshold, target);
 }
 
@@ -123,6 +130,32 @@ pub fn consume_nonce(env: &Env, provided_nonce: u64) -> Result<(), Error> {
 }
 
 // ---------------------------------------------------------------------------
+// Cooldown validation
+// ---------------------------------------------------------------------------
+
+/// Validates that the cooldown period has elapsed since the last admin action.
+/// If valid, updates the last action time to the current ledger timestamp.
+///
+/// # Errors
+/// - [`Error::AdminCooldown`] if the time since the last action is less than the cooldown period.
+fn enforce_and_update_cooldown(env: &Env) -> Result<(), Error> {
+    let now = env.ledger().timestamp();
+    let last_action_time: Option<u64> = env.storage().instance().get(&AdminKey::LastActionTime);
+
+    if let Some(last) = last_action_time {
+        if now < last.saturating_add(ADMIN_COOLDOWN_SECONDS) {
+            return Err(Error::AdminCooldown);
+        }
+    }
+
+    env.storage()
+        .instance()
+        .set(&AdminKey::LastActionTime, &now);
+    // Instance TTL will be extended by `consume_nonce` immediately after this.
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Public entrypoint
 // ---------------------------------------------------------------------------
 
@@ -150,6 +183,7 @@ pub fn consume_nonce(env: &Env, provided_nonce: u64) -> Result<(), Error> {
 /// - [`Error::NotFound`] if the contract is not initialised or `stream_id`
 ///   does not exist.
 /// - [`Error::Unauthorized`] if `admin` is not the stored admin.
+/// - [`Error::AdminCooldown`] if the time since the last action is less than the cooldown period.
 /// - [`Error::NonceTooLow`] if `nonce` is stale (already consumed).
 /// - [`Error::NonceOutOfOrder`] if `nonce` skips ahead of the current counter.
 /// - [`Error::InvalidTimeRange`] if `new_end_time <= stream.start_time`.
@@ -181,7 +215,10 @@ pub fn admin_override(
         return Err(Error::Unauthorized);
     }
 
-    // (3) Nonce: consume the nonce *before* any state mutation.
+    // (3) Cooldown: enforce rate limiting on admin overrides.
+    enforce_and_update_cooldown(env)?;
+
+    // (4) Nonce: consume the nonce *before* any state mutation.
     //     This ensures that a failed subsequent mutation cannot be retried
     //     with the same nonce — the nonce is spent even on partial failure.
     consume_nonce(env, nonce)?;

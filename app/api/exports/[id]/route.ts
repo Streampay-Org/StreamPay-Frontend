@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
-import { tryAuthenticateRequest, JWT_SECRET } from "@/app/lib/auth";
+import { tryAuthenticateRequest, getJwtSecret } from "@/app/lib/auth";
 import { getStore } from "@/app/lib/db";
 import { checkRateLimit, rateLimitResponse, type ClientIdentity } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
@@ -23,7 +23,7 @@ function createAuditRecord(exportId: string, type: "export.requested" | "export.
 /** Verifies the HMAC-SHA256 signature on a download URL. */
 function verifySignedUrl(jobId: string, expiresAt: string, sig: string): boolean {
   const payload = `${jobId}:${expiresAt}`;
-  const expected = createHmac("sha256", JWT_SECRET).update(payload).digest("hex");
+  const expected = createHmac("sha256", getJwtSecret()).update(payload).digest("hex");
   try {
     return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(sig, "hex"));
   } catch {

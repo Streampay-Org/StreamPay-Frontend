@@ -102,7 +102,8 @@ export function calculateVestingDates(
   createdAt: string,
   status: string,
   token: string = 'XLM',
-  maxEvents: number = 52 // Limit to 1 year of events for weekly streams
+  maxEvents: number = 52, // Limit to 1 year of events for weekly streams
+  includePast: boolean = true
 ): VestingEvent[] {
   const parsedRate = parseRate(rate);
   if (!parsedRate) {
@@ -125,8 +126,8 @@ export function calculateVestingDates(
     const eventStart = new Date(startDate.getTime() + i * periodMs[parsedRate.period]);
     const eventEnd = new Date(eventStart.getTime() + 60 * 60 * 1000); // 1 hour duration
 
-    // Skip past events
-    if (eventEnd < now) continue;
+    // Skip past events if includePast is false
+    if (!includePast && eventEnd < now) continue;
 
     // For ended streams, don't generate future events
     if (isEnded && eventStart > now) break;

@@ -79,8 +79,9 @@ describe("Resilient Stellar client", () => {
       address: "GABC",
     });
 
+    const assertion = expect(promise).rejects.toThrow(TimeoutError);
     await jest.advanceTimersByTimeAsync(60);
-    await expect(promise).rejects.toThrow(TimeoutError);
+    await assertion;
   });
 
   it("recovers after half-open success", async () => {

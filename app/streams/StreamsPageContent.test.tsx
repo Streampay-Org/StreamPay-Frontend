@@ -3,7 +3,8 @@
  */
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { StreamsPageContent, mockStreams } from "./StreamsPageContent";
+import { StreamsPageContent } from "./StreamsPageContent";
+import { mockStreams } from "./fixtures";
 
 // Mock the StreamRow component
 jest.mock("../components/StreamRow", () => ({
@@ -53,12 +54,12 @@ describe("StreamsPageContent", () => {
       render(<StreamsPageContent state="empty" streams={[]} />);
 
       // Primary copy matches streamListCopy.empty
-      expect(screen.getByText(/First-time setup/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/Streams/i)[0]).toBeInTheDocument();
       expect(
-        screen.getByRole("heading", { name: /Start your first stream/i }),
+        screen.getByRole("heading", { name: /Your streams list is empty/i }),
       ).toBeInTheDocument();
       expect(
-        screen.getByRole("button", { name: /Create your first stream/i }),
+        screen.getByRole("button", { name: /Create Your First Stream/i }),
       ).toBeInTheDocument();
 
       // v7 EmptyIllustration is rendered (inside .empty-state__illustration > svg)
@@ -70,7 +71,7 @@ describe("StreamsPageContent", () => {
     it("auto-detects empty when state prop is omitted and streams=[]", () => {
       render(<StreamsPageContent streams={[]} />);
       expect(
-        screen.getByRole("heading", { name: /Start your first stream/i }),
+        screen.getByRole("heading", { name: /Your streams list is empty/i }),
       ).toBeInTheDocument();
     });
 
@@ -92,7 +93,7 @@ describe("StreamsPageContent", () => {
         />,
       );
       fireEvent.click(
-        screen.getByRole("button", { name: /Create your first stream/i }),
+        screen.getByRole("button", { name: /Create Your First Stream/i }),
       );
       expect(onCreate).toHaveBeenCalledTimes(1);
     });
@@ -152,19 +153,19 @@ describe("StreamsPageContent", () => {
   });
 
   describe("density toggle", () => {
-    it("renders the density switch with comfortable initial state", () => {
+    it("renders the density toggle with comfortable initial state", () => {
       render(<StreamsPageContent state="populated" streams={mockStreams} />);
-      const switchBtn = screen.getByRole("switch", { name: /Density/i });
-      expect(switchBtn).toBeInTheDocument();
-      expect(switchBtn).toHaveAttribute("aria-checked", "false");
+      const cozyBtn = screen.getByRole("radio", { name: "Cozy" });
+      expect(cozyBtn).toBeInTheDocument();
+      expect(cozyBtn).toHaveAttribute("aria-checked", "true");
     });
 
     it("toggles density to compact on click and forwards it to StreamRow", () => {
       render(<StreamsPageContent state="populated" streams={mockStreams} />);
-      const switchBtn = screen.getByRole("switch", { name: /Density/i });
+      const compactBtn = screen.getByRole("radio", { name: "Compact" });
 
-      fireEvent.click(switchBtn);
-      expect(switchBtn).toHaveAttribute("aria-checked", "true");
+      fireEvent.click(compactBtn);
+      expect(compactBtn).toHaveAttribute("aria-checked", "true");
 
       const rows = screen.getAllByTestId("stream-row");
       expect(rows.length).toBeGreaterThan(0);
@@ -181,8 +182,8 @@ describe("StreamsPageContent", () => {
           initialDensity="compact"
         />,
       );
-      const switchBtn = screen.getByRole("switch", { name: /Density/i });
-      expect(switchBtn).toHaveAttribute("aria-checked", "true");
+      const compactBtn = screen.getByRole("radio", { name: "Compact" });
+      expect(compactBtn).toHaveAttribute("aria-checked", "true");
     });
   });
 });
