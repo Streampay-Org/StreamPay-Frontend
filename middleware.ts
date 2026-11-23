@@ -6,6 +6,7 @@ import {
   DEFAULT_CORS_EXPOSE_HEADERS,
   DEFAULT_CORS_HEADERS,
   DEFAULT_CORS_METHODS,
+  resolveCorsMaxAge,
   DEFAULT_CORS_MAX_AGE_SECONDS,
   NULL_ORIGIN,
 } from './app/lib/cors';
@@ -35,6 +36,33 @@ import {
 import { applyChaos, getChaosConfig } from './lib/chaos';
 import { touchLastSeenFromRequest } from './lib/lastSeen';
 
+// ---------------------------------------------------------------------------
+// Request body size cap
+// ---------------------------------------------------------------------------
+//
+// Supports per-route body size limits:
+//  - Default routes: 256 KB (override via MAX_STREAM_BODY_BYTES)
+//  - Webhook routes (/api/webhooks/*): 1 MB (override via MAX_WEBHOOK_BODY_BYTES)
+//
+// The check is intentionally O(1): we read the Content-Length header rather
+// than buffering the body.  Clients that omit Content-Length are allowed
+// through — the application layer is responsible for streaming limits.
+//
+// Only write methods (POST, PUT, PATCH) are checked; safe methods (GET, HEAD,
+// OPTIONS, DELETE) are not expected to carry a body and are skipped.
+
+// Build limits configuration at module initialization
+const bodyLimits = buildLimitsConfig();
+
+// Validate configuration at middleware initialization so invalid CORS settings fail early.
+validateConfig();
+
+const allowedOrigins = buildAllowedOriginSet(process.env.ALLOWED_ORIGINS);
+const corsMaxAgeSeconds = resolveCorsMaxAge(process.env.CORS_MAX_AGE_SECONDS);
+
+// Chaos/fault injection config. Resolved once at module init; force-disabled in
+// production by getChaosConfig regardless of env vars.
+const chaosConfig = getChaosConfig();
 const CANARY_HEADER_NAME = 'X-Canary';
 
 /**
@@ -64,6 +92,7 @@ function buildCorsHeaders(origin: string) {
   headers.set('Access-Control-Allow-Origin', origin);
   headers.set('Access-Control-Allow-Methods', DEFAULT_CORS_METHODS);
   headers.set('Access-Control-Allow-Headers', DEFAULT_CORS_HEADERS);
+  headers.set('Access-Control-Max-Age', String(corsMaxAgeSeconds));
   headers.set('Access-Control-Expose-Headers', DEFAULT_CORS_EXPOSE_HEADERS);
   headers.set('Access-Control-Max-Age', String(DEFAULT_CORS_MAX_AGE_SECONDS));
   headers.set('Vary', 'Origin');
