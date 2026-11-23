@@ -173,6 +173,7 @@ export function SettingsPageContent({
           </p>
           <nav aria-label="More settings" style={{ display: 'flex', gap: '1rem' }}>
             <Link href="/settings/webhooks">Webhook console</Link>
+            <Link href="/exports">Data exports</Link>
             {userRole && PRIVILEGED_AUDIT_ROLES.has(userRole) && (
               <Link href="/audit">Audit log</Link>
             )}

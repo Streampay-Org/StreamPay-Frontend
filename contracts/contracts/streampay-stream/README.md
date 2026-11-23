@@ -11,7 +11,8 @@ Linear payment streams on Stellar/Soroban.
 | `set_paused` | Yes | `admin` | Sets the global emergency pause flag. |
 | `set_admin` | Yes | `admin` | Transfers the admin role to a new address. |
 | `set_token_allowed` | Yes | `admin` | Allows or blocks a token for future stream creation. |
-| `create_stream` | Yes | `sender` | Creates a stream and escrows funds from the sender. |
+| `create_stream` | Yes | `sender` | Creates a stream and escrows funds from the sender (no cliff; `cliff_time = 0`). |
+| `create_stream_with_cliff` | Yes | `sender` | Creates a stream with an optional `cliff_time` (`0` = no cliff, or `start_time <= cliff_time <= end_time`); vested amount is `0` before the cliff and jumps to linear accrual at/after the cliff. |
 | `start_stream` | Yes | `stream.sender` | Activates a draft stream, anchoring its time bounds. |
 | `pause` | Yes | `stream.sender` | Freezes accrual for an active stream. |
 | `resume` | Yes | `stream.sender` | Resumes a paused stream, extending the end time. |

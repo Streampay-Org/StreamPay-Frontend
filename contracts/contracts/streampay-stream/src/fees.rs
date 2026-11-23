@@ -706,6 +706,7 @@ mod tests {
             paused_at: 0,
             total_paused_duration: 0,
             fee_bps,
+            cliff_time: 0,
         };
         crate::storage::set_stream(env, stream_id, &stream);
     }

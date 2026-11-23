@@ -6264,6 +6264,7 @@
                         "failed": 2,
                         "pending": 0,
                         "dlq": 0,
+                        "stale": 0,
                         "success_rate_pct": 99.87
                       }
                     }
@@ -6285,7 +6286,8 @@
                         "failed": 8,
                         "pending": 2,
                         "dlq": 3,
-                        "success_rate_pct": 99.33
+                        "stale": 1,
+                        "success_rate_pct": 99.27
                       }
                     }
                   },
@@ -6306,7 +6308,8 @@
                         "failed": 50,
                         "pending": 30,
                         "dlq": 15,
-                        "success_rate_pct": 60
+                        "stale": 5,
+                        "success_rate_pct": 64.86
                       }
                     }
                   }
@@ -7070,6 +7073,9 @@
           },
           "401": {
             "$ref": "#/components/responses/401"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
           }
         }
       }
