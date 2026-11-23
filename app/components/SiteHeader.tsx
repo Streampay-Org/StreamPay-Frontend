@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -9,10 +10,12 @@ import {
 } from "../ops/reconciliation/admin-credential";
 
 const LINKS = [
+  { href: "/dashboard", label: "Dashboard" },
   { href: "/streams", label: "Streams" },
   { href: "/activity", label: "Activity" },
   { href: "/contacts", label: "Contacts" },
   { href: "/templates", label: "Templates" },
+  { href: "/orgs", label: "Orgs" },
   { href: "/settings", label: "Settings" },
   { href: "/docs", label: "Docs" },
 ];
@@ -32,6 +35,35 @@ export function SiteHeader() {
   const links = showOps
     ? [...LINKS, { href: "/ops/reconciliation", label: "Ops" }]
     : LINKS;
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkIdentity() {
+      try {
+        const res = await fetch("/api/identity/me", { credentials: "include" });
+        if (!res.ok) return;
+        const json = await res.json();
+        const data = json?.data;
+        const admin =
+          data?.is_admin === true ||
+          data?.role === "admin";
+        if (!cancelled) {
+          setIsAdmin(admin);
+        }
+      } catch {
+        // Ignore unauthenticated or network errors
+      }
+    }
+
+    checkIdentity();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const links = isAdmin ? [...LINKS, { href: "/admin", label: "Admin" }] : LINKS;
 
   return (
     <header className="site-header">

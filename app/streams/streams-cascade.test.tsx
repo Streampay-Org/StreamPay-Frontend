@@ -13,8 +13,9 @@
  *    the DOM structure is correct so the guard can fire).
  */
 
-import { render, screen } from "@testing-library/react";
-import { StreamsPageContent, mockStreams } from "./StreamsPageContent";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { StreamsPageContent } from "./StreamsPageContent";
+import { mockStreams } from "./fixtures";
 
 // Minimal StreamRow mock — we only need the article element to be present.
 jest.mock("../components/StreamRow", () => ({
@@ -33,6 +34,10 @@ jest.mock("../components/StreamRow", () => ({
 }));
 
 describe("Cascade animation — #841", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
   it("wraps each stream row in a .stream-cascade-item element", () => {
     render(<StreamsPageContent state="populated" streams={mockStreams} />);
 
@@ -98,7 +103,7 @@ describe("Cascade animation — #841", () => {
 
     // Click the "onboarding" tag chip to filter down to 1 stream
     const onboardingBtn = screen.getByRole("button", { name: "onboarding" });
-    onboardingBtn.click();
+    fireEvent.click(onboardingBtn);
 
     const wrappers = document.querySelectorAll<HTMLElement>(".stream-cascade-item");
     // Only 1 stream has the "onboarding" tag (stream-kemi)
@@ -111,7 +116,7 @@ describe("Cascade animation — #841", () => {
 
     // Switch to compact via the radiogroup
     const compactRadio = screen.getByRole("radio", { name: /compact/i });
-    compactRadio.click();
+    fireEvent.click(compactRadio);
 
     // The stream-list should carry the compact modifier class
     const list = screen.getByLabelText(/streams list/i);

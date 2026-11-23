@@ -34,6 +34,20 @@ All three routes use `createSseConnection()` from `app/lib/sse.ts`. The helper
 owns the `ReadableStreamDefaultController`: routes call `send()` to emit data
 events and never close the controller themselves.
 
+## Stream event subscription authorization
+
+Both `GET /api/streams/events` and `GET /api/streams/:id/events` use the shared
+`authorizeStreamSubscriber()` policy. After tenant matching, a subscriber may
+connect when they are the stream recipient or sender, a member of the owning
+organization (any org role), an administrator, or a user whose non-empty email
+matches the stream's non-empty email case-insensitively. Streams without a
+tenant stamp belong to the `default` tenant; the per-stream route also uses
+that tenant when `x-tenant-id` is omitted.
+
+Tenant mismatches return the same generic 404 as missing streams to avoid
+revealing stream existence. Other unauthorized subscriptions return 403, with
+no stream fields included in either error response.
+
 ## Configuration (env-tunable per request)
 
 | Variable | Default | Meaning |
@@ -55,10 +69,38 @@ events and never close the controller themselves.
   max-events | manual` and are logged with per-connection counters
   (`events_sent`, `heartbeats_sent`).
 
+## Published lifecycle events (issue #1725)
+
+Stream lifecycle routes publish to the in-process event bus **after** the store
+write succeeds. Subscribers on `GET /api/streams/:id/events` and
+`GET /api/streams/events` receive:
+
+| event | when |
+| --- | --- |
+| `stream:updated:<id>` | the committed write changed `status`, `nextAction`, `pausedAt`, `settlementTxHash`, `withdrawal`, `cancellation`, `vestedAmount` or `releasedAmount` |
+| `settle:finished:<id>` | after `stream:updated`, only when a settle moved the stream into `ended` |
+
+The SSE payload is a redacted projection: `email`, `label`, `memo` and
+`partnerId` are omitted, not masked. Each publish also emits an activity event
+(`stream.pause`, `stream.settle`, …) for the activity timeline.
+
+Producers are `start`, `pause`, `stop`, `settle`, `withdraw`, `cancel`,
+`batch/start`, `batch/stop`, `v2/streams/batch`, the generic single-stream
+update routes (v1 `POST`, v2 `PATCH`) and `admin/pause-by-sender`. Idempotent
+replays, rejected transitions and writes that only touch PII or `updatedAt` do
+**not** publish.
+
+The bus is in-process. A subscriber connected to one API instance will not see
+events committed on another instance; cross-process fan-out (Redis or Postgres
+`LISTEN`) is deliberately out of scope for this change.
+
 ## Test coverage
 
 - `app/lib/sse.test.ts` — unit tests for bounded heartbeats, max-events,
   rejected-write (client-gone), abort, idle deadline, and exactly-once close.
+- `app/lib/stream-publish.test.ts` — lifecycle publication, redaction, event
+  ordering, activity projection and no-op suppression.
 - `app/api/streams/events/route.test.ts` — integration tests proving the
-  stream emits exactly the configured number of heartbeats then closes, and
-  closes cleanly on client abort.
+  stream emits exactly the configured number of heartbeats then closes, closes
+  cleanly on client abort, delivers lifecycle frames, and returns the listener
+  count to baseline after 200 connect/abort cycles.

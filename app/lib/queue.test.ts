@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
-import { MockQueue, QueueCapacityError, settlementQueue } from './queue';
-import { withCorrelationContext, logger, type CorrelationContext } from './logger';
+import { InMemoryQueue, MockQueue, QueueCapacityError, settlementQueue } from './queue';
+import { withCorrelationContext, type CorrelationContext } from './logger';
 
 const vi = jest;
 
@@ -201,6 +201,13 @@ describe('Mock Queue System', () => {
         expect(queue.getAllJobs()).toHaveLength(0);
         expect(queue.getDeadLetters()).toHaveLength(1);
       });
+    });
+
+    it('aliases MockQueue to InMemoryQueue for backward compatibility', () => {
+      expect(MockQueue).toBe(InMemoryQueue);
+      const queue = new InMemoryQueue('in-memory-test');
+      expect(queue).toBeInstanceOf(InMemoryQueue);
+      expect(queue).toBeInstanceOf(MockQueue);
     });
   });
 });

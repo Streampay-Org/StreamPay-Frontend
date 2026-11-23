@@ -1,4 +1,28 @@
 export interface paths {
+    "/api/streams/template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List all stream templates
+         * @description Returns every stream template held in memory on the current instance.
+         */
+        get: operations["listStreamTemplates"];
+        put?: never;
+        /**
+         * Create a new stream template
+         * @description Creates a reusable stream preset with decimal string amounts and collision-free UUID ids.
+         */
+        post: operations["createStreamTemplate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/activity": {
         parameters: {
             query?: never;
@@ -8,7 +32,7 @@ export interface paths {
         };
         /**
          * List activity events
-         * @description Returns a paginated, cursor-based list of activity events. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId and event type.
+         * @description Returns a paginated, cursor-based list of activity events for the authenticated caller. Only events for streams the caller sends or receives, plus the caller's own wallet events, are returned. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId, event type, and an inclusive from/to date range.
          */
         get: operations["listActivity"];
         put?: never;
@@ -48,7 +72,7 @@ export interface paths {
         };
         /**
          * Issue a wallet authentication challenge
-         * @description Returns a one-time nonce the client must sign with their Stellar private key, then submit to `POST /api/auth/wallet`.
+         * @description Returns a one-time challenge the client must sign with their Stellar private key, then submit to `POST /api/auth/wallet`. Challenges are generated with a CSPRNG and have the format `streampay-auth:v1:<nonce>|<origin>|<expires_at>`, where `nonce` is a 43-character base64url value, `origin` is this deployment's origin, and `expires_at` is the ISO-8601 expiry included in the signed message. Responses always have `Cache-Control: no-store` and never answer `304 Not Modified`. The paginated listing mode was removed: `cursor` and `limit` now return `400 UNSUPPORTED_QUERY` because listing outstanding challenges would let unauthenticated callers harvest live challenges for any address.
          */
         get: operations["getWalletChallenge"];
         put?: never;
@@ -57,6 +81,26 @@ export interface paths {
          * @description Wallet login endpoint. Rate-limited to 5 requests per minute per client IP to mitigate brute-force attempts.
          */
         post: operations["verifyWalletSignature"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke the presented bearer token
+         * @description Adds the token's `jti` to the access-token denylist until the token's own `exp`. Every route that authenticates with `tryAuthenticateRequest` rejects the token afterwards. Repeated logout calls with the same token are safe. Tokens issued before revocation existed carry no `jti` and simply expire on their own.
+         */
+        post: operations["logout"];
         delete?: never;
         options?: never;
         head?: never;
@@ -73,7 +117,7 @@ export interface paths {
         /**
          * List payment streams (v1, deprecated)
          * @deprecated
-         * @description Returns a cursor-paginated list of streams owned by the authenticated identity. **Deprecated** — use `GET /api/v2/streams` instead.
+         * @description Returns a cursor-paginated list of streams scoped to the caller's tenant (`x-tenant-id`, defaulting to `default-tenant`) and ownership (sender, recipient, owning organisation member, or admin). Unauthenticated requests are restricted to the resolved tenant and omit PII fields (`email`, `label`, `memo`, `partnerId`). `meta.total` reflects the filtered count. **Deprecated** — use `GET /api/v2/streams` instead.
          */
         get: operations["listStreams"];
         put?: never;
@@ -85,6 +129,71 @@ export interface paths {
          *     Supplying an `Idempotency-Key` header makes this request idempotent; replaying the same key and body returns the cached response.
          */
         post: operations["createStream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview stream creation without side effects
+         * @description Runs the same recipient, rate, schedule, token normalization, and token allowlist checks as POST /api/streams. Does not write to stream, idempotency, or quota stores. Cost estimation is null with a reason when the normalized asset is unsupported.
+         */
+        post: operations["previewStream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/dryrun": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deprecated legacy stream dry-run alias
+         * @deprecated
+         * @description Deprecated alias for POST /api/streams/preview. Legacy amountPerInterval is mapped to rate, asset to token, and intervalSeconds must exactly match a supported schedule duration.
+         */
+        post: operations["dryrunStreamDeprecated"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk-import payment streams from CSV or JSON rows
+         * @description Validates and bulk-imports up to 500 payment streams with partial-import semantics (207 Multi-Status).
+         *
+         *     When `dryRun=false` (the default), the `Idempotency-Key` header is required. Requests are fingerprinted by their canonical row list: replaying the same key and rows returns the original 207 response; reusing a key with different rows returns 409 `IDEMPOTENCY_CONFLICT`; a concurrent replay while the first request is in flight returns 409 `IDEMPOTENCY_IN_FLIGHT`.
+         *
+         *     Each row is identified by an optional `external_id` column/field or a SHA-256 hash of the normalised `(recipient, rate, schedule, token, memo)` tuple. Duplicate rows within the same batch or previously imported by the same caller are reported with `status: "duplicate"` and the existing `streamId`.
+         */
+        post: operations["importStreams"];
         delete?: never;
         options?: never;
         head?: never;
@@ -183,6 +292,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/streams/{id}/history": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant id — must match the stream's owner. */
+                "x-tenant-id": string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Paginated lifecycle event history for a stream
+         * @description Returns a newest-first paginated list of committed lifecycle events. No PII. Uses composite (at, id) cursor.
+         */
+        get: operations["getStreamHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/streams/{id}/stop": {
         parameters: {
             query?: never;
@@ -206,6 +341,34 @@ export interface paths {
          * @description Permanently stops a stream, transitioning it to `ended` status. Valid from `active` or `draft` states. This action is irreversible. **Deprecated** — use `POST /api/v2/streams/{id}/stop` instead.
          */
         post: operations["stopStream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Caller wallet address (used for org policy evaluation on org-owned streams). */
+                "Actor-Wallet-Address"?: string;
+                /** @description Client-generated key (UUID recommended) to make the request idempotent. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a payment stream and split escrow funds
+         * @description Terminates an active or paused stream early and splits the escrowed funds: recipient earned payout and sender unvested refund. Authorization: verified stream sender matching `senderAddress` (individual streams) OR canceller role in org policy (org-owned streams). Unclaimed streams cannot be cancelled (403 SENDER_UNKNOWN). Unauthorized callers receive 403 SENDER_AUTH_REQUIRED.
+         */
+        post: operations["cancelStream"];
         delete?: never;
         options?: never;
         head?: never;
@@ -270,6 +433,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/streams/{id}/withdraw": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated key (UUID recommended) to make the request idempotent. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw vested funds from a payment stream
+         * @description Releases vested-but-unreleased funds to the stream recipient. The caller must be authenticated as the stream recipient, or be an org member with `withdraw` permission. Amounts are raw i128 units (stroops for XLM); omit `amount` to withdraw the full withdrawable balance. Auth is checked before stream state, and stream state before the amount.
+         */
+        post: operations["withdrawStream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/streams": {
         parameters: {
             query?: never;
@@ -279,11 +468,17 @@ export interface paths {
         };
         /**
          * List payment streams (v2)
-         * @description Returns all streams owned by the authenticated user in the v2 shape (`allowed_actions`, `created_at`, `settlement`).
+         * @description Returns all streams owned by the authenticated user within the caller's tenant (`x-tenant-id`, defaulting to `default-tenant`) in the v2 shape (`allowed_actions`, `created_at`, `settlement`). Visibility includes streams where the caller is the sender, recipient, a member of the owning organisation, or an admin (falling back to tenant-scoped visibility when no verified actor claim is present). `meta.total` reflects the filtered stream count.
          */
         get: operations["listStreamsV2"];
         put?: never;
-        /** Create a payment stream (v2) */
+        /**
+         * Create a payment stream (v2)
+         * @description Creates a payment stream using the v2 request and response shape. Requires bearer authentication and returns the created stream.
+         */
+        /**
+         * @description Creates a v2 payment stream for the authenticated sender and returns its initial representation.
+         */
         post: operations["createStreamV2"];
         delete?: never;
         options?: never;
@@ -430,6 +625,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieve Prometheus metrics for webhook processing
+         * @description Returns Prometheus text-format metrics for webhook requests and durations.
+         */
+        get: operations["getWebhookMetrics"];
+        put?: never;
+        /**
+         * Receive an incoming webhook event
+         * @description Validates and accepts an incoming webhook event payload.
+         */
+        post: operations["receiveWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/webhooks/dlq": {
         parameters: {
             query?: never;
@@ -457,10 +676,56 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List webhook delivery attempts */
+        /**
+         * List webhook delivery attempts
+         * @description Returns paginated webhook delivery attempts, including their status, retry count, and related endpoint.
+         */
+        /**
+         * @description Lists webhook delivery attempts with pagination for the authenticated caller.
+         */
         get: operations["listWebhookDeliveries"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/webhooks/dlq/{dlqId}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay a dead-lettered webhook delivery
+         * @description Idempotently re-enqueues a dead-lettered webhook delivery through the delivery worker. Requires internal-service HMAC authentication or an admin JWT.
+         */
+        post: operations["replayDlqWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/webhooks/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate the active webhook signing secret
+         * @description Rotates the active webhook signing secret. Requires admin authentication.
+         */
+        post: operations["rotateWebhookSecret"];
         delete?: never;
         options?: never;
         head?: never;
@@ -478,35 +743,7 @@ export interface paths {
          * Webhook delivery system health
          * @description Returns the health status of the webhook delivery system along with subscription and delivery statistics.
          */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Health status retrieved */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": unknown;
-                    };
-                };
-                /** @description Failed to retrieve health stats */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": unknown;
-                    };
-                };
-            };
-        };
+        get: operations["getWebhookHealth"];
         put?: never;
         post?: never;
         delete?: never;
@@ -621,6 +858,405 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/healthz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Liveness probe
+         * @description Returns service liveness status without checking external dependencies.
+         */
+        get: operations["getHealthz"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/readyz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Readiness probe
+         * @description Checks database and dependency readiness before accepting traffic.
+         */
+        get: operations["getReadyz"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Scrape Prometheus metrics
+         * @description Exports application and runtime metrics in Prometheus text exposition format.
+         */
+        get: operations["getMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/wallet/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Wallet authentication subsystem health
+         * @description Returns health status of the wallet challenge and session store.
+         */
+        get: operations["getWalletAuthHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/identity/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export authenticated user profile and personal data
+         * @description Returns the authenticated subject profile, preferences, and stream history for GDPR data portability.
+         */
+        get: operations["getIdentityMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/identity/me/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Erase authenticated user personal data
+         * @description Anonymizes or deletes off-chain personal data associated with the authenticated wallet address.
+         */
+        delete: operations["deleteIdentityMe"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get notification preferences
+         * @description Returns notification channel and event preferences for the authenticated user.
+         */
+        get: operations["getNotificationPreferences"];
+        /**
+         * Update notification preferences
+         * @description Updates notification channel and event preferences for the authenticated user.
+         */
+        put: operations["updateNotificationPreferences"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/indexer/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stellar indexer status
+         * @description Returns the latest indexed ledger sequence, lag metrics, and indexer health status.
+         */
+        get: operations["getIndexerStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/indexer/sse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Subscribe to real-time indexer server-sent events
+         * @description Opens a Server-Sent Events (SSE) stream emitting real-time contract and ledger indexing updates.
+         */
+        get: operations["streamIndexerEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List data export jobs
+         * @description Lists export jobs created by the authenticated user.
+         */
+        get: operations["listExports"];
+        put?: never;
+        /**
+         * Create a data export job
+         * @description Enqueues an asynchronous CSV or JSON export job for streams or activity records.
+         */
+        post: operations["createExport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/exports/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export worker subsystem health
+         * @description Returns health status and queue depth for the asynchronous export subsystem.
+         */
+        get: operations["getExportsHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/exports/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get or download an export job
+         * @description Returns the status or downloadable artifact of a specific export job.
+         */
+        get: operations["getExportById"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/audit/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List archived audit log batches
+         * @description Returns metadata for archived cold-storage audit log batches.
+         */
+        get: operations["listAuditArchives"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/audit/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export tamper-evident audit log entries
+         * @description Exports audit log entries in CSV or JSONL format with cryptographic hash chain fields.
+         */
+        get: operations["exportAuditLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/{id}/cancel/preview": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Preview cancellation payout split for a stream
+         * @description Read-only preview of cancelling an active or paused stream. Returns the exact recipient payout and sender refund without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.
+         */
+        get: operations["previewCancelStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/{id}/settle/preview": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Preview settlement outcome for a stream
+         * @description Read-only preview of settling an active or paused stream. Returns the resulting status and escrow amounts without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.
+         */
+        get: operations["previewSettleStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/streams/{id}/withdraw/preview": {
+        parameters: {
+            query?: {
+                /** @description Optional withdrawal amount in raw i128 units. Omit to preview withdrawing the full withdrawable balance. */
+                amount?: string;
+            };
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Preview withdrawal outcome for a stream
+         * @description Read-only preview of withdrawing from an ended stream. Computes the exact payout and updated released amount without mutating stream state or writing history, audit, or webhook records. Responds with Cache-Control: no-store.
+         */
+        get: operations["previewWithdrawStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get organization stream policy
+         * @description Returns the current StreamPolicy for the specified organization along with a strong ETag header.
+         */
+        get: operations["getOrgPolicy"];
+        /**
+         * Replace organization stream policy
+         * @description Replaces the StreamPolicy for an organization. Restricted to organization owners. Supports optimistic concurrency via the If-Match header and records an audit log entry.
+         */
+        put: operations["updateOrgPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -636,6 +1272,11 @@ export interface components {
             percentage: string;
             /** @description Amount owed to this leg, as a fixed 7-decimal string. The legs sum exactly to total_amount. */
             amount: string;
+            /**
+             * @description Current lifecycle status of this stream leg.
+             * @enum {string}
+             */
+            status?: "draft" | "active" | "paused" | "ended" | "withdrawn";
         };
         MultiRecipientStreamV2: {
             /**
@@ -649,10 +1290,10 @@ export interface components {
             /** @enum {string} */
             token: "XLM" | "USDC";
             /**
-             * @description Every leg is created in `draft`; drive them with the start/pause/stop/settle endpoints.
+             * @description Common leg status, or `mixed` when legs differ.
              * @enum {string}
              */
-            status: "draft";
+            status: "draft" | "active" | "paused" | "ended" | "withdrawn" | "mixed";
             /** @description Total distributed across all legs, as a fixed 7-decimal string. */
             total_amount: string;
             /** @description Sum of the allocation, as a fixed 4-decimal string. Always 100.0000 for an accepted request. */
@@ -756,6 +1397,17 @@ export interface components {
              * @example 2024-01-15T10:00:00.000Z
              */
             updatedAt: string;
+            /**
+             * @description Stellar wallet address of the stream sender (payer). Stored at creation time.
+             * @example GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc5XJLGH5
+             */
+            senderAddress?: string | null;
+            /**
+             * @description Stream ownership state: individual, org, or unclaimed.
+             * @example individual
+             * @enum {string}
+             */
+            ownership?: "individual" | "org" | "unclaimed";
         };
         StreamV2: {
             /**
@@ -777,9 +1429,9 @@ export interface components {
              * @description Current lifecycle state of the stream.
              * @enum {string}
              */
-            status: "draft" | "active" | "paused" | "ended";
+            status: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
             /**
-             * @description Actions the authenticated user may perform on this stream. Replaces v1 `actions`.
+             * @description Legal actions for the stream's current status, derived from the lifecycle state-machine table (status-changing actions only). Replaces v1 `actions`.
              * @example [
              *       "pause",
              *       "stop"
@@ -794,21 +1446,37 @@ export interface components {
             created_at: string;
             /** @description Settlement details once the stream has been settled, otherwise `null`. Clients must handle `null` explicitly. */
             settlement: {
+                /** @example c3f8a12e4b76 */
+                tx_hash: string;
                 /**
                  * Format: date-time
                  * @example 2024-02-01T12:00:00.000Z
                  */
                 settled_at: string;
-                /** @example 360 XLM */
+                /**
+                 * @description Raw-unit amount string (releasedAmount or totalAmount).
+                 * @example 3600000000
+                 */
                 amount: string;
                 /** @example XLM */
                 currency: string;
             } | null;
+            /**
+             * @description Stellar wallet address of the stream sender (payer). Stored at creation time.
+             * @example GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc5XJLGH5
+             */
+            senderAddress?: string | null;
+            /**
+             * @description Stream ownership state: individual, org, or unclaimed.
+             * @example individual
+             * @enum {string}
+             */
+            ownership?: "individual" | "org" | "unclaimed";
         };
         WalletChallenge: {
             /**
-             * @description One-time nonce the client must sign with their Stellar private key.
-             * @example streampay_auth_1716000000000_x7k2m
+             * @description One-time challenge the client must sign with their Stellar private key: `streampay-auth:v1:<nonce>|<origin>|<expires_at>`.
+             * @example streampay-auth:v1:nKlQNln6SV4hJ6pm6jNMSBVlcqo7r8Pjcj9mqLA_oRg|https://app.streampay.io|2024-01-15T10:05:00.000Z
              */
             challenge: string;
             /**
@@ -820,14 +1488,20 @@ export interface components {
         };
         WalletToken: {
             /**
-             * @description Opaque bearer token. Pass as `Authorization: Bearer <token>`.
-             * @example tok_R0FCQzEyMzQ1Njc4OTA
+             * @description Signed JWT for the authenticated wallet address. Pass as `Authorization: Bearer <token>`.
+             * @example eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJHQ0xIMlNOTTVNVFY0VEdOTk9BRExZT1pKWUlGQlhUSURWU05XNFhQM0xFSTJVUVYyTVo0Nk9ENyIsImlzcyI6InN0cmVhbXBheSIsImF1ZCI6InN0cmVhbXBheS1hcGkiLCJpYXQiOjE3MjE4MDAwMDAsImV4cCI6MTcyMTgwMDkwMH0.sample_signature
              */
             token: string;
             /**
+             * @description Token type, always `Bearer`.
+             * @example Bearer
+             * @enum {string}
+             */
+            token_type: "Bearer";
+            /**
              * Format: date-time
-             * @description Token expiry (24 hours from issuance).
-             * @example 2024-01-16T10:00:00.000Z
+             * @description Token expiry matching the JWT exp claim (15 minutes from issuance).
+             * @example 2024-01-15T10:15:00.000Z
              */
             expires_at: string;
         };
@@ -894,6 +1568,11 @@ export interface components {
              */
             streamId?: string;
             /**
+             * @description Wallet that produced a non-stream event (for example wallet.connected).
+             * @example GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV
+             */
+            actorAddress?: string;
+            /**
              * Format: date-time
              * @description ISO-8601 timestamp of the event.
              * @example 2026-04-28T09:00:00Z
@@ -904,6 +1583,8 @@ export interface components {
              * @example Stream 'Design Retainer' created and set to draft.
              */
             description: string;
+            /** @description Whether the associated stream no longer exists. Such events are not linkable. */
+            isDeleted?: boolean;
         };
         PaginatedMeta: {
             /** @description Whether additional results are available. */
@@ -927,6 +1608,186 @@ export interface components {
                  * @description Canonical URL for this request.
                  * @example /api/activity?limit=20
                  */
+                self: string;
+            };
+        };
+        /** @description Immutable lifecycle event for a stream. No PII — actor wallet truncated to 6 chars. */
+        StreamHistoryEntry: {
+            /**
+             * @description Unique entry id.
+             * @example 3c4d5e6f-7a8b-9c0d-e1f2-a3b4c5d6e7f8
+             */
+            id: string;
+            /**
+             * @description Owning stream id.
+             * @example stream-abc12345
+             */
+            streamId: string;
+            /** @enum {string} */
+            type: "created" | "started" | "paused" | "resumed" | "stopped" | "settled" | "withdrawn" | "cancelled";
+            /** @description Status before transition; absent for 'created'. */
+            fromStatus?: string | null;
+            /** @description Status after transition. */
+            toStatus: string;
+            /**
+             * Format: date-time
+             * @description ISO-8601 UTC timestamp.
+             * @example 2026-06-01T09:00:00.000Z
+             */
+            at: string;
+            /**
+             * @description First 6 chars of actor wallet (no PII).
+             * @example GABCDE
+             */
+            actor?: string | null;
+            /** @description On-chain tx hash (once indexer is wired). */
+            txHash?: string | null;
+            /** @description Human-readable amount label, e.g. '120 XLM'. */
+            amountRaw?: string | null;
+        };
+        StreamHistoryResponse: {
+            /** @description History entries, newest first. */
+            data: components["schemas"]["StreamHistoryEntry"][];
+            meta: {
+                /** @description Opaque cursor for the next page; null when none remain. */
+                nextCursor: string | null;
+            };
+        };
+        StreamTemplate: {
+            /**
+             * @description Unique template identifier (tpl_<uuid>).
+             * @example tpl_9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d
+             */
+            id: string;
+            /**
+             * @description Template name.
+             * @example Monthly Design Retainer
+             */
+            name: string;
+            /**
+             * @description Asset code (e.g. XLM, USDC).
+             * @example XLM
+             */
+            asset: string;
+            /**
+             * @description Payment amount per interval as a decimal string with at most 7 decimals.
+             * @example 120.5
+             */
+            amountPerInterval: string;
+            /**
+             * @description Payout interval in seconds (60 to 31,536,000).
+             * @example 2592000
+             */
+            intervalSeconds: number;
+            /**
+             * @description Optional memo or description for the template.
+             * @example Recurring freelance payment
+             */
+            memo?: string;
+            /**
+             * Format: date-time
+             * @description ISO 8601 timestamp when the template was created.
+             * @example 2026-01-15T00:00:00.000Z
+             */
+            createdAt: string;
+        };
+        CancelOutcomePreview: {
+            /** @enum {string} */
+            action: "cancel";
+            allowed: boolean;
+            /** @enum {string} */
+            currentStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            /** @enum {string} */
+            nextStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            token: string;
+            /** @description Raw i128 units as string. */
+            totalAmount: string;
+            /** @description Raw i128 units as string. */
+            releasedAmount: string;
+            /** @description Raw i128 units as string. */
+            vestedAmount: string;
+            /** @description Raw i128 units as string. */
+            recipientPayout: string;
+            /** @description Raw i128 units as string. */
+            senderRefund: string;
+            /** @description Raw i128 units as string. */
+            escrowDrained: string;
+            /** Format: date-time */
+            asOf: string;
+        };
+        SettleOutcomePreview: {
+            /** @enum {string} */
+            action: "settle";
+            allowed: boolean;
+            /** @enum {string} */
+            currentStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            /** @enum {string} */
+            nextStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            token: string;
+            /** @description Raw i128 units as string. */
+            totalAmount: string;
+            /** @description Raw i128 units as string. */
+            releasedAmount: string;
+            /** @description Raw i128 units as string. */
+            vestedAmount: string;
+            /** @description Raw i128 units as string. */
+            withdrawableAmount: string;
+            /** @description Raw i128 units as string. */
+            unvestedAmount: string;
+            /** Format: date-time */
+            asOf: string;
+        };
+        WithdrawOutcomePreview: {
+            /** @enum {string} */
+            action: "withdraw";
+            allowed: boolean;
+            /** @enum {string} */
+            currentStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            /** @enum {string} */
+            nextStatus: "draft" | "active" | "paused" | "ended" | "withdrawn" | "cancelled";
+            token: string;
+            /** @description Raw i128 units as string. */
+            totalAmount: string;
+            /** @description Raw i128 units as string. */
+            releasedAmount: string;
+            /** @description Raw i128 units as string. */
+            vestedAmount: string;
+            /** @description Raw i128 units as string. */
+            withdrawableAmount: string;
+            /** @description Raw i128 units as string. */
+            amountPaidOut: string;
+            /** @description Raw i128 units as string. */
+            newReleasedAmount: string;
+            /** @description Raw i128 units as string. */
+            remainingEscrow: string;
+            /** Format: date-time */
+            asOf: string;
+        };
+        /** @enum {string} */
+        OrgRole: "owner" | "pauser" | "settler" | "viewer";
+        StreamPolicy: {
+            /** @enum {integer} */
+            policyVersion: 1;
+            canStart: components["schemas"]["OrgRole"][];
+            canPause: components["schemas"]["OrgRole"][];
+            canResume: components["schemas"]["OrgRole"][];
+            canSettle: components["schemas"]["OrgRole"][];
+            canStop: components["schemas"]["OrgRole"][];
+            canWithdraw: components["schemas"]["OrgRole"][];
+            /** @enum {integer} */
+            requireApprovals: 1 | 2;
+        };
+        UpdateOrgPolicyRequest: {
+            policy: components["schemas"]["StreamPolicy"];
+        };
+        OrgPolicyResponse: {
+            data: {
+                orgId: string;
+                policy: components["schemas"]["StreamPolicy"];
+                /** Format: date-time */
+                updatedAt: string;
+            };
+            links: {
                 self: string;
             };
         };
@@ -1022,6 +1883,24 @@ export interface components {
                 "application/json": components["schemas"]["ErrorEnvelope"];
             };
         };
+        /** @description Payload too large — request body exceeds size limit. */
+        413: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "REQUEST_TOO_LARGE",
+                 *         "message": "Request body exceeds maximum allowed size.",
+                 *         "request_id": "req_01HZ9ABCDEF"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["ErrorEnvelope"];
+            };
+        };
         /** @description Unprocessable entity — request body failed schema validation. */
         422: {
             headers: {
@@ -1066,6 +1945,83 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listStreamTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of stream templates. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        templates: components["schemas"]["StreamTemplate"][];
+                    };
+                };
+            };
+        };
+    };
+    createStreamTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Non-empty template name.
+                     * @example Monthly Design Retainer
+                     */
+                    name: string;
+                    /**
+                     * @description Asset symbol (e.g. XLM, USDC).
+                     * @example XLM
+                     */
+                    asset: string;
+                    /**
+                     * @description Amount per interval as a decimal string (numeric values accepted if lossless).
+                     * @example 120.5
+                     */
+                    amountPerInterval: string;
+                    /**
+                     * @description Interval in seconds between payouts (60 to 31536000).
+                     * @example 2592000
+                     */
+                    intervalSeconds: number;
+                    /**
+                     * @description Optional memo string.
+                     * @example Recurring freelance payment
+                     */
+                    memo?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Stream template created successfully. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        template: components["schemas"]["StreamTemplate"];
+                    };
+                };
+            };
+            400: components["responses"]["400"];
+            413: components["responses"]["413"];
+            422: components["responses"]["422"];
+        };
+    };
     listActivity: {
         parameters: {
             query?: {
@@ -1073,10 +2029,14 @@ export interface operations {
                 limit?: number;
                 /** @description Opaque base64-encoded composite cursor (timestamp|id) for cursor-based pagination. Obtained from meta.nextCursor of the previous response. */
                 cursor?: string;
-                /** @description Filter events by associated stream identifier. */
+                /** @description Filter events by associated stream identifier. Must match the id charset [A-Za-z0-9._:-]+ and belong to the caller; a non-owned streamId returns 404. */
                 streamId?: string;
-                /** @description Filter events by type (e.g. stream.created, wallet.connected). */
+                /** @description Filter events by a known type (e.g. stream.created, wallet.connected). */
                 type?: string;
+                /** @description Inclusive lower bound for event timestamps. Accepts an ISO date (YYYY-MM-DD, treated as 00:00:00 UTC) or an ISO datetime. */
+                from?: string;
+                /** @description Inclusive upper bound for event timestamps. Accepts an ISO date (YYYY-MM-DD, treated as 23:59:59.999 UTC) or an ISO datetime. */
+                to?: string;
             };
             header?: never;
             path?: never;
@@ -1093,7 +2053,43 @@ export interface operations {
                     "application/json": components["schemas"]["ActivityResponse"];
                 };
             };
-            /** @description Unprocessable entity — malformed cursor. */
+            /** @description Unauthorized — missing or invalid bearer token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "UNAUTHORIZED",
+                     *         "message": "Missing or invalid authorization header",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found — the requested streamId does not exist or is not owned by the caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "STREAM_NOT_FOUND",
+                     *         "message": "Stream 'stream-abc12345' not found",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable entity — invalid limit (INVALID_LIMIT), type, streamId, cursor, or date range (INVALID_DATE_RANGE). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -1171,7 +2167,33 @@ export interface operations {
                     "application/json": components["schemas"]["WalletChallenge"];
                 };
             };
-            400: components["responses"]["400"];
+            /** @description Unsupported query parameters — this endpoint does not list outstanding challenges. `cursor` or `limit` are rejected. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "UNSUPPORTED_QUERY",
+                     *         "message": "Query parameters 'cursor' and 'limit' are not supported.",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable entity ? query parameter failed validation. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             /** @description IP rate limit exceeded for challenge issuance (20 req/min per IP). */
             429: {
                 headers: {
@@ -1213,8 +2235,8 @@ export interface operations {
                      */
                     address: string;
                     /**
-                     * @description The nonce returned by GET /api/auth/wallet.
-                     * @example streampay_auth_1716000000000_x7k2m
+                     * @description The challenge returned by GET /api/auth/wallet (shape `streampay-auth:v1:<nonce>|<origin>|<expires_at>`).
+                     * @example streampay-auth:v1:nKlQNln6SV4hJ6pm6jNMSBVlcqo7r8Pjcj9mqLA_oRg|https://app.streampay.io|2024-01-15T10:05:00.000Z
                      */
                     challenge: string;
                     /**
@@ -1235,8 +2257,34 @@ export interface operations {
                     "application/json": components["schemas"]["WalletToken"];
                 };
             };
-            400: components["responses"]["400"];
-            401: components["responses"]["401"];
+            /** @description Bad request ? invalid request body. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication failed — invalid signature, unknown challenge, expired challenge, or address mismatch. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            403: components["responses"]["403"];
+            /** @description Unprocessable entity ? request body failed schema validation. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             /** @description IP rate limit exceeded for wallet login (5 req/min per IP). */
             429: {
                 headers: {
@@ -1244,6 +2292,63 @@ export interface operations {
                     "Retry-After"?: number;
                     /** @description Correlation ID for this response. */
                     "x-request-id"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "rate_limit_exceeded",
+                     *         "message": "Too many requests. Please try again later.",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Token revoked, or already revoked (idempotent). */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing, malformed, or expired bearer token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "UNAUTHORIZED",
+                     *         "message": "Missing or invalid authorization header",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description IP rate limit exceeded for logout (5 req/min per IP). */
+            429: {
+                headers: {
+                    /** @description Seconds until the client may retry. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1432,6 +2537,216 @@ export interface operations {
                 };
             };
             500: components["responses"]["500"];
+        };
+    };
+    previewStream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Stellar public key. */
+                    recipient: string;
+                    /** @description Positive decimal stream rate. */
+                    rate: string;
+                    /** @enum {string} */
+                    schedule: "second" | "minute" | "hour" | "day" | "week" | "month" | "year";
+                    /** @description Optional XLM or CODE:ISSUER token. */
+                    token?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Valid dry-run stream preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** @constant */
+                            valid: true;
+                            estimated_events: {
+                                type: string;
+                                description: string;
+                            }[];
+                            /** @description Null when the normalized token is unsupported by the cost estimator. */
+                            cost_estimate: Record<string, never> | null;
+                            cost_estimate_reason?: string;
+                            preview_stream: Record<string, never>;
+                        };
+                        meta: {
+                            /** @constant */
+                            dry_run: true;
+                            request_id: string;
+                        };
+                    };
+                };
+            };
+            /** @description Validation or token allowlist failure. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** @constant */
+                            valid: false;
+                            validation_errors?: Record<string, never>[];
+                            cost_estimate?: Record<string, never> | null;
+                            preview_stream?: Record<string, never> | null;
+                        };
+                        error: components["schemas"]["ErrorEnvelope"]["error"];
+                    };
+                };
+            };
+            /** @description Write-tier rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    dryrunStreamDeprecated: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    recipient: string;
+                    /** @description Accepted for legacy compatibility and ignored by preview. */
+                    sender?: string;
+                    asset: string;
+                    amountPerInterval: number | string;
+                    /** @description Must exactly match a supported schedule duration: 1, 60, 3600, 86400, 604800, 2592000, or 31536000. */
+                    intervalSeconds: number;
+                    durationSeconds?: number;
+                    memo?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Preview response. Deprecation and Sunset headers are included. */
+            200: {
+                headers: {
+                    Deprecation?: string;
+                    Sunset?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description Invalid stream body or unsupported interval. */
+            422: {
+                headers: {
+                    Deprecation?: string;
+                    Sunset?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Write-tier rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    importStreams: {
+        parameters: {
+            query?: {
+                /** @description When `true`, validates rows without persisting streams or touching the idempotency store. */
+                dryRun?: boolean;
+            };
+            header?: {
+                /** @description Required when `dryRun=false`. Client-generated idempotency key for safe retries. */
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/csv": string;
+                "application/json": {
+                    /** @description Raw CSV string with header row. */
+                    csv: string;
+                } | {
+                    rows: {
+                        recipient: string;
+                        rate?: string;
+                        amount?: string;
+                        schedule: string;
+                        token?: string;
+                        asset?: string;
+                        memo?: string;
+                        external_id?: string;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Multi-Status per-row import summary and results. */
+            207: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        summary: {
+                            total: number;
+                            valid: number;
+                            failed: number;
+                            imported?: number;
+                        };
+                        results: {
+                            row: number;
+                            /** @enum {string} */
+                            status: "imported" | "duplicate" | "valid" | "error";
+                            streamId?: string;
+                            errors?: {
+                                field: string;
+                                code: string;
+                                message: string;
+                            }[];
+                        }[];
+                    };
+                };
+            };
+            400: components["responses"]["400"];
+            /** @description Idempotency conflict (`IDEMPOTENCY_CONFLICT`) or in-flight request with the same key (`IDEMPOTENCY_IN_FLIGHT`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Gateway timeout when persistence exceeds the route deadline. */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
         };
     };
     searchStreams: {
@@ -1801,6 +3116,41 @@ export interface operations {
             500: components["responses"]["500"];
         };
     };
+    getStreamHistory: {
+        parameters: {
+            query?: {
+                /** @description Max entries per page. */
+                limit?: number;
+                /** @description Opaque cursor from meta.nextCursor of the previous response. */
+                cursor?: string;
+            };
+            header: {
+                /** @description Tenant id — must match the stream's owner. */
+                "x-tenant-id": string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated list of lifecycle events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StreamHistoryResponse"];
+                };
+            };
+            400: components["responses"]["400"];
+            404: components["responses"]["404"];
+            422: components["responses"]["422"];
+            500: components["responses"]["500"];
+        };
+    };
     stopStream: {
         parameters: {
             query?: never;
@@ -1881,6 +3231,69 @@ export interface operations {
                      *       }
                      *     }
                      */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    cancelStream: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Caller wallet address (used for org policy evaluation on org-owned streams). */
+                "Actor-Wallet-Address"?: string;
+                /** @description Client-generated key (UUID recommended) to make the request idempotent. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stream cancelled successfully. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["StreamV1"];
+                        /** @description Full refund-split breakdown. */
+                        cancellation: Record<string, never>;
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Forbidden: sender authentication required (SENDER_AUTH_REQUIRED), stream is unclaimed (SENDER_UNKNOWN), or org policy denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["404"];
+            /** @description Conflict: stream already in terminal state or idempotency conflict. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            422: components["responses"]["422"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
@@ -2075,6 +3488,128 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
+        };
+    };
+    withdrawStream: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated key (UUID recommended) to make the request idempotent. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Optional raw i128 units as a decimal string. Maximum 2^127-1. Omit to withdraw the full withdrawable balance. Decimals, signs and symbols are rejected.
+                     * @example 10000000
+                     */
+                    amount?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Withdrawal computed and the stream's releasedAmount persisted alongside its finality state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["StreamV1"];
+                        /** @description Current withdrawal finality state. */
+                        withdrawal?: Record<string, never>;
+                    };
+                };
+            };
+            /** @description No verified caller identity (Bearer JWT or Actor-Wallet-Address fallback). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "UNAUTHORIZED",
+                     *         "message": "A verified caller identity is required to withdraw from a stream.",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Caller is neither the stream recipient nor an org member permitted to withdraw. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stream not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "STREAM_NOT_FOUND",
+                     *         "message": "Stream 'stream-abc12345' not found",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stream state or balance conflict: `INVALID_STREAM_STATE`, `NO_WITHDRAWABLE_BALANCE`, or `APPROVAL_REQUIRED`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Invalid amount or escrow state: `VALIDATION_ERROR`, `ZERO_AMOUNT`, `OVER_WITHDRAW`, or `INVALID_ESCROW_STATE`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "RATE_LIMIT_EXCEEDED",
+                     *         "message": "Too many requests. Retry after 30 seconds.",
+                     *         "request_id": "req_01HZ9ABCDEF"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
         };
     };
     listStreamsV2: {
@@ -2481,6 +4016,78 @@ export interface operations {
             500: components["responses"]["500"];
         };
     };
+    getWebhookMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Prometheus metrics payload. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Too many requests — rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    receiveWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example payment.received */
+                    eventType: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Webhook event accepted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example true */
+                        success: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["400"];
+            413: components["responses"]["413"];
+            /** @description Too many requests — rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
     receiveDlqWebhook: {
         parameters: {
             query?: never;
@@ -2538,7 +4145,119 @@ export interface operations {
                 };
             };
             400: components["responses"]["400"];
+            422: components["responses"]["422"];
             500: components["responses"]["500"];
+        };
+    };
+    replayDlqWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Identifier of the dead-letter queue entry to replay. */
+                dlqId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description DLQ entry replayed (or already replayed). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            dlqId: string;
+                            deliveryId: string;
+                            alreadyReplayed: boolean;
+                            endpointId: string;
+                            endpointUrl: string;
+                            eventId: string;
+                            eventType: string;
+                            /** Format: date-time */
+                            replayedAt: string;
+                        };
+                        links: {
+                            dlq?: string;
+                            delivery?: string;
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            404: components["responses"]["404"];
+            /** @description Bad gateway — worker failed to enqueue the replay. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    rotateWebhookSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description New webhook signing secret. */
+                    secret: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Webhook signing secret rotated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: Record<string, never>;
+                    };
+                };
+            };
+            400: components["responses"]["400"];
+            403: components["responses"]["403"];
+            422: components["responses"]["422"];
+        };
+    };
+    getWebhookHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Health status retrieved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Failed to retrieve health stats */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
         };
     };
     adminRedeliverWebhook: {
@@ -2732,6 +4451,676 @@ export interface operations {
             400: components["responses"]["400"];
             403: components["responses"]["403"];
             500: components["responses"]["500"];
+        };
+    };
+    getHealthz: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Service is alive. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "ok";
+                    };
+                };
+            };
+        };
+    };
+    getReadyz: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Service is ready. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "ready" | "degraded";
+                    };
+                };
+            };
+            /** @description Service unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Prometheus metrics payload. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            401: components["responses"]["401"];
+            500: components["responses"]["500"];
+        };
+    };
+    getWalletAuthHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Wallet auth subsystem status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "ok" | "degraded";
+                    };
+                };
+            };
+            /** @description Service unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getIdentityMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authenticated user identity export. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    deleteIdentityMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Personal data erased. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getNotificationPreferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notification preferences. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["401"];
+        };
+    };
+    updateNotificationPreferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Updated notification preferences. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: components["responses"]["400"];
+            401: components["responses"]["401"];
+        };
+    };
+    getIndexerStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current indexer status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    streamIndexerEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE event stream. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+        };
+    };
+    listExports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Export jobs list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["401"];
+        };
+    };
+    createExport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Export job created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: components["responses"]["400"];
+            401: components["responses"]["401"];
+        };
+    };
+    getExportsHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Export subsystem health. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    getExportById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Unique identifier of the export job. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Export job details or artifact. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["401"];
+            404: components["responses"]["404"];
+        };
+    };
+    listAuditArchives: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Archived audit batches. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["401"];
+        };
+    };
+    exportAuditLog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Exported audit log entries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["401"];
+        };
+    };
+    previewCancelStream: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cancellation outcome preview computed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CancelOutcomePreview"];
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Forbidden: caller is not authorized to preview this stream action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["404"];
+            /** @description Conflict: illegal state transition or terminal stream state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            422: components["responses"]["422"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    previewSettleStream: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settlement outcome preview computed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SettleOutcomePreview"];
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Forbidden: caller is not authorized to preview this stream action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["404"];
+            /** @description Conflict: illegal state transition or terminal stream state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            422: components["responses"]["422"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    previewWithdrawStream: {
+        parameters: {
+            query?: {
+                /** @description Optional withdrawal amount in raw i128 units. Omit to preview withdrawing the full withdrawable balance. */
+                amount?: string;
+            };
+            header?: {
+                /** @description Optional tenant identifier for tenant-scoped stream visibility. */
+                "x-tenant-id"?: string;
+                /** @description Caller wallet address (fallback when allowed for org policy evaluation). */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Withdrawal outcome preview computed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WithdrawOutcomePreview"];
+                    };
+                };
+            };
+            401: components["responses"]["401"];
+            /** @description Forbidden: caller is not authorized to preview this stream action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["404"];
+            /** @description Conflict: illegal state transition or terminal stream state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            422: components["responses"]["422"];
+            /** @description Rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: components["responses"]["500"];
+        };
+    };
+    getOrgPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization identifier */
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Organization stream policy */
+            200: {
+                headers: {
+                    /** @description Strong entity tag for optimistic concurrency control */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgPolicyResponse"];
+                };
+            };
+            /** @description Organization not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    updateOrgPolicy: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag returned by GET /api/orgs/{orgId}/policy for optimistic concurrency control */
+                "If-Match"?: string;
+            };
+            path: {
+                /** @description Organization identifier */
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateOrgPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated organization stream policy */
+            200: {
+                headers: {
+                    /** @description Updated strong entity tag */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgPolicyResponse"];
+                };
+            };
+            /** @description Invalid policy payload */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Caller is not an authenticated owner of the organization */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Organization not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Optimistic concurrency conflict (If-Match ETag mismatch) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
         };
     };
 }

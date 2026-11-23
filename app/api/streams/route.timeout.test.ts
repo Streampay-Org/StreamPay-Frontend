@@ -12,6 +12,8 @@
 import { GET, POST } from "./route";
 import { resetDb } from "@/app/lib/db";
 import { resetRateLimitStore, setRateLimitStore } from "@/app/lib/rate-limit-store";
+import { _resetAllowlistForTesting, addAllowedToken } from "@/app/lib/token-allowlist";
+import { signToken } from "@/app/lib/auth";
 
 jest.mock("@/app/lib/logger", () => ({
   logger: {
@@ -30,7 +32,6 @@ jest.mock("@/app/lib/logger", () => ({
 let __simulateTimeout = false;
 
 jest.mock("@/src/middleware/timeout", () => {
-  const { NextResponse } = require("next/server");
   const { errorResponse, ErrorCode } = jest.requireActual(
     "@/app/lib/errors/server",
   );
@@ -55,6 +56,10 @@ jest.mock("@/src/middleware/timeout", () => {
   return { withRouteTimeout };
 });
 
+const VALID_RECIPIENT = "GDSBCG3OKHCMMWS5EBH2X7XOYTJRWXN2YYQPCNS5OFBU4IDO4X7OFSQA";
+const VALID_SENDER = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
+const AUTH_HEADER = `Bearer ${signToken(VALID_SENDER)}`;
+
 function makeRequest(url: string): Request {
   return new Request(url);
 }
@@ -64,6 +69,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   resetDb();
   resetRateLimitStore();
+  _resetAllowlistForTesting();
+  addAllowedToken("XLM");
   // Generous store so rate limits don't interfere with timeout tests.
   setRateLimitStore({
     async check() {
@@ -73,6 +80,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  __simulateTimeout = false;
   resetRateLimitStore();
   resetDb();
 });
@@ -109,9 +117,9 @@ describe("GET /api/streams — route-level timeout", () => {
 
 describe("POST /api/streams — route-level timeout", () => {
   const validBody = JSON.stringify({
-    recipient: "GABC",
+    recipient: VALID_RECIPIENT,
     rate: "1",
-    schedule: "daily",
+    schedule: "day",
     token: "XLM",
   });
 
@@ -120,7 +128,11 @@ describe("POST /api/streams — route-level timeout", () => {
     const res = await POST(
       new Request("http://localhost/api/streams", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          authorization: AUTH_HEADER,
+          "Idempotency-Key": "test-key-timeout-504",
+        },
         body: validBody,
       }),
     );
@@ -131,12 +143,18 @@ describe("POST /api/streams — route-level timeout", () => {
     const res = await POST(
       new Request("http://localhost/api/streams", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          authorization: AUTH_HEADER,
+          "Idempotency-Key": "test-key-timeout-201",
+        },
         body: validBody,
       }),
     );
     expect(res.status).toBe(201);
     const body = await res.json();
+    expect(body.data.id).toBeDefined();
     expect(body.data.status).toBe("draft");
+    expect(body.links.self).toBeDefined();
   });
 });

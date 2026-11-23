@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db, getStore } from "@/app/lib/db";
-import { tryAuthenticateRequest, JWT_SECRET } from "@/app/lib/auth";
+import { getStore } from "@/app/lib/db";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
+import { authorizeStreamSubscriber, DEFAULT_STREAM_TENANT } from "@/app/lib/stream-subscriber-auth";
 import { eventBus } from "@/app/lib/event-bus";
 import { logger, getCorrelationContext, extractCorrelationContext, setCorrelationContext, withStreamContext } from "@/app/lib/logger";
 import {
@@ -25,13 +26,14 @@ type Context = { params: Promise<{ id: string }> };
  * 
  * Security:
  * - JWT Authentication required.
- * - Users can only subscribe to streams they own (recipient or matching email).
- * - 403 returned on unauthorized access or ID guessing.
+ * - Subscribers must be the recipient, sender, an owning-org member, an
+ *   administrator, or have a matching non-empty email.
+ * - A tenant mismatch returns 404 to avoid exposing stream existence.
  * 
  * Headers:
  * - Authorization: Bearer <JWT token>
  * - x-correlation-id: Optional correlation ID for tracing
- * - x-tenant-id: Required tenant ID header
+ * - x-tenant-id: Optional tenant ID header (defaults to "default")
  * 
  * Response Headers:
  * - Content-Type: text/event-stream
@@ -90,24 +92,8 @@ export async function GET(
     );
   }
 
-  // 3. Validate Tenant ID
-  const tenant = request.headers.get("x-tenant-id");
-  if (!tenant || tenant.trim() === "") {
-    logger.warn("Missing tenant ID in SSE request", {
-      streamId,
-      actorId: actor.actorId,
-    });
-    return NextResponse.json(
-      { 
-        error: { 
-          code: "MISSING_TENANT", 
-          message: "Tenant ID header (x-tenant-id) is required",
-          request_id: getCorrelationContext()?.request_id 
-        } 
-      }, 
-      { status: 400 }
-    );
-  }
+  // 3. Resolve Tenant ID
+  const tenant = request.headers.get("x-tenant-id")?.trim() || DEFAULT_STREAM_TENANT;
 
   // 4. Fetch Stream
   const { streamRepository } = getStore();
@@ -123,7 +109,7 @@ export async function GET(
       { 
         error: { 
           code: "NOT_FOUND", 
-          message: `Stream '${streamId}' not found`,
+          message: "Stream not found",
           request_id: getCorrelationContext()?.request_id 
         } 
       }, 
@@ -131,30 +117,25 @@ export async function GET(
     );
   }
 
-  // 5. Authorization Check
-  // Users can only subscribe to streams where they are the recipient
-  // or if they have admin role
-  const isOwner = 
-    (stream as any).recipient === actor.walletAddress || 
-    (stream as any).email && (db.users.get(actor.walletAddress)?.email === (stream as any).email) ||
-    actor.role === "admin";
-
-  if (!isOwner) {
+  // 5. Authorize the subscriber without exposing stream data on failure.
+  const authorization = authorizeStreamSubscriber(actor, stream, tenant);
+  if (!authorization.ok) {
+    const notFound = authorization.status === 404;
     logger.warn("Unauthorized SSE subscription attempt", {
       actorId: actor.actorId,
       streamId,
       tenant,
-      walletAddress: actor.walletAddress,
+      status: authorization.status,
     });
     return NextResponse.json(
       { 
         error: { 
-          code: "FORBIDDEN", 
-          message: "You do not have permission to subscribe to this stream",
+          code: notFound ? "NOT_FOUND" : "FORBIDDEN",
+          message: notFound ? "Stream not found" : "You do not have permission to subscribe to this stream",
           request_id: getCorrelationContext()?.request_id 
         } 
       }, 
-      { status: 403 }
+      { status: authorization.status }
     );
   }
 

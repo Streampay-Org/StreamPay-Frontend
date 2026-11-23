@@ -133,10 +133,12 @@ describe('onChainClient — chaos / fault injection', () => {
       },
       {
         label: 'wrong BigInt type (string instead of bigint)',
+        // The fixture deliberately supplies malformed on-chain data to test pass-through behavior.
         payload: { ...STREAM_XLM, total_amount: '1000000000' as unknown as bigint },
       },
       {
         label: 'null token field',
+        // The fixture deliberately supplies malformed on-chain data to test pass-through behavior.
         payload: { ...STREAM_XLM, token: null as unknown as string },
       },
     ];
@@ -149,6 +151,7 @@ describe('onChainClient — chaos / fault injection', () => {
     test.each(malformedCases)(
       'passes through malformed payload — $label',
       async ({ payload }) => {
+        // The fixture deliberately supplies malformed on-chain data to test pass-through behavior.
         mockFetch(async () => payload as unknown as OnChainStream);
 
         // Current behaviour: no validation layer, returns as-is.

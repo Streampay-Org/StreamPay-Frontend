@@ -10,7 +10,9 @@ const vi = {
 import { WebhookDeliveryWorker } from '@/app/lib/webhook-delivery-worker';
 import { webhookDeliveryStore } from '@/app/lib/webhook-delivery-store';
 import { WebhookEndpoint, WebhookEvent } from '@/app/lib/webhook-delivery';
-import { logger, setCorrelationContext } from '@/app/lib/logger';
+import { setCorrelationContext } from '@/app/lib/logger';
+import * as adminGuard from '@/app/lib/admin-guard';
+import { registry, webhookDeliveryDuration } from '@/src/metrics/registry';
 
 /**
  * Integration tests with realistic failure scenarios
@@ -410,9 +412,7 @@ describe('Webhook Delivery Integration Tests', () => {
         maxRetries: 2,
       };
 
-      let fetchCount = 0;
       vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-        fetchCount++;
         // First endpoint succeeds, second fails
         if (url.includes('success')) {
           return { status: 200, statusText: 'OK' };
@@ -470,14 +470,14 @@ describe('Webhook Delivery Integration Tests', () => {
         { code: 504, name: 'Gateway Timeout', shouldDeliver: true },
       ];
 
-      const endpoint: WebhookEndpoint = {
+      const _endpoint: WebhookEndpoint = {
         id: 'status-code-endpoint',
         url: 'https://receiver.example.com',
         maxRetries: 3,
       };
 
       testCases.forEach(testCase => {
-        const event: WebhookEvent = {
+        const _event: WebhookEvent = {
           id: `event-status-${testCase.code}`,
           eventType: 'stream.settled',
           streamId: 'stream-123',
@@ -488,6 +488,135 @@ describe('Webhook Delivery Integration Tests', () => {
         // Verify behavior is as expected
         // (Success on 2xx, retry on 5xx/408/429, no retry on other 4xx)
       });
+    });
+  });
+
+  describe('Webhook Delivery Latency Histogram Metrics', () => {
+    const getOutcomeCount = async (outcome: string): Promise<number> => {
+      const metric = registry.getSingleMetric('webhook_delivery_attempt_duration_seconds');
+      const data = await metric!.get();
+      const entry = data.values.find(
+        (v: any) =>
+          v.metricName === 'webhook_delivery_attempt_duration_seconds_count' &&
+          v.labels.outcome === outcome,
+      );
+      return entry ? entry.value : 0;
+    };
+
+    const makeEvent = (id: string): WebhookEvent => ({
+      id,
+      eventType: 'stream.settled',
+      streamId: 'stream-metrics-1',
+      data: { amount: 100 },
+      timestamp: new Date().toISOString(),
+    });
+
+    beforeEach(() => {
+      webhookDeliveryDuration.reset();
+      adminGuard._resetAdminStateForTesting();
+    });
+
+    afterEach(() => {
+      adminGuard._resetAdminStateForTesting();
+      jest.restoreAllMocks();
+    });
+
+    it('records success outcome for 2xx delivery', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, statusText: 'OK' })) as any);
+      const endpoint: WebhookEndpoint = { id: 'ep-m-ok', url: 'https://ok.example.com', maxRetries: 3 };
+
+      const result = await worker.processDelivery(endpoint, makeEvent('evt-ok'), 'dlv-m-ok');
+      expect(result.success).toBe(true);
+      expect(await getOutcomeCount('success')).toBe(1);
+    });
+
+    it('records retryable_failure for each 5xx attempt and success on recovery', async () => {
+      let n = 0;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          n++;
+          return n <= 2
+            ? { status: 503, statusText: 'Service Unavailable' }
+            : { status: 200, statusText: 'OK' };
+        }) as any,
+      );
+      const endpoint: WebhookEndpoint = { id: 'ep-m-retry', url: 'https://retry.example.com', maxRetries: 4 };
+
+      const result = await worker.processDelivery(endpoint, makeEvent('evt-retry'), 'dlv-m-retry');
+      expect(result.success).toBe(true);
+      expect(await getOutcomeCount('retryable_failure')).toBe(2);
+      expect(await getOutcomeCount('success')).toBe(1);
+    });
+
+    it('records retryable_failure when fetch throws network error through max attempts', async () => {
+      const localWorker = new WebhookDeliveryWorker({ maxAttempts: 2 }, () => Promise.resolve());
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED'); }) as any);
+      const endpoint: WebhookEndpoint = { id: 'ep-m-net', url: 'https://net.example.com', maxRetries: 2 };
+
+      const result = await localWorker.processDelivery(endpoint, makeEvent('evt-net'), 'dlv-m-net');
+      expect(result.dlqed).toBe(true);
+      expect(await getOutcomeCount('retryable_failure')).toBe(2);
+      expect(await getOutcomeCount('non_retryable_failure')).toBe(0);
+    });
+
+    it('records non_retryable_failure for 4xx response', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => ({ status: 400, statusText: 'Bad Request' })) as any);
+      const endpoint: WebhookEndpoint = { id: 'ep-m-4xx', url: 'https://4xx.example.com', maxRetries: 3 };
+
+      const result = await worker.processDelivery(endpoint, makeEvent('evt-4xx'), 'dlv-m-4xx');
+      expect(result.dlqed).toBe(true);
+      expect(await getOutcomeCount('non_retryable_failure')).toBe(1);
+    });
+
+    it('records timeout when fetch rejects with AbortError', async () => {
+      const localWorker = new WebhookDeliveryWorker({ maxAttempts: 2 }, () => Promise.resolve());
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          const err = new Error('Aborted');
+          err.name = 'AbortError';
+          throw err;
+        }) as any,
+      );
+      const endpoint: WebhookEndpoint = { id: 'ep-m-to', url: 'https://to.example.com', maxRetries: 2 };
+
+      const result = await localWorker.processDelivery(endpoint, makeEvent('evt-to'), 'dlv-m-to');
+      expect(result.dlqed).toBe(true);
+      expect(await getOutcomeCount('timeout')).toBe(2);
+    });
+
+    it('records deferred when admin circuit breaker is open', async () => {
+      adminGuard._resetAdminStateForTesting('GADMIN_METRICS_TEST');
+      const req = new Request('http://localhost/api/admin/circuit-breaker', {
+        method: 'POST',
+        headers: { 'Actor-Wallet-Address': 'GADMIN_METRICS_TEST' },
+      });
+      adminGuard.setCircuitBreaker(req, 'webhook', true);
+      const endpoint: WebhookEndpoint = { id: 'ep-m-def', url: 'https://def.example.com', maxRetries: 3 };
+
+      const result = await worker.processDelivery(endpoint, makeEvent('evt-def'), 'dlv-m-def');
+      expect(result.deferred).toBe(true);
+      expect(await getOutcomeCount('deferred')).toBe(1);
+    });
+
+    it('records circuit_open when endpoint circuit breaker trips', async () => {
+      const localWorker = new WebhookDeliveryWorker({ maxAttempts: 1 }, () => Promise.resolve());
+      vi.stubGlobal('fetch', vi.fn(async () => ({ status: 500, statusText: 'Internal Server Error' })) as any);
+      const endpoint: WebhookEndpoint = {
+        id: 'ep-m-cb',
+        url: 'https://cb.example.com',
+        maxRetries: 1,
+        circuitBreakerThreshold: 2,
+      };
+
+      await localWorker.processDelivery(endpoint, makeEvent('evt-cb-1'), 'dlv-m-cb-1');
+      await localWorker.processDelivery(endpoint, makeEvent('evt-cb-2'), 'dlv-m-cb-2');
+      const blocked = await localWorker.processDelivery(endpoint, makeEvent('evt-cb-3'), 'dlv-m-cb-3');
+
+      expect(blocked.dlqed).toBe(true);
+      expect(await getOutcomeCount('retryable_failure')).toBe(2);
+      expect(await getOutcomeCount('circuit_open')).toBe(1);
     });
   });
 });

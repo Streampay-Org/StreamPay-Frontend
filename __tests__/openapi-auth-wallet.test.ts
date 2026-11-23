@@ -3,15 +3,14 @@
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import yaml from 'js-yaml';
 
-function loadOpenApiYaml(): any {
-  const raw = readFileSync(join(__dirname, '..', 'src', 'openapi.yaml'), 'utf8');
-  return yaml.load(raw);
+function loadOpenApiSpec(): any {
+  const raw = readFileSync(join(__dirname, '..', 'openapi.json'), 'utf8');
+  return JSON.parse(raw);
 }
 
 describe('OpenAPI examples /api/auth/wallet', () => {
-  const spec = loadOpenApiYaml();
+  const spec = loadOpenApiSpec();
   const wallet = spec.paths['/api/auth/wallet'];
 
   it('declares /api/auth/wallet path with GET and POST', () => {
@@ -30,6 +29,24 @@ describe('OpenAPI examples /api/auth/wallet', () => {
         expires_at: expect.any(String),
       }),
     );
+  });
+
+  it('GET 200 walletChallenge example validates against the response schema', () => {
+    const content = wallet.get.responses['200'].content['application/json'];
+    const schemaRef: string = content.schema.$ref;
+    const schemaName = schemaRef.replace('#/components/schemas/', '');
+    const schema = spec.components.schemas[schemaName];
+    const exampleValue = content.examples.walletChallenge.value;
+
+    expect(schema).toBeDefined();
+    for (const requiredKey of schema.required ?? []) {
+      expect(exampleValue[requiredKey]).toBeDefined();
+    }
+    for (const [propName, propSchema] of Object.entries<any>(schema.properties ?? {})) {
+      if (exampleValue[propName] !== undefined) {
+        expect(typeof exampleValue[propName]).toBe(propSchema.type);
+      }
+    }
   });
 
   it('GET error responses include example envelopes with request_id', () => {

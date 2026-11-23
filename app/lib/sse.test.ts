@@ -17,6 +17,7 @@ function makeController() {
   const controller = {
     enqueue,
     close,
+  // The controller fixture implements only enqueue/close, the operations consumed by the SSE connection.
   } as unknown as ReadableStreamDefaultController<Uint8Array>;
   return { controller, enqueue, close };
 }
@@ -106,6 +107,7 @@ describe("createSseConnection", () => {
     const abort = new AbortController();
     const onClose = jest.fn();
     const sse = createSseConnection(
+      // The controller fixture implements only enqueue/close, the operations consumed by the SSE connection.
       { enqueue, close } as unknown as ReadableStreamDefaultController<Uint8Array>,
       { signal: abort.signal, onClose },
     );

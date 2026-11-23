@@ -1,5 +1,11 @@
 import jwt from "jsonwebtoken";
-import { getJwtJwks, signToken, tryAuthenticateRequest } from "./auth";
+import {
+  getJwtJwks,
+  signToken,
+  tryAuthenticateRequest,
+  verifyRequestToken,
+} from "./auth";
+import { getTokenDenylist, resetTokenDenylist } from "./token-denylist";
 
 const TEST_SECRET = "test-secret-at-least-32-characters-long";
 const PREVIOUS_SECRET = "previous-secret-at-least-32-characters-long";
@@ -16,6 +22,7 @@ describe("auth JWKS and rotation helpers", () => {
     delete process.env.JWT_PREVIOUS_SECRET;
     delete process.env.JWT_KEY_ID;
     delete process.env.JWT_PREVIOUS_KEY_ID;
+    resetTokenDenylist();
   });
 
   afterEach(() => {
@@ -95,12 +102,54 @@ describe("auth JWKS and rotation helpers", () => {
     const token = jwt.sign(
       { sub: WALLET_ADDRESS, iss: "streampay", aud: "streampay-api" },
       PREVIOUS_SECRET,
-      { algorithm: "HS256", expiresIn: "15m", header: { kid: "streampay-previous" } },
+      { algorithm: "HS256", expiresIn: "15m", header: { alg: "HS256", kid: "streampay-previous" } },
     );
     const request = new Request("http://localhost", {
       headers: { authorization: `Bearer ${token}` },
     });
 
     expect(tryAuthenticateRequest(request)).toMatchObject({ walletAddress: WALLET_ADDRESS });
+  });
+
+  it("issues a unique jti claim on every token", () => {
+    const first = jwt.decode(signToken(WALLET_ADDRESS)) as { jti?: string };
+    const second = jwt.decode(signToken(WALLET_ADDRESS)) as { jti?: string };
+
+    expect(typeof first.jti).toBe("string");
+    expect(first.jti).not.toBe(second.jti);
+  });
+
+  it("rejects a token once its jti is revoked", () => {
+    const token = signToken(WALLET_ADDRESS);
+    const claims = jwt.decode(token) as { jti: string; exp: number };
+    const request = new Request("http://localhost", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(tryAuthenticateRequest(request)).not.toBeNull();
+
+    getTokenDenylist().revoke(claims.jti, claims.exp);
+
+    expect(tryAuthenticateRequest(request)).toBeNull();
+    // Signature verification still succeeds so logout can stay idempotent.
+    expect(verifyRequestToken(request)).toMatchObject({
+      actor: { walletAddress: WALLET_ADDRESS },
+      jti: claims.jti,
+    });
+  });
+
+  it("keeps tokens without a jti valid", () => {
+    const token = jwt.sign(
+      { sub: WALLET_ADDRESS, iss: "streampay", aud: "streampay-api" },
+      TEST_SECRET,
+      { algorithm: "HS256", expiresIn: "15m", header: { alg: "HS256", kid: "streampay-current" } },
+    );
+    const request = new Request("http://localhost", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(tryAuthenticateRequest(request)).toMatchObject({
+      walletAddress: WALLET_ADDRESS,
+    });
   });
 });

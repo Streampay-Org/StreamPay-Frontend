@@ -1,4 +1,3 @@
-import type { Stream } from "@/app/types/openapi";
 import type { StreamV1, StreamV2, MigrationResult } from "./schema";
 import { CURRENT_SCHEMA_VERSION } from "./schema";
 

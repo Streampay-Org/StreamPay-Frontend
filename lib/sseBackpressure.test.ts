@@ -475,7 +475,7 @@ describe("sseMetricsLog", () => {
     const q = makeQueue();
     const m = q.metrics();
     sseMetricsLog(m, { extra: true });
-    expect((m as Record<string, unknown>).extra).toBeUndefined();
+    expect(m).not.toHaveProperty('extra');
   });
 });
 
@@ -543,6 +543,7 @@ describe("flushQueue", () => {
     const received: Uint8Array[] = [];
     const controller = {
       enqueue: (c: Uint8Array) => received.push(c),
+    // The controller fixture implements only enqueue, the operation consumed by flushQueue.
     } as unknown as ReadableStreamDefaultController;
 
     const result = flushQueue(q, controller);
@@ -558,6 +559,7 @@ describe("flushQueue", () => {
 
     const controller = {
       enqueue: () => { throw new Error("stream closed"); },
+    // The controller fixture implements only enqueue, the operation consumed by flushQueue.
     } as unknown as ReadableStreamDefaultController;
 
     const result = flushQueue(q, controller);
@@ -568,6 +570,7 @@ describe("flushQueue", () => {
     const q = new SseQueue({ capacity: 4 });
     const controller = {
       enqueue: jest.fn(),
+    // The controller fixture implements only enqueue, the operation consumed by flushQueue.
     } as unknown as ReadableStreamDefaultController;
 
     expect(flushQueue(q, controller)).toBe("ok");
@@ -586,6 +589,7 @@ describe("flushQueue", () => {
     const received: Uint8Array[] = [];
     const controller = {
       enqueue: (c: Uint8Array) => received.push(c),
+    // The controller fixture implements only enqueue, the operation consumed by flushQueue.
     } as unknown as ReadableStreamDefaultController;
 
     flushQueue(q, controller);

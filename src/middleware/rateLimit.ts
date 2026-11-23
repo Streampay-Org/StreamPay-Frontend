@@ -2,6 +2,7 @@ import type { NextRequest, NextResponse } from "next/server";
 import {
   checkRateLimit,
   getClientIdentity,
+  rateLimitHeaders,
   rateLimitResponse,
 } from "@/app/lib/rate-limit";
 import type { ClientIdentity } from "@/app/lib/rate-limit";
@@ -17,6 +18,24 @@ import {
 export type { ClientIdentity, WalletRateLimitType, WalletRateLimitResult };
 export { getClientIdentity, checkIpRateLimit, walletIpRateLimitResponse };
 
+export type RateLimitGuardResult =
+  | { allowed: true; headers: Record<string, string>; response?: undefined }
+  | { allowed: false; response: NextResponse; headers?: undefined };
+
+/**
+ * Attach `X-RateLimit-*` headers to an outgoing `Response` / `NextResponse`.
+ */
+export function withRateLimitHeaders<T extends Response>(
+  response: T,
+  headers?: Record<string, string>,
+): T {
+  if (!headers) return response;
+  for (const [name, value] of Object.entries(headers)) {
+    response.headers.set(name, value);
+  }
+  return response;
+}
+
 function getRequestUrl(request: Request, fallbackPath: string): URL {
   try {
     return request.url ? new URL(request.url) : new URL(`http://localhost${fallbackPath}`);
@@ -29,14 +48,14 @@ function getRequestUrl(request: Request, fallbackPath: string): URL {
  * Generic per-user rate-limit guard for API routes.
  *
  * Identity resolution priority: API key > JWT wallet sub > IP address.
- * Returns a `NextResponse` with 429 + Retry-After when the caller's bucket
- * is exhausted, or `null` when the request may proceed.
+ * Returns `{ allowed: false, response }` with 429 + Retry-After + X-RateLimit-* when the
+ * caller's bucket is exhausted, or `{ allowed: true, headers }` when the request may proceed.
  */
 export async function applyRateLimit(
   request: Request,
   routeName: string,
   method: "GET" | "POST" | "DELETE" = "GET",
-): Promise<NextResponse | null> {
+): Promise<RateLimitGuardResult> {
   const url = getRequestUrl(request, `/api/${routeName}`);
   const limitType = getLimitForRoute(method, url.pathname);
   const identity = getClientIdentity(request);
@@ -44,18 +63,18 @@ export async function applyRateLimit(
 
   if (!result.allowed) {
     recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
-    return rateLimitResponse(result.retryAfter!) as unknown as NextResponse;
+    return { allowed: false, response: rateLimitResponse(result.retryAfter!, result) };
   }
 
   recordRequest(url.pathname);
-  return null;
+  return { allowed: true, headers: rateLimitHeaders(result) };
 }
 
 export async function streamsRateLimit(
   request: Request,
   method: "GET" | "POST" | "DELETE",
   path: string,
-): Promise<{ allowed: true; response?: undefined } | { allowed: false; response: NextResponse }> {
+): Promise<RateLimitGuardResult> {
   const url = getRequestUrl(request, path);
   const limitType = getLimitForRoute(method, url.pathname);
   const identity = getClientIdentity(request);
@@ -63,11 +82,11 @@ export async function streamsRateLimit(
 
   if (!result.allowed) {
     recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
-    return { allowed: false, response: rateLimitResponse(result.retryAfter!) as unknown as NextResponse };
+    return { allowed: false, response: rateLimitResponse(result.retryAfter!, result) };
   }
 
   recordRequest(url.pathname);
-  return { allowed: true };
+  return { allowed: true, headers: rateLimitHeaders(result) };
 }
 
 /**

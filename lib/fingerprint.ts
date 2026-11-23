@@ -100,11 +100,11 @@ function sha256Hex(input: string): string {
 }
 
 /** Merge the request fingerprint into audit metadata. */
-export function attachRequestFingerprintMetadata<T extends Record<string, unknown> | undefined>(
+export function attachRequestFingerprintMetadata<T>(
   request: Request | undefined,
-  metadata?: T,
-): Record<string, unknown> {
-  const base: Record<string, unknown> = { ...(metadata ?? {}) };
+  metadata?: Record<string, T>,
+): Record<string, T | string> {
+  const base: Record<string, T | string> = { ...(metadata ?? {}) };
   if (request) base.requestFingerprint = generateFingerprint(request);
   return base;
 }

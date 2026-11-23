@@ -4,7 +4,9 @@ import { recordThrottle, recordRequest } from "@/app/lib/rate-limit-metrics";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { getCorrelationContext } from "@/app/lib/logger";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
+import { getAdminAddress } from "@/app/lib/admin-guard";
 import { getLastSeen } from "@/lib/lastSeen";
+import { withRouteSpan } from "@/lib/routeSpan";
 import { withRouteTimeout } from "@/src/middleware/timeout";
 
 function createErrorResponse(code: string, message: string, status: number) {
@@ -32,16 +34,20 @@ async function handleIdentityMeGet(request: Request) {
   return NextResponse.json({
     data: {
       wallet_address: actor.walletAddress,
+      role: actor.role,
+      is_admin: actor.role === "admin" || actor.walletAddress === getAdminAddress(),
       email: null,
       display_name: actor.walletAddress,
       avatar_url: null,
-      created_at: new Date().toISOString(),
-      last_seen: getLastSeen(actor.actorId),
+      created_at: null,
+      last_seen: getLastSeen(actor.walletAddress),
     },
     links: { self: "/api/identity/me" },
   });
 }
 
 export async function GET(request: Request) {
-  return withRouteTimeout(request, () => handleIdentityMeGet(request));
+  return withRouteSpan("/api/identity/me", () =>
+    withRouteTimeout(request, () => handleIdentityMeGet(request)),
+  )(request);
 }

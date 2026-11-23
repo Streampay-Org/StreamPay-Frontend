@@ -25,6 +25,8 @@ export interface WithdrawalStatus {
  * The contract escrow is fully drained after cancellation (no dust).
  */
 export interface CancellationSplit {
+  /** Wallet address of the stream sender receiving the refund leg. */
+  senderAddress?: string;
   /** Raw units paid to the recipient (vested but not yet released). */
   recipientPayout: string;
   /** Raw units refunded to the sender (unvested remainder). */
@@ -45,17 +47,24 @@ export interface CancellationSplit {
 
 export interface Stream {
   id: string;
+  tenant?: string;
+  /** Alternate tenant key used by some persistence adapters (takes precedence over `tenant`). */
+  tenantId?: string;
+  /** Owning organisation id, when the stream is org-managed. */
+  orgId?: string;
   recipient: string;
   rate: string;
   schedule: string;
   status: StreamStatus;
   nextAction?: StreamAction;
-  email?: string;       // PII
-  label?: string;       // PII
-  memo?: string;        // PII
-  partnerId?: string;   // PII
+  email?: string; // PII
+  label?: string; // PII
+  memo?: string; // PII
+  partnerId?: string; // PII
   createdAt: string;
   updatedAt: string;
+  startTime?: string;
+  endTime?: string;
   settlementTxHash?: string;
   withdrawal?: WithdrawalStatus;
   /**
@@ -76,14 +85,27 @@ export interface Stream {
   cancellation?: CancellationSplit;
   /**
    * Wallet address of the stream sender (payer). Required for the refund leg
-   * of cancel_stream. Stored at creation time.
+   * of cancel_stream. Stored at creation time. `null` for unclaimed streams.
    */
-  senderAddress?: string;
+  senderAddress?: string | null;
+  /**
+   * 
+   * 
+   * Stream ownership state:
+   * - "individual": Owned by a specific wallet sender (requires sender JWT auth to cancel).
+   * - "org": Managed by organization RBAC policy.
+   * - "unclaimed": Created unauthenticated or legacy backfill; cannot be cancelled until claimed.
+   */
+  ownership?: "individual" | "org" | "unclaimed";
   /**
    * Vested amount at the time of the last on-chain update (raw i128 units).
    * Tracks how much the recipient has earned so far.
    */
   vestedAmount?: string;
+
+
+    tags?: string[];
+    
   /**
    * Amount already released to the recipient before this operation (raw i128 units).
    */
@@ -102,6 +124,21 @@ export interface Stream {
    * stream escrow account (GrantFox campaign, issue #pause-entrypoint).
    */
   pausedAt?: string;
+  /**
+   * Total stream duration in milliseconds. Used by the escrow vesting
+   * computation to derive the vested amount.
+   */
+  total?: string;
+  /**
+   * Total time the stream spent paused, in milliseconds.
+   */
+  totalPausedMs?: number;
+  /**
+   * Webhook endpoint (HTTPS) notified on stream lifecycle transitions.
+   */
+  webhook_url?: string;
+  /** Completed pause time in milliseconds, excluded from linear vesting. */
+  pausedDurationMs?: number;
 }
 
 export interface User {
@@ -109,7 +146,7 @@ export interface User {
   email: string | null;
   display_name: string;
   avatar_url: string | null;
-  created_at: string;
+  created_at: string | null;
   last_seen: string | null;
 }
 
@@ -153,6 +190,8 @@ export interface ActivityEvent {
   id: string;
   type: string;
   streamId?: string;
+  /** Wallet that produced a non-stream event (for example `wallet.connected`). */
+  actorAddress?: string;
   timestamp: string;
   description: string;
   isDeleted?: boolean;

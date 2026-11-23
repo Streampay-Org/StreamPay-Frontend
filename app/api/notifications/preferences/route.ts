@@ -11,47 +11,28 @@ import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
+import { withRouteSpan } from "@/lib/routeSpan";
 import {
   QuietHoursConfig,
   DEFAULT_QUIET_HOURS,
   validatePartialQuietHours,
 } from "@/app/lib/quiet-hours";
-
-export interface NotificationPreferences {
-  userId: string;
-  email: boolean;
-  inApp: boolean;
-  webhook: boolean;
-  soundEnabled: boolean;
-  events: {
-    streamCreated: boolean;
-    streamCompleted: boolean;
-    streamCancelled: boolean;
-    paymentFailed: boolean;
-    lowBalance: boolean;
-  };
-  quietHours: QuietHoursConfig;
-  updatedAt: string;
-}
-
-const prefsStore = new Map<string, NotificationPreferences>();
-
-const DEFAULT_PREFS: Omit<NotificationPreferences, "userId" | "updatedAt"> = {
-  email: true,
-  inApp: true,
-  webhook: false,
-  soundEnabled: true,
-  events: {
-    streamCreated: true,
-    streamCompleted: true,
-    paymentFailed: true,
-    streamCancelled: true,
-    lowBalance: false,
-  },
-  quietHours: {
-    ...DEFAULT_QUIET_HOURS,
-  },
-};
+import {
+  getPreferences,
+  setPreferences,
+  type NotificationPreferences,
+} from "@/app/lib/notification-prefs-store";
+import {
+  buildLimitsConfig,
+  createBodySizeTooLargeResponse,
+  getBodySizeLimit,
+} from "@/lib/bodySize";
+import {
+  BodyTooLargeError,
+  InvalidJsonError,
+  readJsonBody,
+} from "@/lib/readJsonBody";
+import { resolveRequestId } from "@/lib/requestId";
 
 const TOP_LEVEL_FIELDS = ["email", "inApp", "webhook", "soundEnabled", "events", "quietHours"] as const;
 const EVENT_FIELDS = [
@@ -90,22 +71,6 @@ function createErrorResponse(request: Request, code: string, message: string, st
     },
     { status },
   );
-}
-
-function getPreferences(userId: string): NotificationPreferences {
-  const existing = prefsStore.get(userId);
-  if (existing) {
-    // Ensure quietHours is populated even if previously saved without it
-    return {
-      ...existing,
-      quietHours: existing.quietHours ?? { ...DEFAULT_QUIET_HOURS },
-    };
-  }
-  return {
-    userId,
-    ...DEFAULT_PREFS,
-    updatedAt: new Date().toISOString(),
-  };
 }
 
 interface PartialPreferencePayload {
@@ -171,7 +136,7 @@ function validatePreferencePayload(body: unknown): PartialPreferencePayload | nu
   return normalized;
 }
 
-export async function GET(request: Request) {
+async function handleNotificationPreferencesGet(request: Request) {
   const url = new URL(request.url);
   const limitType = getLimitForRoute("GET", url.pathname);
   const identity = getClientIdentity(request);
@@ -208,7 +173,7 @@ export async function GET(request: Request) {
   });
 }
 
-export async function PUT(request: Request) {
+async function handleNotificationPreferencesPut(request: Request) {
   const url = new URL(request.url);
   const limitType = getLimitForRoute("PUT", url.pathname);
   const identity = getClientIdentity(request);
@@ -231,9 +196,28 @@ export async function PUT(request: Request) {
 
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
-    return createErrorResponse(request, "INVALID_JSON", "Request body must be valid JSON", 400);
+    const limits = buildLimitsConfig();
+    const maxBytes = getBodySizeLimit(url.pathname, limits) ?? limits.default;
+    body = await readJsonBody(request, { maxBytes });
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) {
+      return createBodySizeTooLargeResponse(
+        error.receivedBytes,
+        error.maxBytes,
+        resolveRequestId(request.headers),
+      );
+    }
+    if (error instanceof InvalidJsonError) {
+      return createErrorResponse(
+        request,
+        error.code,
+        error.code === "EMPTY_BODY"
+          ? "Request body is required"
+          : "Request body must be valid JSON",
+        400,
+      );
+    }
+    throw error;
   }
 
   const payload = validatePreferencePayload(body);
@@ -278,7 +262,7 @@ export async function PUT(request: Request) {
     updatedAt: new Date().toISOString(),
   };
 
-  prefsStore.set(actor.actorId, updated);
+  setPreferences(actor.actorId, updated);
   const newEtag = computeETag(actor.actorId, updated);
 
   logger.info("Notification preferences updated", {
@@ -292,4 +276,16 @@ export async function PUT(request: Request) {
       "Cache-Control": "private, max-age=0, must-revalidate",
     },
   });
+}
+
+export async function GET(request: Request) {
+  return withRouteSpan("/api/notifications/preferences", () =>
+    handleNotificationPreferencesGet(request),
+  )(request);
+}
+
+export async function PUT(request: Request) {
+  return withRouteSpan("/api/notifications/preferences", () =>
+    handleNotificationPreferencesPut(request),
+  )(request);
 }

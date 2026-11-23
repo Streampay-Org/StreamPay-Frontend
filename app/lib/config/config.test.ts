@@ -8,6 +8,7 @@ import {
   validateConfig,
   getConfig,
   resetConfigCache,
+  onNetworkChange,
   ConfigValidationError,
   isSecret,
   redactSecrets,
@@ -20,7 +21,8 @@ import {
   TESTNET_PROFILE,
   MAINNET_PROFILE,
 } from './stellar';
-import { resetBootstrap } from './bootstrap';
+import { bootstrapApplication, resetBootstrap } from './bootstrap';
+import { streamCache } from '../cache';
 
 describe('Stellar Network Configuration', () => {
   beforeEach(() => {
@@ -421,6 +423,108 @@ describe('Stellar Network Configuration', () => {
       resetConfigCache();
       const config2 = getConfig();
       expect(config1).not.toBe(config2);
+    });
+
+    it('should read the environment at validateConfig() call time', () => {
+      process.env.STELLAR_NETWORK = 'testnet';
+      process.env.JWT_SECRET = 'first-secret-at-least-32-characters-long';
+      process.env.ALLOWED_ORIGINS = 'http://localhost:3000';
+      process.env.SERVICE_NAME = 'first-service';
+
+      const first = validateConfig();
+      expect(first.jwtSecret).toBe('first-secret-at-least-32-characters-long');
+      expect(first.serviceName).toBe('first-service');
+
+      process.env.JWT_SECRET = 'second-secret-at-least-32-characters-long';
+      process.env.SERVICE_NAME = 'second-service';
+
+      const second = validateConfig();
+      expect(second.jwtSecret).toBe('second-secret-at-least-32-characters-long');
+      expect(second.serviceName).toBe('second-service');
+    });
+  });
+
+  describe('Stream Cache Network Change Flush', () => {
+    const originalCacheDisabled = process.env.STREAMPAY_CACHE_DISABLED;
+    const sampleStream = {
+      id: 'stream-1',
+      recipient: 'GABCD1234',
+      rate: '100 XLM / month',
+      schedule: 'Pays every 30 days',
+      status: 'active' as const,
+      createdAt: '2026-04-01T00:00:00Z',
+      updatedAt: '2026-04-01T00:00:00Z',
+      token: 'XLM',
+    };
+
+    beforeEach(() => {
+      process.env.STREAMPAY_CACHE_DISABLED = 'false';
+      process.env.STELLAR_NETWORK = 'testnet';
+      process.env.JWT_SECRET = 'test-secret-at-least-32-characters-long';
+      process.env.ALLOWED_ORIGINS = 'http://localhost:3000';
+    });
+
+    afterEach(() => {
+      if (originalCacheDisabled === undefined) {
+        delete process.env.STREAMPAY_CACHE_DISABLED;
+      } else {
+        process.env.STREAMPAY_CACHE_DISABLED = originalCacheDisabled;
+      }
+    });
+
+    it('flushes streamCache when switching STELLAR_NETWORK via resetBootstrap and bootstrapApplication', () => {
+      bootstrapApplication();
+      streamCache.set('tenant-1', 'stream-1', sampleStream, 'testnet');
+      expect(streamCache.get('tenant-1', 'stream-1', 'testnet')).toEqual(sampleStream);
+
+      process.env.STELLAR_NETWORK = 'mainnet';
+      resetBootstrap();
+      bootstrapApplication();
+
+      expect(streamCache.get('tenant-1', 'stream-1', 'testnet')).toBeNull();
+    });
+
+    it('flushes streamCache immediately when validateConfig sees a different STELLAR_NETWORK', () => {
+      validateConfig();
+      streamCache.set('tenant-1', 'stream-1', sampleStream, 'testnet');
+      expect(streamCache.get('tenant-1', 'stream-1', 'testnet')).toEqual(sampleStream);
+
+      process.env.STELLAR_NETWORK = 'mainnet';
+      validateConfig();
+
+      expect(streamCache.get('tenant-1', 'stream-1', 'testnet')).toBeNull();
+    });
+
+    it('keeps streamCache entries when STELLAR_NETWORK is unchanged on re-bootstrap or re-validation', () => {
+      bootstrapApplication();
+      streamCache.set('tenant-1', 'stream-1', sampleStream, 'testnet');
+
+      // Re-bootstrap and re-validate with the same network
+      bootstrapApplication();
+      validateConfig();
+
+      expect(streamCache.get('tenant-1', 'stream-1', 'testnet')).toEqual(sampleStream);
+    });
+
+    it('always flushes streamCache on explicit resetConfigCache()', () => {
+      validateConfig();
+      streamCache.set('tenant-1', 'stream-1', sampleStream, 'testnet');
+
+      resetConfigCache();
+
+      expect(streamCache.get('tenant-1', 'stream-1', 'testnet')).toBeNull();
+    });
+
+    it('supports unsubscribing custom onNetworkChange listeners', () => {
+      const listener = jest.fn();
+      const unsubscribe = onNetworkChange(listener);
+
+      resetConfigCache();
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      unsubscribe();
+      resetConfigCache();
+      expect(listener).toHaveBeenCalledTimes(1);
     });
   });
 });

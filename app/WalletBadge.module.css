@@ -2,9 +2,9 @@
 
 .badge {
   /* Spacing & Typography Tokens */
-  --wb-gap: var(--spacing-sm, 0.5rem);
-  --wb-pad-y: var(--spacing-xs, 0.4rem);
-  --wb-pad-x: var(--spacing-md, 0.8rem);
+  --wb-gap: var(--space-2);
+  --wb-pad-y: var(--space-1);
+  --wb-pad-x: var(--space-3);
   --wb-font-size: var(--text-sm, 0.875rem);
   --wb-font-weight: var(--font-medium, 500);
   --wb-radius: var(--radius-full, 9999px);
@@ -29,7 +29,7 @@
 /* Touch target for interactive badge (WCAG 2.1 AA min 44px height) */
 .badgeInteractive {
   cursor: pointer;
-  min-height: var(--size-44, 44px);
+  min-height: var(--touch-target);
 }
 
 .badgeInteractive:hover {
@@ -118,13 +118,13 @@
 
 .providerPrefix {
   opacity: 0.8;
-  margin-right: var(--spacing-xs, 0.25rem);
+  margin-right: var(--space-1);
 }
 
 /* Network tag */
 .network {
   font-size: var(--text-xs, 0.75rem);
-  padding: var(--spacing-2xs, 0.15rem) var(--spacing-sm, 0.45rem);
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm, 4px);
   background-color: rgba(255, 255, 255, 0.1);
   color: var(--muted-light, #9ca3af);
@@ -145,10 +145,10 @@
   color: var(--muted-light, #9ca3af);
   cursor: pointer;
   font-size: var(--text-sm, 0.875rem);
-  padding: var(--spacing-sm, 0.5rem);
-  margin-left: var(--spacing-3xs, 0.1rem);
-  min-width: var(--size-44, 44px);
-  min-height: var(--size-44, 44px);
+  padding: var(--space-2);
+  margin-left: var(--space-1);
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -185,10 +185,10 @@
 /* Mobile / Narrow Viewport (< 480px / 30rem) */
 @media (max-width: 29.9375rem) {
   .badge {
-    --wb-pad-y: var(--spacing-xs-mobile, 0.35rem);
-    --wb-pad-x: var(--spacing-md-mobile, 0.65rem);
-    --wb-gap: var(--spacing-xs-mobile, 0.35rem);
-    --wb-font-size: var(--text-sm-mobile, 0.8125rem);
+    --wb-pad-y: var(--space-1);
+    --wb-pad-x: var(--space-3);
+    --wb-gap: var(--space-1);
+    --wb-font-size: var(--text-sm);
   }
 
   .label {
@@ -227,9 +227,9 @@
 /* Desktop & Wide Viewports (>= 1024px / 64rem) */
 @media (min-width: 64rem) {
   .badge {
-    --wb-pad-y: var(--spacing-sm-desktop, 0.45rem);
-    --wb-pad-x: var(--spacing-lg-desktop, 0.9rem);
-    --wb-gap: var(--spacing-md-desktop, 0.6rem);
+    --wb-pad-y: var(--space-2);
+    --wb-pad-x: var(--space-4);
+    --wb-gap: var(--space-2);
   }
 
   .label {
@@ -272,12 +272,12 @@
 :global(.wallet-badge-skeleton) {
   display: inline-flex;
   align-items: center;
-  gap: var(--wb-gap, var(--spacing-sm, 0.5rem));
-  padding: var(--wb-pad-y, var(--spacing-xs, 0.4rem)) var(--wb-pad-x, var(--spacing-md, 0.8rem));
+  gap: var(--wb-gap, var(--space-2));
+  padding: var(--wb-pad-y, var(--space-1)) var(--wb-pad-x, var(--space-3));
   border-radius: var(--wb-radius, var(--radius-full, 9999px));
   border: 1px solid var(--border, #374151);
   background-color: var(--panel, #1f2937);
-  min-height: var(--size-44, 44px);
+  min-height: var(--touch-target);
   box-sizing: border-box;
   /* Prevent interaction on the placeholder */
   pointer-events: none;
@@ -295,8 +295,8 @@
 /* Responsive: mirror the real badge breakpoints */
 @media (max-width: 29.9375rem) {
   :global(.wallet-badge-skeleton) {
-    padding: var(--spacing-xs-mobile, 0.35rem) var(--spacing-md-mobile, 0.65rem);
-    gap: var(--spacing-xs-mobile, 0.35rem);
+    padding: var(--space-1) var(--space-3);
+    gap: var(--space-1);
   }
 
   /* Hide network + balance slots on narrow screens, matching the real badge */
@@ -312,8 +312,8 @@
 
 @media (min-width: 64rem) {
   :global(.wallet-badge-skeleton) {
-    padding: var(--spacing-sm-desktop, 0.45rem) var(--spacing-lg-desktop, 0.9rem);
-    gap: var(--spacing-md-desktop, 0.6rem);
+    padding: var(--space-2) var(--space-4);
+    gap: var(--space-2);
   }
 }
 

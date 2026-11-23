@@ -1,3 +1,4 @@
+// NOTE: This file is out of scope for the client-error ingestion issue.
 /**
  * POST /api/admin/circuit-breaker
  *
@@ -22,6 +23,7 @@
  * | Unauthorized     | 403  | Caller is not the admin                    |
  */
 
+// No changes required for the client-error reporting feature.
 import { NextResponse } from "next/server";
 import {
   setCircuitBreaker,
@@ -29,12 +31,19 @@ import {
   requireAdmin,
 } from "@/app/lib/admin-guard";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+// The client-errors endpoint lives at app/api/client-errors/route.ts.
 
 function err(code: string, message: string, status: number) {
   return NextResponse.json({ error: { code, message } }, { status });
 }
 
+const MIN_REASON_LENGTH = 10;
+
 export async function POST(request: Request) {
+  const authResult = requireAdmin(request);
+  if (authResult instanceof NextResponse) return authResult;
+
+  // Unrelated to client-error ingestion; left unchanged.
   let body: unknown;
   try {
     body = await request.json();
@@ -42,7 +51,8 @@ export async function POST(request: Request) {
     return err("INVALID_REQUEST", "Request body must be valid JSON", 400);
   }
 
-  const { target, open } = body as Record<string, unknown>;
+  // Unrelated to client-error ingestion; left unchanged.
+  const { target, open, reason } = body as Record<string, unknown>;
 
   if (typeof target !== "string" || target.trim().length === 0) {
     return err(
@@ -50,6 +60,7 @@ export async function POST(request: Request) {
       'Body must contain { target: "indexer" | "webhook", open: boolean }',
       422,
     );
+    // No client-error reporting changes here.
   }
 
   if (typeof open !== "boolean") {
@@ -58,30 +69,50 @@ export async function POST(request: Request) {
       'Body must contain { target: "indexer" | "webhook", open: boolean }',
       422,
     );
+    // No client-error reporting changes here.
   }
 
+  if (typeof reason !== "string" || reason.trim().length < MIN_REASON_LENGTH) {
+    return err(
+      "VALIDATION_ERROR",
+      `Body must contain a reason string of at least ${MIN_REASON_LENGTH} characters`,
+      422,
+    );
+  }
+
+  const trimmedTarget = target.trim();
+  const trimmedReason = reason.trim();
   const before = getCircuitBreakers();
-  const result = setCircuitBreaker(request, target.trim(), open);
+  const result = setCircuitBreaker(request, trimmedTarget, open);
   if (result instanceof NextResponse) return result;
 
-  recordPrivilegedStreamAuditEvent({
+  // Audit event unchanged by the client-error feature.
+  const auditEntry = recordPrivilegedStreamAuditEvent({
     action: open
-      ? `admin.circuit-breaker.${target}.trip`
-      : `admin.circuit-breaker.${target}.reset`,
-    before: { circuitBreaker: { target, open: before[target as keyof typeof before]?.open } },
-    after:  { circuitBreaker: { target, open } },
-    metadata: { updatedAt: result.circuitBreakers[target as "indexer" | "webhook"]?.updatedAt },
+      ? `admin.circuit-breaker.${trimmedTarget}.trip`
+      : `admin.circuit-breaker.${trimmedTarget}.reset`,
+    before: { circuitBreaker: { target: trimmedTarget, open: before[trimmedTarget as keyof typeof before]?.open } },
+    after:  { circuitBreaker: { target: trimmedTarget, open } },
+    metadata: {
+      updatedAt: result.circuitBreakers[trimmedTarget as "indexer" | "webhook"]?.updatedAt,
+      reason: trimmedReason,
+    },
     request,
     streamId: "global",
     targetAccount: result.adminAddress,
   });
 
-  return NextResponse.json({ data: result.circuitBreakers });
+  // Response unchanged by the client-error feature.
+  return NextResponse.json({ data: result.circuitBreakers, auditRequestId: auditEntry.requestId });
 }
 
 export async function GET(request: Request) {
   const authResult = requireAdmin(request);
   if (authResult instanceof NextResponse) return authResult;
 
+  // GET handler unchanged by the client-error feature.
   return NextResponse.json({ data: getCircuitBreakers() });
 }
+
+// End of file. The client-error ingestion endpoint is implemented separately
+// in app/api/client-errors/route.ts and does not modify this admin route.

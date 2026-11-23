@@ -6,13 +6,25 @@ other processing.
 
 ## GET /api/auth/wallet
 
-Issues a one-time challenge for wallet-based authentication. When `limit` or `cursor` is supplied, the endpoint instead returns a paginated list of previously issued wallet challenges ordered by `(created_at, id)` for stable navigation.
+Issues a one-time challenge for wallet-based authentication. Challenges are
+generated with a CSPRNG and have the shape
+`streampay-auth:v1:<nonce>|<origin>|<expires_at>`, where `<nonce>` is a
+43-character base64url value, `<origin>` is the server origin, and
+`<expires_at>` is the ISO-8601 expiry. The client signs the whole string, so a
+challenge minted on one deployment cannot be replayed against another.
 
 | Query param | Rules |
 | ----------- | ----- |
 | `address`   | Required for challenge issuance. Stellar public key, checksum-validated (strkey), not just shape. |
-| `limit`     | Optional for pagination. Defaults to `20`, capped at `100`. |
-| `cursor`    | Optional for pagination. Must be a valid composite cursor encoding `(created_at,id)`. |
+| `limit`     | Rejected with `400 UNSUPPORTED_QUERY`. |
+| `cursor`    | Rejected with `400 UNSUPPORTED_QUERY`. |
+
+The paginated listing mode was **removed** as a security fix: returning every
+outstanding challenge let unauthenticated callers harvest live challenges for
+any address. Responses always carry `Cache-Control: no-store` and never answer
+`304 Not Modified` — a freshly issued challenge must reach the client. The
+in-process store is bounded: 5 live challenges per address (oldest evicted),
+`WALLET_CHALLENGE_MAX` globally (default 10 000), TTL-pruned on every write.
 
 ## POST /api/auth/wallet
 
@@ -23,7 +35,7 @@ validation.
 | Body field  | Rules |
 | ----------- | ----- |
 | `address`   | Required string. Checksum-valid Stellar public key. |
-| `challenge` | Required string. Must match the issued shape `streampay_auth_<timestamp>_<nonce>`, max 128 chars. |
+| `challenge` | Required string. Must match the issued shape `streampay-auth:v1:<nonce>|<origin>|<expires_at>`, max 256 chars. |
 | `signature` | Required non-empty string, max 1024 chars. |
 
 Unknown body fields are ignored. A body that is not valid JSON is rejected

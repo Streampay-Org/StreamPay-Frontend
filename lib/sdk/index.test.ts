@@ -1,4 +1,9 @@
-import { StreamPayClient, StreamPaySdkError, type EventSourceLike } from "./index";
+import {
+  createStreamPayClient,
+  StreamPayClient,
+  StreamPaySdkError,
+  type EventSourceLike,
+} from "./index";
 
 function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
@@ -28,6 +33,11 @@ class FakeEventSource implements EventSourceLike {
     listener?.({ data: JSON.stringify(data) } as MessageEvent<string>);
   }
 
+  emitRawEvent(type: string, data: string): void {
+    const listener = this.listeners.get(type);
+    listener?.({ data } as MessageEvent<string>);
+  }
+
   emitRawMessage(data: string): void {
     const event = { data } as MessageEvent<string>;
     this.onmessage?.(event);
@@ -46,8 +56,9 @@ describe("StreamPayClient", () => {
   it("sends typed REST requests with auth and correlation headers", async () => {
     const fetchFn = jest.fn().mockResolvedValue(
       jsonResponse({
-        data: [{ id: "stream-1", recipient: "Ada", rate: "10 XLM/month", status: "active" }],
-        meta: { total: 1 },
+        streams: [{ id: "stream-1", recipient: "Ada", rate: "10 XLM/month", status: "active" }],
+        meta: { hasNext: false, nextCursor: null, total: 1 },
+        links: { self: "/api/v2/streams" },
       }),
     );
     const client = new StreamPayClient({
@@ -59,7 +70,7 @@ describe("StreamPayClient", () => {
 
     const result = await client.listStreams({ limit: 10, status: "active" });
 
-    expect(result.data[0].id).toBe("stream-1");
+    expect(result.streams[0].id).toBe("stream-1");
     expect(fetchFn).toHaveBeenCalledWith(
       "https://api.streampay.test/api/v2/streams?limit=10&status=active",
       expect.objectContaining({
@@ -91,7 +102,7 @@ describe("StreamPayClient", () => {
   it("adds idempotency keys and JSON bodies for stream creation", async () => {
     const fetchFn = jest.fn().mockResolvedValue(
       jsonResponse({
-        data: { id: "stream-2", recipient: "Kemi", rate: "5 XLM/week", status: "draft" },
+        id: "stream-2", recipient: "Kemi", rate: "5 XLM/week", status: "draft",
       }),
     );
     const client = new StreamPayClient({ baseUrl: "https://api.streampay.test", fetchFn });
@@ -322,5 +333,140 @@ describe("StreamPayClient", () => {
     sub1.close();
     sub2.close();
     consoleSpy.mockRestore();
+  });
+
+  it("validates required ids, stream fields, and the base URL", async () => {
+    expect(() => new StreamPayClient({ baseUrl: "  " })).toThrow(
+      "StreamPayClient requires a non-empty baseUrl",
+    );
+
+    const fetchFn = jest.fn();
+    const client = new StreamPayClient({
+      baseUrl: "https://api.streampay.test",
+      fetchFn,
+      eventSourceFactory: () => new FakeEventSource(),
+    });
+
+    await expect(client.getStream(" ")).rejects.toThrow("stream id is required");
+    await expect(client.deleteStream("")).rejects.toThrow("stream id is required");
+    expect(() => client.subscribeToStream(" ")).toThrow("stream id is required");
+    await expect(
+      client.createStream({ recipient: " ", rate: "10", schedule: "month" }),
+    ).rejects.toThrow("recipient, rate, and schedule are required");
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("keeps activity pages and handles empty delete responses", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ data: [{ id: "event-1", type: "created", timestamp: "now" }] }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = new StreamPayClient({
+      baseUrl: "https://api.streampay.test",
+      fetchFn,
+    });
+
+    await expect(client.listActivity({ streamId: "stream-1" })).resolves.toMatchObject({
+      data: [{ id: "event-1" }],
+    });
+    await expect(client.deleteStream("stream-1")).resolves.toBeUndefined();
+    expect(fetchFn).toHaveBeenLastCalledWith(
+      "https://api.streampay.test/api/v2/streams/stream-1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("parses non-JSON errors and falls back to response request IDs", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValueOnce(
+        new Response("upstream unavailable", {
+          headers: { "content-type": "text/plain" },
+          status: 502,
+          statusText: "Bad Gateway",
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { details: { field: "rate" } } },
+          422,
+          { "x-request-id": "req-header" },
+        ),
+      );
+    const client = new StreamPayClient({
+      baseUrl: "https://api.streampay.test",
+      fetchFn,
+      requestIdFactory: () => "req-fallback",
+    });
+
+    await expect(client.listActivity()).rejects.toMatchObject({
+      code: "HTTP_ERROR",
+      details: "upstream unavailable",
+      status: 502,
+    });
+    await expect(client.listActivity()).rejects.toMatchObject({
+      code: "UNKNOWN_ERROR",
+      requestId: "req-header",
+      status: 422,
+    });
+  });
+
+  it("dispatches SSE lifecycle events and reports malformed payloads", () => {
+    const source = new FakeEventSource();
+    const onOpen = jest.fn();
+    const onError = jest.fn();
+    const onMessage = jest.fn();
+    const onUpdate = jest.fn();
+    const onSettlement = jest.fn();
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+    source.close = jest.fn(() => {
+      throw new Error("close failed");
+    });
+    const client = new StreamPayClient({
+      baseUrl: "https://api.streampay.test",
+      eventSourceFactory: () => source,
+    });
+    const subscription = client.subscribeToStream("stream-lifecycle", {
+      onOpen,
+      onError,
+      onMessage,
+      onUpdate,
+      onSettlement,
+    });
+    const failingSubscription = client.subscribeToStream("stream-lifecycle", {
+      onError: () => {
+        throw new Error("error handler failed");
+      },
+      onSettlement: () => {
+        throw new Error("settlement handler failed");
+      },
+    });
+
+    source.emitOpen();
+    source.emitError();
+    source.emitRawMessage("hello");
+    source.emit("stream:updated", { id: "stream-lifecycle", status: "active" });
+    source.emit("settle:finished", { id: "stream-lifecycle", status: "ended" });
+    source.emitRawEvent("stream:updated", "{");
+    source.emitRawEvent("settle:finished", "{");
+
+    expect(onOpen).toHaveBeenCalledWith(expect.any(Event));
+    expect(onError).toHaveBeenCalledTimes(3);
+    expect(onMessage).toHaveBeenCalledWith({ data: "hello" });
+    expect(onUpdate).toHaveBeenCalledWith({ id: "stream-lifecycle", status: "active" });
+    expect(onSettlement).toHaveBeenCalledWith({ id: "stream-lifecycle", status: "ended" });
+    subscription.close();
+    failingSubscription.close();
+    expect(source.close).toHaveBeenCalledTimes(1);
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("constructs clients through the exported factory", () => {
+    expect(createStreamPayClient({ baseUrl: "https://api.streampay.test" })).toBeInstanceOf(
+      StreamPayClient,
+    );
   });
 });

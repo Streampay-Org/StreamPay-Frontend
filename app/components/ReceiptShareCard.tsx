@@ -28,7 +28,7 @@ export function maskAddress(address: string): string {
   return `${address.slice(0, 4)}…${address.slice(-4)}`;
 }
 
-const COPY_FEEDBACK_MS = 2_000;
+export const COPY_FEEDBACK_MS = 2_000;
 
 export function ReceiptShareCard({
   streamId,
@@ -57,12 +57,17 @@ export function ReceiptShareCard({
   const handleCopy = useCallback(() => {
     const shareText =
       `StreamPay receipt ${streamId}: ${amount} ${assetCode} to ${shownRecipient}`;
-    navigator.clipboard?.writeText(shareText).then(() => {
-      setCopied(true);
-      setAnnouncement("Share text copied to clipboard.");
-      const t = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
-      timeoutRef.current = t;
-    });
+    navigator.clipboard
+      ?.writeText(shareText)
+      .then(() => {
+        setCopied(true);
+        setAnnouncement("Share text copied to clipboard.");
+        const t = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
+        timeoutRef.current = t;
+      })
+      .catch(() => {
+        setAnnouncement("Could not copy share text to the clipboard.");
+      });
   }, [streamId, amount, assetCode, shownRecipient]);
 
   const handleMaskToggle = useCallback((next: boolean) => {

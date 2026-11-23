@@ -73,6 +73,20 @@ await client.deleteStream("stream-ended");
 const activity = await client.listActivity({ streamId: "stream-ada" });
 ```
 
+`listStreams()` follows the v2 response shape and returns `streams`, `meta`,
+and `links`. During the migration window, reading `page.data` still returns the
+same array at runtime and logs a deprecation warning once; the deprecated
+getter is intentionally absent from the TypeScript type. Update callers to use
+`page.streams`. `createStream()` returns the created stream directly, while
+`getStream()` returns the `data` stream from the single-stream response.
+
+Set `onDiagnostic` in the client options to receive SDK diagnostics instead of
+the default `console.warn` output.
+
+`StreamStatus` includes `draft`, `active`, `paused`, `ended`, `withdrawn`, and
+`cancelled`. Other server-provided status strings are preserved so newer API
+statuses remain usable before the SDK is updated.
+
 ## SSE Updates
 
 `subscribeToStream` wraps the existing live-events protocol at

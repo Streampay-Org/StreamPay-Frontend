@@ -11,8 +11,6 @@
 import { 
   getNetworkProfile, 
   getSupportedNetworks, 
-  validatePassphraseForNetwork,
-  validateHorizonUrlForNetwork,
   StellarNetwork,
   StellarNetworkProfile 
 } from './stellar';
@@ -55,13 +53,23 @@ interface OptionalEnvVars {
   INTERNAL_SERVICE_CURRENT_KEY_ID?: string;
   /** Allowed request freshness window in seconds */
   INTERNAL_SERVICE_CLOCK_SKEW_SECONDS?: string;
+  /** CI provider flag (set automatically in continuous integration) */
+  CI?: string;
+  /** GitHub Actions flag (set automatically on GitHub runners) */
+  GITHUB_ACTIONS?: string;
   /** Anomaly detection threshold for stream creation burst */
   ANOMALY_CREATION_THRESHOLD?: string;
   /** Anomaly detection threshold for settlement rate spike */
   ANOMALY_SETTLE_THRESHOLD?: string;
   /** Anomaly detection threshold for stream cancel burst */
   ANOMALY_CANCEL_THRESHOLD?: string;
+  /** Audit log persistence backend: memory (default) or postgres */
+  AUDIT_LOG_STORE?: string;
+  /** Postgres connection URL (required when AUDIT_LOG_STORE=postgres) */
+  DATABASE_URL?: string;
 }
+
+export type EventBusTransportType = 'memory' | 'redis';
 
 /**
  * Validated configuration
@@ -82,6 +90,10 @@ export interface ValidatedConfig {
     currentKeyId: string;
     keys: Record<string, string>;
     allowedClockSkewSeconds: number;
+  };
+  auditLog: {
+    store: 'memory' | 'postgres';
+    databaseUrl?: string;
   };
 }
 
@@ -171,11 +183,16 @@ export function redactSecrets(obj: Record<string, unknown>): Record<string, unkn
 }
 
 /**
- * Validate that CI is not using production credentials
+ * Validate that CI is not using production credentials.
+ *
+ * The flag and secret are passed in from the call-time environment snapshot
+ * so validation never reads stale module-load state.
  */
-function validateCIEnvironment(env: string, network: StellarNetwork): void {
-  const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
-  
+function validateCIEnvironment(
+  isCI: boolean,
+  network: StellarNetwork,
+  jwtSecret: string
+): void {
   if (isCI && network === 'mainnet') {
     throw new ConfigValidationError(
       'CI environment detected with mainnet network configuration. ' +
@@ -183,7 +200,7 @@ function validateCIEnvironment(env: string, network: StellarNetwork): void {
     );
   }
   
-  if (isCI && process.env.JWT_SECRET && process.env.JWT_SECRET !== 'streampay-dev-secret-do-not-use-in-prod') {
+  if (isCI && jwtSecret !== 'streampay-dev-secret-do-not-use-in-prod') {
     throw new ConfigValidationError(
       'CI environment detected with production JWT_SECRET. ' +
       'CI must use test/dev secrets only.'
@@ -265,15 +282,14 @@ function validateStellarNetwork(network: StellarNetwork): StellarNetworkProfile 
  *   (fail-fast at boot — no silent fallback to a hardcoded placeholder).
  * - The dev placeholder is only tolerated in NODE_ENV=development|test.
  */
-function validateJwtSecret(secret: string | undefined): string {
+function validateJwtSecret(secret: string | undefined, environment: string): string {
   if (!secret) {
     throw new ConfigValidationError(
       'JWT_SECRET environment variable is required'
     );
   }
   
-  const env   = process.env.NODE_ENV ?? "development";
-  const isDev = env === "development" || env === "test";
+  const isDev = environment === "development" || environment === "test";
 
   if (secret === 'streampay-dev-secret-do-not-use-in-prod' && !isDev) {
     throw new ConfigValidationError(
@@ -294,17 +310,20 @@ function validateJwtSecret(secret: string | undefined): string {
 function validateInternalServiceAuth(
   env: RequiredEnvVars & OptionalEnvVars
 ): ValidatedConfig["internalServiceAuth"] {
+  // The legacy shared token is deprecated and must never be used in production,
+  // even when HMAC keys are also configured.
+  if (env.NODE_ENV === "production" && env.INTERNAL_AUTH_TOKEN) {
+    throw new ConfigValidationError(
+      "INTERNAL_AUTH_TOKEN is not allowed in production. Configure INTERNAL_SERVICE_HMAC_KEYS and INTERNAL_SERVICE_CURRENT_KEY_ID instead."
+    );
+  }
+
   const hasHmacConfig =
     typeof env.INTERNAL_SERVICE_HMAC_KEYS === "string" ||
     typeof env.INTERNAL_SERVICE_CURRENT_KEY_ID === "string" ||
     typeof env.INTERNAL_SERVICE_CLOCK_SKEW_SECONDS === "string";
 
   if (!hasHmacConfig) {
-    if (env.NODE_ENV === "production" && env.INTERNAL_AUTH_TOKEN) {
-      throw new ConfigValidationError(
-        "INTERNAL_AUTH_TOKEN is not allowed in production. Configure INTERNAL_SERVICE_HMAC_KEYS and INTERNAL_SERVICE_CURRENT_KEY_ID instead."
-      );
-    }
     return undefined;
   }
 
@@ -411,25 +430,127 @@ function validateAnomalyThresholds(
 }
 
 /**
+ * Validate event bus transport configuration.
+ * Defaults to 'memory'. When 'redis' is selected, EVENT_BUS_REDIS_URL is required
+ * and must be a valid redis:// or rediss:// URL.
+ */
+export function validateEventBusConfig(
+  transportRaw?: string,
+  redisUrlRaw?: string
+): { transport: EventBusTransportType; redisUrl?: string } {
+  const normalized = (transportRaw ?? '').trim().toLowerCase();
+  const transport: EventBusTransportType =
+    normalized === '' ? 'memory' : (normalized as EventBusTransportType);
+
+  if (transport !== 'memory' && transport !== 'redis') {
+    throw new ConfigValidationError(
+      `Invalid EVENT_BUS_TRANSPORT: ${transportRaw}. Supported transports: memory, redis`
+    );
+  }
+
+  if (transport === 'redis') {
+    const redisUrl = (redisUrlRaw ?? '').trim();
+    if (!redisUrl) {
+      throw new ConfigValidationError(
+        'EVENT_BUS_REDIS_URL environment variable is required when EVENT_BUS_TRANSPORT=redis'
+      );
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(redisUrl);
+    } catch {
+      throw new ConfigValidationError(
+        'EVENT_BUS_REDIS_URL must be a valid redis:// or rediss:// URL'
+      );
+    }
+
+    if (parsed.protocol !== 'redis:' && parsed.protocol !== 'rediss:') {
+      throw new ConfigValidationError(
+        `EVENT_BUS_REDIS_URL must use redis:// or rediss:// protocol (received: ${parsed.protocol})`
+      );
+    }
+
+    return { transport, redisUrl };
+  }
+
+  return { transport };
+}
+
+/**
+ * Validate audit log storage configuration
+ */
+function validateAuditLogConfig(
+  storeRaw?: string,
+  databaseUrl?: string
+): ValidatedConfig['auditLog'] {
+  const store = (storeRaw?.trim() || 'memory').toLowerCase();
+
+  if (store !== 'memory' && store !== 'postgres') {
+    throw new ConfigValidationError(
+      `Invalid AUDIT_LOG_STORE: ${storeRaw}. Supported values: memory, postgres`
+    );
+  }
+
+  if (store === 'postgres') {
+    const trimmedUrl = databaseUrl?.trim();
+    if (!trimmedUrl) {
+      throw new ConfigValidationError(
+        'DATABASE_URL environment variable is required when AUDIT_LOG_STORE=postgres'
+      );
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmedUrl);
+    } catch {
+      throw new ConfigValidationError(
+        'DATABASE_URL must be a valid Postgres connection URL (postgres:// or postgresql://)'
+      );
+    }
+
+    if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') {
+      throw new ConfigValidationError(
+        'DATABASE_URL must use the postgres:// or postgresql:// protocol'
+      );
+    }
+
+    return {
+      store: 'postgres',
+      databaseUrl: trimmedUrl,
+    };
+  }
+
+  return {
+    store: 'memory',
+    databaseUrl: databaseUrl?.trim() || undefined,
+  };
+}
+
+/**
  * Main configuration validation function
  * Call this at application boot to fail-fast on invalid configuration
  * 
  * @throws ConfigValidationError if configuration is invalid
  */
 export function validateConfig(): ValidatedConfig {
+  // Read the environment on every invocation so runtime/test overrides are
+  // always honored instead of being frozen at module import time.
   const env = process.env as unknown as RequiredEnvVars & OptionalEnvVars;
+  const environment = env.NODE_ENV || 'development';
+  const isCI = env.CI === 'true' || env.GITHUB_ACTIONS === 'true';
   
   // Validate network
   const networkProfile = validateStellarNetwork(env.STELLAR_NETWORK);
   
   // Validate JWT secret
-  const jwtSecret = validateJwtSecret(env.JWT_SECRET);
+  const jwtSecret = validateJwtSecret(env.JWT_SECRET, environment);
   
   // Validate CI environment
-  validateCIEnvironment(env.NODE_ENV || 'development', networkProfile.name);
+  validateCIEnvironment(isCI, networkProfile.name, jwtSecret);
   
   // Validate ALLOWED_ORIGINS for browser API requests
-  const allowedOrigins = validateAllowedOrigins(env.ALLOWED_ORIGINS, env.NODE_ENV || 'development');
+  const allowedOrigins = validateAllowedOrigins(env.ALLOWED_ORIGINS, environment);
   
   // Validate anomaly thresholds
   const anomalyThresholds = validateAnomalyThresholds(
@@ -439,19 +560,52 @@ export function validateConfig(): ValidatedConfig {
   );
 
   const internalServiceAuth = validateInternalServiceAuth(env);
+  const auditLog = validateAuditLogConfig(env.AUDIT_LOG_STORE, env.DATABASE_URL);
   
   const config: ValidatedConfig = {
     network: networkProfile,
     jwtSecret,
     serviceName: env.SERVICE_NAME || 'streampay-frontend',
-    environment: env.NODE_ENV || 'development',
+    environment,
     internalAuthToken: env.INTERNAL_AUTH_TOKEN,
     allowedOrigins,
     anomalyThresholds,
     internalServiceAuth,
+    auditLog,
   };
-  
+
+  if (lastValidatedNetwork !== null && lastValidatedNetwork !== networkProfile.name) {
+    notifyNetworkChange();
+  }
+  lastValidatedNetwork = networkProfile.name;
+
   return config;
+}
+
+/**
+ * Listener invoked when the active Stellar network changes or config cache is reset.
+ */
+export type NetworkChangeListener = () => void;
+
+const networkChangeListeners = new Set<NetworkChangeListener>();
+let lastValidatedNetwork: StellarNetwork | null = null;
+
+function notifyNetworkChange(): void {
+  for (const listener of networkChangeListeners) {
+    listener();
+  }
+}
+
+/**
+ * Register a callback to be invoked whenever the configured Stellar network
+ * changes on re-validation or when `resetConfigCache()` is called explicitly.
+ * Returns an unsubscribe function.
+ */
+export function onNetworkChange(listener: NetworkChangeListener): () => void {
+  networkChangeListeners.add(listener);
+  return () => {
+    networkChangeListeners.delete(listener);
+  };
 }
 
 /**
@@ -467,8 +621,11 @@ export function getConfig(): ValidatedConfig {
 }
 
 /**
- * Reset cached configuration (useful for testing)
+ * Reset cached configuration (useful for testing).
+ * Always notifies registered network-change listeners so caches are flushed immediately.
  */
 export function resetConfigCache(): void {
   cachedConfig = null;
+  lastValidatedNetwork = null;
+  notifyNetworkChange();
 }

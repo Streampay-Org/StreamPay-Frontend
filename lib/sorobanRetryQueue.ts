@@ -215,6 +215,10 @@ const VALID_OPERATIONS: ReadonlySet<string> = new Set<SorobanOperation>([
   "fetchStream",
 ]);
 
+function isSorobanOperation(value: unknown): value is SorobanOperation {
+  return typeof value === "string" && VALID_OPERATIONS.has(value);
+}
+
 function buildError(
   code: string,
   message: string,
@@ -231,7 +235,7 @@ function validateOperation(
   value: unknown,
   correlationId: string,
 ): RetryQueueError | null {
-  if (typeof value !== "string" || !VALID_OPERATIONS.has(value)) {
+  if (!isSorobanOperation(value)) {
     return buildError(
       "INVALID_OPERATION",
       `operation must be one of: ${[...VALID_OPERATIONS].join(", ")}`,
@@ -437,6 +441,59 @@ function deserializeEntry(ser: SerializedRetryQueueEntry): RetryQueueEntry {
   return { ...ser, lastError: deserializeError(ser.lastError) };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isSerializedRetryQueueEntry(
+  value: unknown,
+): value is SerializedRetryQueueEntry {
+  if (!isRecord(value)) return false;
+
+  const { id, operation, payload, attempts, maxAttempts, nextRetryAt, status,
+    correlationId, createdAt, updatedAt, lastError } = value;
+  if (
+    typeof id !== "string" ||
+    id.trim().length === 0 ||
+    typeof correlationId !== "string" ||
+    correlationId.trim().length === 0 ||
+    !isSorobanOperation(operation) ||
+    validatePayload(operation, payload, correlationId) ||
+    typeof attempts !== "number" ||
+    !Number.isInteger(attempts) ||
+    attempts < 0 ||
+    typeof maxAttempts !== "number" ||
+    !Number.isInteger(maxAttempts) ||
+    maxAttempts < 0 ||
+    typeof nextRetryAt !== "number" ||
+    !Number.isFinite(nextRetryAt) ||
+    (status !== "pending" && status !== "processing" && status !== "dead") ||
+    typeof createdAt !== "string" ||
+    !Number.isFinite(Date.parse(createdAt)) ||
+    typeof updatedAt !== "string" ||
+    !Number.isFinite(Date.parse(updatedAt))
+  ) {
+    return false;
+  }
+
+  if (lastError !== null) {
+    if (
+      !isRecord(lastError) ||
+      lastError.__type !== "SorobanError" ||
+      typeof lastError.variant !== "string" ||
+      !Object.values(SorobanErrorCode).includes(lastError.variant as SorobanErrorCode) ||
+      typeof lastError.message !== "string" ||
+      (lastError.meta !== undefined && !isRecord(lastError.meta)) ||
+      (lastError.statusCode !== undefined &&
+        (typeof lastError.statusCode !== "number" || !Number.isFinite(lastError.statusCode)))
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 // =============================================================================
 // Storage Interface (in-memory, swappable)
 // =============================================================================
@@ -602,8 +659,8 @@ export const sorobanRetryQueue = {
 
       for (const ser of parsed.entries) {
         try {
-          if (!ser || typeof ser !== "object" || typeof ser.id !== "string") continue;
-          const entry = deserializeEntry(ser as SerializedRetryQueueEntry);
+          if (!isSerializedRetryQueueEntry(ser)) continue;
+          const entry = deserializeEntry(ser);
 
           // CRITICAL INVARIANT: Any entry found in "processing" state at
           // hydrate time was interrupted by a reload / crash mid-flight.
@@ -728,7 +785,6 @@ export const sorobanRetryQueue = {
   dequeue(
     now: number = Date.now(),
   ): RetryQueueResult<RetryQueueEntry | null> {
-    const cid = randomUUID();
     // Clamp now to a valid Date range. Infinity / NaN cause Date#toISOString
     // to throw, and tests pass Infinity as a sentinel for "any time".
     const safeNow = Number.isFinite(now) ? now : 4_000_000_000_000;

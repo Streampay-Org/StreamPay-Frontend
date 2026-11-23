@@ -9,7 +9,7 @@
  * Standardized error codes used across all StreamPay services.
  * These are stable, versioned, and machine-readable.
  */
-export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue | undefined };
 
 export type ErrorCode =
   // HTTP Standard Errors (4xx)
@@ -55,6 +55,7 @@ export type ErrorCode =
   | 'STREAM_NOT_FOUND'
   | 'INVALID_STREAM_STATE'
   | 'STREAM_CREATION_FAILED'
+  | 'AMOUNT_TOO_LARGE'
   | 'SETTLEMENT_FAILED'
   | 'WITHDRAWAL_FAILED'
   
@@ -140,7 +141,7 @@ export interface StreamPayError {
     /** Field-level validation errors for forms */
     fieldErrors?: Record<string, string>;
     /** Additional context (safe only) - must be JSON-serializable */
-    [key: string]: JsonValue;
+    [key: string]: JsonValue | undefined;
   };
   
   /** 
@@ -167,7 +168,7 @@ export interface StreamPayError {
 export interface BackendApiError {
   code: string;
   message: string;
-  details?: Record<string, JsonValue>;
+  details?: Record<string, unknown>;
   request_id: string;
 }
 

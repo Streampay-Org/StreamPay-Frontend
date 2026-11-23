@@ -42,6 +42,12 @@ export interface LiveRegionProps {
    * @default false
    */
   allowDuplicates?: boolean;
+  /**
+   * ARIA role override.
+   * When omitted, defaults to `"alert"` for assertive announcements
+   * (WCAG technique ARIA19) and `"status"` otherwise.
+   */
+  role?: string;
   /** Optional data-testid for test selectors. */
   "data-testid"?: string;
 }
@@ -54,6 +60,7 @@ export function LiveRegion({
   atomic = true,
   deduplicate = true,
   allowDuplicates = false,
+  role: roleProp,
   "data-testid": testId,
 }: LiveRegionProps) {
   const [announcedMessage, setAnnouncedMessage] = useState(message);
@@ -76,10 +83,12 @@ export function LiveRegion({
     setAnnouncedMessage(message);
   }, [message, deduplicate, allowDuplicates, announcedMessage]);
 
+  const role = roleProp ?? (politeness === "assertive" ? "alert" : "status");
+
   return (
     <div
       className="sr-only"
-      role="status"
+      role={role}
       aria-live={politeness}
       aria-atomic={atomic}
       data-testid={testId}

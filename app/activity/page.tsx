@@ -8,16 +8,32 @@ import {
   type ActivityGroup,
 } from "../components/ActivityTimeline";
 import type { StateTriadState } from "../components/StateTriad";
+import { LiveRegion } from "../components/LiveRegion";
+import { DateRangePicker } from "../components/DateRangePicker";
 
 type ActivityPageState = "loading" | "populated" | "empty" | "error";
 
+interface DateRange {
+  startDate: string;
+  endDate: string;
+}
+
 export default function ActivityPage() {
   const [pageState, setPageState] = useState<ActivityPageState>("loading");
+  const [errorMessage, setErrorMessage] = useState<string>("");
   const [activities, setActivities] = useState<ActivityGroup[]>([]);
   const [loadKey, setLoadKey] = useState(0);
+  const [dateRange, setDateRange] = useState<DateRange>({
+    startDate: "",
+    endDate: "",
+  });
 
   const handleRetry = useCallback(() => {
     setLoadKey((k) => k + 1);
+  }, []);
+
+  const handleDateRangeChange = useCallback((range: DateRange) => {
+    setDateRange(range);
   }, []);
 
   useEffect(() => {
@@ -26,7 +42,11 @@ export default function ActivityPage() {
 
     async function fetchActivity() {
       try {
-        const res = await fetch("/api/activity?limit=50", {
+        const params = new URLSearchParams({ limit: "50" });
+        if (dateRange.startDate) params.set("from", dateRange.startDate);
+        if (dateRange.endDate) params.set("to", dateRange.endDate);
+
+        const res = await fetch(`/api/activity?${params.toString()}`, {
           headers: {
             "x-tenant-id": "default-tenant", // Assuming a tenant or passing whatever is available
           }
@@ -87,17 +107,20 @@ export default function ActivityPage() {
 
         setActivities(grouped);
         setPageState(grouped.length > 0 ? "populated" : "empty");
-      } catch (err) {
+      } catch (err: unknown) {
         if (mounted) {
           setPageState("error");
+          setErrorMessage(err instanceof Error && err.message ? err.message : "Couldn't load your activity");
         }
       }
     }
     
-    fetchActivity();
+    void fetchActivity();
 
     return () => { mounted = false; };
-  }, [loadKey]);
+  }, [loadKey, dateRange.startDate, dateRange.endDate]);
+
+  const hasDateRange = Boolean(dateRange.startDate || dateRange.endDate);
 
   // Map to StateTriad state
   const getTriadState = (): StateTriadState => {
@@ -107,8 +130,33 @@ export default function ActivityPage() {
     return "success";
   };
 
+  const totalEvents = activities.reduce((sum, g) => sum + g.events.length, 0);
+
+  let announcement = "";
+  let politeness: "polite" | "assertive" = "polite";
+
+  if (pageState === "loading") {
+    announcement = "Loading activity…";
+    politeness = "polite";
+  } else if (pageState === "error") {
+    announcement = errorMessage || "Couldn't load your activity";
+    politeness = "assertive";
+  } else if (pageState === "empty" || totalEvents === 0) {
+    announcement = "No activity to display.";
+    politeness = "polite";
+  } else {
+    announcement = `Loaded ${totalEvents} event${totalEvents === 1 ? "" : "s"}`;
+    politeness = "polite";
+  }
+
   return (
     <main className="page-shell">
+      <LiveRegion
+        message={announcement}
+        politeness={politeness}
+        data-testid="activity-live-region"
+      />
+
       <section className="page-hero">
         <div>
           <p className="page-hero__eyebrow">Activity</p>
@@ -123,7 +171,6 @@ export default function ActivityPage() {
       <section
         aria-busy={pageState === "loading"}
         aria-labelledby="activity-overview-title"
-        aria-live="polite"
         className="stream-layout"
       >
         <div className="section-heading">
@@ -141,6 +188,15 @@ export default function ActivityPage() {
           </div>
         </div>
 
+        <div className="activity-filters flex flex-col gap-2">
+          <DateRangePicker
+            startDate={dateRange.startDate}
+            endDate={dateRange.endDate}
+            onChange={handleDateRangeChange}
+            label="Filter by date"
+          />
+        </div>
+
         <StateTriad
           state={getTriadState()}
           loading={{
@@ -148,9 +204,12 @@ export default function ActivityPage() {
           }}
           empty={{
             eyebrow: "Activity",
-            title: "Activity will appear here",
-            description:
-              "Any payment stream updates, payments, or wallet events will show up once activity begins. Stay connected to monitor your flow.",
+            title: hasDateRange
+              ? "No activity in this range"
+              : "Activity will appear here",
+            description: hasDateRange
+              ? "No events matched the selected dates. Try widening the range to see more activity."
+              : "Any payment stream updates, payments, or wallet events will show up once activity begins. Stay connected to monitor your flow.",
             actionLabel: "View Streams",
             onAction: () => {
               window.location.href = "/streams";

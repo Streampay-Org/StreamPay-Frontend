@@ -249,7 +249,7 @@ describe("validateMultiRecipientStreamBody", () => {
   it("accepts exactly MAX_RECIPIENTS recipients", () => {
     const recipients = new Array(MAX_RECIPIENTS)
       .fill(0)
-      .map((_, index) => ({ address: KEY_A, percentage: 100 / MAX_RECIPIENTS }));
+      .map(() => ({ address: KEY_A, percentage: 100 / MAX_RECIPIENTS }));
     const errors = validateMultiRecipientStreamBody(validBody({ recipients }));
     expect(errors).toEqual([]);
   });
@@ -367,6 +367,7 @@ describe("validateMultiRecipientStreamBody — allocation", () => {
 
   it("rejects a non-numeric percentage", () => {
     const errors = validateMultiRecipientStreamBody(
+      // The fixture deliberately violates the input type to verify runtime validation.
       validBody({ recipients: [{ address: KEY_A, percentage: "50" as unknown as number }] }),
     );
     expect(codesFor(errors, "recipients.0.percentage")).toContain("MISSING_FIELD");
@@ -412,6 +413,7 @@ describe("validateMultiRecipientStreamBody — allocation", () => {
 describe("validateMultiRecipientStreamBody — recipients list", () => {
   it("rejects a missing recipients array", () => {
     const errors = validateMultiRecipientStreamBody(
+      // The fixture deliberately violates the input type to verify runtime validation.
       validBody({ recipients: undefined as unknown as [] }),
     );
     expect(codesFor(errors, "recipients")).toContain("MISSING_FIELD");
@@ -424,6 +426,7 @@ describe("validateMultiRecipientStreamBody — recipients list", () => {
 
   it("rejects a non-object recipient entry", () => {
     const errors = validateMultiRecipientStreamBody(
+      // The fixture deliberately violates the input type to verify runtime validation.
       validBody({ recipients: ["nope" as unknown as { address: string; percentage: number }] }),
     );
     expect(codesFor(errors, "recipients.0.address")).toContain("INVALID_RECIPIENT");
@@ -474,6 +477,7 @@ describe("validateMultiRecipientStreamBody — top-level fields", () => {
 
   it("rejects a non-numeric totalAmount", () => {
     const errors = validateMultiRecipientStreamBody(
+      // The fixture deliberately violates the input type to verify runtime validation.
       validBody({ totalAmount: "1000" as unknown as number }),
     );
     expect(codesFor(errors, "totalAmount")).toContain("MISSING_FIELD");

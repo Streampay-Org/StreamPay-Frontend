@@ -1,25 +1,36 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { groupOpenApiRoutesByTag } from "./openapi-routes";
 
 export const metadata: Metadata = {
   title: "Docs - StreamPay",
   description: "How StreamPay works: streams, lifecycle, API, configuration and deployment.",
 };
 
-const apiRoutes: [string, string, string][] = [
-  ["GET", "/api/healthz", "Liveness probe"],
-  ["GET", "/api/readyz", "Readiness probe (config, Horizon, KMS)"],
-  ["GET", "/api/streams", "List streams (cursor-paginated, seeded demo data when no database is configured)"],
-  ["POST", "/api/streams", "Create a stream (authenticated)"],
-  ["GET", "/api/streams/:id", "Stream detail"],
-  ["POST", "/api/streams/:id/{start,pause,stop,settle,withdraw}", "Lifecycle actions"],
-  ["GET", "/api/activity", "Activity feed"],
-  ["GET/POST", "/api/auth/wallet", "Wallet challenge and signature verification, returns a JWT"],
-  ["GET", "/api/webhooks/health", "Webhook delivery health"],
-  ["GET", "/api/metrics", "Prometheus metrics (token protected)"],
-];
+function LockIcon() {
+  return (
+    <svg
+      className="docs__auth-icon"
+      aria-hidden="true"
+      focusable="false"
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3.25" y="7.25" width="9.5" height="6.5" rx="1.5" />
+      <path d="M5.25 7.25V5a2.75 2.75 0 0 1 5.5 0v2.25" />
+    </svg>
+  );
+}
 
 export default function DocsPage() {
+  const routeGroups = groupOpenApiRoutesByTag();
+
   return (
     <main className="docs">
       <p className="home__eyebrow">Documentation</p>
@@ -58,15 +69,57 @@ export default function DocsPage() {
       </p>
 
       <h2 id="api">HTTP API</h2>
-      <div className="docs__table-wrap">
-      <table>
-        <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
-        <tbody>
-          {apiRoutes.map(([m, p, d]) => (
-            <tr key={`${m} ${p}`}><td><code>{m}</code></td><td><code>{p}</code></td><td>{d}</td></tr>
-          ))}
-        </tbody>
-      </table>
+      <p>
+        Generated at build time from <code>openapi.json</code> and grouped by tag.
+      </p>
+      <div className="docs__api-groups">
+        {routeGroups.map((group) => (
+          <section
+            key={group.tag}
+            className="docs__api-group"
+            aria-label={`${group.tag} API routes`}
+          >
+            <div className="docs__api-group-header">
+              <h3>{group.tag}</h3>
+              {group.description ? (
+                <p className="docs__api-group-description">{group.description}</p>
+              ) : null}
+            </div>
+            <div className="docs__table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Method</th>
+                    <th>Path</th>
+                    <th>Auth</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.routes.map((route) => (
+                    <tr key={`${route.method} ${route.path}`}>
+                      <td><code>{route.method}</code></td>
+                      <td><code>{route.path}</code></td>
+                      <td>
+                        {route.security ? (
+                          <span className="docs__auth-badge" data-secured="true">
+                            <LockIcon />
+                            <span>Requires auth</span>
+                          </span>
+                        ) : (
+                          <span className="docs__public-badge" data-secured="false">
+                            Public
+                          </span>
+                        )}
+                      </td>
+                      <td>{route.summary}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ))}
       </div>
       <p>The full contract is in <code>openapi.json</code> in the repository.</p>
 
