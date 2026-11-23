@@ -1,5 +1,63 @@
 # Changelog
 
+## Unreleased
+
+### Security
+- **Pluggable shared wallet challenge store with atomic Redis consume**:
+  Extracted wallet challenge storage from module-level `Map`s in
+  `app/api/auth/wallet/route.ts` into `app/lib/wallet-challenge-store.ts` with
+  `InMemoryWalletChallengeStore` (default when Redis env vars are unset,
+  preserving per-address and global caps) and `RedisWalletChallengeStore`
+  (Upstash REST + Lua scripts for atomic single-use `consume`, `PX` TTL, and
+  per-address 5-live cap). Configure via `WALLET_CHALLENGE_REDIS_URL` /
+  `WALLET_CHALLENGE_REDIS_TOKEN` (falling back to `RATE_LIMIT_REDIS_URL` /
+  `RATE_LIMIT_REDIS_TOKEN`). Redis outages fail closed with HTTP `503`.
+- **Wallet challenges are now unguessable and no longer enumerable** (#1669):
+  `GET /api/auth/wallet` issues challenges with `crypto.randomBytes(32)` (a
+  CSPRNG) using the shape `streampay-auth:v1:<nonce>|<origin>|<expires_at>`, and
+  the server origin and expiry are part of the signed message. The paginated
+  listing mode was removed — `cursor`/`limit` now return `400 UNSUPPORTED_QUERY`
+  instead of leaking live challenges for every address to unauthenticated
+  callers. The in-process store is a `Map` with TTL pruning on every write, a
+  per-address cap of 5 (oldest evicted), and a global cap of
+  `WALLET_CHALLENGE_MAX` (default 10 000). Conditional `If-None-Match`/`304`
+  handling was removed for challenge issuance: the endpoint always returns `200`
+  with `Cache-Control: no-store`.
+
+### Changed
+- **Partner SDK v2 response migration**: `listStreams()` now returns
+  `streams`, `meta`, and `links`; its deprecated runtime-only `data` getter
+  warns once. `createStream()` now returns the bare stream, and `getStream()`
+  returns the stream in `data`. Update typed list consumers from `page.data` to
+  `page.streams`. `StreamStatus` now includes `withdrawn` and `cancelled` and
+  preserves unknown status strings. (#1746)
+- **SSE heartbeats are now bounded and dead clients are detected** (#1372):
+  all three SSE endpoints (`/api/indexer/sse`, `/api/streams/events`,
+  `/api/streams/:id/events`) share a new `createSseConnection` helper
+  (`app/lib/sse.ts`) that emits at most `SSE_HEARTBEAT_MAX` keep-alive
+  heartbeats, closes on client abort, rejected writes, or an idle deadline
+  (`SSE_MAX_IDLE_MS`), and cleans up timers/listeners exactly once per
+  connection. Documented in `docs/SSE-HEARTBEATS.md`.
+- `POST /api/webhooks` now applies strict Zod body validation. Requests must include a non-empty `eventType`; unknown top-level fields now return `400 INVALID_INPUT`.
+
+### Fixed
+- **v2 stream projection is now faithful** (correctness fix, not a breaking rename):
+  `/api/v2/streams` responses pass `status` through unchanged, including `withdrawn`
+  and `cancelled` (previously any status outside draft/active/paused/ended was rewritten
+  to `draft`). `allowed_actions` is now derived from the stream state-machine table
+  instead of a single stale hint (`next_action` still carries the hint), and
+  `settlement` is populated as `{ tx_hash, settled_at, amount, currency }` when the
+  stream has a `settlementTxHash` (otherwise `null`). An unknown status now returns
+  `500 PROJECTION_ERROR` instead of being coerced. The SDK `StreamStatus` type already
+  includes `withdrawn` and `cancelled`.
+- **Idempotency records are now scoped to the stream id and the calling wallet** (#1720):
+  `POST /api/streams/:id/settle` and `POST /api/streams/:id/withdraw` now store
+  their idempotency record under a key that contains the stream id, and the
+  request fingerprint contains the acting wallet. An `Idempotency-Key` reused on
+  a different stream can no longer replay the first stream's cached response,
+  and a replay by a different wallet is answered with `409` instead of the
+  original body. See `docs/api/idempotency-scoping.md`.
+
 All notable API changes to StreamPay are documented here.  
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).  
 API versioning follows the policy in [README.md#api-versioning](README.md#api-versioning).
@@ -8,6 +66,28 @@ API versioning follows the policy in [README.md#api-versioning](README.md#api-ve
 
 ## [Unreleased]
 
+### Fixed
+- **CreateStreamForm responsive breakpoints** (#1042 v7): Audited and fixed
+  responsive layout for `CreateStreamForm` (`app/streams/new/page.tsx`) across
+  narrow, mobile, and wide viewports. The Amount+Token grid now collapses to a
+  single column below 360px (`22.4375rem`), action buttons stack vertically on
+  extra-narrow screens, and the multi-recipient CTA banner adapts with tighter
+  padding on small viewports. Introduced `.csf-field-row`, `.csf-actions`,
+  `.csf-cta-banner`, and `.csf-section` CSS classes with media-query overrides
+  in `globals.css`. Added `data-testid` attributes for each responsive container
+  and a focused test suite (`page.resp.test.tsx`) covering class presence,
+  structural integrity, and mobile bottom-sheet behaviour. All 19
+  CreateStreamForm tests pass.
+- **Stream list pagination now uses strict keyset cursors** (#1738):
+  `GET /api/streams` and `GET /api/v2/streams` encode the cursor as
+  `base64(<createdAt>|<id>)` instead of `base64(<stream id>)`, and the payload is
+  validated strictly. A malformed cursor is now rejected with `422
+  INVALID_CURSOR` instead of decoding to a junk id, and a cursor whose stream
+  was deleted resumes at the right position instead of silently returning page
+  one again. `GET /api/v2/streams` also validates `limit` and `status` through
+  the shared `validateListStreamsQuery` schema. Plain-id cursors are still
+  accepted for one release and are logged as deprecated. See
+  `docs/api/streams-cursor.md`.
 ### Performance (issue #85 — reduce initial render time)
 - **SplashScreen delay reduced**: mandatory display time cut from 2 400 ms to
   400 ms and fade-out from 600 ms to 300 ms, removing ~2.3 s of forced
@@ -30,6 +110,18 @@ API versioning follows the policy in [README.md#api-versioning](README.md#api-ve
   (gzip/brotli for all responses).
 
 ### Added
+- Prometheus metrics on `GET|POST /api/exports`: `export_requests_total`
+  (counter) and `export_request_duration_seconds` (histogram), labelled by
+  `status` and `method`, registered in `src/metrics/registry.ts` and
+  exposed through `GET /api/metrics`. Every response path (200/201/401/422/
+  429/500) records exactly one counter increment and one histogram
+  observation. Covered by `app/api/exports/exports.metrics.test.ts`, which is
+  no longer quarantined in `jest.config.js`. Restores the work first
+  proposed in #1282.
+- Cursor pagination on `GET /api/reconciliation` over stable
+  `(created_at, id)` ordering with `meta.nextCursor` / `meta.hasNext`.
+  Malformed cursors return `422 INVALID_CURSOR`. Documented in
+  `docs/api/reconciliation-cursor.md`.
 - MRU (most-recently-used) wallet ordering on the connect modal: the
   provider a user picked last surfaces at the top of `WalletModal`,
   persisted under the `streampay_mru_wallet` `localStorage` key via
@@ -56,6 +148,9 @@ API versioning follows the policy in [README.md#api-versioning](README.md#api-ve
   and the middleware dispatch surface.
 
 ### Security
+- Per-user rate limit on `GET|POST /api/webhooks`: 30 requests/min per
+  caller (API key / JWT wallet / IP), returning the standard `429`
+  envelope with `Retry-After`. Override via `WEBHOOK_RATE_LIMIT`.
 - Per-user rate limit on `POST /api/exports`: 5 requests/min per
   authenticated wallet, checked after JWT verification so forged tokens
   cannot spend a victim's budget, returning the standard `429` envelope with
@@ -90,6 +185,9 @@ API versioning follows the policy in [README.md#api-versioning](README.md#api-ve
   to the broader streams list.
 - `StreamProgress` now emits shared color-blind pattern classes on its fill so
   stream state remains distinguishable beyond color alone.
+- `StreamTypeChip` now uses shared design-token spacing, typography, and focus
+  styling for more consistent rendering across light, dark, and high-contrast
+  themes.
 
 ### Fixed
 - `GET /api/orgs/:orgId/members` and `POST /api/orgs/:orgId/members` now return

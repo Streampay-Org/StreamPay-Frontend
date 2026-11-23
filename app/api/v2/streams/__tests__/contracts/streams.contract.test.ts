@@ -13,6 +13,9 @@
 
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/v2/streams/route";
+import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
+import { GET as GET_SINGLE } from "@/app/api/v2/streams/[id]/route";
+import { getStore } from "@/app/lib/db";
 import { loadAllFixtures, type PactInteraction } from "./pact-helpers";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -34,6 +37,15 @@ async function callHandler(
   interaction: PactInteraction
 ): Promise<Response> {
   const req = makeNextRequest(interaction);
+  const path = interaction.request.path;
+
+  if (path.startsWith("/api/v2/streams/") && path !== "/api/v2/streams") {
+    const id = path.replace("/api/v2/streams/", "");
+    if (interaction.request.method === "GET") {
+      return GET_SINGLE(req, { params: Promise.resolve({ id }) });
+    }
+  }
+
   switch (interaction.request.method) {
     case "GET":
       return GET(req);
@@ -44,15 +56,44 @@ async function callHandler(
   }
 }
 
+function setupProviderState(providerState: string) {
+  const { streamRepository } = getStore();
+  if (providerState.includes("stream stream_abc123 exists")) {
+    let status = "active";
+    if (providerState.includes("ended")) status = "ended";
+    if (providerState.includes("withdrawn")) status = "withdrawn";
+    if (providerState.includes("cancelled")) status = "cancelled";
+    if (providerState.includes("paused")) status = "paused";
+    if (providerState.includes("active")) status = "active";
+
+    streamRepository.streams.set("stream_abc123", {
+      id: "stream_abc123",
+      recipient: "GABC1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234",
+      rate: "120",
+      schedule: "month",
+      status: status as any,
+      nextAction: status === "active" ? "pause" : status === "ended" ? "withdraw" : status === "draft" || status === "paused" ? "start" : undefined,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      token: "XLM",
+    });
+  }
+}
+
 // ── Contract verifier ─────────────────────────────────────────────────────────
 
 describe("Pact contract verifier — /api/v2/streams", () => {
   const fixtures = loadAllFixtures();
 
+  afterEach(() => {
+    resetRateLimitStore();
+  });
+
   for (const fixture of fixtures) {
     describe(`${fixture.consumer.name} → ${fixture.provider.name}`, () => {
       for (const interaction of fixture.interactions) {
         it(interaction.description, async () => {
+          setupProviderState(interaction.providerState ?? "");
           const response = await callHandler(interaction);
 
           // ── Status code ──────────────────────────────────────────────────
@@ -84,7 +125,10 @@ describe("Pact contract verifier — /api/v2/streams", () => {
             if (expected.id !== undefined) {
               expect(typeof body.id).toBe("string");
               expect(typeof body.status).toBe("string");
-              expect(["draft","active","paused","ended"]).toContain(body.status);
+              expect(body.status).toBe(expected.status);
+              if (Array.isArray(expected.allowed_actions)) {
+                expect(body.allowed_actions).toEqual(expected.allowed_actions);
+              }
             }
           }
         });

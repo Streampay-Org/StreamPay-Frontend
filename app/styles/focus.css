@@ -13,7 +13,8 @@
     .card--clickable,
     .stream-row__action,
     .stream-progress__track,
-    .stream-type-chip
+    .stream-type-chip,
+    .csf-field
   ):focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
@@ -33,10 +34,34 @@
     .card--clickable,
     .stream-row__action,
     .stream-progress__track,
-    .stream-type-chip
+    .stream-type-chip,
+    .csf-field
   ):focus:not(:focus-visible) {
     outline: none;
     box-shadow: none;
+  }
+
+  /*
+   * CreateStreamForm — enhanced focus-visible treatment (#1046).
+   *
+   * The form fields use inline border styles which override generic rules,
+   * so we use a dedicated `.csf-field:focus-visible` rule with elevated
+   * specificity to ensure the accent ring is always visible on keyboard
+   * navigation. The border color shifts to --accent to reinforce the active
+   * field alongside the outline ring.
+   */
+  .create-stream-form .csf-field:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--background);
+    border-color: var(--accent) !important;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .create-stream-form .csf-field:focus:not(:focus-visible) {
+    outline: none;
+    box-shadow: none;
+    border-color: var(--border) !important;
   }
 }
 

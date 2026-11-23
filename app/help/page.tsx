@@ -1,10 +1,36 @@
+
 /**
  * Help & FAQ page for StreamPay.
  *
- * Static server component — no client-side state or interactivity required.
+ * Server component — the FAQ data is rendered statically, with a small
+ * client island (FaqSearch) layered on top for search and deep links.
  * Covers common questions about wallet connection, payment streams, the
  * Stellar network, and troubleshooting local-dev issues.
  */
+
+import { Suspense } from "react";
+import { SHORTCUT_GROUPS, formatShortcutKeys, getShortcut } from "@/lib/shortcuts";
+import FaqSearch from "./FaqSearch";
+import CopyLinkButton from "./CopyLinkButton";
+import type { FaqSection } from "./faq-data";
+
+/** Keys for a single shortcut id, e.g. "⌘/Ctrl + K". */
+function keysFor(id: string): string {
+  return formatShortcutKeys(getShortcut(id).keys);
+}
+
+/**
+ * The full reference, generated from the registry so the FAQ can never fall
+ * behind the `?` overlay or the in-form hints.
+ */
+function fullShortcutReference(): string {
+  return SHORTCUT_GROUPS.map((group) => {
+    const entries = group.shortcuts
+      .map((shortcut) => `${formatShortcutKeys(shortcut.keys)} ${shortcut.description}`)
+      .join("; ");
+    return `${group.label} — ${entries}.`;
+  }).join(" ");
+}
 
 export const metadata = {
   title: "Help & FAQ — StreamPay",
@@ -12,19 +38,7 @@ export const metadata = {
     "Answers to the most common questions about StreamPay, Stellar wallets, and payment streams.",
 };
 
-interface FaqItem {
-  id: string;
-  question: string;
-  answer: string;
-}
-
-interface FaqSection {
-  id: string;
-  title: string;
-  items: FaqItem[];
-}
-
-const FAQ_SECTIONS: FaqSection[] = [
+export const FAQ_SECTIONS: FaqSection[] = [
   {
     id: "getting-started",
     title: "Getting Started",
@@ -52,6 +66,24 @@ const FAQ_SECTIONS: FaqSection[] = [
         question: "How do I switch between testnet and mainnet?",
         answer:
           "The network is selected at deployment time via the STELLAR_NETWORK environment variable (\"testnet\" or \"mainnet\"). Testnet assets are clearly labelled in the UI to prevent accidental mainnet operations. Contact your administrator to change the active network for a given deployment.",
+      },
+    ],
+  },
+  {
+    id: "keyboard-shortcuts",
+    title: "Keyboard Shortcuts",
+    items: [
+      {
+        id: "shortcuts-overlay",
+        question: "How do I view all available keyboard shortcuts?",
+        answer:
+          `Press ${keysFor("global.toggle-overlay")} anywhere in the app to open the Keyboard Shortcuts overlay, which lists every available shortcut grouped by where it applies. Press ${keysFor("global.toggle-overlay")} again or ${keysFor("global.close-dialogs")} to close it. Press ${keysFor("global.command-palette")} to open the command palette for searching streams. This page, the overlay and the in-form hints all render from one registry (lib/shortcuts.ts), so they cannot disagree.`,
+      },
+      {
+        id: "shortcuts-list",
+        question: "What keyboard shortcuts are available?",
+        answer:
+          `${fullShortcutReference()} Shortcuts in a scoped group are only live where that scope applies: the Create stream form shortcuts do nothing outside the form, and the Receipt card shortcuts only work while a receipt is on screen. Single-key shortcuts such as ${keysFor("receipt-card.toggle-mask")} and ${keysFor("receipt-card.copy")} are ignored while you are typing in a text field.`,
       },
     ],
   },
@@ -191,13 +223,19 @@ export default function HelpPage() {
         </div>
       </header>
 
+      <Suspense fallback={null}>
+        {/* Search island: the full list below is server-rendered, so the
+            island only renders matches once the visitor types a query. */}
+        <FaqSearch sections={FAQ_SECTIONS} showAllWhenEmpty={false} />
+      </Suspense>
+
       <div className="help-layout">
         {/* Quick-jump nav */}
         <nav aria-label="FAQ sections" className="help-nav">
-          <ul className="help-nav__list" role="list">
+          <ul className="help-nav__list">
             {FAQ_SECTIONS.map((section) => (
               <li key={section.id} className="help-nav__item">
-                <a href={`#${section.id}`} className="help-nav__link">
+                <a href={`#${section.id}`} className="help-nav__link" data-help-nav-link data-help-section={section.id}>
                   {section.title}
                 </a>
               </li>
@@ -224,7 +262,10 @@ export default function HelpPage() {
               <dl className="faq-list">
                 {section.items.map((item) => (
                   <div key={item.id} id={item.id} className="faq-item">
-                    <dt className="faq-item__question">{item.question}</dt>
+                    <dt id={`${item.id}-question`} className="faq-item__question">
+                      {item.question}{" "}
+                      <CopyLinkButton id={item.id} question={item.question} />
+                    </dt>
                     <dd className="faq-item__answer">{item.answer}</dd>
                   </div>
                 ))}

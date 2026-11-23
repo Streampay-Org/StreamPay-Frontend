@@ -212,6 +212,24 @@
     background-size: 8px 8px;
   }
 
+  /* ── WalletBadge dot pattern ─────────────────────────────────────────────
+   * The wallet status dot is a small (10px) circle.  We shrink the tile size
+   * so at least one full repeat of the pattern fits inside the dot, and bump
+   * opacity slightly to compensate for the smaller surface area.
+   *
+   * Pattern mapping (each wallet state maps to a unique geometric texture):
+   *   • disconnected → draft (spaced dots ···)   — "waiting / not connected"
+   *   • connecting   → active (diagonal stripes)  — "in motion / flowing"
+   *   • connected    → ended (crosshatch ×××)     — "established / complete"
+   *   • error        → cancelled (reverse-diagonal) — "failed / aborted"
+   *   • disconnecting→ paused (horizontal bars ≡) — "pausing / transitioning" */
+
+  .wallet-badge__dot.cb-pattern::before {
+    background-size: 8px 8px;
+    opacity: calc(var(--cb-pattern-opacity) * 0.85);
+    border-radius: 50%;
+  }
+
   /* ── StreamProgress fill pattern ────────────────────────────────────────
    * The progress bar fill uses the texture as a second background layer so
    * the pattern is only visible on the coloured fill portion, not the track. */
@@ -282,6 +300,22 @@
       auto;
   }
 
+  /* ── StreamTypeChip pattern ─────────────────────────────────────────────
+   * The chip uses the shared cb-pattern--* utility classes.  Tile size is
+   * reduced to 8px so the texture is readable even in the compact chip
+   * footprint.  Opacity is kept at the same reduced level as the StatusBadge
+   * so the type label and amount remain fully legible on top. */
+
+  .stream-type-chip.cb-pattern--active::before,
+  .stream-type-chip.cb-pattern--draft::before,
+  .stream-type-chip.cb-pattern--paused::before,
+  .stream-type-chip.cb-pattern--ended::before,
+  .stream-type-chip.cb-pattern--withdrawn::before,
+  .stream-type-chip.cb-pattern--cancelled::before {
+    opacity: calc(var(--cb-pattern-opacity) * 0.7);
+    background-size: 8px 8px;
+  }
+
   /* ── MiniBurnDown pattern colour hint ─────────────────────────────────── */
 
   .stream-row__burndown--active {
@@ -316,6 +350,86 @@
     .stream-row--withdrawn .stream-row__pattern {
       opacity: 0.45;
       mix-blend-mode: multiply;
+    }
+  }
+
+  /* ── CreateStreamForm status patterns ───────────────────────────────────
+   * Apply colour-blind safe texture overlays to the form's submit button
+   * and status indicator so users with CVD can distinguish idle, submitting,
+   * and success states by shape in addition to colour.
+   *
+   * Pattern mapping:
+   *   • idle   (default)  → no pattern — the button uses the accent fill.
+   *   • busy   (submit)   → draft dots (···) — "processing / pending".
+   *   • success            → active diagonals (///) — "complete / live".
+   * ───────────────────────────────────────────────────────────────────── */
+
+  /* Status indicator strip — thin bar above the form section that visually
+     communicates the current form state. */
+  .create-stream-status {
+    position: relative;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    overflow: hidden;
+    margin-bottom: 1.5rem;
+  }
+
+  .create-stream-status::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-repeat: repeat;
+    background-size: var(--cb-pattern-tile) var(--cb-pattern-tile);
+    opacity: var(--cb-pattern-opacity);
+    mix-blend-mode: multiply;
+    border-radius: inherit;
+  }
+
+  .create-stream-status--draft {
+    background: var(--stream-status-draft-bg, var(--muted));
+  }
+  .create-stream-status--draft::before {
+    background-image: var(--cb-pattern-draft);
+  }
+
+  .create-stream-status--active {
+    background: var(--stream-status-active-bg, var(--accent));
+  }
+  .create-stream-status--active::before {
+    background-image: var(--cb-pattern-active);
+  }
+
+  /* Submit button pattern overlay — applied via pseudo-element so the
+     button text and background colour remain intact. */
+  .button--primary.cb-pattern--draft::before,
+  .button--primary.cb-pattern--active::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-repeat: repeat;
+    background-size: 8px 8px;
+    opacity: calc(var(--cb-pattern-opacity) * 0.6);
+    mix-blend-mode: multiply;
+    border-radius: inherit;
+  }
+
+  .button--primary.cb-pattern--draft::before {
+    background-image: var(--cb-pattern-draft);
+  }
+  .button--primary.cb-pattern--active::before {
+    background-image: var(--cb-pattern-active);
+  }
+
+  @media (prefers-contrast: more) {
+    .create-stream-status::before,
+    .button--primary.cb-pattern--draft::before,
+    .button--primary.cb-pattern--active::before {
+      opacity: calc(var(--cb-pattern-opacity) * 1.4);
     }
   }
 }

@@ -5,6 +5,11 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { EventTimeline, EventTimelineSkeleton, type ContractEvent } from "./EventTimeline";
 
+// Keep the config module from throwing during tests (no real env vars available).
+jest.mock("../lib/config", () => ({
+  getConfig: () => ({ network: { name: "testnet" } }),
+}));
+
 const EVENTS: ContractEvent[] = [
   {
     id: "e1",
@@ -89,15 +94,80 @@ describe("EventTimeline", () => {
     expect(allChip).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("shows an empty message when there are no events", () => {
+  it("shows 'No events yet.' when the events array is empty", () => {
     render(<EventTimeline events={[]} />);
 
-    expect(screen.getByText(/no contract events match this filter yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/no events yet/i)).toBeInTheDocument();
     expect(screen.queryAllByRole("listitem")).toHaveLength(0);
   });
 
   it("renders the skeleton without errors", () => {
     const { container } = render(<EventTimelineSkeleton />);
     expect(container.querySelector(".event-panel")).toBeInTheDocument();
+  });
+
+  describe("explorer links", () => {
+    it("renders tx hashes as links pointing to the testnet explorer", () => {
+      render(<EventTimeline events={EVENTS} network="testnet" />);
+
+      const links = screen.getAllByRole("link", { name: /view transaction on explorer/i });
+      expect(links.length).toBe(3);
+
+      const firstHash = EVENTS[2].txHash!; // created event (sorted newest-first so index 2)
+      expect(links[2]).toHaveAttribute(
+        "href",
+        `https://stellar.expert/testnet/tx/${firstHash}`,
+      );
+    });
+
+    it("renders tx hashes as links pointing to the mainnet explorer", () => {
+      render(<EventTimeline events={EVENTS} network="mainnet" />);
+
+      const links = screen.getAllByRole("link", { name: /view transaction on explorer/i });
+      expect(links[0]).toHaveAttribute(
+        "href",
+        expect.stringContaining("https://stellar.expert/tx/"),
+      );
+    });
+
+    it("sets target=_blank and rel=noopener noreferrer on explorer links", () => {
+      render(<EventTimeline events={EVENTS} network="testnet" />);
+
+      const links = screen.getAllByRole("link", { name: /view transaction on explorer/i });
+      links.forEach((link) => {
+        expect(link).toHaveAttribute("target", "_blank");
+        expect(link).toHaveAttribute("rel", "noopener noreferrer");
+      });
+    });
+
+    it("falls back to plain CopyAddress when the hash is invalid", () => {
+      const eventWithBadHash: ContractEvent = {
+        id: "bad",
+        type: "created",
+        summary: "Bad hash event",
+        timestamp: "2024-11-01T09:00:00.000Z",
+        txHash: "not-a-real-hash",
+      };
+      render(<EventTimeline events={[eventWithBadHash]} network="testnet" />);
+
+      expect(screen.queryByRole("link", { name: /view transaction on explorer/i })).not.toBeInTheDocument();
+    });
+
+    it("falls back to plain CopyAddress for the future network (no explorer profile)", () => {
+      render(<EventTimeline events={EVENTS} network="future" />);
+
+      expect(screen.queryByRole("link", { name: /view transaction on explorer/i })).not.toBeInTheDocument();
+    });
+
+    it("uses the network from app config when no network prop is supplied", () => {
+      // The mock at the top of this file returns testnet.
+      render(<EventTimeline events={EVENTS} />);
+
+      const links = screen.getAllByRole("link", { name: /view transaction on explorer/i });
+      expect(links[0]).toHaveAttribute(
+        "href",
+        expect.stringContaining("https://stellar.expert/testnet/tx/"),
+      );
+    });
   });
 });

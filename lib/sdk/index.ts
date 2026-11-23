@@ -1,4 +1,15 @@
-export type StreamStatus = "draft" | "active" | "paused" | "ended";
+import { redactDiagnosticBody } from "./redact";
+import { SdkErrorCode } from "./types";
+
+export { SdkErrorCode } from "./types";
+export type StreamStatus =
+  | "draft"
+  | "active"
+  | "paused"
+  | "ended"
+  | "withdrawn"
+  | "cancelled"
+  | (string & {});
 
 export interface StreamPayStream {
   id: string;
@@ -49,17 +60,33 @@ export interface StreamPayPage<T> {
   meta?: Record<string, unknown>;
 }
 
+export interface StreamPayStreamList {
+  streams: StreamPayStream[];
+  meta: {
+    hasNext: boolean;
+    nextCursor: string | null;
+    total: number;
+  };
+  links: Record<string, string>;
+}
+
 export interface StreamPayItem<T> {
   data: T;
   links?: Record<string, string>;
   meta?: Record<string, unknown>;
 }
 
-export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
+export type FetchLike = (
+  input: string | URL,
+  init?: RequestInit,
+) => Promise<Response>;
 
 export type EventSourceLike = {
   close(): void;
-  addEventListener(type: string, listener: (event: MessageEvent<string>) => void): void;
+  addEventListener(
+    type: string,
+    listener: (event: MessageEvent<string>) => void,
+  ): void;
   onerror: ((event: Event) => void) | null;
   onopen: ((event: Event) => void) | null;
   onmessage: ((event: MessageEvent<string>) => void) | null;
@@ -73,6 +100,7 @@ export interface StreamPayClientOptions {
   fetchFn?: FetchLike;
   eventSourceFactory?: EventSourceFactory;
   requestIdFactory?: () => string;
+  onDiagnostic?: (message: string) => void;
   streamEventsPath?: string;
 }
 
@@ -104,13 +132,47 @@ interface ErrorEnvelope {
   };
 }
 
+interface ActiveSharedConnection {
+  url: string;
+  source: EventSourceLike;
+  subscribers: Set<StreamEventHandlers>;
+}
+
+let hasWarnedAboutStreamListData = false;
+
+function addDeprecatedStreamListDataGetter(
+  page: StreamPayStreamList,
+  onDiagnostic: (message: string) => void,
+): StreamPayStreamList {
+  Object.defineProperty(page, "data", {
+    get() {
+      if (!hasWarnedAboutStreamListData) {
+        hasWarnedAboutStreamListData = true;
+        onDiagnostic(
+          "[StreamPay SDK] listStreams().data is deprecated; use .streams instead.",
+        );
+      }
+      return page.streams;
+    },
+  });
+  return page;
+}
+
 export class StreamPaySdkError extends Error {
   readonly code: string;
   readonly details?: unknown;
   readonly requestId?: string;
   readonly status: number;
 
-  constructor(message: string, options: { code: string; details?: unknown; requestId?: string; status: number }) {
+  constructor(
+    message: string,
+    options: {
+      code: string;
+      details?: unknown;
+      requestId?: string;
+      status: number;
+    },
+  ) {
     super(message);
     this.name = "StreamPaySdkError";
     this.code = options.code;
@@ -121,7 +183,10 @@ export class StreamPaySdkError extends Error {
 }
 
 function defaultRequestId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return `req-${crypto.randomUUID()}`;
   }
   return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -131,7 +196,11 @@ function trimSlashes(value: string): string {
   return value.replace(/^\/+|\/+$/g, "");
 }
 
-function buildUrl(baseUrl: string, path: string, query?: RequestOptions["query"]): string {
+function buildUrl(
+  baseUrl: string,
+  path: string,
+  query?: RequestOptions["query"],
+): string {
   const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   const url = new URL(trimSlashes(path), base);
 
@@ -144,6 +213,22 @@ function buildUrl(baseUrl: string, path: string, query?: RequestOptions["query"]
   }
 
   return url.toString();
+}
+
+function assertValidPaginationCursor(cursor: unknown): void {
+  if (cursor === undefined || cursor === null || cursor === "") return;
+  if (
+    typeof cursor !== "string" ||
+    cursor.trim() !== cursor ||
+    cursor.length > 512
+  ) {
+    throw new Error(
+      "Pagination cursor must be a trimmed string of at most 512 characters",
+    );
+  }
+  if (!/^[A-Za-z0-9+/=._:-]+$/.test(cursor)) {
+    throw new Error("Pagination cursor contains invalid characters");
+  }
 }
 
 async function parseJson(response: Response): Promise<unknown> {
@@ -163,8 +248,13 @@ export class StreamPayClient {
   private readonly eventSourceFactory?: EventSourceFactory;
   private readonly fetchFn: FetchLike;
   private readonly requestIdFactory: () => string;
+  private readonly onDiagnostic: (message: string) => void;
   private readonly streamEventsPath: string;
   private readonly token?: string;
+  private readonly activeConnections = new Map<
+    string,
+    ActiveSharedConnection
+  >();
 
   constructor(options: StreamPayClientOptions) {
     if (!options.baseUrl.trim()) {
@@ -175,21 +265,41 @@ export class StreamPayClient {
     this.eventSourceFactory = options.eventSourceFactory;
     this.fetchFn = options.fetchFn ?? fetch.bind(globalThis);
     this.requestIdFactory = options.requestIdFactory ?? defaultRequestId;
+    this.onDiagnostic =
+      options.onDiagnostic ?? ((message) => console.warn(message));
     this.streamEventsPath = options.streamEventsPath ?? "/api/streams/events";
     this.token = options.token;
   }
 
-  async listStreams(query: StreamListQuery = {}): Promise<StreamPayPage<StreamPayStream>> {
-    return this.request("GET", "/api/v2/streams", { query });
+  async listStreams(
+    query: StreamListQuery = {},
+  ): Promise<StreamPayStreamList> {
+    const page = await this.request<StreamPayStreamList>(
+      "GET",
+      "/api/v2/streams",
+      { query },
+    );
+    return addDeprecatedStreamListDataGetter(page, this.onDiagnostic);
   }
 
-  async getStream(id: string): Promise<StreamPayItem<StreamPayStream>> {
+  async getStream(id: string): Promise<StreamPayStream> {
     this.assertId(id, "stream id");
-    return this.request("GET", `/api/v2/streams/${encodeURIComponent(id)}`);
+    const response = await this.request<StreamPayItem<StreamPayStream>>(
+      "GET",
+      `/api/v2/streams/${encodeURIComponent(id)}`,
+    );
+    return response.data;
   }
 
-  async createStream(input: CreateStreamInput, options: RequestOptions = {}): Promise<StreamPayItem<StreamPayStream>> {
-    if (!input.recipient.trim() || !input.rate.trim() || !input.schedule.trim()) {
+  async createStream(
+    input: CreateStreamInput,
+    options: RequestOptions = {},
+  ): Promise<StreamPayStream> {
+    if (
+      !input.recipient.trim() ||
+      !input.rate.trim() ||
+      !input.schedule.trim()
+    ) {
       throw new Error("recipient, rate, and schedule are required");
     }
     return this.request("POST", "/api/v2/streams", options, input);
@@ -200,20 +310,17 @@ export class StreamPayClient {
     await this.request("DELETE", `/api/v2/streams/${encodeURIComponent(id)}`);
   }
 
-  async listActivity(query: ActivityListQuery = {}): Promise<StreamPayPage<StreamPayActivityEvent>> {
+  async listActivity(
+    query: ActivityListQuery = {},
+  ): Promise<StreamPayPage<StreamPayActivityEvent>> {
     return this.request("GET", "/api/activity", { query });
   }
 
-  subscribeToStream(streamId: string, handlers: StreamEventHandlers = {}): StreamSubscription {
+  subscribeToStream(
+    streamId: string,
+    handlers: StreamEventHandlers = {},
+  ): StreamSubscription {
     this.assertId(streamId, "stream id");
-    const factory =
-      this.eventSourceFactory ??
-      ((url: string) => {
-        if (typeof EventSource === "undefined") {
-          throw new Error("EventSource is not available; pass eventSourceFactory in this environment");
-        }
-        return new EventSource(url);
-      });
 
     const query: Record<string, string> = { streamId };
     if (this.token) {
@@ -221,16 +328,145 @@ export class StreamPayClient {
     }
 
     const url = buildUrl(this.baseUrl, this.streamEventsPath, query);
-    const source = factory(url);
-    source.onopen = handlers.onOpen ?? null;
-    source.onerror = handlers.onError ?? null;
-    source.onmessage = handlers.onMessage ?? null;
-    source.addEventListener("stream:updated", (event) => handlers.onUpdate?.(this.parseStreamEvent(event)));
-    source.addEventListener("settle:finished", (event) => handlers.onSettlement?.(this.parseStreamEvent(event)));
+
+    let connection = this.activeConnections.get(url);
+    if (!connection) {
+      const factory =
+        this.eventSourceFactory ??
+        ((targetUrl: string) => {
+          if (typeof EventSource === "undefined") {
+            throw new Error(
+              "EventSource is not available; pass eventSourceFactory in this environment",
+            );
+          }
+          return new EventSource(targetUrl);
+        });
+
+      const source = factory(url);
+      const subscribers = new Set<StreamEventHandlers>();
+
+      connection = { url, source, subscribers };
+      this.activeConnections.set(url, connection);
+
+      source.onopen = (event: Event) => {
+        for (const sub of subscribers) {
+          try {
+            sub.onOpen?.(event);
+          } catch (err) {
+            console.error(
+              "[StreamPay SDK] onOpen handler threw an error:",
+              err,
+            );
+          }
+        }
+      };
+
+      source.onerror = (event: Event) => {
+        for (const sub of subscribers) {
+          try {
+            sub.onError?.(event);
+          } catch (err) {
+            console.error(
+              "[StreamPay SDK] onError handler threw an error:",
+              err,
+            );
+          }
+        }
+      };
+
+      source.onmessage = (event: MessageEvent<string>) => {
+        for (const sub of subscribers) {
+          try {
+            sub.onMessage?.(event);
+          } catch (err) {
+            console.error(
+              "[StreamPay SDK] onMessage handler threw an error:",
+              err,
+            );
+          }
+        }
+      };
+
+      source.addEventListener("stream:updated", (event) => {
+        let stream: StreamPayStream;
+        try {
+          stream = this.parseStreamEvent(event);
+        } catch {
+          for (const sub of subscribers) {
+            try {
+              sub.onError?.(event);
+            } catch {
+              // ignore secondary error
+            }
+          }
+          return;
+        }
+
+        for (const sub of subscribers) {
+          try {
+            sub.onUpdate?.(stream);
+          } catch (err) {
+            console.error(
+              "[StreamPay SDK] onUpdate handler threw an error:",
+              err,
+            );
+          }
+        }
+      });
+
+      source.addEventListener("settle:finished", (event) => {
+        let stream: StreamPayStream;
+        try {
+          stream = this.parseStreamEvent(event);
+        } catch {
+          for (const sub of subscribers) {
+            try {
+              sub.onError?.(event);
+            } catch {
+              // ignore secondary error
+            }
+          }
+          return;
+        }
+
+        for (const sub of subscribers) {
+          try {
+            sub.onSettlement?.(stream);
+          } catch (err) {
+            console.error(
+              "[StreamPay SDK] onSettlement handler threw an error:",
+              err,
+            );
+          }
+        }
+      });
+    }
+
+    const currentHandlers = { ...handlers };
+    connection.subscribers.add(currentHandlers);
+
+    let isClosed = false;
 
     return {
       url,
-      close: () => source.close(),
+      close: () => {
+        if (isClosed) return;
+        isClosed = true;
+
+        const active = this.activeConnections.get(url);
+        if (!active) return;
+
+        active.subscribers.delete(currentHandlers);
+
+        if (active.subscribers.size === 0) {
+          try {
+            active.source.close();
+          } catch (err) {
+            console.error("[StreamPay SDK] Error closing EventSource:", err);
+          }
+          this.activeConnections.delete(url);
+        }
+      },
     };
   }
 
@@ -240,6 +476,8 @@ export class StreamPayClient {
     options: RequestOptions = {},
     body?: unknown,
   ): Promise<T> {
+    assertValidPaginationCursor(options.query?.cursor);
+
     const requestId = this.requestIdFactory();
     const headers = new Headers(options.headers);
     headers.set("accept", "application/json");
@@ -259,11 +497,14 @@ export class StreamPayClient {
       payload = JSON.stringify(body);
     }
 
-    const response = await this.fetchFn(buildUrl(this.baseUrl, path, options.query), {
-      body: payload,
-      headers,
-      method,
-    });
+    const response = await this.fetchFn(
+      buildUrl(this.baseUrl, path, options.query),
+      {
+        body: payload,
+        headers,
+        method,
+      },
+    );
 
     if (response.status === 204) {
       return undefined as T;
@@ -282,28 +523,38 @@ export class StreamPayClient {
       return JSON.parse(event.data) as StreamPayStream;
     } catch {
       throw new StreamPaySdkError("SSE event payload was not valid JSON", {
-        code: "INVALID_SSE_PAYLOAD",
+        code: SdkErrorCode.INVALID_SSE_PAYLOAD,
         status: 0,
       });
     }
   }
 
-  private toSdkError(response: Response, body: unknown, fallbackRequestId: string): StreamPaySdkError {
+  private toSdkError(
+    response: Response,
+    body: unknown,
+    fallbackRequestId: string,
+  ): StreamPaySdkError {
     if (isErrorEnvelope(body) && body.error) {
       return new StreamPaySdkError(body.error.message ?? response.statusText, {
-        code: body.error.code ?? "UNKNOWN_ERROR",
-        details: body.error.details,
-        requestId: body.error.request_id ?? response.headers.get("x-request-id") ?? fallbackRequestId,
+        code: body.error.code ?? SdkErrorCode.UNKNOWN_ERROR,
+        details: redactDiagnosticBody(body.error.details),
+        requestId:
+          body.error.request_id ??
+          response.headers.get("x-request-id") ??
+          fallbackRequestId,
         status: response.status,
       });
     }
 
-    return new StreamPaySdkError(response.statusText || "StreamPay request failed", {
-      code: "HTTP_ERROR",
-      details: body,
-      requestId: response.headers.get("x-request-id") ?? fallbackRequestId,
-      status: response.status,
-    });
+    return new StreamPaySdkError(
+      response.statusText || "StreamPay request failed",
+      {
+        code: SdkErrorCode.HTTP_ERROR,
+        details: redactDiagnosticBody(body),
+        requestId: response.headers.get("x-request-id") ?? fallbackRequestId,
+        status: response.status,
+      },
+    );
   }
 
   private assertId(value: string, label: string) {
@@ -313,6 +564,8 @@ export class StreamPayClient {
   }
 }
 
-export function createStreamPayClient(options: StreamPayClientOptions): StreamPayClient {
+export function createStreamPayClient(
+  options: StreamPayClientOptions,
+): StreamPayClient {
   return new StreamPayClient(options);
 }

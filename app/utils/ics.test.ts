@@ -11,7 +11,11 @@ import {
   calculateVestingDates,
   generateIcsFile,
   generateIcsFilename,
+  foldIcsLine,
 } from './ics';
+
+/** Number of UTF-8 octets a string occupies. */
+const utf8Length = (value: string): number => new TextEncoder().encode(value).length;
 
 describe('ICS Utilities', () => {
   describe('escapeIcsText', () => {
@@ -42,6 +46,60 @@ describe('ICS Utilities', () => {
     it('should handle strings without special characters', () => {
       expect(escapeIcsText('normal text')).toBe('normal text');
     });
+
+    it('should escape lone carriage returns as escaped newlines', () => {
+      expect(escapeIcsText('test\rvalue')).toBe('test\\nvalue');
+    });
+
+    it('should normalise CRLF line endings to a single escaped newline', () => {
+      expect(escapeIcsText('test\r\nvalue')).toBe('test\\nvalue');
+    });
+
+    it('should never leave a raw carriage return in the output', () => {
+      expect(escapeIcsText('a\rb\r\nc')).toBe('a\\nb\\nc');
+      expect(escapeIcsText('a\rb\r\nc')).not.toContain('\r');
+    });
+  });
+
+  describe('foldIcsLine', () => {
+    it('should leave a line of exactly 75 octets unmodified', () => {
+      const line = 'A'.repeat(75);
+      expect(foldIcsLine(line)).toBe(line);
+    });
+
+    it('should fold a 76 octet line after the 75th octet', () => {
+      const line = 'A'.repeat(76);
+      expect(foldIcsLine(line)).toBe(`${'A'.repeat(75)}\r\n A`);
+    });
+
+    it('should not split multi-byte characters at the fold boundary', () => {
+      const line = `${'A'.repeat(74)}😀B`;
+      const folded = foldIcsLine(line);
+
+      expect(folded).toBe(`${'A'.repeat(74)}\r\n 😀B`);
+      expect(folded).not.toContain('\uFFFD');
+    });
+
+    it('should keep every physical line within 75 octets for wide characters', () => {
+      const line = `DESCRIPTION:${'é'.repeat(200)}`;
+      foldIcsLine(line)
+        .split('\r\n')
+        .forEach(physicalLine => {
+          expect(utf8Length(physicalLine)).toBeLessThanOrEqual(75);
+        });
+    });
+
+    it('should unfold back to the original logical line', () => {
+      const line = `DESCRIPTION:${'Lorem ipsum dolor sit amet, consectetur adipiscing elit. '.repeat(4)}`;
+      const folded = foldIcsLine(line);
+
+      expect(folded).toContain('\r\n ');
+      expect(folded.split('\r\n ').join('')).toBe(line);
+    });
+
+    it('should handle empty strings', () => {
+      expect(foldIcsLine('')).toBe('');
+    });
   });
 
   describe('formatIcsDate', () => {
@@ -64,7 +122,7 @@ describe('ICS Utilities', () => {
       
       expect(uid).toContain(streamId);
       expect(uid).toContain('@streampay.io');
-      expect(uid).toMatch(/^\w+-\d+@streampay\.io$/);
+      expect(uid).toMatch(/^[a-zA-Z0-9_-]+-\d+@streampay\.io$/);
     });
 
     it('should generate different UIDs for different timestamps', () => {
@@ -147,7 +205,10 @@ describe('ICS Utilities', () => {
         'stream-123',
         '10 XLM / day',
         pastDate.toISOString(),
-        'active'
+        'active',
+        'XLM',
+        52,
+        false
       );
       
       // All events should be in the future
@@ -300,6 +361,69 @@ describe('ICS Utilities', () => {
       
       expect(icsContent.match(/BEGIN:VEVENT/g)).toHaveLength(2);
       expect(icsContent.match(/END:VEVENT/g)).toHaveLength(2);
+    });
+
+    it('should fold long description lines and unfold to the original line', () => {
+      const description = `Stream stream-123 vesting payment of 120 XLM. ${'Extra detail '.repeat(10)}`;
+      const events = [
+        {
+          uid: 'test-uid@streampay.io',
+          summary: 'Test Event',
+          description,
+          start: new Date('2024-01-15T10:00:00.000Z'),
+          end: new Date('2024-01-15T11:00:00.000Z'),
+          streamId: 'stream-123',
+        },
+      ];
+
+      const icsContent = generateIcsFile(events, 'Fold Calendar');
+
+      expect(icsContent).toContain('\r\n ');
+      expect(icsContent.split('\r\n ').join('')).toContain(
+        `DESCRIPTION:${escapeIcsText(description)}`
+      );
+    });
+
+    it('should keep every physical line within 75 octets', () => {
+      const events: any[] = calculateVestingDates(
+        'stream-long',
+        '120 XLM / month',
+        '2024-11-01T09:00:00.000Z',
+        'active',
+        'XLM',
+        12
+      );
+      events.forEach(event => {
+        event.description = `${event.description} ${'A very long description. '.repeat(8)}`;
+        event.summary = `${event.summary} — ${'long summary '.repeat(4)}`;
+        event.location = 'StreamPay vesting calendar, online; worldwide';
+      });
+
+      const icsContent = generateIcsFile(events, 'StreamPay: A rather long calendar name for folding');
+
+      icsContent.split('\r\n').forEach(physicalLine => {
+        expect(utf8Length(physicalLine)).toBeLessThanOrEqual(75);
+      });
+    });
+
+    it('should never emit a raw carriage return from event text', () => {
+      const events = [
+        {
+          uid: 'test-uid@streampay.io',
+          summary: 'Test Event',
+          description: 'Line one\r\nLine two\rLine three',
+          start: new Date('2024-01-15T10:00:00.000Z'),
+          end: new Date('2024-01-15T11:00:00.000Z'),
+          streamId: 'stream-123',
+        },
+      ];
+
+      const icsContent = generateIcsFile(events);
+
+      expect(icsContent).toContain('DESCRIPTION:Line one\\nLine two\\nLine three');
+      icsContent.split('\r\n').forEach(physicalLine => {
+        expect(physicalLine).not.toContain('\r');
+      });
     });
   });
 

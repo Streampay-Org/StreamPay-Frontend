@@ -1,5 +1,7 @@
 import React from "react";
 
+export type EmptyStateVariant = "default" | "stream-type-chip";
+
 export interface EmptyStateProps {
   /** The main title of the empty state */
   title: string;
@@ -15,6 +17,11 @@ export interface EmptyStateProps {
   className?: string;
   /** Test ID for the component */
   testId?: string;
+  /**
+   * Visual variant. `"stream-type-chip"` tightens padding for inline chip
+   * empty states (Issue #1085); `"default"` keeps the full card layout.
+   */
+  variant?: EmptyStateVariant;
 }
 
 /**
@@ -29,24 +36,28 @@ export function EmptyState({
   onCtaClick,
   className = "",
   testId = "empty-state",
+  variant = "default",
 }: EmptyStateProps) {
+  const isChip = variant === "stream-type-chip";
+
   return (
     <div
-      className={`empty-state ${className}`.trim()}
+      className={`empty-state ${isChip ? "empty-state--stream-type-chip" : ""} ${className}`.trim()}
       data-testid={testId}
+      data-variant={variant}
       style={{
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        padding: "2rem",
+        padding: isChip ? "1.25rem 1rem" : "2rem",
         textAlign: "center",
         backgroundColor: "var(--panel, #1F2937)",
         border: "1px solid var(--border, #374151)",
-        borderRadius: "0.75rem",
+        borderRadius: isChip ? "0.875rem" : "0.75rem",
         color: "var(--foreground, #F9FAFB)",
         width: "100%",
-        maxWidth: "24rem",
+        maxWidth: isChip ? "20rem" : "24rem",
         margin: "0 auto",
       }}
       role="region"
@@ -86,24 +97,24 @@ export function EmptyState({
       >
         {description}
       </p>
-      {ctaText && onCtaClick && (
+      {ctaText && (
         <button
-          className="empty-state__cta"
+          className="empty-state__cta empty-state__cta--focus-visible"
           onClick={onCtaClick}
+          disabled={!onCtaClick}
+          type="button"
           style={{
             padding: "0.75rem 1.5rem",
             borderRadius: "9999px",
-            backgroundColor: "var(--primary, #3B82F6)",
+            backgroundColor: "var(--accent)",
             color: "#FFFFFF",
             border: "none",
             fontSize: "0.875rem",
             fontWeight: 500,
-            cursor: "pointer",
-            transition: "background-color 0.2s",
-            outline: "none",
+            cursor: onCtaClick ? "pointer" : "not-allowed",
+            opacity: onCtaClick ? 1 : 0.6,
+            transition: "background-color 0.2s, box-shadow 0.15s ease",
           }}
-          onFocus={(e) => (e.target.style.boxShadow = "0 0 0 2px var(--primary, #3B82F6), 0 0 0 4px var(--panel, #1F2937)")}
-          onBlur={(e) => (e.target.style.boxShadow = "none")}
         >
           {ctaText}
         </button>

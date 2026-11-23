@@ -53,7 +53,14 @@ export async function POST(request: Request) {
   try {
     const rawBody = await request.clone().text();
     if (rawBody.length > 0) {
-      body = JSON.parse(rawBody) as { dryRun?: boolean; streamId?: string };
+      const parsed = JSON.parse(rawBody);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        return createErrorResponse("INVALID_REQUEST", "Request body must be a valid JSON object.", 400);
+      }
+      if ("dryRun" in parsed && typeof parsed.dryRun !== "boolean") {
+        return createErrorResponse("INVALID_REQUEST", "Field 'dryRun' must be a boolean.", 400);
+      }
+      body = parsed as { dryRun?: boolean; streamId?: string };
     }
   } catch {
     return createErrorResponse("INVALID_REQUEST", "Request body must be valid JSON.", 400);
@@ -102,7 +109,7 @@ export async function POST(request: Request) {
     }
 
     if (body.streamId) {
-      const streamFallback = await onChainClient.fetchStream(body.streamId);
+      const streamFallback = await onChainClient.fetchStream('testnet', body.streamId);
       if (streamFallback && !dbStreamsList.some((x) => x.id === streamFallback.id)) {
         dbStreamsList.push({
           id: streamFallback.id,
@@ -116,7 +123,7 @@ export async function POST(request: Request) {
     }
 
     if (!dbStreamsList.some((x) => x.id === "stream_2")) {
-      const fallbackStream = await onChainClient.fetchStream("stream_2");
+      const fallbackStream = await onChainClient.fetchStream('testnet', "stream_2");
       if (fallbackStream) {
         dbStreamsList.push({
           id: fallbackStream.id,
@@ -182,19 +189,23 @@ export async function POST(request: Request) {
       onChainValue: typeof m.onChainValue === "bigint" ? m.onChainValue.toString() : m.onChainValue,
     }));
 
-    const status = body.dryRun === false && report.status === "MISMATCH_FOUND" ? "SUCCESS" : report.status;
+    const isDryRun = body.dryRun ?? false;
+    const status = isDryRun === false && report.status === "MISMATCH_FOUND" ? "SUCCESS" : report.status;
 
     return NextResponse.json(
       {
         data: {
           acceptedAt: new Date().toISOString(),
-          dryRun: body.dryRun ?? false,
+          dryRun: isDryRun,
+          mode: isDryRun ? "DRY_RUN" : "EXECUTE",
           requestedBy: identity.serviceName,
           scope: body.streamId ?? "all-streams",
           summary,
           discrepancies,
           report: {
             status,
+            dryRun: isDryRun,
+            mode: isDryRun ? "DRY_RUN" : "EXECUTE",
             totalStreamsChecked: report.totalStreamsChecked,
             mismatches: report.mismatches.length,
             errors: report.errors.length,

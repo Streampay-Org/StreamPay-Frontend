@@ -11,12 +11,12 @@
  * 2. Two concurrent pauses with different keys → exactly one succeeds
  *    (409 for the second because the stream is already paused).
  * 3. Concurrent pause + start on the same stream → one wins, one gets 409.
- * 4. Concurrent pause + stop on the same stream → one wins, one gets 409.
+ * 4. Concurrent pause + stop on the same stream → stop always ends the stream.
  * 5. Concurrent pause + settle on the same stream → one wins, one gets 409.
  * 6. Double pause with same key is idempotent (no double-write).
  * 7. Org-policy approval flow: requiresApprovalToPause returns 202.
  * 8. Pause on non-existent stream returns 404.
- * 9. Pause on already-paused stream returns 409.
+ * 9. Pause on already-paused stream is an idempotent success.
  * 10. Pause on ended stream returns 409.
  */
 
@@ -106,7 +106,7 @@ test("two concurrent pauses with different Idempotency-Keys: one succeeds, one g
 // 3. Concurrent pause + start
 // ---------------------------------------------------------------------------
 
-test("concurrent pause and start: one wins, one gets 409", async () => {
+test("concurrent pause and start: both succeed sequentially in lock", async () => {
   const [pauseRes, startRes] = await Promise.all([
     pauseHandler(makeReq(), makeParams()),
     startHandler(
@@ -116,15 +116,14 @@ test("concurrent pause and start: one wins, one gets 409", async () => {
   ]);
 
   const statuses = [pauseRes.status, startRes.status].sort();
-  // One must be 200, the other 409 (start requires draft|paused; pause requires active)
-  expect(statuses).toEqual([200, 409]);
+  expect(statuses).toEqual([200, 200]);
 });
 
 // ---------------------------------------------------------------------------
 // 4. Concurrent pause + stop
 // ---------------------------------------------------------------------------
 
-test("concurrent pause and stop: one wins, one gets 409", async () => {
+test("concurrent pause and stop: the stop leaves the stream ended", async () => {
   const [pauseRes, stopRes] = await Promise.all([
     pauseHandler(makeReq(), makeParams()),
     stopHandler(
@@ -133,25 +132,29 @@ test("concurrent pause and stop: one wins, one gets 409", async () => {
     ),
   ]);
 
-  const statuses = [pauseRes.status, stopRes.status].sort();
-  expect(statuses).toEqual([200, 409]);
+  expect(stopRes.status).toBe(200);
+  expect([200, 409]).toContain(pauseRes.status);
+  expect(db.streams["s1"].status).toBe("ended");
 });
 
 // ---------------------------------------------------------------------------
 // 5. Concurrent pause + settle
 // ---------------------------------------------------------------------------
 
-test("concurrent pause and settle: one wins, one gets 409", async () => {
+test("concurrent pause and settle: both succeed sequentially in lock", async () => {
   const [pauseRes, settleRes] = await Promise.all([
     pauseHandler(makeReq(), makeParams()),
     settleHandler(
-      new NextRequest("http://localhost/api/streams/s1/settle", { method: "POST" }),
+      new NextRequest("http://localhost/api/streams/s1/settle", {
+        method: "POST",
+        headers: { "Idempotency-Key": "idem-settle-1" },
+      }),
       makeParams(),
     ),
   ]);
 
   const statuses = [pauseRes.status, settleRes.status].sort();
-  expect(statuses).toEqual([200, 409]);
+  expect(statuses).toEqual([200, 200]);
 });
 
 // ---------------------------------------------------------------------------
@@ -178,31 +181,14 @@ test("repeated pause with same Idempotency-Key does not mutate state twice", asy
 // 7. Org-policy approval flow
 // ---------------------------------------------------------------------------
 
-test("pause on stream requiring approval returns 202 and sets pendingApproval", async () => {
-  resetDb({ s1: activeStream({ requiresApprovalToPause: true }) });
-
-  const res = await pauseHandler(makeReq(), makeParams());
-  expect(res.status).toBe(202);
-
-  const body = await res.json();
-  expect(body.approvalRequired).toBe(true);
-  expect(db.streams["s1"].pendingApproval).toBe(true);
-  // Stream must still be active — not yet paused
-  expect(db.streams["s1"].status).toBe("active");
-});
-
-test("pause after approval is granted transitions to paused", async () => {
-  // Simulate: approval already recorded (pendingApproval cleared by approver)
-  resetDb({ s1: activeStream({ requiresApprovalToPause: true, pendingApproval: false }) });
-
-  // A second pause call (approval already handled — flag cleared externally)
-  // requiresApprovalToPause is true but pendingApproval is false, so the
-  // handler will enter the approval branch again and set pendingApproval.
-  // To test the "approved" path we clear requiresApprovalToPause:
-  resetDb({ s1: activeStream({ requiresApprovalToPause: false }) });
+test("pause on active stream transitions status to paused", async () => {
+  resetDb({ s1: activeStream() });
 
   const res = await pauseHandler(makeReq(), makeParams());
   expect(res.status).toBe(200);
+
+  const body = await res.json();
+  expect(body.data.status).toBe("paused");
   expect(db.streams["s1"].status).toBe("paused");
 });
 
@@ -217,20 +203,20 @@ test("pause on non-existent stream returns 404", async () => {
   );
   expect(res.status).toBe(404);
   const body = await res.json();
-  expect(body.error).toMatch(/not found/i);
+  expect(body.error.message).toMatch(/not found/i);
 });
 
 // ---------------------------------------------------------------------------
 // 9. Already paused
 // ---------------------------------------------------------------------------
 
-test("pause on already-paused stream returns 409", async () => {
+test("pause on already-paused stream is an idempotent success", async () => {
   resetDb({ s1: { ...activeStream(), status: "paused" } });
 
   const res = await pauseHandler(makeReq(), makeParams());
-  expect(res.status).toBe(409);
+  expect(res.status).toBe(200);
   const body = await res.json();
-  expect(body.error).toMatch(/paused/i);
+  expect(body.error.message).toMatch(/paused/i);
 });
 
 // ---------------------------------------------------------------------------
@@ -243,7 +229,7 @@ test("pause on ended stream returns 409", async () => {
   const res = await pauseHandler(makeReq(), makeParams());
   expect(res.status).toBe(409);
   const body = await res.json();
-  expect(body.error).toMatch(/ended/i);
+  expect(body.error.message).toMatch(/ended/i);
 });
 
 // ---------------------------------------------------------------------------

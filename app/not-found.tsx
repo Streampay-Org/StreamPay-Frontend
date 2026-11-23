@@ -17,7 +17,7 @@ export default function NotFound() {
       secondaryAction={
         <Link
           className="button button--secondary error-page__action"
-          href="/settings"
+          href="/help"
         >
           Contact support
         </Link>

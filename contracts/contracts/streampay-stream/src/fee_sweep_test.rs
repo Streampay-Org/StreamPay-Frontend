@@ -22,9 +22,7 @@
 //! | 16 | Empty stream_ids vec returns `Error::SweepNoFees` |
 
 use crate::fee_sweep::{sweep_fees, SweepResult};
-use crate::fees::{
-    accrue_fees, clear_accumulated_fees, get_accumulated_fees, set_fee_collector,
-};
+use crate::fees::{accrue_fees, clear_accumulated_fees, get_accumulated_fees, set_fee_collector};
 use crate::storage::{self, Stream, StreamStatus};
 use crate::Contract;
 use crate::Error;
@@ -69,11 +67,7 @@ fn setup() -> (SweepFixture, soroban_sdk::Address) {
     let client: ContractClient<'_> = ContractClient::new(&env, &contract_id);
     client.initialize(&admin);
 
-    let fix = SweepFixture {
-        env,
-        admin,
-        token,
-    };
+    let fix = SweepFixture { env, admin, token };
     (fix, contract_id)
 }
 
@@ -97,6 +91,7 @@ fn insert_stream(env: &Env, _contract_id: &Address, stream_id: u64, token: &Addr
         paused_at: 0,
         total_paused_duration: 0,
         fee_bps: 100,
+        cliff_time: 0,
     };
     storage::set_stream(env, stream_id, &stream);
 }
@@ -130,7 +125,10 @@ fn test_sweep_single_stream_success() {
 
     // Balance must be zeroed.
     let remaining = env.as_contract(&contract_id, || get_accumulated_fees(env, 1));
-    assert_eq!(remaining, 0, "accumulated fees should be zeroed after sweep");
+    assert_eq!(
+        remaining, 0,
+        "accumulated fees should be zeroed after sweep"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -445,7 +443,7 @@ fn test_sweep_skips_missing_stream_ids() {
 
     let mut ids: Vec<u64> = Vec::new(env);
     ids.push_back(1u64);
-    ids.push_back(99u64);  // non-existent
+    ids.push_back(99u64); // non-existent
     ids.push_back(100u64); // non-existent
 
     // Should succeed on stream 1 and silently ignore the missing IDs.

@@ -35,7 +35,7 @@ describe('GET /api/exports/health', () => {
     global.fetch = jest.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({ result: { status: 'healthy' } }),
-    }) as unknown as typeof fetch;
+    });
 
     const response = await GET(buildRequest());
     const body = await response.json();
@@ -51,7 +51,7 @@ describe('GET /api/exports/health', () => {
     global.fetch = jest.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({ result: { status: 'healthy' } }),
-    }) as unknown as typeof fetch;
+    });
 
     const response = await GET(buildRequest());
     const body = await response.json();
@@ -64,7 +64,7 @@ describe('GET /api/exports/health', () => {
 
   it('returns 503 when soroban rpc is unreachable', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [{ '?column?': 1 }] });
-    global.fetch = jest.fn().mockRejectedValueOnce(new Error('fetch_failed')) as unknown as typeof fetch;
+    global.fetch = jest.fn().mockRejectedValueOnce(new Error('fetch_failed'));
 
     const response = await GET(buildRequest());
     const body = await response.json();
@@ -89,7 +89,7 @@ describe('GET /api/exports/health', () => {
     global.fetch = jest.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({ result: { status: 'healthy' } }),
-    }) as unknown as typeof fetch;
+    });
 
     const response = await GET(buildRequest({ 'x-request-id': 'req_test_123' }));
     const body = await response.json();

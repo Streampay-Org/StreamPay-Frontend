@@ -36,13 +36,14 @@ export function PayoutSummary({
           <div className="space-y-1 sm:text-right">
             <p className="text-xs font-medium text-[var(--muted)]">Total amount</p>
             <p className="text-2xl font-bold tracking-tight text-[var(--foreground)] sm:text-3xl">
-              {totalAmount} {tokenSymbol}
+              {`${totalAmount} ${tokenSymbol}`}
             </p>
           </div>
 
           <p className="text-sm text-[var(--muted-foreground)]">
-            <span className="font-semibold text-[var(--foreground)]">{recipientCount}</span>{" "}
-            <span>{recipientCount === 1 ? "recipient" : "recipients"}</span>
+            <span className="font-semibold text-[var(--foreground)]">
+              {`${recipientCount} ${recipientCount === 1 ? "recipient" : "recipients"}`}
+            </span>
           </p>
         </div>
       </div>

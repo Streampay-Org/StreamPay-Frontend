@@ -5,7 +5,7 @@
 
 // @ts-nocheck - PATCH route handler not yet exported from this module
 import { PATCH } from "@/app/api/v2/streams/[id]/route";
-import { getStore, resetDb } from "@/app/lib/db";
+import { db, resetDb } from "@/app/lib/db";
 import { Stream } from "@/app/types/openapi";
 
 const MOCK_STREAM_ID = "stream_mock_123";
@@ -22,8 +22,7 @@ describe("PATCH /api/v2/streams/[id]", () => {
   beforeEach(() => {
     resetDb();
     // Seed the store with a stream to update
-    const { streams } = getStore();
-    streams.set(MOCK_STREAM_ID, {
+    db.streams.set(MOCK_STREAM_ID, {
       id: MOCK_STREAM_ID,
       status: "active",
       recipient: "GABC...",
@@ -86,7 +85,7 @@ describe("PATCH /api/v2/streams/[id]", () => {
     expect(body.data.updatedAt).toBeDefined();
 
     // Verify the store was updated
-    const storedStream = getStore().streams.get(MOCK_STREAM_ID);
+    const storedStream = db.streams.get(MOCK_STREAM_ID);
     expect(storedStream?.description).toBe("A new description");
   });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import { LiveRegion } from "./LiveRegion";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -28,7 +28,7 @@ export function maskAddress(address: string): string {
   return `${address.slice(0, 4)}…${address.slice(-4)}`;
 }
 
-const COPY_FEEDBACK_MS = 2_000;
+export const COPY_FEEDBACK_MS = 2_000;
 
 export function ReceiptShareCard({
   streamId,
@@ -52,14 +52,22 @@ export function ReceiptShareCard({
     network === "mainnet" ? "Stellar Mainnet" : "Stellar Testnet";
   const statusLabel = status ? STATUS_LABELS[status] ?? status : undefined;
 
+  const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
   const handleCopy = useCallback(() => {
     const shareText =
       `StreamPay receipt ${streamId}: ${amount} ${assetCode} to ${shownRecipient}`;
-    navigator.clipboard?.writeText(shareText).then(() => {
-      setCopied(true);
-      setAnnouncement("Share text copied to clipboard.");
-      setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
-    });
+    navigator.clipboard
+      ?.writeText(shareText)
+      .then(() => {
+        setCopied(true);
+        setAnnouncement("Share text copied to clipboard.");
+        const t = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
+        timeoutRef.current = t;
+      })
+      .catch(() => {
+        setAnnouncement("Could not copy share text to the clipboard.");
+      });
   }, [streamId, amount, assetCode, shownRecipient]);
 
   const handleMaskToggle = useCallback((next: boolean) => {
@@ -69,11 +77,20 @@ export function ReceiptShareCard({
     );
   }, []);
 
+  // Cleanup any pending timeout when component unmounts
+  React.useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, []);
+
   return (
     <figure className="receipt-share-card" aria-label="Stream receipt share card">
       {/* SR-only — announces copy/mask-toggle state changes without moving focus. */}
       <LiveRegion message={announcement} />
-
       <div className="receipt-share-card__brand">
         <span className="receipt-share-card__wordmark">StreamPay</span>
         <span className="receipt-share-card__tagline">Receipt</span>

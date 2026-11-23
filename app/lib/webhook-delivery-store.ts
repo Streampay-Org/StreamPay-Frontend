@@ -1,4 +1,5 @@
 import { logger, getCorrelationContext } from './logger';
+import { decodeCompositeCursor, encodeCompositeCursor } from './db';
 import {
   WebhookDeliveryRecord,
   WebhookDeliveryAttempt,
@@ -6,6 +7,22 @@ import {
   WebhookEndpoint,
   WebhookEvent,
 } from './webhook-delivery';
+
+export interface WebhookDeliveriesPage {
+  data: WebhookDeliveryRecord[];
+  hasNext: boolean;
+  nextCursor: string | null;
+  total: number;
+}
+
+export interface WebhookDeliveryHealthStats {
+  total: number;
+  delivered: number;
+  failed: number;
+  pending: number;
+  dlq: number;
+  stale: number;
+}
 
 /**
  * In-memory storage for webhook deliveries and DLQ entries.
@@ -177,6 +194,47 @@ export class WebhookDeliveryStore {
   }
 
   /**
+   * Get a stable, cursor-paginated page of delivery records.
+   *
+   * Records are ordered by (createdAt, deliveryId) descending so that
+   * ordering stays stable even when multiple deliveries share the same
+   * `createdAt` timestamp. An invalid cursor yields an empty page rather
+   * than throwing, mirroring the activity timeline's query behaviour.
+   */
+  getDeliveriesPage(params: { cursor?: string; limit: number }): WebhookDeliveriesPage {
+    const { cursor, limit } = params;
+    let sorted = Array.from(this.deliveries.values()).sort((a, b) => {
+      const tsCmp = b.createdAt.localeCompare(a.createdAt);
+      return tsCmp !== 0 ? tsCmp : b.deliveryId.localeCompare(a.deliveryId);
+    });
+
+    const total = sorted.length;
+
+    if (cursor) {
+      let cursorTimestamp: string;
+      let cursorId: string;
+      try {
+        ({ timestamp: cursorTimestamp, id: cursorId } = decodeCompositeCursor(cursor));
+      } catch {
+        return { data: [], hasNext: false, nextCursor: null, total };
+      }
+      sorted = sorted.filter((record) => {
+        const tsCmp = record.createdAt.localeCompare(cursorTimestamp);
+        return tsCmp < 0 || (tsCmp === 0 && record.deliveryId.localeCompare(cursorId) < 0);
+      });
+    }
+
+    const data = sorted.slice(0, limit);
+    const hasNext = sorted.length > limit;
+    const nextCursor =
+      hasNext && data.length > 0
+        ? encodeCompositeCursor(data[data.length - 1].createdAt, data[data.length - 1].deliveryId)
+        : null;
+
+    return { data, hasNext, nextCursor, total };
+  }
+
+  /**
    * Get all deliveries for an endpoint
    */
   getDeliveriesByEndpoint(endpointId: string): WebhookDeliveryRecord[] {
@@ -250,6 +308,10 @@ export class WebhookDeliveryStore {
     return Array.from(this.dlq.values());
   }
 
+  getDLQEntries(): DLQEntry[] {
+    return this.getAllDLQEntries();
+  }
+
   /**
    * Get DLQ entries by status/date range for observability
    */
@@ -280,6 +342,61 @@ export class WebhookDeliveryStore {
       dlq: deliveries.filter(d => d.status === 'dlq').length,
       totalAttempts: deliveries.reduce((sum, d) => sum + d.attempts.length, 0),
       dlqEntries: this.dlq.size,
+    };
+  }
+
+  /**
+   * Aggregate delivery counts by status and detect stale pending deliveries.
+   *
+   * A pending delivery is considered stale when its last attempt timestamp
+   * (or `createdAt` if no attempts have been recorded) is strictly older than
+   * `staleAfterMs` relative to `now`.
+   */
+  getDeliveryHealthStats(
+    now: Date | number,
+    staleAfterMs: number,
+  ): WebhookDeliveryHealthStats {
+    const nowMs = typeof now === 'number' ? now : now.getTime();
+    let delivered = 0;
+    let failed = 0;
+    let pending = 0;
+    let dlq = 0;
+    let stale = 0;
+
+    for (const record of this.deliveries.values()) {
+      switch (record.status) {
+        case 'delivered':
+          delivered += 1;
+          break;
+        case 'failed':
+          failed += 1;
+          break;
+        case 'dlq':
+          dlq += 1;
+          break;
+        case 'pending': {
+          pending += 1;
+          const lastAttempt =
+            record.attempts.length > 0
+              ? record.attempts[record.attempts.length - 1]
+              : undefined;
+          const refTimestamp = lastAttempt?.timestamp ?? record.createdAt;
+          const refMs = new Date(refTimestamp).getTime();
+          if (Number.isFinite(refMs) && nowMs - refMs > staleAfterMs) {
+            stale += 1;
+          }
+          break;
+        }
+      }
+    }
+
+    return {
+      total: this.deliveries.size,
+      delivered,
+      failed,
+      pending,
+      dlq,
+      stale,
     };
   }
 }

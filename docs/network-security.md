@@ -65,7 +65,7 @@ The public API surface is protected by an explicit `ALLOWED_ORIGINS` allowlist. 
 
 - `ALLOWED_ORIGINS` is required for all environments.
 - In `production`, wildcard origin `*` is not permitted.
-- Preflight responses use a 10-minute cache (`Access-Control-Max-Age: 600`) to avoid breaking deploys while preserving explicit origin validation.
+- Preflight responses use `CORS_MAX_AGE_SECONDS` (default `600`, range `0`–`86400`) for `Access-Control-Max-Age`. Set it to `0` to disable caching. Invalid, missing, negative, fractional, and out-of-range values fall back to `600`. Browsers may cap the value; for example, Chrome commonly caps it at `7200` seconds.
 - No `Access-Control-Allow-Origin` header is reflected for disallowed browser origins.
 - The API does not enable credentialed CORS by default, so bearer tokens remain the expected auth mechanism.
 

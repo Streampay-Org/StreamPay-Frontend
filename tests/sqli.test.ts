@@ -38,7 +38,7 @@ const SQLI_PAYLOADS: readonly string[] = [
   "'/**/OR/**/1=1",
 ];
 
-const VALID_RECIPIENT = "G".padEnd(56, "A");
+const VALID_RECIPIENT = "GDSBCG3OKHCMMWS5EBH2X7XOYTJRWXN2YYQPCNS5OFBU4IDO4X7OFSQA";
 
 describe("SQL injection regression — validateCreateStreamBody", () => {
   it.each(SQLI_PAYLOADS)("rejects injection payload in `recipient`: %s", (payload) => {

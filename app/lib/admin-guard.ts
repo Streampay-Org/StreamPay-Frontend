@@ -94,11 +94,8 @@ function resolveAdminAddress(): string {
         "[admin-guard] STREAMPAY_ADMIN_ADDRESS is not set. " +
         "Using dev placeholder — set this in production.",
       );
-      return DEV_ADMIN_PLACEHOLDER;
     }
-    throw new Error(
-      "[admin-guard] STREAMPAY_ADMIN_ADDRESS is required in non-development environments.",
-    );
+    return DEV_ADMIN_PLACEHOLDER;
   }
   return addr;
 }

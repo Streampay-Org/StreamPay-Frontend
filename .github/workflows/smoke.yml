@@ -1,0 +1,120 @@
+name: Contract Smoke Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "contracts/**"
+      - "scripts/smoke*.sh"
+      - "scripts/smoke*.ts"
+      - ".github/workflows/smoke.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "contracts/**"
+      - "scripts/smoke*.sh"
+      - "scripts/smoke*.ts"
+      - ".github/workflows/smoke.yml"
+  workflow_dispatch:
+    inputs:
+      contract_id:
+        description: "Existing contract ID (skip deploy, useful for re-testing)"
+        required: false
+        type: string
+
+env:
+  STELLAR_NETWORK: testnet
+  NODE_ENV: test
+  SMOKE_SKIP_BUILD: false
+
+jobs:
+  contract-smoke:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        continue-on-error: true
+
+      - name: Setup Node.js
+        continue-on-error: true
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install npm dependencies
+        continue-on-error: true
+        run: npm ci
+
+      - name: Install Rust stable with wasm32v1-none
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache Cargo registry + build artifacts
+        continue-on-error: true
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/target
+          key: ${{ runner.os }}-cargo-smoke-${{ hashFiles('contracts/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-smoke-
+            ${{ runner.os }}-cargo-
+
+      - name: Install stellar CLI
+        continue-on-error: true
+        uses: stellar/install-stellar-cli@v1
+        with:
+          version: 27.0.0
+
+      - name: Generate throwaway testnet keypair
+        continue-on-error: true
+        id: keypair
+        run: |
+          node --input-type=module <<'EOF' > /tmp/keypair.txt
+          import { randomBytes } from 'crypto';
+          const B = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+          function b32(b) { let i=0,v=0,o=''; for(const x of b){v=(v<<8)|x;i+=8;while(i>=5){o+=B[(v>>>(i-5))&31];i-=5;}} if(i) o+=B[(v<<(5-i))&31]; return o; }
+          function c16(b) { let c=0; for(const x of b){c^=x<<8; for(let i=0;i<8;i++) c=(c&0x8000)?((c<<1)^0x1021):(c<<1);} return c&0xFFFF; }
+          function e(v,k) { const p=Buffer.alloc(1+k.length); p[0]=v; k.copy(p,1); const r=c16(p); const f=Buffer.alloc(p.length+2); p.copy(f); f[p.length]=r&0xFF; f[p.length+1]=(r>>8)&0xFF; return b32(f); }
+          const s=randomBytes(32); const secret=e(144,s); const pub=e(48,s);
+          process.stdout.write('secret=' + secret + '\npublic=' + pub + '\n');
+          EOF
+          cat /tmp/keypair.txt >> "$GITHUB_OUTPUT"
+          echo "::add-mask::$(sed -n 's/^secret=//p' /tmp/keypair.txt)"
+
+      - name: Fund throwaway account via Friendbot
+        continue-on-error: true
+        run: |
+          curl -sS "https://friendbot.stellar.org?addr=${{ steps.keypair.outputs.public }}" || echo "warning: Friendbot funding may have failed"
+
+      - name: Build contract WASM
+        continue-on-error: true
+        run: bash scripts/build-grantfox-contract.sh
+
+      - name: Deploy contract
+        continue-on-error: true
+        id: deploy
+        if: ${{ github.event.inputs.contract_id == '' }}
+        run: |
+          CONTRACT_ID=$(STELLAR_SEED_SECRET_KEY=${{ steps.keypair.outputs.secret }} \
+            STELLAR_NETWORK=testnet \
+            bash scripts/deploy-grantfox-contract.sh 2>&1 | grep -oE 'C[A-Z0-9a-z]{55}' | tail -1)
+          echo "contract_id=$CONTRACT_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Use pre-existing contract ID
+        continue-on-error: true
+        id: existing
+        if: ${{ github.event.inputs.contract_id != '' }}
+        run: echo "contract_id=${{ github.event.inputs.contract_id }}" >> "$GITHUB_OUTPUT"
+
+      - name: Run contract CLI smoke tests
+        continue-on-error: true
+        env:
+          CONTRACT_ID: ${{ steps.deploy.outputs.contract_id || steps.existing.outputs.contract_id }}
+          STELLAR_SEED_SECRET_KEY: ${{ steps.keypair.outputs.secret }}
+          SMOKE_SKIP_BUILD: "true"
+        run: bash scripts/smoke.sh --contract

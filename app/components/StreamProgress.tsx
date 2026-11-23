@@ -26,27 +26,40 @@
  * ## Amounts
  * Accepts raw i128-compatible bigint or number values. No decimal conversion
  * is performed here; callers supply pre-scaled display values if needed.
+ *
+ * ## Styling
+ * Track/meta spacing and label typography (`app/globals.css`, the
+ * `.stream-progress*` rules) are pinned to the shared `--space-*` / `--text-*`
+ * / `--font-*` design tokens rather than hardcoded rem values, so the
+ * component stays in step with any future scale adjustments.
  */
 
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { StreamStatus } from "@/app/types/openapi";
 import { LiveRegion } from "./LiveRegion";
 import { EmptyState } from "./EmptyState";
+import { KbdHint } from "@/src/components/KbdHint";
+import type { KbdShortcut } from "@/src/components/KbdHint";
+import { Skeleton } from "./Skeleton";
 
 // ── Reduced-motion ─────────────────────────────────────────────────────────────
 
 /**
  * Tracks the user's `prefers-reduced-motion` setting.
  *
- * Returns `true` when the user has requested reduced motion. SSR-safe: defaults
- * to `false` on the server (and before hydration) and updates live if the
- * preference changes. Used to swap the animated fill transition for a static,
- * instantly-positioned bar.
+ * Reads the media query synchronously on mount so the correct class is applied
+ * on the first render (no flash). Updates live if the preference changes.
+ * SSR-safe: returns `false` on the server.
  */
 function usePrefersReducedMotion(): boolean {
-  const [prefersReduced, setPrefersReduced] = useState(false);
+  const [prefersReduced, setPrefersReduced] = useState(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return false;
+    }
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  });
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -54,12 +67,8 @@ function usePrefersReducedMotion(): boolean {
     }
 
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setPrefersReduced(query.matches);
-
     const onChange = (event: MediaQueryListEvent) => setPrefersReduced(event.matches);
 
-    // addEventListener is the modern API; fall back to addListener for older
-    // engines (e.g. Safari < 14) so the hook degrades gracefully.
     if (typeof query.addEventListener === "function") {
       query.addEventListener("change", onChange);
       return () => query.removeEventListener("change", onChange);
@@ -110,6 +119,16 @@ export interface StreamProgressProps {
   emptyActionLabel?: string;
   /** Optional handler invoked when the empty state CTA button is pressed */
   onEmptyAction?: () => void;
+  /** Removes progress controls from the tab sequence when nested in an ARIA grid. */
+  withinGrid?: boolean;
+  /**
+   * When true, renders a themed skeleton placeholder matching the StreamProgress
+   * layout — a shimmer track bar and meta row — while stream data is loading.
+   * The skeleton is `aria-hidden="true"` for screen readers and wrapped in a
+   * `div[aria-busy="true"]`. The container carries `.stream-progress--skeleton`
+   * so external CSS or JS can detect the loading state.
+   */
+  loading?: boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -191,14 +210,54 @@ export function StreamProgress({
   emptyDescription,
   emptyActionLabel,
   onEmptyAction,
+  withinGrid = false,
+  loading = false,
 }: StreamProgressProps) {
+  // ── Loading skeleton (early return before any hooks) ───────────────────────
+  if (loading) {
+    return (
+      <div
+        className={`stream-progress stream-progress--skeleton ${className}`.trim()}
+        aria-busy="true"
+        aria-label="Stream progress is loading"
+      >
+        {/* Skeleton track — mirrors .stream-progress__track dimensions */}
+        <Skeleton
+          className="stream-progress__skeleton-track"
+          width="100%"
+          height="10px"
+        />
+
+        {/* Skeleton meta row — mirrors .stream-progress__meta layout */}
+        <div className="stream-progress__skeleton-meta" aria-hidden="true">
+          <Skeleton variant="label" width="6rem" />
+          <Skeleton variant="text" width="5rem" />
+        </div>
+      </div>
+    );
+  }
+
   const percent = derivePercent({ status, accruedAmount, totalAmount, startedAt, endsAt });
   const label   = deriveLabel(status, percent);
   const prefersReducedMotion = usePrefersReducedMotion();
 
+  // ── Keyboard shortcut hints ────────────────────────────────────────────────
+  const [showHints, setShowHints] = useState(false);
+  const toggleHints = useCallback(() => setShowHints((prev) => !prev), []);
+
+  const shortcuts: KbdShortcut[] = [];
+  if (status === "active" || status === "paused") {
+    shortcuts.push({ keys: ["Space"], description: "Pause / resume" });
+  }
+  if (status === "draft") {
+    shortcuts.push({ keys: ["Enter"], description: "Start stream" });
+  }
+  shortcuts.push({ keys: ["Esc"], description: "Deselect" });
+  shortcuts.push({ keys: ["Ctrl", "K"], description: "Command palette" });
+
   // ── ARIA live announcements ────────────────────────────────────────────────
   const [srAnnouncement, setSrAnnouncement] = useState("");
-  const prevStatusRef = useRef<StreamStatus | null>(null);
+  const prevStatusRef = useRef<StreamStatus | "empty" | null>(null);
   const prevPercentRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -284,7 +343,7 @@ export function StreamProgress({
       {/* Track */}
       <div
         role="progressbar"
-        tabIndex={0}
+        tabIndex={withinGrid ? -1 : 0}
         aria-valuenow={Math.round(percent)}
         aria-valuemin={0}
         aria-valuemax={100}
@@ -304,11 +363,34 @@ export function StreamProgress({
 
       {/* Visible label — state is NOT conveyed by color alone */}
       <div className="stream-progress__meta" aria-hidden="true">
-        <span className="stream-progress__label">{label}</span>
+        <span className="stream-progress__label tabular-nums">{label}</span>
         {typeof totalAmount === "number" && typeof accruedAmount === "number" && totalAmount > 0 && (
           <span className="stream-progress__remaining tabular-nums">
             {Math.round(totalAmount - accruedAmount).toLocaleString()} remaining
           </span>
+        )}
+      </div>
+
+      {/* Keyboard shortcut hints — hidden by default, toggled via button */}
+      <div className="stream-progress__hints" aria-hidden="true">
+        <button
+          type="button"
+          className="stream-progress__hints-toggle"
+          onClick={toggleHints}
+          aria-expanded={showHints}
+          tabIndex={withinGrid ? -1 : undefined}
+          data-testid="stream-progress-kbd-toggle"
+        >
+          <span className="stream-progress__hints-icon" aria-hidden="true">
+            {showHints ? "▾" : "▸"}
+          </span>
+          Keyboard shortcuts
+        </button>
+        {showHints && (
+          <KbdHint
+            shortcuts={shortcuts}
+            data-testid="stream-progress-kbd-hints"
+          />
         )}
       </div>
     </div>

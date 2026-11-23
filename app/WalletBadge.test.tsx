@@ -2,9 +2,25 @@
  * @jest-environment jsdom
  */
 
+import fs from "fs";
+import path from "path";
 import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { WalletBadge } from "./WalletBadge";
+
+/** Installs a matchMedia mock that reports the given reduced-motion preference. */
+function mockMatchMedia(prefersReduced: boolean) {
+  window.matchMedia = jest.fn().mockImplementation((query: string) => ({
+    matches: query.includes("prefers-reduced-motion") ? prefersReduced : false,
+    media: query,
+    onchange: null,
+    addEventListener: jest.fn(),
+    removeEventListener: jest.fn(),
+    addListener: jest.fn(),
+    removeListener: jest.fn(),
+    dispatchEvent: jest.fn(),
+  }));
+}
 
 describe("WalletBadge", () => {
   it("renders disconnected state by default with connect label and SR announcement", () => {
@@ -132,5 +148,55 @@ describe("WalletBadge", () => {
     const badge = screen.getByTestId("wallet-badge");
     expect(badge).toHaveAttribute("role", "region");
     expect(badge).not.toHaveAttribute("tabIndex");
+  });
+
+  describe("color-blind pattern fills", () => {
+    it.each([
+      ["disconnected", "cb-pattern--draft"],
+      ["connecting", "cb-pattern--active"],
+      ["connected", "cb-pattern--ended"],
+      ["error", "cb-pattern--cancelled"],
+      ["disconnecting", "cb-pattern--paused"],
+    ])("applies %s → %s pattern class to the status dot", (state, expectedPattern) => {
+      const { container } = render(
+        <WalletBadge state={state as any} />
+      );
+      const dot = container.querySelector(".wallet-badge__dot");
+      expect(dot).toHaveClass("cb-pattern");
+      expect(dot).toHaveClass(expectedPattern);
+    });
+
+    it("applies distinct pattern classes across all wallet states", () => {
+      const states = [
+        "disconnected",
+        "connecting",
+        "connected",
+        "error",
+        "disconnecting",
+      ] as const;
+
+      const patterns = states.map((state) => {
+        const { container } = render(
+          <WalletBadge state={state} />
+        );
+        return Array.from(
+          container.querySelector(".wallet-badge__dot")?.classList ?? []
+        );
+      });
+
+      // Every state must carry at least cb-pattern + one specific pattern class
+      patterns.forEach((clsList, i) => {
+        expect(clsList).toContain("cb-pattern");
+        expect(
+          clsList.filter((c) => c.startsWith("cb-pattern--"))
+        ).toHaveLength(1);
+      });
+
+      // All five pattern classes must be distinct (no two states share the same texture)
+      const patternClasses = patterns.map(
+        (cls) => cls.find((c) => c.startsWith("cb-pattern--"))!
+      );
+      expect(new Set(patternClasses).size).toBe(states.length);
+    });
   });
 });

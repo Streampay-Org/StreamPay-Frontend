@@ -37,4 +37,19 @@ describe("shared focus-visible layer", () => {
     expect(suppressionRule).toContain(".stream-type-chip");
     expect(styleText).toContain(":focus:not(:focus-visible)");
   });
+
+  it("includes .csf-field in the focus-visible selector list", () => {
+    expect(styleText).toContain(".csf-field");
+  });
+
+  it("declares a CreateStreamForm-specific focus-visible rule", () => {
+    expect(styleText).toContain(".create-stream-form .csf-field:focus-visible");
+    expect(styleText).toContain("border-color: var(--accent)");
+  });
+
+  it("suppresses focus outline for mouse/touch on .csf-field", () => {
+    expect(styleText).toContain(
+      ".create-stream-form .csf-field:focus:not(:focus-visible)"
+    );
+  });
 });
