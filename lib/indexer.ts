@@ -1,4 +1,11 @@
 import { randomUUID } from 'crypto';
+import {
+  deriveIndexerStatus,
+  isStale,
+  type IndexerFailure,
+  type IndexerStatusState,
+  type IndexerTelemetry,
+} from './indexerStatus';
 
 export interface IndexerConfig {
   network: string;
@@ -31,12 +38,32 @@ export class HorizonIndexer {
   private overlapWindow: number;
   private stallThresholdMs: number;
   private isRunning: boolean = false;
+  /**
+   * Latest failure disposition. Reset to "none" whenever a cursor advance
+   * succeeds; set to "fatal"/"retrying" on failure so `readStatus()` reports
+   * the actionable reason before staleness.
+   */
+  private failure: IndexerFailure = "none";
+  /**
+   * This instance's view of the indexer circuit breaker. Kept local so
+   * `lib/indexer.ts` does not depend on the app-layer admin guard; the
+   * caller (e.g. the status route) feeds it via `setBreakerOpen`.
+   */
+  private breakerOpen: boolean = false;
 
   constructor(config: IndexerConfig) {
     this.network = config.network;
     this.horizonUrl = config.horizonUrl;
     this.overlapWindow = config.overlapWindow;
     this.stallThresholdMs = config.stallThresholdMs;
+  }
+
+  /**
+   * Feed the operator-controlled circuit breaker state into the indexer so
+   * `readStatus()` reports the permission/suspended state deterministically.
+   */
+  public setBreakerOpen(open: boolean) {
+    this.breakerOpen = open;
   }
 
   public async getCursor(): Promise<number> {
@@ -51,9 +78,52 @@ export class HorizonIndexer {
   public checkStall() {
     const state = cursorsDb.get(this.network);
     if (!state) return;
-    if (Date.now() - state.lastUpdatedAt > this.stallThresholdMs) {
+    if (isStale(state.lastUpdatedAt, Date.now(), this.stallThresholdMs)) {
       console.error(`[ALERT] Cursor stalled for network ${this.network}. Last update: ${new Date(state.lastUpdatedAt).toISOString()}`);
     }
+  }
+
+  /**
+   * Whether the cursor is currently stale (advanced at least once, but not
+   * advanced again within the stall threshold while the loop is running).
+   * Unlike `checkStall()` this does not log — it is the queryable predicate
+   * used to make the stale-state transition explicit and diagnosable.
+   */
+  public getStale(): boolean {
+    const state = cursorsDb.get(this.network);
+    if (!state || !this.isRunning) return false;
+    return isStale(state.lastUpdatedAt, Date.now(), this.stallThresholdMs);
+  }
+
+  /** Latest failure disposition. */
+  public getFailure(): IndexerFailure {
+    return this.failure;
+  }
+
+  /** Whether the indexer main loop is currently running. */
+  public getRunning(): boolean {
+    return this.isRunning;
+  }
+
+  /**
+   * Deterministically derive the current indexer status from live telemetry
+   * using the pure state machine in `./indexerStatus`. Staleness, permission
+   * (breaker), failure/retry, loading, and lag are all resolved in a fixed,
+   * documented priority order.
+   */
+  public readStatus(): IndexerStatusState {
+    const state = cursorsDb.get(this.network);
+    const telemetry: IndexerTelemetry = {
+      running: this.isRunning,
+      breakerOpen: this.breakerOpen,
+      lastProcessedAt: state ? state.lastUpdatedAt : null,
+      now: Date.now(),
+      stallThresholdMs: this.stallThresholdMs,
+      failure: this.failure,
+      lagLedgers: 0,
+      syncToleranceLedgers: 2,
+    };
+    return deriveIndexerStatus(telemetry);
   }
 
   public async processEvent(event: HorizonEvent, correlationId: string) {
@@ -69,7 +139,12 @@ export class HorizonIndexer {
       
       // Persist the cursor after successfully processing
       await this.saveCursor(event.ledger);
+
+      // A successful advance clears any prior failure disposition so the
+      // status returns to a healthy (synced/syncing/stalled) lineage.
+      this.failure = "none";
     } catch (error) {
+      this.failure = "fatal";
       console.error(JSON.stringify({
         level: "error",
         message: "Failed to process event",
@@ -113,6 +188,7 @@ export class HorizonIndexer {
         
         this.checkStall();
       } catch (err) {
+        this.failure = "retrying";
         console.error(JSON.stringify({
            level: "error",
            message: "Main loop error",

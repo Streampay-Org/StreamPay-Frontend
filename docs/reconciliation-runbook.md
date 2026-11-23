@@ -2,6 +2,10 @@
 
 This document outlines the steps to take when the nightly reconciliation job detects a mismatch between the StreamPay database and the on-chain (Stellar/Soroban) state.
 
+## Health probe
+
+Use `GET /api/reconciliation/health` to verify that the reconciliation dependencies needed by the service are available. The endpoint returns `200 OK` when both the database and on-chain dependencies are ready and `503 Service Unavailable` when either dependency reports degraded readiness. The payload includes per-dependency status and timestamps for easier monitoring and alerting.
+
 ## Per-stream diff endpoint
 
 `GET /api/internal/reconciliation/diff/:id` lets you inspect the DB-vs-on-chain diff for a single stream without triggering a full reconciliation run. Use it to quickly triage alerts from the nightly job.
@@ -54,9 +58,17 @@ curl -s -X GET \
 ## 1. Identify the Mismatch
 Check the reconciliation report (logs or Slack alert). Each mismatch includes:
 - **Stream ID**: The unique identifier of the stream.
+- **Kind** (when mixed-kind streams are present): `"standard"`, `"split"`, `"recurring"`, or an unknown kind reported by the indexer.
 - **Field**: The field that mismatched (e.g., `released_amount`, `total_amount`, `status`).
 - **DB Value**: The value currently stored in our database.
 - **On-Chain Value**: The value fetched directly from the Stellar/Soroban contract.
+
+### Reading Per-Kind Output
+When a run includes `split` or `recurring` streams (or an unknown kind from the indexer), the report includes a `byKind` breakdown alongside the top-level totals:
+- In the nightly endpoint (`POST /api/internal/reconciliation/nightly`), inspect `summary.byKind.<kind>` (`standard`, `split`, `recurring`, or an unknown kind key) to isolate which stream family is drifting, and filter `diff.*` entries by `kind`.
+- In the CLI / `ReconciliationService` report, inspect `report.byKind.<kind>` (`totalStreamsChecked`, `mismatchCount`, `errorCount`) and the `kind` field on each item in `report.mismatches` and `report.errors`.
+- For `split` streams, amounts are normalised from `total` / `total_amount`; for `recurring` streams, total amounts are computed via `BigInt(amount_per_cycle) * BigInt(total_cycles)` before comparison.
+- If an unknown kind appears in `summary.byKind`, treat it as a schema/indexer rollout mismatch and verify whether the indexer is emitting a new contract stream type not yet registered in the app.
 
 ## 2. Verify On-Chain Truth
 Before taking action, manually verify the stream state using a block explorer or the Stellar CLI.

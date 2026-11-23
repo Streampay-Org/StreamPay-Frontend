@@ -1,5 +1,9 @@
 import { HorizonIndexer, HorizonEvent, cursorsDb, processedEventsDb } from './indexer';
 
+function installFakeNow(now: number) {
+  jest.spyOn(Date, 'now').mockReturnValue(now);
+}
+
 describe('HorizonIndexer', () => {
   let indexer: HorizonIndexer;
 
@@ -17,6 +21,7 @@ describe('HorizonIndexer', () => {
 
   afterEach(() => {
     indexer.stop();
+    jest.restoreAllMocks();
   });
 
   it('should persist last_ledger cursor', async () => {
@@ -94,7 +99,7 @@ describe('HorizonIndexer', () => {
     jest.useFakeTimers();
     const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
     
-    indexer.saveCursor(100);
+    void indexer.saveCursor(100);
     
     // Advance time past stallThresholdMs (1000ms)
     jest.advanceTimersByTime(1500);
@@ -141,5 +146,98 @@ describe('HorizonIndexer', () => {
     expect(parsedLog.error).toBe('DB connection failed');
     
     consoleSpy.mockRestore();
+  });
+
+  describe('readStatus / deterministic stale-state transitions', () => {
+    it('reports stopped when the main loop is not running', () => {
+      indexer.stop();
+      expect(indexer.getRunning()).toBe(false);
+      expect(indexer.readStatus()).toBe('stopped');
+    });
+
+    it('reports stopped when the breaker is open (permission)', () => {
+      installFakeNow(1_000);
+      indexer.setBreakerOpen(true);
+      void indexer.startMainLoop(60_000, async () => [] as HorizonEvent[]);
+      expect(indexer.readStatus()).toBe('stopped');
+      expect(indexer.getStale()).toBe(false);
+    });
+
+    it('reports loading when running but the cursor has never advanced', () => {
+      installFakeNow(1_000);
+      void indexer.startMainLoop(60_000, async () => [] as HorizonEvent[]);
+      expect(indexer.readStatus()).toBe('loading');
+    });
+
+    it('reports synced after a cursor advance clears loading', async () => {
+      installFakeNow(1_000);
+      void indexer.startMainLoop(60_000, async () => [] as HorizonEvent[]);
+      await indexer.saveCursor(5);
+      expect(indexer.readStatus()).toBe('synced');
+      expect(indexer.getFailure()).toBe('none');
+    });
+
+    it('transitions to stalled once the cursor goes stale while running', () => {
+      installFakeNow(1_000);
+      void indexer.startMainLoop(60_000, async () => [] as HorizonEvent[]);
+      cursorsDb.set('testnet', { lastLedger: 5, lastUpdatedAt: 1_000 });
+
+      // Exactly at the 1000ms threshold: fresh (strict greater-than).
+      installFakeNow(2_000);
+      expect(indexer.readStatus()).toBe('synced');
+      expect(indexer.getStale()).toBe(false);
+
+      // Just past the threshold: stale.
+      installFakeNow(2_001);
+      expect(indexer.getStale()).toBe(true);
+      expect(indexer.readStatus()).toBe('stalled');
+    });
+
+    it('recovers from stalled to synced when the cursor advances again', async () => {
+      installFakeNow(1_000);
+      void indexer.startMainLoop(60_000, async () => [] as HorizonEvent[]);
+
+      // Stale: now(1000) - lastUpdatedAt(-1) = 1001 > threshold(1000).
+      cursorsDb.set('testnet', { lastLedger: 5, lastUpdatedAt: -1 });
+      expect(indexer.readStatus()).toBe('stalled');
+
+      // Advance cursor at now -> fresh again.
+      installFakeNow(2_000);
+      await indexer.saveCursor(6);
+      expect(indexer.getStale()).toBe(false);
+      expect(indexer.readStatus()).toBe('synced');
+    });
+
+    it('reports error and then recovers after a successful advance', async () => {
+      installFakeNow(1_000);
+      void indexer.startMainLoop(60_000, async () => [] as HorizonEvent[]);
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+
+      const event: HorizonEvent = {
+        id: 'fatal_evt',
+        type: 'payment',
+        ledger: 7,
+        data: {},
+      };
+      const broken = new HorizonIndexer({
+        network: 'testnet',
+        horizonUrl: 'test',
+        overlapWindow: 5,
+        stallThresholdMs: 1000,
+      });
+      broken.setBreakerOpen(false);
+      void broken.startMainLoop(60_000, async () => [] as HorizonEvent[]);
+      broken.saveCursor = jest.fn().mockRejectedValue(new Error('DB down'));
+      await expect(broken.processEvent(event, 'corr-fatal')).rejects.toThrow('DB down');
+      expect(broken.getFailure()).toBe('fatal');
+      expect(broken.readStatus()).toBe('error');
+      broken.stop();
+
+      // Recover on the original fresh indexer.
+      await indexer.saveCursor(7);
+      expect(indexer.getFailure()).toBe('none');
+      expect(indexer.readStatus()).toBe('synced');
+      consoleErrorSpy.mockRestore();
+    });
   });
 });

@@ -3,6 +3,7 @@ import { requireAuditLogAccess } from "@/app/lib/auth";
 import { AUDIT_LOG_RETENTION_DAYS, auditLogStore } from "@/app/lib/audit-log";
 import type { AuditActorRole, AuditListFilters } from "@/app/types/audit";
 import { AuditResponseSchema, type AuditResponseDTO } from "@/app/lib/dtos/audit.dto";
+import { withRouteTimeout } from "@/src/middleware/timeout";
 
 function createErrorResponse(code: string, message: string, status: number) {
   return NextResponse.json({ error: { code, message, request_id: "mock-request-id" } }, { status });
@@ -26,10 +27,11 @@ function buildFilters(request: Request): AuditListFilters {
     requestId: searchParams.get("requestId"),
     role: searchParams.get("role") as AuditActorRole | null,
     targetId: searchParams.get("targetId"),
+    cursor: searchParams.get("cursor"),
   };
 }
 
-export async function GET(request: Request) {
+async function handleAuditGet(request: Request) {
   const { searchParams } = new URL(request.url);
   const exportFormat = searchParams.get("export");
   const actor = requireAuditLogAccess(request, exportFormat === "ndjson" ? "export" : "read");
@@ -41,6 +43,17 @@ export async function GET(request: Request) {
   const filters = buildFilters(request);
   if (exportFormat && exportFormat !== "ndjson") {
     return createErrorResponse("INVALID_EXPORT_FORMAT", "Only export=ndjson is supported", 422);
+  }
+
+  if (filters.cursor) {
+    try {
+      const decoded = Buffer.from(filters.cursor, "base64").toString("utf-8");
+      if (!decoded.includes("|")) {
+        throw new Error();
+      }
+    } catch {
+      return createErrorResponse("INVALID_CURSOR", "Malformed cursor", 422);
+    }
   }
 
   if (exportFormat === "ndjson") {
@@ -56,24 +69,30 @@ export async function GET(request: Request) {
     });
   }
 
-  const entries = auditLogStore.list(filters);
+  const { data, hasNext, nextCursor, total } = auditLogStore.getPaginated(filters);
   const payload = AuditResponseSchema.parse({
     access: {
       actorId: actor.actorId,
       role: actor.role,
     },
-    data: entries,
+    data,
     links: {
       self: "/api/audit",
     },
     meta: {
       chainIntact: auditLogStore.assertIntegrity(),
       retentionDays: AUDIT_LOG_RETENTION_DAYS,
-      total: entries.length,
+      total,
+      hasNext,
+      nextCursor,
     },
   });
 
   return NextResponse.json<AuditResponseDTO>(payload);
+}
+
+export async function GET(request: Request) {
+  return withRouteTimeout(request, () => handleAuditGet(request));
 }
 
 export async function POST() {

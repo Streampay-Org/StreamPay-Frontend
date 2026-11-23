@@ -194,6 +194,46 @@ git push origin ci/security-gates
 - [ ] New vulnerabilities addressed promptly
 - [ ] Documentation kept up to date
 
+## Incident Mode Flag (NEXT_PUBLIC_DISABLE_ONCHAIN_OPERATIONS)
+
+### Overview
+The `NEXT_PUBLIC_DISABLE_ONCHAIN_OPERATIONS` environment variable provides a frontend-only "incident mode" that disables all on-chain lifecycle operation buttons in the UI:
+- **StreamDetailClient** (stream detail page)
+- **StreamRow** (stream list rows)
+
+When set to `true`:
+- All action buttons (Start, Pause, Resume, Withdraw, Cancel) are disabled
+- A prominent warning banner is shown: "⚠️ On-chain operations are temporarily paused during incident mode."
+- Users attempting to click disabled buttons see an alert: "On-chain operations are temporarily paused during incident mode."
+
+### Build-Time Caveat ⚠️
+**This is a `NEXT_PUBLIC_` variable — it is inlined at build time.**
+- Changing this value **requires a full rebuild and redeploy** of the frontend
+- Cannot be toggled at runtime without a new deployment
+- Plan for ~5-10 minute rebuild + deploy cycle during incidents
+
+### Difference from `/api/admin/pause` (Global Pause)
+
+| Aspect | `NEXT_PUBLIC_DISABLE_ONCHAIN_OPERATIONS` | `/api/admin/pause` |
+|--------|------------------------------------------|-------------------|
+| **Scope** | Frontend UI only | Backend API + Smart Contract |
+| **Toggle Time** | Requires rebuild + redeploy (~5-10 min) | Instant (runtime API call) |
+| **Enforcement** | UI buttons disabled; API calls still possible | Returns `503 ContractPaused` for create/withdraw |
+| **Allowed During Pause** | All API calls work if called directly | `cancel_stream` and `settle` remain allowed |
+| **Use Case** | Visual pause for users during incidents | Actual on-chain enforcement |
+| **Auth Required** | None (env var) | Admin authentication |
+
+**Recommended Practice**: Use both together during incidents:
+1. Call `POST /api/admin/pause` with `{ "paused": true }` for immediate backend enforcement
+2. Set `NEXT_PUBLIC_DISABLE_ONCHAIN_OPERATIONS=true` and redeploy for UI consistency
+
+### Deployment Checklist for Incident Mode
+- [ ] Team knows the flag exists and its purpose
+- [ ] Rebuild+deploy process is documented and tested
+- [ ] Runbook step exists for enabling/disabling (see `RUNBOOK_SETTLEMENT_FAILURES.md`)
+- [ ] Difference from `/api/admin/pause` is understood by on-call
+- [ ] Post-incident: revert flag and redeploy to re-enable UI
+
 ## Rollback Plan
 
 If critical issues are discovered:

@@ -1,11 +1,16 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { GasOnRecipientToggle } from '../../components/GasOnRecipientToggle';
 import { RecentRecipients } from './components/RecentRecipients';
 import { addRecentRecipient } from '../../state/recentRecipients';
 import { BottomSheet } from '../../components/BottomSheet';
+import {
+  getWizardDraft,
+  saveWizardDraft,
+  clearWizardDraft,
+} from '../../state/wizardDraft';
 
 function shortenAddress(address: string): string {
   const trimmed = address.trim();
@@ -16,15 +21,33 @@ function shortenAddress(address: string): string {
 /**
  * New Stream page (single-recipient).
  *
- * Includes the gas-on-recipient toggle so the creator can explicitly
- * decide who bears the Stellar transaction fee, with the cost surfaced
- * inline before submission (#528).
+ * ### Save draft (#863)
+ * All form fields are written to localStorage on every change via
+ * `saveWizardDraft()`.  On mount, `getWizardDraft()` restores a
+ * previously saved draft so work-in-progress survives navigation,
+ * accidental tab closes, and page refreshes.
  *
- * GrantFox campaign update:
- * Intercepts form submission on mobile viewports (< 768px) to display a
- * bottom-sheet summary screen before final submission.
+ * A "Saved draft" banner is shown when a draft was restored, giving
+ * the user clear feedback that their previous input is back. A
+ * "Discard draft" control lets them start clean.
+ *
+ * The draft is cleared with `clearWizardDraft()` on successful
+ * stream creation so stale state is never re-loaded.
+ *
+ * ### Mobile bottom-sheet (#528)
+ * Intercepts form submission on mobile viewports (< 768 px) to display
+ * a bottom-sheet summary before final submission.
  */
 export default function NewStreamPage() {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const q = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setPrefersReducedMotion(q.matches);
+    const onChange = (e: MediaQueryListEvent) => setPrefersReducedMotion(e.matches);
+    q.addEventListener?.('change', onChange);
+    return () => q.removeEventListener?.('change', onChange);
+  }, []);
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
   const [token, setToken] = useState<'XLM' | 'USDC'>('XLM');
@@ -35,7 +58,45 @@ export default function NewStreamPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [isBottomSheetOpen, setIsBottomSheetOpen] = useState(false);
 
-  // Detect mobile viewport using matchMedia
+  /**
+   * Whether a saved draft was restored on mount.  When true, a banner
+   * is displayed so the user knows their previous work has been recovered.
+   */
+  const [draftRestored, setDraftRestored] = useState(false);
+
+  /* ── Restore draft on mount ─────────────────────────────────────── */
+  useEffect(() => {
+    const draft = getWizardDraft();
+    if (draft) {
+      setRecipient(draft.recipient);
+      setAmount(draft.amount);
+      setToken(draft.token);
+      setGasOnRecipient(draft.gasOnRecipient);
+      setDraftRestored(true);
+    }
+  }, []);
+
+  /* ── Persist draft on every field change ────────────────────────── */
+  // Wrapped in useCallback so lint is happy; the identity is stable per render
+  const persistDraft = useCallback(() => {
+    saveWizardDraft({ recipient, amount, token, gasOnRecipient });
+  }, [recipient, amount, token, gasOnRecipient]);
+
+  useEffect(() => {
+    persistDraft();
+  }, [persistDraft]);
+
+  /* ── Discard draft ───────────────────────────────────────────────── */
+  const handleDiscardDraft = () => {
+    clearWizardDraft();
+    setRecipient('');
+    setAmount('');
+    setToken('XLM');
+    setGasOnRecipient(false);
+    setDraftRestored(false);
+  };
+
+  /* ── Mobile detection ────────────────────────────────────────────── */
   useEffect(() => {
     const mediaQuery = window.matchMedia('(max-width: 767px)');
     setIsMobile(mediaQuery.matches);
@@ -57,12 +118,15 @@ export default function NewStreamPage() {
     }
   }, [isMobile]);
 
+  /* ── Stream creation ─────────────────────────────────────────────── */
   const performCreateStream = async () => {
     setIsSubmitting(true);
     setIsBottomSheetOpen(false);
     // TODO: call stream creation API with { recipient, amount, token, gasOnRecipient }
     await new Promise((resolve) => setTimeout(resolve, 800));
     addRecentRecipient(recipient);
+    // Clear the draft now that creation has succeeded
+    clearWizardDraft();
     setIsSubmitting(false);
     setSuccess(true);
   };
@@ -86,6 +150,7 @@ export default function NewStreamPage() {
     fontSize: 'var(--text-base)',
   };
 
+  /* ── Success screen ──────────────────────────────────────────────── */
   if (success) {
     return (
       <main className="page-shell">
@@ -113,18 +178,35 @@ export default function NewStreamPage() {
         </div>
       </section>
 
-      <section style={{ maxWidth: '560px', margin: '0 auto 1.5rem', padding: '0 1.5rem' }}>
+      {/* ── Saved-draft banner ────────────────────────────────────── */}
+      {draftRestored && (
+        <section
+          aria-live="polite"
+          className="draft-banner"
+          data-testid="draft-restored-banner"
+          role="status"
+        >
+          <span className="draft-banner__icon" aria-hidden="true">📝</span>
+          <p className="draft-banner__message">
+            <strong>Draft restored</strong> — your previous inputs have been
+            recovered. Continue where you left off, or{' '}
+            <button
+              type="button"
+              className="draft-banner__discard"
+              onClick={handleDiscardDraft}
+              data-testid="discard-draft-btn"
+            >
+              discard draft
+            </button>
+            .
+          </p>
+        </section>
+      )}
+
+      <section style={{ width: '100%', maxWidth: '560px', margin: '0 auto 1.5rem', padding: '0 1.5rem' }}>
         <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '0.75rem',
-            padding: '1rem 1.25rem',
-            background: 'var(--panel)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-md)',
-          }}
+          className="csf-cta-banner"
+          data-testid="csf-cta-banner"
         >
           <div>
             <p style={{ margin: 0, fontWeight: 600 }}>Need a fan-out split?</p>
@@ -138,9 +220,16 @@ export default function NewStreamPage() {
         </div>
       </section>
 
-      <section style={{ maxWidth: '560px', margin: '0 auto', padding: '0 1.5rem' }}>
+      <section style={{ width: '100%', maxWidth: '560px', margin: '0 auto', padding: '0 1.5rem' }}>
+        <div
+          className={`create-stream-status ${success ? 'create-stream-status--active' : 'create-stream-status--draft'}`}
+          role="status"
+          aria-label={success ? 'Stream created successfully' : 'Form ready'}
+        />
         <form
           onSubmit={handleSubmit}
+          data-testid="create-stream-form"
+          className="create-stream-form"
           style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}
         >
           {/* Recipient */}
@@ -162,12 +251,13 @@ export default function NewStreamPage() {
               value={recipient}
               onChange={(e) => setRecipient(e.target.value)}
               placeholder="GABC..."
+              className="csf-field"
               style={{ ...fieldStyle, marginTop: '0.5rem' }}
             />
           </div>
 
           {/* Amount + token */}
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
+          <div className="csf-field-row" data-testid="csf-field-row" style={{ gap: '1rem' }}>
             <div>
               <label
                 htmlFor="amount"
@@ -184,6 +274,7 @@ export default function NewStreamPage() {
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="100"
+                className="csf-field"
                 style={fieldStyle}
               />
             </div>
@@ -198,6 +289,7 @@ export default function NewStreamPage() {
                 id="token"
                 value={token}
                 onChange={(e) => setToken(e.target.value as 'XLM' | 'USDC')}
+                className="csf-field"
                 style={fieldStyle}
               >
                 <option value="XLM">XLM</option>
@@ -214,17 +306,17 @@ export default function NewStreamPage() {
           />
 
           {/* Actions */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+          <div className="csf-actions" data-testid="csf-actions">
             <button
               type="button"
-              className="button button--secondary"
+              className="button button--secondary csf-field"
               onClick={() => window.history.back()}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className={`button button--primary${isSubmitting ? ' button--busy' : ''}`}
+              className={`button button--primary${isSubmitting ? ' button--busy cb-pattern--draft' : ''}`}
               disabled={isSubmitting}
             >
               {isSubmitting ? 'Creating…' : 'Create Stream'}
@@ -238,6 +330,7 @@ export default function NewStreamPage() {
         isOpen={isBottomSheetOpen}
         onClose={() => setIsBottomSheetOpen(false)}
         title="Review Stream Details"
+        reducedMotion={prefersReducedMotion}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           <p style={{ color: 'var(--muted-light)', fontSize: 'var(--text-sm, 0.875rem)', margin: 0 }}>
@@ -292,7 +385,7 @@ export default function NewStreamPage() {
           >
             <button
               type="button"
-              className={`button button--primary${isSubmitting ? ' button--busy' : ''}`}
+              className={`button button--primary${isSubmitting ? ' button--busy cb-pattern--draft' : ''}`}
               disabled={isSubmitting}
               onClick={performCreateStream}
               style={{ width: '100%', minHeight: '2.75rem' }}
@@ -314,4 +407,3 @@ export default function NewStreamPage() {
     </main>
   );
 }
-

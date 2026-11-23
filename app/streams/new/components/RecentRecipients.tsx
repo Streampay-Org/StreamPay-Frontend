@@ -5,6 +5,7 @@ import {
   getRecentRecipients,
   RecentRecipient,
 } from "../../../state/recentRecipients";
+import { EmptyState } from "../../../components/EmptyState";
 
 export interface RecentRecipientsProps {
   /** Called with the full address when the user clicks a recent-recipient pill. */
@@ -21,8 +22,9 @@ function truncateAddress(address: string, chars = 6): string {
 
 /**
  * RecentRecipients — quick-pick rail showing the last 6 addresses used in the
- * create-stream form.  Reads from localStorage on mount and renders nothing
- * when the list is empty (e.g. first-time users).
+ * create-stream form.  Reads from localStorage on mount and renders a themed
+ * empty state (v7 `EmptyState`, generic variant) for first-time users who
+ * have no recent addresses yet, with a CTA that focuses the address input.
  *
  * Accessibility
  * - Landmark-free; the outer `<div>` has an `aria-label` describing the region.
@@ -44,7 +46,21 @@ export function RecentRecipients({
     setRecipients(getRecentRecipients());
   }, []);
 
-  if (recipients.length === 0) return null;
+  if (recipients.length === 0) {
+    return (
+      <EmptyState
+        variant="generic"
+        eyebrow="Recent recipients"
+        title="No recent recipients yet"
+        description="Addresses you send streams to will appear here for quick reuse next time."
+        actionLabel="Enter an address"
+        onAction={() => {
+          document.getElementById("recipient")?.focus();
+        }}
+        className={`recent-recipients-empty${className ? ` ${className}` : ""}`}
+      />
+    );
+  }
 
   return (
     <div

@@ -5,6 +5,7 @@ import {
   getStore,
   idempotencyToken,
   setIdempotency,
+  newStreamId,
 } from "@/app/lib/db";
 import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
@@ -12,7 +13,7 @@ import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { checkTokenAllowed, checkTokenAllowedForOrg, normaliseToken } from "@/app/lib/token-allowlist";
-import { validateCreateStreamBody } from "@/app/lib/stream-validation";
+import { parseCreateStreamBody } from "@/app/lib/stream-validation";
 import { orgDb } from "@/app/lib/org-db";
 import { checkCreationQuota } from "@/app/lib/quota-enforcement";
 import {
@@ -22,6 +23,7 @@ import {
   withStreamCreationQuotaLock,
 } from "@/app/lib/stream-create-core";
 import { recordCreationQuotaRejection } from "@/app/lib/org-quota-metrics";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
 
 const MAX_BATCH_SIZE = 20;
 
@@ -185,21 +187,21 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    const fieldErrors = validateCreateStreamBody(item);
-    for (const err of fieldErrors) {
-      validationErrors.push({
-        index: i,
-        field: err.field,
-        code: err.code,
-        message: err.message,
-      });
-    }
-
-    if (fieldErrors.length > 0) {
+    const parseResult = parseCreateStreamBody(item);
+    if (!parseResult.success) {
+      for (const err of parseResult.errors) {
+        validationErrors.push({
+          index: i,
+          field: err.field,
+          code: err.code,
+          message: err.message,
+        });
+      }
       continue;
     }
 
-    const { rate, recipient, schedule, token: rawToken, orgId } = item as Record<string, string>;
+    const { rate, recipient, schedule, token: rawToken } = parseResult.data;
+    const orgId = typeof (item as Record<string, unknown>).orgId === "string" ? ((item as Record<string, unknown>).orgId as string) : undefined;
 
     const tokenStr = rawToken?.trim() || "XLM";
     let normalisedToken: string;
@@ -276,6 +278,40 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(cached.body, { status: cached.status });
       }
     }
+  const now = new Date().toISOString();
+  const createdStreams = [];
+  const authenticatedActor = tryAuthenticateRequest(request);
+  const senderAddress = authenticatedActor?.walletAddress ?? null;
+
+  for (const input of validItems) {
+    const id = newStreamId();
+    const ownership: "individual" | "org" | "unclaimed" = input.orgId
+      ? "org"
+      : authenticatedActor
+        ? "individual"
+        : "unclaimed";
+
+    if (input.orgId) {
+      orgDb.streamOwnership.set(id, input.orgId);
+    }
+
+    const newStream = {
+      createdAt: now,
+      id,
+      nextAction: "start" as const,
+      rate: input.rate,
+      recipient: input.recipient,
+      schedule: input.schedule,
+      status: "draft" as const,
+      updatedAt: now,
+      token: input.token,
+      senderAddress,
+      ownership,
+    };
+
+    streamRepository.streams.set(id, newStream);
+    createdStreams.push(newStream);
+  }
 
     const now = new Date().toISOString();
     const createdStreams = [];

@@ -34,7 +34,16 @@ enqueue() ──► PENDING ──► dequeue() ──► PROCESSING
 
 ## Persistence Strategy
 
-Currently uses an in-memory `Map` for storage, matching the project's pattern for `cursorsDb`, `processedEventsDb`, and other in-memory stores. The storage interface (`StorageAdapter`) is intentionally narrow — only `get`, `set`, `delete`, `entries`, and `clear` — so migrating to PostgreSQL or Redis requires swapping only the adapter implementation.
+Durable write-through persistence using `window.localStorage` under the versioned key `streampay:soroban-retry-queue:v1`. An in-memory `Map` serves as the hot path for zero-latency reads, while every mutation writes through to localStorage atomically.
+
+**Guarantees:**
+
+- State survives page reloads, tab restores, and soft navigation.
+- Entries interrupted in `PROCESSING` state by a crash or reload are automatically reset to `PENDING` on hydrate so they can be retried — nothing is ever stuck mid-flight.
+- Corrupt or version-mismatched storage is safely discarded and the queue starts fresh (no silent data corruption).
+- If localStorage is unavailable (SSR, private browsing, quota exceeded) the queue degrades gracefully to in-memory-only with a single warning log — subsequent mutations do not spam.
+
+The persistence interface is intentionally narrow (`_persist` / `_hydrate`) so a future migration to PostgreSQL or Redis requires swapping only that layer; no callers change.
 
 ## Public API
 

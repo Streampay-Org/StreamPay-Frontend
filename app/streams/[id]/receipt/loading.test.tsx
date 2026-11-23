@@ -23,6 +23,15 @@ describe("ReceiptLoading", () => {
     expect(buttons.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("uses themed skeleton variants for the receipt header and fields", () => {
+    const { container } = render(<ReceiptLoading />);
+
+    expect(container.querySelector(".skeleton--title")).toBeInTheDocument();
+    expect(container.querySelector(".skeleton--text")).toBeInTheDocument();
+    expect(container.querySelector(".skeleton--badge")).toBeInTheDocument();
+    expect(container.querySelector(".skeleton--value")).toBeInTheDocument();
+  });
+
   it("renders skeleton fields for the receipt document", () => {
     const { container } = render(<ReceiptLoading />);
     const skeletons = container.querySelectorAll(".skeleton");

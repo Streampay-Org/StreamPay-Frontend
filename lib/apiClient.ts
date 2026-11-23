@@ -1,6 +1,11 @@
 import type { StreamPayError, ErrorNormalizationOptions } from '@/app/lib/errors/types';
 import { normalizeError, normalizeBackendError, isNetworkError, createError } from '@/app/lib/errors/mapper';
 import { getUserMessage } from '@/app/lib/errors/codes';
+import {
+  AccountFetchCoordinator,
+  defaultAccountFetchCoordinator,
+  AccountSwitchedError,
+} from './accountFetchCoordinator';
 
 // Request ID header for correlation
 const REQUEST_ID_HEADER = 'x-request-id';
@@ -182,7 +187,7 @@ async function fetchWithTimeout(
   try {
     const fetchPromise = fetch(url, {
       ...options,
-      signal: controller.signal,
+      signal: options.signal || controller.signal,
     });
 
     const response = await Promise.race([fetchPromise, timeoutPromise]);
@@ -433,6 +438,36 @@ export async function del<T = unknown>(
   return fetchWithIdempotency<T>(url, { ...options, method: 'DELETE' }, clientOptions);
 }
 
-// Re-export types for convenience
+/**
+ * Executes a fetch bound to an account ID, ensuring responses are automatically discarded
+ * if the active account switches before response resolution.
+ */
+export async function fetchForAccount<T = unknown>(
+  accountId: string,
+  url: string,
+  options: RequestInit = {},
+  clientOptions: ApiClientOptions = {},
+  coordinator: AccountFetchCoordinator = defaultAccountFetchCoordinator
+): Promise<T> {
+  return coordinator.execute<T>(
+    accountId,
+    (signal) =>
+      fetchWithIdempotency<T>(
+        url,
+        { ...options, signal },
+        clientOptions
+      ),
+    {
+      dedupKey: `${options.method || 'GET'}:${url}`,
+      timeoutMs: clientOptions.timeoutMs,
+      retries: clientOptions.retries,
+      retryDelayMs: clientOptions.retryDelayMs,
+      useExponentialBackoff: clientOptions.useExponentialBackoff,
+      signal: options.signal ?? undefined,
+    }
+  );
+}
+
+// Re-export types & coordinator for convenience
 export type { StreamPayError };
-export { isNetworkError };
+export { isNetworkError, AccountFetchCoordinator, AccountSwitchedError, defaultAccountFetchCoordinator };

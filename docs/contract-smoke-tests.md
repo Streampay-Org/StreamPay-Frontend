@@ -30,6 +30,8 @@ is exercised with at minimum one happy-path or expected-error invocation:
 | `get_stream` | Error-path | `NotFound` (stream 9999) |
 | `withdrawable` | Happy-path | returns `i128` |
 | `withdrawable` | Error-path | `NotFound` (stream 9999) |
+| `claim_drip` | Happy-path | returns `i128` (alias for `withdrawable`) |
+| `claim_drip` | Error-path | `NotFound` (stream 9999) |
 | `stream_balance` | Happy-path | returns `i128` |
 | `stream_balance` | Error-path | `NotFound` (stream 9999) |
 | `start_stream` | Error-path | `NotFound` (stream 9999) |
@@ -50,7 +52,8 @@ is exercised with at minimum one happy-path or expected-error invocation:
 ## Files
 
 | File | Purpose |
-|---|---|
+|---|---|---|
+| `scripts/smoke.sh` | Unified entrypoint — API tests + optional contract CLI smoke |
 | `scripts/smoke-contract.test.ts` | Jest suite — machine-readable, integrates with coverage |
 | `scripts/smoke-contract.sh` | Shell harness — standalone runner for local use |
 | `.github/workflows/smoke.yml` | Dedicated CI job: build → fund → deploy → initialise → smoke |
@@ -71,8 +74,11 @@ is exercised with at minimum one happy-path or expected-error invocation:
 # Deploy a fresh contract (only needed once per testnet session)
 STELLAR_SEED_SECRET_KEY=S... bash scripts/deploy-grantfox-contract.sh
 
-# Run Jest smoke suite
-CONTRACT_ID=C... STELLAR_SEED_SECRET_KEY=S... npm run smoke
+# Run unified smoke entrypoint (API + contract CLI)
+CONTRACT_ID=C... STELLAR_SEED_SECRET_KEY=S... bash scripts/smoke.sh
+
+# Run contract CLI smoke only (via npm script)
+CONTRACT_ID=C... STELLAR_SEED_SECRET_KEY=S... npm run smoke:contract
 
 # Run shell harness directly
 CONTRACT_ID=C... STELLAR_SEED_SECRET_KEY=S... npm run smoke:shell
@@ -100,6 +106,8 @@ Both harnesses degrade gracefully when `CONTRACT_ID` or
 
 - The Jest suite skips all network-dependent tests and passes on exit 0.
 - The shell harness exits at the pre-flight check with a clear error.
+- The unified `scripts/smoke.sh` runs the API smoke suite regardless and
+  skips the contract CLI phase with a clear message.
 
 This is how `ci.yml` runs the smoke step — no chain access needed, just
 validating the harness itself loads and that the test pattern resolves.
@@ -115,16 +123,16 @@ syntax errors or broken imports.
 
 ### `smoke.yml` (dedicated smoke job)
 
-Triggered on pushes/PRs that touch `contracts/**` or
-`scripts/smoke-contract.*`. Performs the full on-chain flow:
+Triggered on pushes/PRs that touch `contracts/**`, `scripts/smoke*.sh`,
+`scripts/smoke*.ts`, or the workflow definition itself. Performs the full
+on-chain flow:
 
 1. Builds the contract WASM from source
 2. Generates a throwaway testnet keypair
 3. Funds it via Friendbot
 4. Deploys a fresh contract instance
-5. Initialises the contract (`initialize`)
-6. Runs the Jest suite with full chain access
-7. Runs the shell harness as a second opinion
+5. Runs the unified smoke entrypoint (`scripts/smoke.sh --contract`) which
+   exercises every contract entrypoint via `stellar contract invoke`
 
 The job is isolated from `ci.yml` so documentation-only PRs don't pay the
 20-minute budget. It can also be triggered manually via `workflow_dispatch`

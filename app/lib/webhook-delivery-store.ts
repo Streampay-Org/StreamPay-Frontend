@@ -1,4 +1,5 @@
 import { logger, getCorrelationContext } from './logger';
+import { decodeCompositeCursor, encodeCompositeCursor } from './db';
 import {
   WebhookDeliveryRecord,
   WebhookDeliveryAttempt,
@@ -6,6 +7,13 @@ import {
   WebhookEndpoint,
   WebhookEvent,
 } from './webhook-delivery';
+
+export interface WebhookDeliveriesPage {
+  data: WebhookDeliveryRecord[];
+  hasNext: boolean;
+  nextCursor: string | null;
+  total: number;
+}
 
 /**
  * In-memory storage for webhook deliveries and DLQ entries.
@@ -177,6 +185,47 @@ export class WebhookDeliveryStore {
   }
 
   /**
+   * Get a stable, cursor-paginated page of delivery records.
+   *
+   * Records are ordered by (createdAt, deliveryId) descending so that
+   * ordering stays stable even when multiple deliveries share the same
+   * `createdAt` timestamp. An invalid cursor yields an empty page rather
+   * than throwing, mirroring the activity timeline's query behaviour.
+   */
+  getDeliveriesPage(params: { cursor?: string; limit: number }): WebhookDeliveriesPage {
+    const { cursor, limit } = params;
+    let sorted = Array.from(this.deliveries.values()).sort((a, b) => {
+      const tsCmp = b.createdAt.localeCompare(a.createdAt);
+      return tsCmp !== 0 ? tsCmp : b.deliveryId.localeCompare(a.deliveryId);
+    });
+
+    const total = sorted.length;
+
+    if (cursor) {
+      let cursorTimestamp: string;
+      let cursorId: string;
+      try {
+        ({ timestamp: cursorTimestamp, id: cursorId } = decodeCompositeCursor(cursor));
+      } catch {
+        return { data: [], hasNext: false, nextCursor: null, total };
+      }
+      sorted = sorted.filter((record) => {
+        const tsCmp = record.createdAt.localeCompare(cursorTimestamp);
+        return tsCmp < 0 || (tsCmp === 0 && record.deliveryId.localeCompare(cursorId) < 0);
+      });
+    }
+
+    const data = sorted.slice(0, limit);
+    const hasNext = sorted.length > limit;
+    const nextCursor =
+      hasNext && data.length > 0
+        ? encodeCompositeCursor(data[data.length - 1].createdAt, data[data.length - 1].deliveryId)
+        : null;
+
+    return { data, hasNext, nextCursor, total };
+  }
+
+  /**
    * Get all deliveries for an endpoint
    */
   getDeliveriesByEndpoint(endpointId: string): WebhookDeliveryRecord[] {
@@ -248,6 +297,10 @@ export class WebhookDeliveryStore {
    */
   getAllDLQEntries(): DLQEntry[] {
     return Array.from(this.dlq.values());
+  }
+
+  getDLQEntries(): DLQEntry[] {
+    return this.getAllDLQEntries();
   }
 
   /**

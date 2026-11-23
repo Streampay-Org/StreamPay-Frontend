@@ -5,17 +5,36 @@
 
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
+import { computeETag, ifNoneMatchMatches } from "@/app/lib/etag";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
+import { withRouteSpan } from "@/lib/routeSpan";
+import {
+  QuietHoursConfig,
+  DEFAULT_QUIET_HOURS,
+  validatePartialQuietHours,
+} from "@/app/lib/quiet-hours";
+import {
+  buildLimitsConfig,
+  createBodySizeTooLargeResponse,
+  getBodySizeLimit,
+} from "@/lib/bodySize";
+import {
+  BodyTooLargeError,
+  InvalidJsonError,
+  readJsonBody,
+} from "@/lib/readJsonBody";
+import { resolveRequestId } from "@/lib/requestId";
 
-interface NotificationPreferences {
+export interface NotificationPreferences {
   userId: string;
   email: boolean;
   inApp: boolean;
   webhook: boolean;
+  soundEnabled: boolean;
   events: {
     streamCreated: boolean;
     streamCompleted: boolean;
@@ -23,6 +42,7 @@ interface NotificationPreferences {
     paymentFailed: boolean;
     lowBalance: boolean;
   };
+  quietHours: QuietHoursConfig;
   updatedAt: string;
 }
 
@@ -32,6 +52,7 @@ const DEFAULT_PREFS: Omit<NotificationPreferences, "userId" | "updatedAt"> = {
   email: true,
   inApp: true,
   webhook: false,
+  soundEnabled: true,
   events: {
     streamCreated: true,
     streamCompleted: true,
@@ -39,9 +60,12 @@ const DEFAULT_PREFS: Omit<NotificationPreferences, "userId" | "updatedAt"> = {
     streamCancelled: true,
     lowBalance: false,
   },
+  quietHours: {
+    ...DEFAULT_QUIET_HOURS,
+  },
 };
 
-const TOP_LEVEL_FIELDS = ["email", "inApp", "webhook", "events"] as const;
+const TOP_LEVEL_FIELDS = ["email", "inApp", "webhook", "soundEnabled", "events", "quietHours"] as const;
 const EVENT_FIELDS = [
   "streamCreated",
   "streamCompleted",
@@ -81,14 +105,31 @@ function createErrorResponse(request: Request, code: string, message: string, st
 }
 
 function getPreferences(userId: string): NotificationPreferences {
-  return prefsStore.get(userId) ?? {
+  const existing = prefsStore.get(userId);
+  if (existing) {
+    // Ensure quietHours is populated even if previously saved without it
+    return {
+      ...existing,
+      quietHours: existing.quietHours ?? { ...DEFAULT_QUIET_HOURS },
+    };
+  }
+  return {
     userId,
     ...DEFAULT_PREFS,
     updatedAt: new Date().toISOString(),
   };
 }
 
-function validatePreferencePayload(body: unknown): Partial<Omit<NotificationPreferences, "userId" | "updatedAt">> | null {
+interface PartialPreferencePayload {
+  email?: boolean;
+  inApp?: boolean;
+  webhook?: boolean;
+  soundEnabled?: boolean;
+  events?: Partial<NotificationPreferences["events"]>;
+  quietHours?: Partial<QuietHoursConfig>;
+}
+
+function validatePreferencePayload(body: unknown): PartialPreferencePayload | null {
   if (!isRecord(body)) {
     return null;
   }
@@ -98,15 +139,17 @@ function validatePreferencePayload(body: unknown): Partial<Omit<NotificationPref
     return null;
   }
 
-  const normalized: Partial<Omit<NotificationPreferences, "userId" | "updatedAt">> = {};
+  const normalized: PartialPreferencePayload = {};
 
   if ("email" in body && !isBoolean(body.email)) return null;
   if ("inApp" in body && !isBoolean(body.inApp)) return null;
   if ("webhook" in body && !isBoolean(body.webhook)) return null;
+  if ("soundEnabled" in body && !isBoolean(body.soundEnabled)) return null;
 
   if ("email" in body) normalized.email = body.email as boolean;
   if ("inApp" in body) normalized.inApp = body.inApp as boolean;
   if ("webhook" in body) normalized.webhook = body.webhook as boolean;
+  if ("soundEnabled" in body) normalized.soundEnabled = body.soundEnabled as boolean;
 
   if ("events" in body) {
     if (!isRecord(body.events)) return null;
@@ -128,10 +171,19 @@ function validatePreferencePayload(body: unknown): Partial<Omit<NotificationPref
     normalized.events = eventPayload;
   }
 
+  if ("quietHours" in body) {
+    if (!isRecord(body.quietHours)) return null;
+    const quietResult = validatePartialQuietHours(body.quietHours);
+    if (!quietResult.valid) {
+      return null;
+    }
+    normalized.quietHours = quietResult.value;
+  }
+
   return normalized;
 }
 
-export async function GET(request: Request) {
+async function handleNotificationPreferencesGet(request: Request) {
   const url = new URL(request.url);
   const limitType = getLimitForRoute("GET", url.pathname);
   const identity = getClientIdentity(request);
@@ -153,15 +205,22 @@ export async function GET(request: Request) {
   }
 
   const preferences = getPreferences(actor.actorId);
+  const etag = computeETag(actor.actorId, preferences);
+
   logger.info("Notification preferences fetched", {
     actorId: actor.actorId,
     walletAddress: actor.walletAddress,
   });
 
-  return NextResponse.json({ preferences });
+  return NextResponse.json({ preferences }, {
+    headers: {
+      ETag: etag,
+      "Cache-Control": "private, max-age=0, must-revalidate",
+    },
+  });
 }
 
-export async function PUT(request: Request) {
+async function handleNotificationPreferencesPut(request: Request) {
   const url = new URL(request.url);
   const limitType = getLimitForRoute("PUT", url.pathname);
   const identity = getClientIdentity(request);
@@ -184,9 +243,28 @@ export async function PUT(request: Request) {
 
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
-    return createErrorResponse(request, "INVALID_JSON", "Request body must be valid JSON", 400);
+    const limits = buildLimitsConfig();
+    const maxBytes = getBodySizeLimit(url.pathname, limits) ?? limits.default;
+    body = await readJsonBody(request, { maxBytes });
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) {
+      return createBodySizeTooLargeResponse(
+        error.receivedBytes,
+        error.maxBytes,
+        resolveRequestId(request.headers),
+      );
+    }
+    if (error instanceof InvalidJsonError) {
+      return createErrorResponse(
+        request,
+        error.code,
+        error.code === "EMPTY_BODY"
+          ? "Request body is required"
+          : "Request body must be valid JSON",
+        400,
+      );
+    }
+    throw error;
   }
 
   const payload = validatePreferencePayload(body);
@@ -194,12 +272,29 @@ export async function PUT(request: Request) {
     return createErrorResponse(
       request,
       "INVALID_BODY",
-      "Request body must be a JSON object with boolean values for email, inApp, webhook and optional events flags",
+      "Request body must be a JSON object with valid preference fields (email, inApp, webhook, soundEnabled, events, quietHours)",
       400,
     );
   }
 
   const existing = getPreferences(actor.actorId);
+  const currentEtag = computeETag(actor.actorId, existing);
+  const ifMatch = request.headers.get("if-match");
+
+  if (ifMatch && !ifNoneMatchMatches(ifMatch, currentEtag)) {
+    logger.warn("Notification preferences update conflict detected", {
+      actorId: actor.actorId,
+      ifMatch,
+      currentEtag,
+    });
+    return createErrorResponse(
+      request,
+      "STATE_CONFLICT",
+      "Notification preferences have been modified concurrently. Please reload and retry.",
+      409,
+    );
+  }
+
   const updated: NotificationPreferences = {
     ...existing,
     ...payload,
@@ -207,14 +302,37 @@ export async function PUT(request: Request) {
       ...existing.events,
       ...(payload.events ?? {}),
     },
+    quietHours: {
+      ...(existing.quietHours ?? DEFAULT_QUIET_HOURS),
+      ...(payload.quietHours ?? {}),
+    },
     updatedAt: new Date().toISOString(),
   };
 
   prefsStore.set(actor.actorId, updated);
+  const newEtag = computeETag(actor.actorId, updated);
+
   logger.info("Notification preferences updated", {
     actorId: actor.actorId,
     updatedFields: Object.keys(payload),
   });
 
-  return NextResponse.json({ preferences: updated });
+  return NextResponse.json({ preferences: updated }, {
+    headers: {
+      ETag: newEtag,
+      "Cache-Control": "private, max-age=0, must-revalidate",
+    },
+  });
+}
+
+export async function GET(request: Request) {
+  return withRouteSpan("/api/notifications/preferences", () =>
+    handleNotificationPreferencesGet(request),
+  )(request);
+}
+
+export async function PUT(request: Request) {
+  return withRouteSpan("/api/notifications/preferences", () =>
+    handleNotificationPreferencesPut(request),
+  )(request);
 }

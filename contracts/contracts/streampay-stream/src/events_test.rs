@@ -108,7 +108,11 @@ fn created_event_has_correct_topics() {
     make_active_stream(&data, &client);
 
     let events = data.env.events().all();
-    assert_eq!(events.len(), 1, "create_stream should emit exactly one event");
+    assert_eq!(
+        events.len(),
+        1,
+        "create_stream should emit exactly one event"
+    );
 
     let (_, topics, _) = events.first().unwrap();
     assert_eq!(topics.len(), 2, "event should have exactly 2 topics");
@@ -137,12 +141,8 @@ fn created_event_payload_fields() {
 
     // Deserialise as a vec of Val and check field count.
     let fields: soroban_sdk::Vec<soroban_sdk::Val> = payload.from_val(&data.env);
-    // stream_id | sender | recipient | token | total_amount | timestamp  = 6 fields
-    assert_eq!(
-        fields.len(),
-        6,
-        "StreamCreated payload must have 6 fields"
-    );
+    // stream_id | sender | recipient | token | total_amount | fee_bps | duration | timestamp = 8 fields
+    assert_eq!(fields.len(), 8, "StreamCreated payload must have 8 fields");
 
     // Field 0: stream_id
     let got_id: u64 = fields.get_unchecked(0).from_val(&data.env);
@@ -151,6 +151,17 @@ fn created_event_payload_fields() {
     // Field 4: total_amount
     let got_amount: i128 = fields.get_unchecked(4).from_val(&data.env);
     assert_eq!(got_amount, 1_000i128);
+
+    // Field 5: fee_bps
+    let got_fee_bps: u32 = fields.get_unchecked(5).from_val(&data.env);
+    assert_eq!(got_fee_bps, 0u32, "fee_bps should be 0 for mock streams");
+
+    // Field 6: duration
+    let got_duration: u64 = fields.get_unchecked(6).from_val(&data.env);
+    assert_eq!(
+        got_duration, 100u64,
+        "duration should be end_time - start_time"
+    );
 }
 
 /// No events are emitted when `create_stream` fails (e.g. invalid amount).
@@ -364,10 +375,7 @@ fn withdraw_on_settled_stream_emits_no_events() {
     assert!(result.is_err(), "withdraw on settled stream must fail");
 
     let events = data.env.events().all();
-    assert!(
-        events.is_empty(),
-        "failed withdraw must not emit events"
-    );
+    assert!(events.is_empty(), "failed withdraw must not emit events");
 }
 
 // ── settle → StreamSettled ────────────────────────────────────────────────────
@@ -458,10 +466,7 @@ fn settle_before_end_time_emits_no_events() {
     assert!(result.is_err());
 
     let events = data.env.events().all();
-    assert!(
-        events.is_empty(),
-        "failed settle must not emit events"
-    );
+    assert!(events.is_empty(), "failed settle must not emit events");
 }
 
 /// `settle` on a paused stream emits the structured `settled` event (not admin_action).
@@ -479,7 +484,11 @@ fn settle_paused_stream_emits_settled_not_admin_action() {
     client.settle(&id);
 
     let events = data.env.events().all();
-    assert_eq!(events.len(), 1, "settle on paused stream should emit one event");
+    assert_eq!(
+        events.len(),
+        1,
+        "settle on paused stream should emit one event"
+    );
 
     let (_, topics, _) = events.first().unwrap();
     // Must be "settled", NOT "adminact"
@@ -560,10 +569,7 @@ fn paused_event_not_emitted_on_invalid_state() {
     assert!(result.is_err());
 
     let events = data.env.events().all();
-    assert!(
-        events.is_empty(),
-        "failed pause must not emit events"
-    );
+    assert!(events.is_empty(), "failed pause must not emit events");
 }
 
 // ── resume → StreamResumed ────────────────────────────────────────────────────
@@ -644,10 +650,7 @@ fn resumed_event_not_emitted_on_invalid_state() {
     assert!(result.is_err());
 
     let events = data.env.events().all();
-    assert!(
-        events.is_empty(),
-        "failed resume must not emit events"
-    );
+    assert!(events.is_empty(), "failed resume must not emit events");
 }
 
 // ── cancel_stream → StreamCancelled ──────────────────────────────────────────
@@ -665,7 +668,11 @@ fn cancelled_event_has_correct_topics() {
     client.cancel_stream(&id);
 
     let events = data.env.events().all();
-    assert_eq!(events.len(), 1, "cancel_stream should emit exactly one event");
+    assert_eq!(
+        events.len(),
+        1,
+        "cancel_stream should emit exactly one event"
+    );
 
     let (_, topics, _) = events.first().unwrap();
     assert_eq!(
@@ -772,7 +779,11 @@ fn amended_event_has_correct_topics() {
     client.amend_stream(&id, &5i128, &1_300u64);
 
     let events = data.env.events().all();
-    assert_eq!(events.len(), 1, "amend_stream should emit exactly one event");
+    assert_eq!(
+        events.len(),
+        1,
+        "amend_stream should emit exactly one event"
+    );
 
     let (_, topics, _) = events.first().unwrap();
     assert_eq!(
@@ -801,11 +812,7 @@ fn amended_event_payload_fields() {
     let (_, _, payload) = events.first().unwrap();
     let fields: soroban_sdk::Vec<soroban_sdk::Val> = payload.from_val(&data.env);
     // stream_id | amended_by | new_rate_per_second | new_end_time | timestamp = 5
-    assert_eq!(
-        fields.len(),
-        5,
-        "StreamAmended payload must have 5 fields"
-    );
+    assert_eq!(fields.len(), 5, "StreamAmended payload must have 5 fields");
 
     let got_id: u64 = fields.get_unchecked(0).from_val(&data.env);
     assert_eq!(got_id, id);
@@ -876,10 +883,7 @@ fn upgrade_event_not_emitted_on_unauthorized() {
     assert!(result.is_err());
 
     let events = data.env.events().all();
-    assert!(
-        events.is_empty(),
-        "failed upgrade must not emit events"
-    );
+    assert!(events.is_empty(), "failed upgrade must not emit events");
 }
 
 // ── Full lifecycle smoke test ─────────────────────────────────────────────────

@@ -114,7 +114,11 @@ pub struct SnapshotDiff {
 /// # Errors
 /// - [`Error::NotFound`]  if `stream_id` does not exist in storage.
 /// - [`Error::Overflow`]  if any arithmetic step overflows `i128`.
-pub fn stream_snapshot(env: &Env, stream_id: u64, at_timestamp: u64) -> Result<StreamSnapshot, Error> {
+pub fn stream_snapshot(
+    env: &Env,
+    stream_id: u64,
+    at_timestamp: u64,
+) -> Result<StreamSnapshot, Error> {
     let stream = get_stream(env, stream_id)?;
     snapshot_from_stream(&stream, at_timestamp)
 }
@@ -234,7 +238,7 @@ mod tests {
         start_time: u64,
         end_time: u64,
         status: StreamStatus,
-        pause_time: u64,
+        paused_at: u64,
         total_paused_duration: u64,
     ) -> Stream {
         let addr = Address::generate(env);
@@ -251,8 +255,9 @@ mod tests {
             duration,
             last_update: start_time,
             status,
-            pause_time,
+            paused_at,
             total_paused_duration,
+            fee_bps: 0,
         }
     }
 
@@ -400,9 +405,7 @@ mod tests {
         let stream_a = make_stream(&env, 1_000, 0, 0, 1_000, StreamStatus::Active, 0, 0);
         let snap_a = snapshot_from_stream(&stream_a, 500).unwrap();
 
-        let stream_b = make_stream(
-            &env, 1_000, 400, 0, 1_000, StreamStatus::Active, 0, 0,
-        );
+        let stream_b = make_stream(&env, 1_000, 400, 0, 1_000, StreamStatus::Active, 0, 0);
         let snap_b = StreamSnapshot {
             stream_id: 1,
             released_amount: 400,
@@ -467,14 +470,14 @@ mod tests {
             stream_id: 1,
             status: StreamStatus::Settled,
             released_amount: 1_000,
-            locked_amount: 0,       // total - released = 1000 - 1000
+            locked_amount: 0, // total - released = 1000 - 1000
             withdrawable_amount: 0,
             ..snapshot_from_stream(&stream_settled, 600).unwrap()
         };
 
         let diff = diff_snapshots(&env, &snap_a, &snap_b).unwrap();
         assert_eq!(diff.delta_released, 1_000); // 1000 - 0
-        assert_eq!(diff.delta_locked, -1_000);  // 0 - 1000
+        assert_eq!(diff.delta_locked, -1_000); // 0 - 1000
         assert_eq!(diff.status_before, StreamStatus::Active);
         assert_eq!(diff.status_after, StreamStatus::Settled);
     }

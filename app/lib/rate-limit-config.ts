@@ -2,6 +2,26 @@ export const RATE_LIMITS = {
   read: { limit: 60, windowMs: 60_000 },
   write: { limit: 10, windowMs: 60_000 },
   export: { limit: 5, windowMs: 60_000 },
+  /**
+   * Per-user limit for the public reconciliation overview endpoint
+   * (`GET /api/reconciliation`).  30 requests per minute is generous enough
+   * for polling dashboards while still protecting the endpoint from abuse.
+   * Override via `RECONCILIATION_RATE_LIMIT` environment variable.
+   */
+  reconciliation: {
+    limit: Number(process.env.RECONCILIATION_RATE_LIMIT ?? 30),
+    windowMs: 60_000,
+  },
+  /**
+   * Per-user limit for webhook ingest + metrics scrape
+   * (`GET|POST /api/webhooks`).  30 requests per minute protects the
+   * public receiver from abuse while remaining usable for legitimate
+   * delivery bursts. Override via `WEBHOOK_RATE_LIMIT`.
+   */
+  webhook: {
+    limit: Number(process.env.WEBHOOK_RATE_LIMIT ?? 30),
+    windowMs: 60_000,
+  },
 } as const;
 
 export type LimitType = keyof typeof RATE_LIMITS;
@@ -21,7 +41,13 @@ export const ORG_DAILY_STREAM_QUOTA = {
   windowMs: 24 * 60 * 60_000, // 24 h — window is one UTC calendar day
 } as const;
 
+// Keep in sync with docs/rate-limits.md (verified by docs/__tests__/rate-limits-doc.test.ts).
 export const ROUTE_LIMITS: Record<string, LimitType> = {
+  "GET:/api/reconciliation": "reconciliation",
+  "GET:/api/webhooks": "webhook",
+  "POST:/api/webhooks": "webhook",
+  "GET:/api/indexer/status": "read",
+  "GET:/api/indexer/sse": "read",
   "GET:/api/streams": "read",
   "GET:/api/streams/": "read",
   "GET:/api/activity": "read",
