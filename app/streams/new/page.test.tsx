@@ -85,8 +85,10 @@ describe("NewStreamPage - Mobile Bottom Sheet Summary", () => {
     });
 
     expect(screen.getByRole("heading", { name: /review stream details/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /grantfox payout summary/i })).toBeInTheDocument();
     expect(screen.getByText("GD72X2…6H8J")).toBeInTheDocument(); // shortened recipient address
-    expect(screen.getByText("150 XLM")).toBeInTheDocument();
+    expect(screen.getAllByText("150 XLM").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("1 recipient")).toBeInTheDocument();
     expect(screen.getByText("You (Sender)")).toBeInTheDocument();
   });
 
@@ -153,5 +155,58 @@ describe("NewStreamPage - Mobile Bottom Sheet Summary", () => {
 
     // Should still be on the edit form
     expect(screen.getByRole("heading", { name: /create stream/i })).toBeInTheDocument();
+  });
+
+  it("updates PayoutSummary when switching token and entering decimal/large amounts", async () => {
+    window.matchMedia = createMockMedia(true) as any;
+    render(<NewStreamPage />);
+
+    const recipientInput = screen.getByLabelText(/recipient address/i);
+    const amountInput = screen.getByLabelText(/amount/i);
+    const tokenSelect = screen.getByLabelText(/token/i);
+    const submitButton = screen.getByRole("button", { name: /create stream/i });
+
+    fireEvent.change(recipientInput, { target: { value: "GD72X2Y3B6V7XW5P4D8Q2Z9K0F1E3R5T7Y9U0I2O4P6A8S0D2F4G6H8J" } });
+    fireEvent.change(amountInput, { target: { value: "1250000.75" } });
+    fireEvent.change(tokenSelect, { target: { value: "USDC" } });
+
+    fireEvent.click(submitButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("bottom-sheet-overlay")).toBeInTheDocument();
+    });
+
+    const summaryHeading = screen.getByRole("heading", { name: /grantfox payout summary/i });
+    const summarySection = summaryHeading.closest("section");
+    expect(summarySection).not.toBeNull();
+    expect(within(summarySection).getByText("1250000.75 USDC")).toBeInTheDocument();
+    expect(within(summarySection).getByText("1 recipient")).toBeInTheDocument();
+  });
+
+  it("does not render PayoutSummary for empty or invalid amounts", async () => {
+    window.matchMedia = createMockMedia(true) as any;
+    const { container } = render(<NewStreamPage />);
+
+    const recipientInput = screen.getByLabelText(/recipient address/i);
+    const amountInput = screen.getByLabelText(/amount/i);
+    const form = container.querySelector("form");
+    expect(form).not.toBeNull();
+
+    fireEvent.change(recipientInput, { target: { value: "GD72X2Y3B6V7XW5P4D8Q2Z9K0F1E3R5T7Y9U0I2O4P6A8S0D2F4G6H8J" } });
+
+    for (const invalidAmount of ["", "0", "-25"]) {
+      fireEvent.change(amountInput, { target: { value: invalidAmount } });
+      fireEvent.submit(form!);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("bottom-sheet-overlay")).toBeInTheDocument();
+      });
+
+      expect(
+        screen.queryByRole("heading", { name: /grantfox payout summary/i })
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/NaN/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/0\.00/)).not.toBeInTheDocument();
+    }
   });
 });
