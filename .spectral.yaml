@@ -1,0 +1,9 @@
+extends:
+  - spectral:oas
+rules:
+  # No public support contact is published for this API, so keep this advisory informational.
+  info-contact: info
+  operation-operationId: error
+  operation-description: error
+  oas3-valid-schema-example: error
+  no-$ref-siblings: error
