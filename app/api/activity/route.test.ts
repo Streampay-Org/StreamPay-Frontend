@@ -736,4 +736,37 @@ describe("GET /api/activity", () => {
       expect(retryAfter).not.toBeNull();
     });
   });
+
+  describe("RFC 8288 Link headers", () => {
+    it("emits rel=\"next\" with preserved filters and omits rel=\"next\" on the last page", async () => {
+      seedStreams();
+      seedActivity(makeEvents(5, "link", "stream-ada"));
+
+      const res1 = await GET(
+        authRequest("http://localhost/api/activity?limit=3&streamId=stream-ada&type=stream.created"),
+      );
+      expect(res1.status).toBe(200);
+      const body1 = await res1.json();
+      expect(body1.meta.hasNext).toBe(true);
+      expect(body1.links.self).toBe(
+        "/api/activity?limit=3&streamId=stream-ada&type=stream.created",
+      );
+
+      const link1 = res1.headers.get("Link")!;
+      expect(link1).toContain('rel="next"');
+      expect(link1).toContain("streamId=stream-ada");
+      expect(link1).toContain("type=stream.created");
+      expect(link1).toContain(`cursor=${encodeURIComponent(body1.meta.nextCursor)}`);
+
+      const nextMatch = link1.match(/<([^>]+)>;\s*rel="next"/);
+      expect(nextMatch).not.toBeNull();
+      const res2 = await GET(authRequest(`http://localhost${nextMatch![1]}`));
+      expect(res2.status).toBe(200);
+      const body2 = await res2.json();
+      expect(body2.data).toHaveLength(2);
+      expect(body2.meta.hasNext).toBe(false);
+      expect(res2.headers.get("Link")).not.toContain('rel="next"');
+      expect(res2.headers.get("Link")).toContain('rel="self"');
+    });
+  });
 });

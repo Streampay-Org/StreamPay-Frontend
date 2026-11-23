@@ -44,11 +44,11 @@ export function resolveCorsMaxAge(raw: string | undefined): number {
 /**
  * Response headers browser clients are allowed to read on a cross-origin
  * response. `x-request-id` is required for incident correlation,
- * `retry-after` and `x-ratelimit-*` for rate-limit pacing/back-off and `etag`
- * for conditional reads.
+ * `retry-after` and `x-ratelimit-*` for rate-limit pacing/back-off, `etag`
+ * for conditional reads, and `Link` for RFC 8288 pagination links.
  */
 export const DEFAULT_CORS_EXPOSE_HEADERS =
-  'x-request-id, retry-after, etag, x-ratelimit-limit, x-ratelimit-remaining, x-ratelimit-reset';
+  'x-request-id, retry-after, etag, x-ratelimit-limit, x-ratelimit-remaining, x-ratelimit-reset, Link';
 
 /**
  * The literal `Origin: null` header value. Browsers send it for sandboxed
