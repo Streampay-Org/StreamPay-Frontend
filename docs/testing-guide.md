@@ -27,6 +27,11 @@ npm run test:e2e
 
 # Contract tests
 (cd contracts && cargo test)
+
+# OpenAPI lint and consistency checks
+npx --yes @stoplight/spectral-cli@6 lint openapi.json --ruleset .spectral.yaml
+node scripts/validate-openapi.mjs
+npm run openapi:check
 ```
 
 ## CI caching

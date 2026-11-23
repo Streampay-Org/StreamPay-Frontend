@@ -476,6 +476,9 @@ export interface paths {
          * Create a payment stream (v2)
          * @description Creates a payment stream using the v2 request and response shape. Requires bearer authentication and returns the created stream.
          */
+        /**
+         * @description Creates a v2 payment stream for the authenticated sender and returns its initial representation.
+         */
         post: operations["createStreamV2"];
         delete?: never;
         options?: never;
@@ -676,6 +679,9 @@ export interface paths {
         /**
          * List webhook delivery attempts
          * @description Returns paginated webhook delivery attempts, including their status, retry count, and related endpoint.
+         */
+        /**
+         * @description Lists webhook delivery attempts with pagination for the authenticated caller.
          */
         get: operations["listWebhookDeliveries"];
         put?: never;
