@@ -1221,6 +1221,8 @@
         ]
       },
       "StreamPolicy": {
+        "type": "object",
+        "required": [
           "policyVersion",
           "canStart",
           "canPause",
@@ -1230,8 +1232,10 @@
           "canWithdraw",
           "requireApprovals"
         ],
+        "properties": {
           "policyVersion": {
             "type": "integer",
+            "enum": [
               1
             ]
           },
@@ -1273,6 +1277,7 @@
           },
           "requireApprovals": {
             "type": "integer",
+            "enum": [
               1,
               2
             ]
@@ -1280,17 +1285,23 @@
         }
       },
       "UpdateOrgPolicyRequest": {
+        "type": "object",
+        "required": [
           "policy"
         ],
+        "properties": {
           "policy": {
             "$ref": "#/components/schemas/StreamPolicy"
           }
         }
       },
       "OrgPolicyResponse": {
+        "type": "object",
+        "required": [
           "data",
           "links"
         ],
+        "properties": {
           "data": {
             "type": "object",
             "required": [
@@ -1811,7 +1822,7 @@
             "schema": {
               "type": "string",
               "pattern": "^G[A-Z2-7]{55}$",
-              "example": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG"
+              "example": "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ"
             }
           }
         ],
@@ -2004,6 +2015,7 @@
                     "summary": "Successful token issuance",
                     "value": {
                       "token": "tok_R0FCQzEyMzQ1Njc4OTA",
+                      "token_type": "Bearer",
                       "expires_at": "2024-01-16T10:00:00.000Z"
                     }
                   }
@@ -2579,9 +2591,6 @@
                         "self": "/api/v1/streams/stream-abc12345"
                       }
                     }
-                  },
-                  "links": {
-                    "self": "/api/v1/streams/stream-abc12345"
                   }
                 }
               }
@@ -4853,8 +4862,9 @@
                           "allowed_actions": [],
                           "created_at": "2024-01-15T10:00:00.000Z",
                           "settlement": {
+                            "tx_hash": "c3f8a12e4b76",
                             "settled_at": "2024-02-01T12:00:00.000Z",
-                            "amount": "360 XLM",
+                            "amount": "3600000000",
                             "currency": "XLM"
                           }
                         }
@@ -4890,6 +4900,7 @@
       "post": {
         "operationId": "createStreamV2",
         "summary": "Create a payment stream (v2)",
+        "description": "Creates a payment stream using the v2 request and response shape. Requires bearer authentication and returns the created stream.",
         "tags": [
           "Streams"
         ],
@@ -5275,8 +5286,9 @@
                         "allowed_actions": [],
                         "created_at": "2024-01-15T10:00:00.000Z",
                         "settlement": {
+                          "tx_hash": "c3f8a12e4b76",
                           "settled_at": "2024-02-01T12:00:00.000Z",
-                          "amount": "360 XLM",
+                          "amount": "3600000000",
                           "currency": "XLM"
                         }
                       },
@@ -5660,8 +5672,9 @@
                       "allowed_actions": [],
                       "created_at": "2024-01-15T10:00:00.000Z",
                       "settlement": {
+                        "tx_hash": "c3f8a12e4b76",
                         "settled_at": "2024-02-01T12:00:00.000Z",
-                        "amount": "360 XLM",
+                        "amount": "3600000000",
                         "currency": "XLM"
                       }
                     }
@@ -5676,8 +5689,9 @@
                       "allowed_actions": [],
                       "created_at": "2024-01-20T09:00:00.000Z",
                       "settlement": {
+                        "tx_hash": "000000000000",
                         "settled_at": "2024-01-20T09:05:00.000Z",
-                        "amount": "0 XLM",
+                        "amount": "0",
                         "currency": "XLM"
                       }
                     }
@@ -5891,6 +5905,7 @@
       "get": {
         "operationId": "listWebhookDeliveries",
         "summary": "List webhook delivery attempts",
+        "description": "Returns paginated webhook delivery attempts, including their status, retry count, and related endpoint.",
         "security": [],
         "tags": [
           "Webhooks"
@@ -7411,9 +7426,11 @@
       }
     },
     "/api/orgs/{orgId}/policy": {
+      "get": {
         "summary": "Get organization stream policy",
         "description": "Returns the current StreamPolicy for the specified organization along with a strong ETag header.",
         "operationId": "getOrgPolicy",
+        "tags": [
           "Organizations"
         ],
         "parameters": [
@@ -7427,20 +7444,31 @@
             "description": "Organization identifier"
           }
         ],
+        "responses": {
+          "200": {
             "description": "Organization stream policy",
             "headers": {
               "ETag": {
                 "description": "Strong entity tag for optimistic concurrency control",
+                "schema": {
                   "type": "string"
                 }
               }
             },
+            "content": {
+              "application/json": {
+                "schema": {
                   "$ref": "#/components/schemas/OrgPolicyResponse"
                 }
               }
             }
           },
+          "404": {
             "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -7451,6 +7479,7 @@
         "summary": "Replace organization stream policy",
         "description": "Replaces the StreamPolicy for an organization. Restricted to organization owners. Supports optimistic concurrency via the If-Match header and records an audit log entry.",
         "operationId": "updateOrgPolicy",
+        "tags": [
           "Organizations"
         ],
         "parameters": [
@@ -7474,6 +7503,7 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -7482,14 +7512,20 @@
             }
           }
         },
+        "responses": {
+          "200": {
             "description": "Updated organization stream policy",
             "headers": {
               "ETag": {
                 "description": "Updated strong entity tag",
+                "schema": {
                   "type": "string"
                 }
               }
             },
+            "content": {
+              "application/json": {
+                "schema": {
                   "$ref": "#/components/schemas/OrgPolicyResponse"
                 }
               }
@@ -7497,21 +7533,40 @@
           },
           "400": {
             "description": "Invalid policy payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
           },
+          "403": {
             "description": "Caller is not an authenticated owner of the organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
           },
+          "404": {
             "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
           },
+          "409": {
             "description": "Optimistic concurrency conflict (If-Match ETag mismatch)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -7548,6 +7603,10 @@
     {
       "name": "Notifications",
       "description": "User notification channel and event preferences"
+    },
+    {
+      "name": "Organizations",
+      "description": "Organization membership and stream policy"
     },
     {
       "name": "Streams",

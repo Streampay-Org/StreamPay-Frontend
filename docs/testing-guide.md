@@ -29,6 +29,14 @@ npm run test:e2e
 (cd contracts && cargo test)
 ```
 
+## OpenAPI lint
+
+Run the pinned Spectral CLI against the repository ruleset:
+
+```bash
+npx --yes @stoplight/spectral-cli@6 lint openapi.json --ruleset .spectral.yaml
+```
+
 ## Conventions
 
 - Prefer black-box assertions against module exports — internal helpers
