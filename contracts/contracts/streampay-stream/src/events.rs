@@ -11,8 +11,8 @@ use soroban_sdk::{contractevent, symbol_short, Address, BytesN, Env, Symbol};
 /// Emitted when a new stream is created (topic: `"stream"`, sub-topic: `"created"`).
 ///
 /// Contains the stream's ID, sender, recipient, token address, total amount,
-/// per-stream fee (in basis points), stream duration in seconds, and the
-/// ledger timestamp at creation.
+/// per-stream fee (in basis points), stream duration in seconds, optional
+/// cliff timestamp (`0` = no cliff), and the ledger timestamp at creation.
 #[contractevent(topics = ["stream", "created"], data_format = "vec")]
 pub struct StreamCreated {
     pub stream_id: u64,
@@ -22,6 +22,7 @@ pub struct StreamCreated {
     pub total_amount: i128,
     pub fee_bps: u32,
     pub duration: u64,
+    pub cliff_time: u64,
     pub timestamp: u64,
 }
 
@@ -151,6 +152,7 @@ pub struct DeprecatedEntrypoint {
     pub timestamp: u64,
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Emitted when a stream's current recipient proposes transferring the stream
 /// to a new recipient (topic: `"stream"`, sub-topic: `"recipient_transfer_proposed"`).
 #[contractevent(topics = ["stream", "recipient_transfer_proposed"], data_format = "vec")]
@@ -190,6 +192,7 @@ pub fn created(
     total_amount: i128,
     fee_bps: u32,
     duration: u64,
+    cliff_time: u64,
     timestamp: u64,
 ) {
     StreamCreated {
@@ -200,6 +203,7 @@ pub fn created(
         total_amount,
         fee_bps,
         duration,
+        cliff_time,
         timestamp,
     }
     .publish(env);
