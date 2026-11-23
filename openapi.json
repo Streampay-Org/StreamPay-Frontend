@@ -6062,6 +6062,19 @@
                 "properties": {
                   "eventType": {
                     "type": "string",
+                    "enum": ["second", "minute", "hour", "day", "week", "month", "year"],
+                    "description": "Payment interval.",
+                    "example": "month"
+                  },
+                  "token": {
+                    "type": "string",
+                    "description": "Stellar asset code (optional, defaults to XLM).",
+                    "example": "XLM"
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "description": "Optional organization that owns this stream and whose configured quota applies.",
+                    "example": "org-acme"
                     "example": "payment.received"
                   }
                 }
@@ -6105,6 +6118,23 @@
               }
             }
           },
+          "422": { "$ref": "#/components/responses/422" },
+          "429": {
+            "description": "Rate limit or configured stream quota exceeded. Retry-After is set for rate limits and monthly-volume quota rejections.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the client may retry. Present for rate limits and monthly-volume quota rejections.",
+                "schema": { "type": "integer" }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "error": {
+                    "code": "QUOTA_ACTIVE_STREAMS_EXCEEDED",
+                    "message": "The user has 2 active streams; the configured limit is 2.",
+                    "request_id": "req_01HZ9ABCDEF"
           "500": {
             "$ref": "#/components/responses/500"
           }
@@ -7223,6 +7253,41 @@
           "content": {
             "application/json": {
               "schema": {
+                "type": "object",
+                "required": ["recipient", "rate", "schedule"],
+                "properties": {
+                  "recipient": {
+                    "type": "string",
+                    "description": "Stellar public key of the recipient (56-character G… address).",
+                    "example": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG"
+                  },
+                  "rate": {
+                    "type": "string",
+                    "description": "Positive decimal payment amount per schedule interval (max 7 decimal places).",
+                    "example": "120"
+                  },
+                  "schedule": {
+                    "type": "string",
+                    "enum": ["second", "minute", "hour", "day", "week", "month", "year"],
+                    "description": "Payment interval.",
+                    "example": "month"
+                  },
+                  "token": {
+                    "type": "string",
+                    "description": "Stellar asset code (optional, defaults to XLM).",
+                    "example": "XLM"
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "description": "Optional organization that owns this stream and whose configured quota applies.",
+                    "example": "org-acme"
+                  }
+                }
+              },
+              "example": {
+                "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                "rate": "120",
+                "schedule": "month"
                 "type": "object"
               }
             }
@@ -7239,6 +7304,31 @@
               }
             }
           },
+          "400": { "$ref": "#/components/responses/400" },
+          "401": { "$ref": "#/components/responses/401" },
+          "422": { "$ref": "#/components/responses/422" },
+          "429": {
+            "description": "Daily creation limit or configured stream quota exceeded. Retry-After indicates when the applicable quota resets.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the daily limit resets at UTC midnight or monthly volume quota resets at the next UTC month.",
+                "schema": { "type": "integer" }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "error": {
+                    "code": "QUOTA_MONTHLY_VOLUME_EXCEEDED",
+                    "message": "The user has used 1000000000 of 1000000000 monthly XLM stroops.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": { "$ref": "#/components/responses/500" }
           "400": {
             "$ref": "#/components/responses/400"
           },

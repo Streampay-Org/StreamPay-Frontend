@@ -16,6 +16,14 @@ import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { checkTokenAllowed, checkTokenAllowedForOrg, normaliseToken } from "@/app/lib/token-allowlist";
 import { parseCreateStreamBody } from "@/app/lib/stream-validation";
 import { orgDb } from "@/app/lib/org-db";
+import { checkCreationQuota } from "@/app/lib/quota-enforcement";
+import {
+  creationQuotaResponse,
+  quotaUserId,
+  rateToStroops,
+  withStreamCreationQuotaLock,
+} from "@/app/lib/stream-create-core";
+import { recordCreationQuotaRejection } from "@/app/lib/org-quota-metrics";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 
 const MAX_BATCH_SIZE = 20;
@@ -256,6 +264,29 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const userId = quotaUserId(identity);
+  return withStreamCreationQuotaLock(async () => {
+    if (idempotencyTokenValue) {
+      const cached = checkIdempotency(
+        idempotencyStore,
+        idempotencyTokenValue,
+        fingerprint,
+      );
+      if (cached) {
+        if (!cached.ok) {
+          return NextResponse.json(
+            {
+              error: {
+                code: "IDEMPOTENCY_CONFLICT",
+                message: "Idempotency key has been used with a different request.",
+              },
+            },
+            { status: 409 },
+          );
+        }
+        return NextResponse.json(cached.body, { status: cached.status });
+      }
+    }
   const now = new Date().toISOString();
   const createdStreams = [];
   const authenticatedActor = tryAuthenticateRequest(request);
@@ -291,16 +322,59 @@ export async function POST(request: NextRequest) {
     createdStreams.push(newStream);
   }
 
-  const payload = { data: createdStreams, links: { self: "/api/v1/streams/batch" } };
+    const now = new Date().toISOString();
+    const createdStreams = [];
+    const persistedIds: string[] = [];
 
-  if (idempotencyTokenValue) {
-    setIdempotency(idempotencyStore, idempotencyTokenValue, fingerprint, 201, payload);
-  }
+    for (const input of validItems) {
+      const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
+      const newStream = {
+        createdAt: now,
+        id,
+        nextAction: "start" as const,
+        rate: input.rate,
+        recipient: input.recipient,
+        schedule: input.schedule,
+        status: "draft" as const,
+        updatedAt: now,
+        token: input.token,
+      };
+      const quota = checkCreationQuota({
+        userId,
+        orgId: input.orgId,
+        amountStroops: rateToStroops(input.rate, input.token),
+        now: new Date(now),
+      });
 
-  logger.info("Batch streams created", {
-    count: createdStreams.length,
-    request_id: getCorrelationContext()?.request_id,
+      if (!quota.allowed) {
+        for (const persistedId of persistedIds) {
+          streamRepository.streams.delete(persistedId);
+          orgDb.streamOwnership.delete(persistedId);
+        }
+        recordCreationQuotaRejection(quota.scope, quota.subject, quota.code);
+        return creationQuotaResponse(quota);
+      }
+
+      streamRepository.streams.set(id, {
+        ...newStream,
+        ...(userId ? { senderAddress: userId } : {}),
+      });
+      if (input.orgId) orgDb.streamOwnership.set(id, input.orgId);
+      persistedIds.push(id);
+      createdStreams.push(newStream);
+    }
+
+    const payload = { data: createdStreams, links: { self: "/api/v1/streams/batch" } };
+
+    if (idempotencyTokenValue) {
+      setIdempotency(idempotencyStore, idempotencyTokenValue, fingerprint, 201, payload);
+    }
+
+    logger.info("Batch streams created", {
+      count: createdStreams.length,
+      request_id: getCorrelationContext()?.request_id,
+    });
+
+    return NextResponse.json(payload, { status: 201 });
   });
-
-  return NextResponse.json(payload, { status: 201 });
 }
