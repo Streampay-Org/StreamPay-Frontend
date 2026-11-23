@@ -68,15 +68,18 @@ try {
       
       if (ex.expiry_date) {
         const expiry = new Date(ex.expiry_date);
-        const now = new Date();
-        const daysUntilExpiry = (expiry - now) / (1000 * 60 * 60 * 24);
-        
-        if (daysUntilExpiry < 0) {
-          console.log(`    ⚠ Exemption ${ex.id} has EXPIRED (${ex.expiry_date})`);
-          warnings++;
-        } else if (daysUntilExpiry < 14) {
-          console.log(`    ⚠ Exemption ${ex.id} expires in ${Math.floor(daysUntilExpiry)} days`);
-          warnings++;
+        if (Number.isNaN(expiry.getTime())) {
+          assert(false, `Exemption ${ex.id} has invalid expiry date (${ex.expiry_date})`);
+        } else {
+          const now = new Date();
+          const daysUntilExpiry = (expiry - now) / (1000 * 60 * 60 * 24);
+
+          if (daysUntilExpiry < 0) {
+            assert(false, `Exemption ${ex.id} has EXPIRED (${ex.expiry_date})`);
+          } else if (daysUntilExpiry < 14) {
+            console.log(`    ⚠ Exemption ${ex.id} expires in ${Math.floor(daysUntilExpiry)} days`);
+            warnings++;
+          }
         }
       }
     });

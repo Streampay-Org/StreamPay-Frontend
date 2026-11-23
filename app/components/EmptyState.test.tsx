@@ -50,6 +50,46 @@ describe("EmptyState", () => {
     expect(h2?.textContent).toBe(DEFAULT_PROPS.title);
   });
 
+  it("uses unique semantic labels when multiple empty states render together", () => {
+    const { container } = render(
+      <>
+        <EmptyState {...DEFAULT_PROPS} title="First empty state" />
+        <EmptyState {...DEFAULT_PROPS} title="Second empty state" />
+      </>
+    );
+
+    const sections = Array.from(container.querySelectorAll("section.empty-state"));
+    const labelledBy = sections.map((section) => section.getAttribute("aria-labelledby"));
+
+    expect(new Set(labelledBy).size).toBe(2);
+    sections.forEach((section) => {
+      expect(section).toHaveAttribute("role", "region");
+      expect(section.getAttribute("aria-describedby")).toBeTruthy();
+      expect(document.getElementById(section.getAttribute("aria-labelledby")!)).not.toBeNull();
+      expect(document.getElementById(section.getAttribute("aria-describedby")!)).not.toBeNull();
+    });
+  });
+
+  it("keeps the CTA semantically tied to the empty-state explanation", () => {
+    const steps = ["Pick a recipient", "Set a cadence"] as const;
+    render(<EmptyState {...DEFAULT_PROPS} guidanceSteps={steps} onAction={jest.fn()} />);
+
+    const button = screen.getByRole("button", { name: DEFAULT_PROPS.actionLabel });
+    const describedBy = button.getAttribute("aria-describedby") ?? "";
+
+    expect(describedBy.split(" ")).toHaveLength(2);
+    describedBy.split(" ").forEach((id) => {
+      expect(document.getElementById(id)).not.toBeNull();
+    });
+    expect(button).not.toBeDisabled();
+  });
+
+  it("renders a disabled CTA when no action handler is available", () => {
+    render(<EmptyState {...DEFAULT_PROPS} />);
+
+    expect(screen.getByRole("button", { name: DEFAULT_PROPS.actionLabel })).toBeDisabled();
+  });
+
   it("renders supporting children when provided", () => {
     render(
       <EmptyState {...DEFAULT_PROPS}>
@@ -95,6 +135,17 @@ describe("EmptyState", () => {
       expect(wrap).toHaveAttribute("aria-hidden", "true");
       expect(wrap!.querySelector("svg")).not.toBeNull();
       expect(container.querySelector("section.empty-state")).toHaveClass("empty-state--streams");
+    });
+
+    it("stream-progress variant renders the StreamProgressEmptyIllustration inside .empty-state__illustration", () => {
+      const { container } = render(<EmptyState {...DEFAULT_PROPS} variant="stream-progress" />);
+      const wrap = container.querySelector(".empty-state__illustration");
+      expect(wrap).not.toBeNull();
+      expect(wrap).toHaveAttribute("aria-hidden", "true");
+      const svg = wrap!.querySelector("svg");
+      expect(svg).not.toBeNull();
+      expect(svg!.innerHTML).toContain("var(--accent)");
+      expect(container.querySelector("section.empty-state")).toHaveClass("empty-state--stream-progress");
     });
 
     it("generic variant omits the illustration entirely", () => {

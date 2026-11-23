@@ -4,6 +4,7 @@
 
 import { NextResponse } from "next/server";
 import { orgDb } from "@/app/lib/org-db";
+import { withRouteTimeout } from "@/src/middleware/timeout";
 
 function errorResponse(code: string, message: string, status: number) {
   return NextResponse.json(
@@ -12,7 +13,7 @@ function errorResponse(code: string, message: string, status: number) {
   );
 }
 
-export async function GET(
+async function handleOrgGet(
   _request: Request,
   { params }: { params: Promise<{ orgId: string }> },
 ) {
@@ -37,4 +38,11 @@ export async function GET(
     },
     links: { self: `/api/orgs/${orgId}` },
   });
+}
+
+export async function GET(
+  request: Request,
+  ctx: { params: Promise<{ orgId: string }> },
+) {
+  return withRouteTimeout(request, () => handleOrgGet(request, ctx));
 }

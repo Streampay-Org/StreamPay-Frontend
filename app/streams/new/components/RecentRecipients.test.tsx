@@ -6,19 +6,20 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 import { RecentRecipients } from "./RecentRecipients";
+import { encodeStellarPublicKey } from "../../../lib/stellar-address";
 import {
   addRecentRecipient,
   clearRecentRecipients,
   getRecentRecipients,
 } from "../../../state/recentRecipients";
 
-const ADDR_A = "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZK7G";
-const ADDR_B = "GBDE4S2PHRXBLPJFQVLZJ6VFBNEXDBKGKNXQY5FAFKPV7XTMHHFP2SU";
-const ADDR_C = "GC5M3NBSIFDIBZGBSMABKW7ZAQEYLQR6YIXMKBDGQCKIQE5KW7ZK7K3";
-const ADDR_D = "GD2GBFGQOFKSJAL5FXIJHQFPAJDP7GQFXHTDQYKFFNPIBZRPZJKFHTB";
-const ADDR_E = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGZQE3DCSSGNL4GQXHOPKC";
-const ADDR_F = "GBXGQJWVLKZX6HIWB3R4R5JXQFQBSKNYZTZM6FXQZN6ER6SDKZFM6O";
-const ADDR_G = "GDVXG2FMFFSUMMMBIUEMWPZAIU2FNCH7PNKEG3QAE6FAJQZF4KBPWF4";
+const ADDR_A = encodeStellarPublicKey(new Uint8Array(32).fill(1));
+const ADDR_B = encodeStellarPublicKey(new Uint8Array(32).fill(2));
+const ADDR_C = encodeStellarPublicKey(new Uint8Array(32).fill(3));
+const ADDR_D = encodeStellarPublicKey(new Uint8Array(32).fill(4));
+const ADDR_E = encodeStellarPublicKey(new Uint8Array(32).fill(5));
+const ADDR_F = encodeStellarPublicKey(new Uint8Array(32).fill(6));
+const ADDR_G = encodeStellarPublicKey(new Uint8Array(32).fill(7));
 
 beforeEach(() => {
   localStorage.clear();
@@ -88,11 +89,65 @@ describe("recentRecipients state module", () => {
 });
 
 describe("RecentRecipients component", () => {
-  it("renders nothing when there are no recent recipients", () => {
-    const { container } = render(
-      <RecentRecipients onSelect={jest.fn()} />
-    );
-    expect(container.firstChild).toBeNull();
+  describe("empty state (no recent recipients)", () => {
+    it("renders a themed empty state instead of nothing", () => {
+      render(<RecentRecipients onSelect={jest.fn()} />);
+
+      expect(screen.getByText("Recent recipients")).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "No recent recipients yet" })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Addresses you send streams to will appear here for quick reuse next time."
+        )
+      ).toBeInTheDocument();
+    });
+
+    it("uses the generic EmptyState variant (no illustration) in this compact context", () => {
+      const { container } = render(<RecentRecipients onSelect={jest.fn()} />);
+
+      expect(container.querySelector(".empty-state__illustration")).toBeNull();
+      expect(container.querySelector("svg")).toBeNull();
+    });
+
+    it("applies the compact recent-recipients-empty class alongside any forwarded className", () => {
+      const { container } = render(
+        <RecentRecipients onSelect={jest.fn()} className="my-extra-class" />
+      );
+
+      const section = container.querySelector("section.empty-state")!;
+      expect(section).toHaveClass("recent-recipients-empty");
+      expect(section).toHaveClass("my-extra-class");
+    });
+
+    it("focuses the recipient address input when the CTA is activated", () => {
+      render(
+        <div>
+          <RecentRecipients onSelect={jest.fn()} />
+          <input id="recipient" />
+        </div>
+      );
+
+      const input = document.getElementById("recipient") as HTMLInputElement;
+      expect(input).not.toHaveFocus();
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Enter an address" })
+      );
+
+      expect(input).toHaveFocus();
+    });
+
+    it("does not throw when the recipient input is not present in the DOM", () => {
+      render(<RecentRecipients onSelect={jest.fn()} />);
+
+      expect(() =>
+        fireEvent.click(
+          screen.getByRole("button", { name: "Enter an address" })
+        )
+      ).not.toThrow();
+    });
   });
 
   it("renders a pill for each recent recipient", async () => {
@@ -115,7 +170,7 @@ describe("RecentRecipients component", () => {
     });
 
     const pill = screen.getByRole("button");
-    expect(pill.textContent).toMatch(/^GAHJJJ…AKZK7G$/);
+    expect(pill.textContent).toBe(`${ADDR_A.slice(0, 6)}…${ADDR_A.slice(-6)}`);
   });
 
   it("exposes the full address in aria-label for screen readers", async () => {
@@ -260,7 +315,7 @@ describe("RecentRecipients component", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 
-  it("short addresses are not truncated", async () => {
+  it("ignores invalid short addresses and keeps the empty state", async () => {
     const shortAddr = "GABC123";
     addRecentRecipient(shortAddr);
 
@@ -268,6 +323,8 @@ describe("RecentRecipients component", () => {
       render(<RecentRecipients onSelect={jest.fn()} />);
     });
 
-    expect(screen.getByRole("button").textContent).toBe(shortAddr);
+    expect(
+      screen.getByRole("heading", { name: "No recent recipients yet" })
+    ).toBeInTheDocument();
   });
 });

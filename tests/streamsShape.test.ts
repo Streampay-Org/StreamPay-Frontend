@@ -341,6 +341,143 @@ describe("OpenAPI lifecycle paths (v1)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// OpenAPI examples for streams CRUD (issue #910)
+// ---------------------------------------------------------------------------
+
+describe("OpenAPI search endpoint examples", () => {
+  const searchPath = "/api/streams/search";
+
+  it("has search endpoint with examples in the OpenAPI spec", () => {
+    const path = openapiSpec().paths[searchPath];
+    expect(path).toBeDefined();
+    const examples = path.get.responses["200"].content["application/json"].examples;
+    expect(examples).toBeDefined();
+    expect(Object.keys(examples).length).toBeGreaterThanOrEqual(1);
+    expect(examples).toHaveProperty("results-found");
+    expect(examples).toHaveProperty("no-results");
+  });
+
+  it("search example values match the schema shape", () => {
+    const examples = openapiSpec().paths[searchPath].get.responses["200"].content["application/json"].examples;
+    for (const [, example] of Object.entries(examples) as [string, { value: { data: unknown[]; meta: Record<string, unknown>; links: Record<string, string> } }][]) {
+      const { data, meta, links } = example.value;
+      expect(Array.isArray(data)).toBe(true);
+      expect(meta).toHaveProperty("total");
+      expect(meta).toHaveProperty("limit");
+      expect(meta).toHaveProperty("offset");
+      expect(meta).toHaveProperty("count");
+      expect(meta).toHaveProperty("query");
+      expect(links).toHaveProperty("self");
+    }
+  });
+});
+
+describe("OpenAPI v2 streams CRUD examples", () => {
+  const v2ListPath = "/api/v2/streams";
+  const v2GetPath = "/api/v2/streams/{id}";
+  const v2DeletePath = "/api/v2/streams/{id}";
+
+  it("GET /api/v2/streams has query parameters", () => {
+    const params = openapiSpec().paths[v2ListPath].get.parameters;
+    expect(params).toBeDefined();
+    const paramNames = params.map((p: { name: string }) => p.name);
+    expect(paramNames).toContain("limit");
+    expect(paramNames).toContain("cursor");
+    expect(paramNames).toContain("status");
+  });
+
+  it("GET /api/v2/streams has examples", () => {
+    const examples = openapiSpec().paths[v2ListPath].get.responses["200"].content["application/json"].examples;
+    expect(examples).toBeDefined();
+    expect(Object.keys(examples).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("GET /api/v2/streams examples include meta and links fields", () => {
+    const examples = openapiSpec().paths[v2ListPath].get.responses["200"].content["application/json"].examples as Record<string, { value: { streams: unknown[]; meta: Record<string, unknown>; links: Record<string, string> } }>;
+    for (const [, example] of Object.entries(examples)) {
+      const { streams, meta, links } = example.value;
+      expect(Array.isArray(streams)).toBe(true);
+      expect(meta).toHaveProperty("hasNext");
+      expect(meta).toHaveProperty("nextCursor");
+      expect(meta).toHaveProperty("total");
+      expect(links).toHaveProperty("self");
+    }
+  });
+
+  it("GET /api/v2/streams paginated-first-page example has hasNext: true and nextCursor", () => {
+    const examples = openapiSpec().paths[v2ListPath].get.responses["200"].content["application/json"].examples as Record<string, { value: { meta: { hasNext: boolean; nextCursor: string | null } } }>;
+    expect(examples).toHaveProperty("paginated-first-page");
+    expect(examples["paginated-first-page"].value.meta.hasNext).toBe(true);
+    expect(examples["paginated-first-page"].value.meta.nextCursor).toBeTruthy();
+  });
+
+  it("GET /api/v2/streams/{id} has examples", () => {
+    const examples = openapiSpec().paths[v2GetPath].get.responses["200"].content["application/json"].examples;
+    expect(examples).toBeDefined();
+    expect(Object.keys(examples).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("GET /api/v2/streams/{id} example data uses v2 shape", () => {
+    const examples = openapiSpec().paths[v2GetPath].get.responses["200"].content["application/json"].examples as Record<string, { value: { data: Record<string, unknown> } }>;
+    for (const [, example] of Object.entries(examples)) {
+      const { data } = example.value;
+      expect(data).toHaveProperty("id");
+      expect(data).toHaveProperty("recipient");
+      expect(data).toHaveProperty("rate");
+      expect(data).toHaveProperty("status");
+      expect(data).toHaveProperty("allowed_actions");
+      expect(data).toHaveProperty("created_at");
+      expect(data).toHaveProperty("settlement");
+      expect(data).not.toHaveProperty("nextAction");
+      expect(data).not.toHaveProperty("createdAt");
+    }
+  });
+
+  it("POST /api/v2/streams has request body examples", () => {
+    const examples = openapiSpec().paths[v2ListPath].post.requestBody.content["application/json"].examples;
+    expect(examples).toBeDefined();
+    expect(Object.keys(examples).length).toBeGreaterThanOrEqual(1);
+    expect(examples).toHaveProperty("minimal-xlm");
+    expect(examples).toHaveProperty("with-usdc-token");
+  });
+
+  it("POST /api/v2/streams has response examples", () => {
+    const examples = openapiSpec().paths[v2ListPath].post.responses["201"].content["application/json"].examples;
+    expect(examples).toBeDefined();
+    expect(Object.keys(examples).length).toBeGreaterThanOrEqual(1);
+    expect(examples).toHaveProperty("draft-xlm");
+    expect(examples).toHaveProperty("draft-usdc");
+  });
+
+  it("POST /api/v2/streams response example data uses v2 shape", () => {
+    const examples = openapiSpec().paths[v2ListPath].post.responses["201"].content["application/json"].examples as Record<string, { value: Record<string, unknown> }>;
+    for (const [, example] of Object.entries(examples)) {
+      const value = example.value;
+      expect(value).toHaveProperty("id");
+      expect(value).toHaveProperty("recipient");
+      expect(value).toHaveProperty("rate");
+      expect(value).toHaveProperty("status");
+      expect(value).toHaveProperty("allowed_actions");
+      expect(value).toHaveProperty("created_at");
+      expect(value).toHaveProperty("settlement");
+    }
+  });
+
+  it("DELETE /api/v2/streams/{id} returns 204", () => {
+    const responses = openapiSpec().paths[v2DeletePath].delete.responses;
+    expect(responses["204"]).toBeDefined();
+  });
+
+  it("DELETE /api/v2/streams/{id} error responses use ErrorEnvelope", () => {
+    const responses = openapiSpec().paths[v2DeletePath].delete.responses;
+    expect(responses["401"]).toBeDefined();
+    expect(responses["404"]).toBeDefined();
+    expect(responses["409"]).toBeDefined();
+    expect(responses["500"]).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Shape stability: field-set must not change between calls
 // ---------------------------------------------------------------------------
 

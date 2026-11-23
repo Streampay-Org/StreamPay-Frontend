@@ -76,6 +76,56 @@ describe("GET /api/metrics", () => {
     });
   });
 
+  describe("prom-client registry merge", () => {
+    beforeEach(() => {
+      (getMetrics as jest.Mock).mockReturnValue({
+        total: {},
+        throttled: {},
+      });
+    });
+
+    it("appends prom-client registry output (webhook_*) to the response body", async () => {
+      const { registry, webhookCounter } = require("@/src/metrics/registry");
+      // Seed the shared registry with a known sample.
+      webhookCounter.inc({ status: "200", event_type: "merge_test" });
+      registry.resetMetrics();
+      webhookCounter.inc({ status: "200", event_type: "merge_test" });
+
+      const request = new NextRequest("http://localhost:3000/api/metrics", {
+        headers: { authorization: "Bearer test-token-12345" },
+      });
+      const response = await GET(request);
+
+      const text = await response.text();
+      // Custom surface still emitted.
+      expect(text).toContain("streampay_metrics_up 1");
+      // prom-client surface appended.
+      expect(text).toContain("webhook_requests_total");
+      expect(text).toContain('event_type="merge_test"');
+    });
+
+    it("appends wallet_auth_* per-endpoint metrics from the shared registry", async () => {
+      const { registry, walletAuthCounter } = require("@/src/metrics/registry");
+      registry.resetMetrics();
+      walletAuthCounter.inc({
+        method: "GET",
+        operation: "challenge",
+        status: "200",
+      });
+
+      const request = new NextRequest("http://localhost:3000/api/metrics", {
+        headers: { authorization: "Bearer test-token-12345" },
+      });
+      const response = await GET(request);
+
+      const text = await response.text();
+      expect(text).toContain("wallet_auth_requests_total");
+      expect(text).toMatch(
+        /wallet_auth_requests_total\{[^}]*method="GET"[^}]*operation="challenge"[^}]*status="200"[^}]*\}\s+1/,
+      );
+    });
+  });
+
   describe("Metrics Format", () => {
     beforeEach(() => {
       (getMetrics as jest.Mock).mockReturnValue({

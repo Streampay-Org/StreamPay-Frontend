@@ -1,4 +1,8 @@
-import { createActivityTimelineStore, activityEventToTimelineEntry } from "./activity-timeline";
+import {
+  activityEventToTimelineEntry,
+  createActivityTimelineStore,
+  mergeActivityTimelinePages,
+} from "./activity-timeline";
 import type { ActivityEvent } from "@/app/types/openapi";
 
 function makeEvent(overrides: Partial<ActivityEvent> & { id: string }): ActivityEvent {
@@ -142,6 +146,168 @@ describe("ActivityTimelineStore", () => {
       const result = store.query({ limit: 10 });
       expect(result.meta.hasNext).toBe(false);
       expect(result.meta.nextCursor).toBeNull();
+    });
+
+    it("does not repeat or drop same-timestamp events across pages", () => {
+      const store = createActivityTimelineStore();
+      seedEvents(store, [
+        makeEvent({ id: "evt-c", timestamp: "2026-06-01T12:00:00Z" }),
+        makeEvent({ id: "evt-b", timestamp: "2026-06-01T12:00:00Z" }),
+        makeEvent({ id: "evt-a", timestamp: "2026-06-01T12:00:00Z" }),
+      ]);
+
+      const first = store.query({ limit: 2 });
+      const second = store.query({ limit: 2, cursor: first.meta.nextCursor ?? undefined });
+
+      expect(first.data.map((event) => event.id)).toEqual(["evt-c", "evt-b"]);
+      expect(second.data.map((event) => event.id)).toEqual(["evt-a"]);
+    });
+  });
+
+  describe("request-scoped predicate", () => {
+    function scopedEvent(
+      id: string,
+      timestamp: string,
+      overrides: Partial<ActivityEvent> = {},
+    ): ActivityEvent {
+      return makeEvent({ id, timestamp, ...overrides });
+    }
+
+    it("computes total and hasNext on the scoped set only", () => {
+      const store = createActivityTimelineStore();
+      const visible = Array.from({ length: 5 }, (_, i) =>
+        scopedEvent(`a-${i}`, `2026-06-${String(20 - i).padStart(2, "0")}T00:00:00Z`, {
+          streamId: "owned",
+        }),
+      );
+      const hidden = Array.from({ length: 25 }, (_, i) =>
+        scopedEvent(`b-${i}`, `2026-05-${String(28 - (i % 28)).padStart(2, "0")}T00:00:00Z`, {
+          streamId: "other",
+        }),
+      );
+      seedEvents(store, [...visible, ...hidden]);
+
+      const first = store.query({
+        limit: 2,
+        predicate: (entry) => entry.streamId === "owned",
+      });
+
+      expect(first.meta.total).toBe(5);
+      expect(first.meta.hasNext).toBe(true);
+      expect(first.data).toHaveLength(2);
+      expect(first.data.every((entry) => entry.streamId === "owned")).toBe(true);
+
+      const second = store.query({
+        limit: 2,
+        cursor: first.meta.nextCursor ?? undefined,
+        predicate: (entry) => entry.streamId === "owned",
+      });
+
+      expect(second.meta.total).toBe(5);
+      expect(second.meta.hasNext).toBe(true);
+      expect(second.data.every((entry) => entry.streamId === "owned")).toBe(true);
+    });
+
+    it("paginates the scoped set across 3 pages without duplicates or gaps", () => {
+      const store = createActivityTimelineStore();
+      const visible = Array.from({ length: 5 }, (_, i) =>
+        scopedEvent(`a-${i}`, `2026-06-${String(20 - i).padStart(2, "0")}T00:00:00Z`, {
+          streamId: "owned",
+        }),
+      );
+      const hidden = Array.from({ length: 10 }, (_, i) =>
+        scopedEvent(`b-${i}`, `2026-06-${String(20 - i).padStart(2, "0")}T12:00:00Z`, {
+          streamId: "other",
+        }),
+      );
+      seedEvents(store, [...visible, ...hidden]);
+
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      for (let i = 0; i < 3; i++) {
+        const result = store.query({
+          limit: 2,
+          cursor,
+          predicate: (entry) => entry.streamId === "owned",
+        });
+        expect(result.meta.total).toBe(5);
+        seen.push(...result.data.map((entry) => entry.id));
+        cursor = result.meta.nextCursor ?? undefined;
+      }
+
+      expect(seen).toEqual(["a-0", "a-1", "a-2", "a-3", "a-4"]);
+      expect(new Set(seen).size).toBe(5);
+      expect(cursor).toBeUndefined();
+    });
+
+    it("combines the predicate with existing streamId and type filters", () => {
+      const store = createActivityTimelineStore();
+      seedEvents(store, [
+        scopedEvent("visible", "2026-06-03T00:00:00Z", {
+          streamId: "s1",
+          type: "stream.created",
+        }),
+        scopedEvent("wrong-type", "2026-06-02T00:00:00Z", {
+          streamId: "s1",
+          type: "stream.stopped",
+        }),
+        scopedEvent("scoped-out", "2026-06-01T00:00:00Z", {
+          streamId: "s2",
+          type: "stream.created",
+        }),
+      ]);
+
+      const result = store.query({
+        limit: 10,
+        streamId: "s1",
+        type: "stream.created",
+        predicate: (entry) => entry.id !== "scoped-out",
+      });
+
+      expect(result.data.map((entry) => entry.id)).toEqual(["visible"]);
+      expect(result.meta.total).toBe(1);
+    });
+
+    it("returns an empty scoped page with total 0 when nothing is visible", () => {
+      const store = createActivityTimelineStore();
+      seedEvents(store, [
+        scopedEvent("hidden-a", "2026-06-02T00:00:00Z", { streamId: "other" }),
+        scopedEvent("hidden-b", "2026-06-01T00:00:00Z", { streamId: "other" }),
+      ]);
+
+      const result = store.query({ limit: 10, predicate: () => false });
+
+      expect(result.data).toHaveLength(0);
+      expect(result.meta.total).toBe(0);
+      expect(result.meta.hasNext).toBe(false);
+      expect(result.meta.nextCursor).toBeNull();
+    });
+
+    it("propagates actorAddress for non-stream events", () => {
+      const entry = activityEventToTimelineEntry(
+        makeEvent({
+          id: "wallet-event",
+          type: "wallet.connected",
+          actorAddress: "GALICE",
+        }),
+        "2026-06-01T00:00:00Z",
+      );
+
+      expect(entry.actorAddress).toBe("GALICE");
+    });
+  });
+
+  describe("mergeActivityTimelinePages", () => {
+    it("deduplicates and sorts paged timeline responses deterministically", () => {
+      const entry = (id: string, timestamp: string) =>
+        activityEventToTimelineEntry(makeEvent({ id, timestamp }), timestamp);
+
+      const merged = mergeActivityTimelinePages([
+        [entry("evt-2", "2026-06-01T12:00:00Z"), entry("evt-1", "2026-06-01T13:00:00Z")],
+        [entry("evt-3", "2026-06-01T12:00:00Z"), entry("evt-2", "2026-06-01T12:00:00Z")],
+      ]);
+
+      expect(merged.map((event) => event.id)).toEqual(["evt-1", "evt-3", "evt-2"]);
     });
   });
 

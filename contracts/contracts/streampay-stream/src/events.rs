@@ -10,8 +10,9 @@ use soroban_sdk::{contractevent, symbol_short, Address, BytesN, Env, Symbol};
 
 /// Emitted when a new stream is created (topic: `"stream"`, sub-topic: `"created"`).
 ///
-/// Contains the stream's ID, sender, recipient, token address, total amount, and
-/// the ledger timestamp at creation.
+/// Contains the stream's ID, sender, recipient, token address, total amount,
+/// per-stream fee (in basis points), stream duration in seconds, and the
+/// ledger timestamp at creation.
 #[contractevent(topics = ["stream", "created"], data_format = "vec")]
 pub struct StreamCreated {
     pub stream_id: u64,
@@ -19,6 +20,8 @@ pub struct StreamCreated {
     pub recipient: Address,
     pub token: Address,
     pub total_amount: i128,
+    pub fee_bps: u32,
+    pub duration: u64,
     pub timestamp: u64,
 }
 
@@ -41,6 +44,20 @@ pub struct StreamStarted {
 pub struct StreamWithdrawn {
     pub stream_id: u64,
     pub recipient: Address,
+    pub amount: i128,
+    pub timestamp: u64,
+}
+
+/// Emitted when tokens are withdrawn from a stream to a custom destination
+/// address (topic: `"stream"`, sub-topic: `"withdrawn_to"`).
+///
+/// Contains the stream ID, recipient, destination address, amount withdrawn,
+/// and the ledger timestamp.
+#[contractevent(topics = ["stream", "withdrawn_to"], data_format = "vec")]
+pub struct StreamWithdrawnTo {
+    pub stream_id: u64,
+    pub recipient: Address,
+    pub destination: Address,
     pub amount: i128,
     pub timestamp: u64,
 }
@@ -141,6 +158,8 @@ pub fn created(
     recipient: &Address,
     token: &Address,
     total_amount: i128,
+    fee_bps: u32,
+    duration: u64,
     timestamp: u64,
 ) {
     StreamCreated {
@@ -149,6 +168,8 @@ pub fn created(
         recipient: recipient.clone(),
         token: token.clone(),
         total_amount,
+        fee_bps,
+        duration,
         timestamp,
     }
     .publish(env);
@@ -176,6 +197,25 @@ pub fn withdrawn(env: &Env, stream_id: u64, recipient: &Address, amount: i128, t
     .publish(env);
 }
 
+/// Publishes a [`StreamWithdrawnTo`] event.
+pub fn withdrawn_to(
+    env: &Env,
+    stream_id: u64,
+    recipient: &Address,
+    destination: &Address,
+    amount: i128,
+    timestamp: u64,
+) {
+    StreamWithdrawnTo {
+        stream_id,
+        recipient: recipient.clone(),
+        destination: destination.clone(),
+        amount,
+        timestamp,
+    }
+    .publish(env);
+}
+
 /// Publishes a [`StreamSettled`] event.
 pub fn settled(env: &Env, stream_id: u64, recipient: &Address, total_amount: i128, timestamp: u64) {
     StreamSettled {
@@ -191,7 +231,7 @@ pub fn paused(env: &Env, stream_id: u64, sender: &Address, pause_time: u64, time
     StreamPaused {
         stream_id,
         sender: sender.clone(),
-        paused_at,
+        paused_at: pause_time,
         timestamp,
     }
     .publish(env);
@@ -321,6 +361,36 @@ pub fn default_fee_bps_set(env: &Env, admin: &Address, fee_bps: u32, timestamp: 
     );
 }
 
+/// Emitted when a per-token fee override is set via
+/// [`Contract::set_token_fee_bps`].
+///
+/// Topics: `("stream", "set_tfee")`.
+/// Data: `(admin, token, fee_bps, timestamp)`.
+pub fn token_fee_bps_set(
+    env: &Env,
+    admin: &Address,
+    token: &Address,
+    fee_bps: u32,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (symbol_short!("stream"), symbol_short!("set_tfee")),
+        (admin.clone(), token.clone(), fee_bps, timestamp),
+    );
+}
+
+/// Emitted when a per-token fee override is cleared via
+/// [`Contract::clear_token_fee_bps`].
+///
+/// Topics: `("stream", "clr_tfee")`.
+/// Data: `(admin, token, timestamp)`.
+pub fn token_fee_bps_cleared(env: &Env, admin: &Address, token: &Address, timestamp: u64) {
+    env.events().publish(
+        (symbol_short!("stream"), symbol_short!("clr_tfee")),
+        (admin.clone(), token.clone(), timestamp),
+    );
+}
+
 /// Emitted for every withdrawal that incurs a non-zero fee.
 ///
 /// Topics: `("stream", "fee_charged")`.
@@ -336,5 +406,70 @@ pub fn fee_charged(
     env.events().publish(
         (symbol_short!("stream"), symbol_short!("fee")),
         (stream_id, fee_amount, fee_bps, collector.clone(), timestamp),
+    );
+}
+
+/// Emitted when the admin sets or clears the per-token maximum stream amount
+/// cap via [`Contract::set_max_stream_amount`] or
+/// [`Contract::clear_max_stream_amount`].
+///
+/// Topics: `("stream", "set_max_a")`.
+/// Data: `(admin, token, max_amount, timestamp)` where `max_amount == 0`
+/// indicates the cap was cleared (unlimited).
+pub fn max_stream_amount_set(
+    env: &Env,
+    admin: &Address,
+    token: &Address,
+    max_amount: i128,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (symbol_short!("stream"), symbol_short!("set_max_a")),
+        (admin.clone(), token.clone(), max_amount, timestamp),
+    );
+}
+
+/// Emitted when the admin updates the per-user cooloff duration via
+/// [`Contract::set_cooloff_duration`].
+///
+/// Topics: `("stream", "cooloff_set")`.
+/// Data: `(admin, duration, timestamp)`.
+pub fn cooloff_duration_set(env: &Env, admin: &Address, duration: u64, timestamp: u64) {
+    env.events().publish(
+        (symbol_short!("stream"), symbol_short!("cooloff")),
+        (admin.clone(), duration, timestamp),
+    );
+}
+
+/// Emitted when the admin successfully sweeps accumulated protocol fees into
+/// the treasury (fee collector address).
+///
+/// Topics: `("stream", "fees_swept")`.
+/// Data: `(streams_swept, total_amount, collector, caller, timestamp)`.
+///
+/// | Field           | Type      | Description                                        |
+/// |-----------------|-----------|----------------------------------------------------|
+/// | `streams_swept` | `u32`     | Number of streams that had a non-zero fee balance. |
+/// | `total_amount`  | `i128`    | Total tokens transferred to the fee collector.     |
+/// | `collector`     | `Address` | Destination of the swept funds.                    |
+/// | `caller`        | `Address` | Admin address that initiated the sweep.            |
+/// | `timestamp`     | `u64`     | Ledger timestamp at the time of the sweep.         |
+pub fn fees_swept(
+    env: &Env,
+    streams_swept: u32,
+    total_amount: i128,
+    collector: &Address,
+    caller: &Address,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (symbol_short!("stream"), symbol_short!("swept")),
+        (
+            streams_swept,
+            total_amount,
+            collector.clone(),
+            caller.clone(),
+            timestamp,
+        ),
     );
 }

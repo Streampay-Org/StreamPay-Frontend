@@ -25,7 +25,9 @@ fn err_discriminants_are_stable() {
 
 #[test]
 fn err_discriminants_are_contiguous_from_1_to_18() {
-    let expected: [u32; 18] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
+    let expected: [u32; 18] = [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+    ];
     let actual: [u32; 18] = [
         Error::NotFound as u32,
         Error::Unauthorized as u32,
@@ -47,4 +49,17 @@ fn err_discriminants_are_contiguous_from_1_to_18() {
         Error::InvalidFeeBps as u32,
     ];
     assert_eq!(actual, expected);
+}
+
+#[test]
+fn err_discriminants_from_19_to_22_are_stable() {
+    assert_eq!(Error::SweepNoFees as u32, 19);
+    assert_eq!(Error::SweepAmountMismatch as u32, 20);
+    assert_eq!(Error::AdminCooldown as u32, 21);
+    assert_eq!(Error::CooloffActive as u32, 22);
+}
+
+#[test]
+fn err_discriminant_23_is_stable() {
+    assert_eq!(Error::AmountTooLarge as u32, 23);
 }

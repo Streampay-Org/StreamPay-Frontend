@@ -1,21 +1,13 @@
-import React from "react";
+/**
+ * LiveRegion
+ *
+ * Consolidated live region component re-exported from app/components/LiveRegion.
+ */
 
-type LiveRegionProps = {
-  message: string;
-  politeness?: "polite" | "assertive";
-  className?: string;
-  role?: "status" | "alert" | "log";
-};
+"use client";
 
-export function LiveRegion({
-  message,
-  politeness = "polite",
-  className = "sr-only",
-  role = "status",
-}: LiveRegionProps) {
-  return (
-    <div className={className} aria-live={politeness} role={role}>
-      {message}
-    </div>
-  );
-}
+export {
+  LiveRegion,
+  type LiveRegionProps,
+  type AriaLive,
+} from "../../app/components/LiveRegion";

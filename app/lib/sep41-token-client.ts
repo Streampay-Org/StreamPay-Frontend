@@ -128,7 +128,7 @@ class MockSep41TokenClient implements Sep41TokenClient {
     };
   }
 
-  async escrowBalance(streamId: string): Promise<TokenBalanceResult> {
+  async escrowBalance(_streamId: string): Promise<TokenBalanceResult> {
     // TODO(production): query Soroban contract storage for this stream's escrow
     return {
       balance: 0n,

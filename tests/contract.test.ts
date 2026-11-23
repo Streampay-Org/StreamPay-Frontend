@@ -67,10 +67,13 @@ function assertWalletToken(obj: unknown): void {
 
 function makeApiRequest(method: string, pathSuffix: string, body?: unknown): Request {
   const url = `http://localhost${pathSuffix}`;
-  const init: RequestInit = { method };
+  const headers = new Headers({ Authorization: "Bearer test-token" });
+  if (body !== undefined) {
+    headers.set("Content-Type", "application/json");
+  }
+  const init: RequestInit = { method, headers };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
-    init.headers = { "Content-Type": "application/json" };
   }
   return new Request(url, init);
 }
@@ -103,6 +106,18 @@ describe("openapi.json meta", () => {
     const paths = Object.keys(spec.paths);
     expect(paths).toContain("/api/auth/wallet");
     expect(paths).toContain("/api/v2/streams");
+    expect(paths).toContain("/api/v2/streams/{id}");
+    expect(paths).toContain("/api/v2/streams/{id}/start");
+    expect(paths).toContain("/api/v2/streams/{id}/stop");
+    expect(paths).toContain("/api/v2/streams/{id}/pause");
+    expect(paths).toContain("/api/v2/streams/{id}/settle");
+    expect(paths).toContain("/api/streams");
+    expect(paths).toContain("/api/streams/search");
+    expect(paths).toContain("/api/streams/{id}");
+    expect(paths).toContain("/api/streams/{id}/start");
+    expect(paths).toContain("/api/streams/{id}/stop");
+    expect(paths).toContain("/api/streams/{id}/pause");
+    expect(paths).toContain("/api/streams/{id}/settle");
     expect(paths).toContain("/api/webhooks/dlq");
     expect(paths).toContain("/api/webhooks/deliveries");
     expect(paths).toContain("/api/debug/kms-sign");
@@ -114,6 +129,32 @@ describe("openapi.json meta", () => {
     expect(schemas).toContain("StreamV2");
     expect(schemas).toContain("WalletChallenge");
     expect(schemas).toContain("WalletToken");
+  });
+
+  describe("streams CRUD examples coverage", () => {
+    const streamsPaths = Object.entries(spec.paths).filter(
+      ([p]) => p.includes("/stream"),
+    );
+
+    for (const [path, pathItem] of streamsPaths) {
+      for (const method of ["get", "post", "put", "delete", "patch"] as const) {
+        const op = pathItem[method];
+        if (!op) continue;
+
+        for (const [status, response] of Object.entries(op.responses ?? {})) {
+          const content = response.content;
+          if (!content) continue;
+
+          for (const [mime, mt] of Object.entries(content)) {
+            if (status.startsWith("2") || status.startsWith("4")) {
+              it(`${method.toUpperCase()} ${path} ${status} has example(s)`, () => {
+                expect(mt.examples ?? mt.example).toBeTruthy();
+              });
+            }
+          }
+        }
+      }
+    }
   });
 });
 
@@ -235,6 +276,32 @@ describe("StreamV2 shape", () => {
     expect(Array.isArray(response.streams)).toBe(true);
     response.streams.forEach((s) => assertStreamV2(s));
   });
+
+  it("GET /api/v2/streams openapi examples conform to schema", () => {
+    const examples = spec.paths["/api/v2/streams"].get.responses["200"].content["application/json"].examples;
+    for (const [name, ex] of Object.entries<Record<string, unknown>>(examples)) {
+      const val = ex.value as Record<string, unknown>;
+      expect(Array.isArray(val.streams)).toBe(true);
+      (val.streams as unknown[]).forEach((s) => assertStreamV2(s));
+      expect(val).toHaveProperty("meta");
+      expect(val).toHaveProperty("links");
+    }
+  });
+
+  it("POST /api/v2/streams openapi response examples conform to schema", () => {
+    const examples = spec.paths["/api/v2/streams"].post.responses["201"].content["application/json"].examples;
+    for (const [, ex] of Object.entries<Record<string, unknown>>(examples)) {
+      assertStreamV2(ex.value);
+    }
+  });
+
+  it("GET /api/v2/streams/{id} openapi examples conform to schema", () => {
+    const examples = spec.paths["/api/v2/streams/{id}"].get.responses["200"].content["application/json"].examples;
+    for (const [, ex] of Object.entries<Record<string, unknown>>(examples)) {
+      const val = ex.value as Record<string, unknown>;
+      assertStreamV2((val as { data: unknown }).data);
+    }
+  });
 });
 
 describe("/api/v2/streams runtime contract", () => {
@@ -265,6 +332,14 @@ describe("/api/v2/streams runtime contract", () => {
       allowed_actions: ["start"],
       settlement: null,
     });
+
+    // Verify meta and links fields per openapi.json
+    expect(body).toHaveProperty("meta");
+    expect(body.meta).toHaveProperty("hasNext");
+    expect(body.meta).toHaveProperty("nextCursor");
+    expect(body.meta).toHaveProperty("total");
+    expect(body).toHaveProperty("links");
+    expect(body.links).toHaveProperty("self");
   });
 
   it("returns a StreamV2 object for POST /api/v2/streams", async () => {

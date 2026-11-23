@@ -59,7 +59,7 @@ fn to_weights(env: &Env, weights: &[u64; 3]) -> Vec<u64> {
     v
 }
 
-fn client(env: &Env, admin: &Address) -> crate::ContractClient<'_> {
+fn client<'a>(env: &'a Env, admin: &'a Address) -> crate::ContractClient<'a> {
     let contract_id = env.register(Contract, ());
     let client = crate::ContractClient::new(env, &contract_id);
     client.initialize(admin);
@@ -80,15 +80,7 @@ fn create_default_split(
     wv.push_back(6000u64);
     wv.push_back(4000u64);
 
-    client.create_split_stream(
-        sender,
-        token,
-        &1000i128,
-        &1_100u64,
-        &1_200u64,
-        &rv,
-        &wv,
-    )
+    client.create_split_stream(sender, token, &1000i128, &1_100u64, &1_200u64, &rv, &wv)
 }
 
 // ── create_split_stream ─────────────────────────────────────────────────
@@ -196,7 +188,13 @@ fn create_split_stream_invalid_time_fails() {
     let wv = to_weights(&td.env, &[5000, 3000, 2000]);
 
     let result = client.try_create_split_stream(
-        &td.sender, &td.token, &1000i128, &1_100u64, &1_100u64, &rv.clone(), &wv.clone(),
+        &td.sender,
+        &td.token,
+        &1000i128,
+        &1_100u64,
+        &1_100u64,
+        &rv.clone(),
+        &wv.clone(),
     );
     assert_eq!(
         result.expect_err("zero duration should fail"),
@@ -227,7 +225,7 @@ fn create_split_stream_emits_event() {
         })
         .expect("should find split_created event");
     let (_, _, data) = ev;
-    let (ev_id, ..): (u64, ..) = soroban_sdk::IntoVal::into_val(&td.env, &data);
+    let (ev_id, _): (u64, _) = soroban_sdk::IntoVal::into_val(&td.env, &data);
     assert_eq!(ev_id, id);
 }
 
@@ -240,7 +238,9 @@ fn create_split_stream_requires_auth() {
     let wv = to_weights(&td.env, &[5000, 3000, 2000]);
 
     td.env.mock_auths(&[]);
-    client.create_split_stream(&td.sender, &td.token, &1000i128, &1_100u64, &1_200u64, &rv, &wv);
+    client.create_split_stream(
+        &td.sender, &td.token, &1000i128, &1_100u64, &1_200u64, &rv, &wv,
+    );
 }
 
 #[test]
@@ -374,7 +374,7 @@ fn withdraw_split_emits_event() {
         })
         .expect("should find split_withdrawn event");
     let (_, _, data) = ev;
-    let (ev_id, ..): (u64, ..) = soroban_sdk::IntoVal::into_val(&td.env, &data);
+    let (ev_id, _): (u64, _) = soroban_sdk::IntoVal::into_val(&td.env, &data);
     assert_eq!(ev_id, id);
 }
 
@@ -529,7 +529,7 @@ fn cancel_split_stream_emits_event() {
         })
         .expect("should find split_cancelled event");
     let (_, _, data) = ev;
-    let (ev_id, ..): (u64, ..) = soroban_sdk::IntoVal::into_val(&td.env, &data);
+    let (ev_id, _): (u64, _) = soroban_sdk::IntoVal::into_val(&td.env, &data);
     assert_eq!(ev_id, id);
 }
 

@@ -39,4 +39,18 @@ describe("runWithTimeout", () => {
       }),
     ).rejects.toThrow("boom");
   });
+
+  it("does not issue duplicate timeout/abort notifications when work resolves during abort", async () => {
+    let abortCount = 0;
+    await expect(
+      runWithTimeout(20, (signal) => {
+        signal.addEventListener("abort", () => {
+          abortCount += 1;
+        });
+        return new Promise((resolve) => setTimeout(() => resolve("done"), 50));
+      }),
+    ).rejects.toBeInstanceOf(TimeoutError);
+
+    expect(abortCount).toBe(1);
+  });
 });

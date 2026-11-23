@@ -2,19 +2,21 @@
  * @jest-environment jsdom
  */
 
+import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { axe } from "jest-axe";
 import { ThemeToggle } from "./ThemeToggle";
 
 // Use jest.mock with inline factory to avoid hoisting issues
 jest.mock("../utils/theme-noflash", () => ({
   __esModule: true,
   setTheme: jest.fn(),
+  applyTheme: jest.fn(),
   setHighContrast: jest.fn(),
   getHighContrast: jest.fn(() => false),
   themeNoFlash: jest.fn(),
 }));
 
-// Import the mock to get typed references
 import * as themeNoFlash from "../utils/theme-noflash";
 
 describe("ThemeToggle", () => {
@@ -65,6 +67,22 @@ describe("ThemeToggle", () => {
     expect(window.localStorage.removeItem).toHaveBeenCalledWith("streampay-theme");
   });
 
+  it("6. ThemeToggle radios are grouped within a fieldset with a legend, and the High Contrast checkbox is outside any radio group", () => {
+    const { container } = render(<ThemeToggle />);
+    const fieldset = container.querySelector("fieldset");
+    expect(fieldset).not.toBeNull();
+    const legend = fieldset?.querySelector("legend");
+    expect(legend).not.toBeNull();
+    expect(legend?.textContent).toBe("Theme selection");
+
+    const radios = fieldset?.querySelectorAll('input[type="radio"]');
+    expect(radios?.length).toBe(3);
+
+    const checkbox = container.querySelector('input[type="checkbox"]');
+    expect(checkbox).not.toBeNull();
+    expect(fieldset?.contains(checkbox)).toBe(false);
+  });
+
   describe("high-contrast", () => {
     it("renders checkbox", () => {
       render(<ThemeToggle />);
@@ -84,5 +102,11 @@ describe("ThemeToggle", () => {
       fireEvent.click(cb);
       expect(themeNoFlash.setHighContrast).toHaveBeenCalledWith(false);
     });
+  });
+
+  it("8. Run axe accessibility checks on the ThemeToggle UI and ensure there are no serious accessibility violations", async () => {
+    const { container } = render(<ThemeToggle />);
+    const results = await axe(container);
+    expect(results).toHaveNoViolations();
   });
 });

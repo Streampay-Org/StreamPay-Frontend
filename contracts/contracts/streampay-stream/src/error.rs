@@ -57,4 +57,15 @@ pub enum Error {
     FeeTooHigh = 17,
     /// 18: Fee basis points value exceeds the maximum allowed (10 000).
     InvalidFeeBps = 18,
+    /// 19: No accumulated fees are available to sweep (all per-stream balances are zero).
+    SweepNoFees = 19,
+    /// 20: Accumulated fee balance for a stream underflows or would produce an
+    ///     invalid token transfer amount.  Guards against integer manipulation.
+    SweepAmountMismatch = 20,
+    /// 21: Admin action is currently in cooldown.
+    AdminCooldown = 21,
+    /// 22: Sender is in cooloff period and cannot create a new stream yet.
+    CooloffActive = 22,
+    /// 23: Stream `total_amount` exceeds the configured per-token maximum cap.
+    AmountTooLarge = 23,
 }
