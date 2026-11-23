@@ -743,3 +743,18 @@ setOutboxStore(new PostgresOutboxStore(dbClient));
 ```
 
 See `docs/persistent-store-interface.md` for the broader repository pluggability pattern.
+
+## Delivery Latency Metrics
+
+Each outbound delivery attempt executed by `WebhookDeliveryWorker.processDelivery()` is timed with a monotonic clock (`process.hrtime.bigint()`) and recorded to the Prometheus histogram `webhook_delivery_attempt_duration_seconds` (exposed via `GET /api/metrics`).
+
+- **Buckets (seconds):** `[0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30]`
+- **Label:** `outcome` (closed set):
+  - `success` — endpoint returned `2xx`
+  - `retryable_failure` — `5xx`, `408`, `429`, or network error
+  - `non_retryable_failure` — non-retryable `4xx`
+  - `timeout` — client request abort timeout (`30s`)
+  - `deferred` — held by the global admin circuit breaker before touching the network
+  - `circuit_open` — blocked by the per-endpoint circuit breaker before touching the network
+
+> **Note:** Attempts short-circuited by the admin breaker (`deferred`) or per-endpoint breaker (`circuit_open`) are labelled explicitly rather than omitted so operators can alert on breaker trips while keeping network-latency quantiles isolated by `outcome`.

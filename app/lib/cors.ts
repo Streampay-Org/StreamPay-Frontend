@@ -21,6 +21,25 @@ export const WILDCARD_ORIGIN = '*';
 export const DEFAULT_CORS_METHODS = 'GET,POST,PUT,PATCH,DELETE,OPTIONS';
 export const DEFAULT_CORS_HEADERS = 'authorization, content-type, x-requested-with, x-api-key, x-streampay-actor-id, x-streampay-actor-role';
 export const DEFAULT_CORS_MAX_AGE_SECONDS = 600;
+export const MAX_CORS_MAX_AGE_SECONDS = 86400;
+
+export function resolveCorsMaxAge(raw: string | undefined): number {
+  if (raw === undefined) {
+    return DEFAULT_CORS_MAX_AGE_SECONDS;
+  }
+
+  const trimmed = raw.trim();
+  if (!/^-?\d+$/.test(trimmed)) {
+    return DEFAULT_CORS_MAX_AGE_SECONDS;
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > MAX_CORS_MAX_AGE_SECONDS) {
+    return DEFAULT_CORS_MAX_AGE_SECONDS;
+  }
+
+  return parsed;
+}
 
 /**
  * Response headers browser clients are allowed to read on a cross-origin

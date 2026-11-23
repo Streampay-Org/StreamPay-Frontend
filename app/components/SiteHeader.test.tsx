@@ -1,28 +1,60 @@
+import React from "react";
+import { render, screen } from "@testing-library/react";
+import { SiteHeader } from "./SiteHeader";
+
+let mockPathname = "/";
+
+jest.mock("next/navigation", () => ({
+  usePathname: () => mockPathname,
+}));
+
+describe("SiteHeader", () => {
+  it("renders the Orgs link in primary navigation", () => {
+    mockPathname = "/streams";
+    render(<SiteHeader />);
+
+    const orgsLink = screen.getByRole("link", { name: "Orgs" });
+    expect(orgsLink).toHaveAttribute("href", "/orgs");
+    expect(orgsLink).not.toHaveAttribute("aria-current");
+  });
+
+  it("marks Orgs as active on /orgs", () => {
+    mockPathname = "/orgs";
+    render(<SiteHeader />);
+
+    const orgsLink = screen.getByRole("link", { name: "Orgs" });
+    expect(orgsLink).toHaveAttribute("aria-current", "page");
+    expect(orgsLink).toHaveClass("is-active");
+  });
+
+  it("marks Orgs as active on nested /orgs/[orgId] routes", () => {
+    mockPathname = "/orgs/org-acme";
+    render(<SiteHeader />);
+
+    const orgsLink = screen.getByRole("link", { name: "Orgs" });
+    expect(orgsLink).toHaveAttribute("aria-current", "page");
+    expect(orgsLink).toHaveClass("is-active");
+  });
+});
 /**
  * @jest-environment jsdom
  */
 
-import React from "react";
 import { render, screen, within } from "@testing-library/react";
 import { usePathname } from "next/navigation";
-import { SiteHeader } from "./SiteHeader";
 
-jest.mock("next/navigation", () => ({
   usePathname: jest.fn(),
-}));
 
 const mockedUsePathname = usePathname as jest.MockedFunction<
   typeof usePathname
 >;
 
-describe("SiteHeader", () => {
   beforeEach(() => {
     mockedUsePathname.mockReset();
   });
 
   it("renders the primary navigation landmark, brand link, and New stream CTA", () => {
     mockedUsePathname.mockReturnValue("/");
-    render(<SiteHeader />);
 
     const nav = screen.getByRole("navigation", { name: "Primary" });
     expect(nav).toBeInTheDocument();

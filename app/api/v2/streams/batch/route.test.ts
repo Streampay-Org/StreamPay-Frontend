@@ -4,6 +4,7 @@
 
 import { POST } from "./route";
 import { getStore, resetDb } from "@/app/lib/db";
+import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
 
 jest.mock("next/server", () => ({
   NextResponse: {
@@ -41,6 +42,7 @@ function makeRequest(
 
 describe("POST /api/v2/streams/batch", () => {
   beforeEach(() => {
+    resetRateLimitStore();
     resetDb({
       "stream-1": {
         id: "stream-1",
@@ -67,6 +69,7 @@ describe("POST /api/v2/streams/batch", () => {
 
   afterEach(() => {
     resetDb();
+    resetRateLimitStore();
   });
 
   it("returns 401 when Authorization header is missing", async () => {

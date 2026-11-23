@@ -9,6 +9,7 @@
  * so external callers cannot splice their own trace IDs into ours.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   correlationContext,
   extractCorrelationContext,
@@ -21,6 +22,17 @@ import {
   tracer,
   type TraceContext,
 } from '@/lib/otel';
+import { observeHttpRequest } from '@/src/metrics/registry';
+
+const routeSpanActiveStorage = new AsyncLocalStorage<boolean>();
+
+/**
+ * Returns true when executing inside a `withRouteSpan`-wrapped handler.
+ * Used by `logAccessEvent` to avoid double-counting `http_request_duration_seconds`.
+ */
+export function isInsideRouteSpan(): boolean {
+  return routeSpanActiveStorage.getStore() === true;
+}
 
 type RouteHandler = (request?: Request) => Promise<Response> | Response;
 
@@ -122,16 +134,23 @@ export function withRouteSpan(
       correlation.span_id = span.context.spanId;
       correlation.traceparent = span.context.traceparent;
 
+      const startNs = process.hrtime.bigint();
+      let status = 500;
+
       try {
-        const response = await handler(request);
-        span.setAttribute('http.status_code', response.status);
-        span.setStatus(response.status >= 500 ? 'ERROR' : 'OK');
+        const response = await routeSpanActiveStorage.run(true, () => handler(request));
+        status = response.status;
+        span.setAttribute('http.status_code', status);
+        span.setStatus(status >= 500 ? 'ERROR' : 'OK');
         return setTraceparentHeader(response, span.context.traceparent);
       } catch (error) {
+        status = 500;
         span.setAttribute('http.status_code', 500);
         span.recordError(error);
         throw error;
       } finally {
+        const durationSeconds = Number(process.hrtime.bigint() - startNs) / 1e9;
+        observeHttpRequest(method, routeTemplate, status, durationSeconds);
         span.end();
       }
     });

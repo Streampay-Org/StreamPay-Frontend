@@ -1,5 +1,7 @@
 # Admin Circuit Breaker
 
+> See also: [Admin API Reference](./api/admin.md) for all `/api/admin/*` endpoints, authorization rules, and audit logging.
+
 ## Overview
 
 The admin circuit breaker is an **operator-controlled kill switch** for the indexer and webhook subsystems. It is toggled manually via `POST /api/admin/circuit-breaker` and is intended for incident response — when a downstream is melting down, an operator trips the breaker to stop dispatch without deploying code.

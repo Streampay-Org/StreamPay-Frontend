@@ -20,6 +20,7 @@
  *     in flight returns 409 `IDEMPOTENCY_IN_FLIGHT`.
  *
  * CSV columns (case-insensitive header):
+ *   `recipient`, `rate`|`amount`, `schedule`, `token`|`asset`, `memo`, `orgId`
  *   `recipient`, `rate`|`amount`, `schedule`, `token`|`asset`, `memo`, `external_id`
  *
  * Row identity & deduplication:
@@ -63,6 +64,7 @@
 
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
+import { idempotencyKeyErrorResponse, validateIdempotencyKey } from "@/app/lib/idempotency";
 import {
   computeFingerprint,
   getStore,
@@ -75,6 +77,15 @@ import { errorResponse } from "@/app/lib/errors/server";
 import { logger } from "@/app/lib/logger";
 import { parseCreateStreamBody, type NormalisedCreateStreamInput } from "@/app/lib/stream-validation";
 import { checkTokenAllowed, normaliseToken } from "@/app/lib/token-allowlist";
+import { getClientIdentity } from "@/app/lib/rate-limit";
+import { checkCreationQuota } from "@/app/lib/quota-enforcement";
+import {
+  quotaUserId,
+  rateToStroops,
+  withStreamCreationQuotaLock,
+} from "@/app/lib/stream-create-core";
+import { recordCreationQuotaRejection } from "@/app/lib/org-quota-metrics";
+import { orgDb } from "@/app/lib/org-db";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { TimeoutError } from "@/app/lib/with-timeout";
 import { ROUTE_TIMEOUT_MS, withRouteTimeout } from "@/src/middleware/timeout";
@@ -200,6 +211,12 @@ function canonicaliseRowForFingerprint(row: NormalisedRow): NormalisedRow {
     // Keep raw token when malformed so distinct invalid payloads do not collide.
   }
 
+  row.recipient = raw.recipient ?? "";
+  row.rate = raw.rate || raw.amount || "";
+  row.schedule = raw.schedule ?? "";
+  row.token = raw.token || raw.asset || "";
+  row.memo = raw.memo ?? "";
+  row.orgId = raw.orgId ?? raw.orgid ?? raw.org_id ?? "";
   return {
     recipient: row.recipient,
     rate: row.rate,
@@ -314,6 +331,8 @@ async function validateRow(
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
+  const { streamRepository } = getStore();
+  const userId = quotaUserId(getClientIdentity(request));
   const { idempotencyStore, streamRepository } = getStore();
   const url = new URL(request.url);
   const dryRun = url.searchParams.get("dryRun") === "true";
@@ -359,6 +378,7 @@ export async function POST(request: Request) {
             schedule: String(obj.schedule ?? ""),
             token: String(obj.token ?? obj.asset ?? ""),
             memo: String(obj.memo ?? ""),
+            orgId: String(obj.orgId ?? obj.org_id ?? ""),
             external_id: String(obj.external_id ?? obj.externalId ?? ""),
           };
         }
@@ -382,6 +402,11 @@ export async function POST(request: Request) {
     );
   }
 
+  // ── 3. Process each row ────────────────────────────────────────────────────
+  const results: RowResult[] = [];
+  let valid = 0;
+  let failed = 0;
+  let imported = 0;
   const normalisedRows = rows.map(normaliseRow);
   const authenticatedActor = tryAuthenticateRequest(request);
   const senderAddress = authenticatedActor?.walletAddress ?? null;
@@ -393,14 +418,12 @@ export async function POST(request: Request) {
   let fingerprint = "";
 
   if (!dryRun) {
-    const idempotencyKey = request.headers.get("Idempotency-Key")?.trim() ?? "";
-    if (!idempotencyKey) {
-      return errorResponse(
-        "IDEMPOTENCY_KEY_REQUIRED",
-        "Idempotency-Key header is required when dryRun is false.",
-        400,
-      );
+    const rawIdempotencyKey = request.headers.get("Idempotency-Key");
+    const keyValidation = validateIdempotencyKey(rawIdempotencyKey);
+    if (!keyValidation.ok) {
+      return idempotencyKeyErrorResponse(keyValidation.reason);
     }
+    const idempotencyKey = keyValidation.key;
 
     const canonicalRows = normalisedRows.map(canonicaliseRowForFingerprint);
     fingerprint = computeFingerprint("POST", "/api/streams/import", canonicalRows);
@@ -437,8 +460,67 @@ export async function POST(request: Request) {
       } else {
         idempotencyStore.delete(reqToken);
       }
+
+      const newStream = {
+        createdAt: now,
+        id,
+        nextAction: "start" as const,
+        rate: row.rate,
+        recipient: row.recipient,
+        schedule: row.schedule,
+        status: "draft" as const,
+        updatedAt: now,
+        token: normalisedToken,
+        memo: row.memo || undefined,
+      };
+
+      const orgId = row.orgId?.trim() || undefined;
+      const quota = await withStreamCreationQuotaLock(async () => {
+        const decision = checkCreationQuota({
+          userId,
+          orgId,
+          amountStroops: rateToStroops(row.rate, normalisedToken),
+          now: new Date(now),
+        });
+        if (!decision.allowed) {
+          recordCreationQuotaRejection(decision.scope, decision.subject, decision.code);
+          return decision;
+        }
+
+        streamRepository.streams.set(id, {
+          ...newStream,
+          ...(userId ? { senderAddress: userId } : {}),
+        });
+        if (orgId) orgDb.streamOwnership.set(id, orgId);
+        return decision;
+      });
+
+      if (!quota.allowed) {
+        results.push({
+          row: i + 1,
+          status: "error",
+          errors: [{ field: "quota", code: quota.code, message: quota.reason }],
+        });
+        failed++;
+      } else {
+        results.push({ row: i + 1, status: "imported", streamId: id });
+        imported++;
+      }
     }
 
+  // ── 4. Build response ──────────────────────────────────────────────────────
+  const summary: ImportSummary = { total: rows.length, valid, failed };
+  if (!dryRun) {
+    summary.imported = imported;
+  }
+
+  logger.info("Stream import completed", {
+    dryRun,
+    total: rows.length,
+    valid,
+    failed,
+    imported: dryRun ? undefined : imported,
+  });
     // Reserve key while request is in flight
     const reservation: StoredIdempotencyRecord = {
       state: "in_flight",
