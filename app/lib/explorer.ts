@@ -1,85 +1,65 @@
-
-import { getNetworkProfile, type StellarNetwork } from "./config/stellar";
-import { isValidStellarPublicKey } from "./stellar-address";
-
 /**
- * Get the Stellar Expert explorer base URL for a supported network.
+ * Stellar Explorer URL helpers
  *
- * The application's network configuration stores the explorer URL as a base
- * URL, while Stellar Expert expects network-specific paths:
- * - Mainnet: /explorer/public
- * - Testnet: /explorer/testnet
+ * Builds links to the network-appropriate Stellar explorer for transactions
+ * and accounts, using the per-network `explorerUrl` defined in the Stellar
+ * network profiles.
  *
- * Returns null when the network is unsupported or its explorer URL is invalid.
+ * Both helpers return `null` for unknown networks (e.g. 'future') and for
+ * inputs that fail validation, so callers can safely fall back to plain text.
  */
-function getExplorerBaseUrl(network: StellarNetwork): string | null {
-  try {
-    const profile = getNetworkProfile(network);
 
-    const networkPath =
-      profile.name === "mainnet"
-        ? "public"
-        : profile.name === "testnet"
-          ? "testnet"
-          : null;
+import { getNetworkProfile, StellarNetwork } from './config/stellar';
 
-    if (!networkPath) {
-      return null;
-    }
-
-    // Use only the configured origin to avoid duplicating network path segments.
-    const origin = new URL(profile.explorerUrl).origin;
-
-    return `${origin}/explorer/${networkPath}`;
-  } catch {
-    // Unsupported networks or invalid URLs must not break the UI.
-    return null;
-  }
-}
+/** Matches a 64-character lowercase or uppercase hexadecimal string. */
+const TX_HASH_RE = /^[0-9a-fA-F]{64}$/;
 
 /**
- * Build a Stellar Expert account URL for a public key.
+ * Returns the explorer URL for a Stellar transaction, or `null` when:
+ * - `network` has no registered profile (e.g. 'future')
+ * - `txHash` is not a 64-character hex string (after trimming whitespace)
  *
- * Only valid Stellar ed25519 public keys (G... StrKeys) are supported.
- * Muxed accounts and arbitrary display strings are intentionally excluded.
- *
- * @param address - Stellar public account address.
- * @param network - Stellar network where the account should be inspected.
- * @returns The explorer URL, or null when the address or network is invalid.
- */
-export function explorerAccountUrl(
-  address: string,
-  network: StellarNetwork,
-): string | null {
-  if (!isValidStellarPublicKey(address)) {
-    return null;
-  }
-
-  const baseUrl = getExplorerBaseUrl(network);
-
-  return baseUrl ? `${baseUrl}/account/${address}` : null;
-}
-
-/**
- * Build a Stellar Expert transaction URL for a transaction hash.
- *
- * Stellar transaction hashes are represented as 64 hexadecimal characters.
- * This checks the hash format only; it does not verify that the transaction
- * exists on the selected network.
- *
- * @param hash - Stellar transaction hash.
- * @param network - Stellar network where the transaction should be inspected.
- * @returns The explorer URL, or null when the hash or network is invalid.
+ * The hash is normalised to lowercase before being embedded in the URL.
  */
 export function explorerTxUrl(
-  hash: string,
   network: StellarNetwork,
+  txHash: string,
 ): string | null {
-  if (!/^[0-9a-fA-F]{64}$/.test(hash)) {
+  const trimmed = txHash.trim();
+  if (!TX_HASH_RE.test(trimmed)) {
     return null;
   }
 
-  const baseUrl = getExplorerBaseUrl(network);
+  let profile;
+  try {
+    profile = getNetworkProfile(network);
+  } catch {
+    return null;
+  }
 
-  return baseUrl ? `${baseUrl}/tx/${hash}` : null;
+  return `${profile.explorerUrl}/tx/${encodeURIComponent(trimmed.toLowerCase())}`;
+}
+
+/**
+ * Returns the explorer URL for a Stellar account address, or `null` when:
+ * - `network` has no registered profile (e.g. 'future')
+ * - `address` is an empty string after trimming
+ */
+export function explorerAccountUrl(
+  network: StellarNetwork,
+  address: string,
+): string | null {
+  const trimmed = address.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  let profile;
+  try {
+    profile = getNetworkProfile(network);
+  } catch {
+    return null;
+  }
+
+  return `${profile.explorerUrl}/account/${encodeURIComponent(trimmed)}`;
 }
