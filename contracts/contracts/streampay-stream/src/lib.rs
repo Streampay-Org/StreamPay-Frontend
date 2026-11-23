@@ -2151,6 +2151,56 @@ impl Contract {
         Ok(stream)
     }
 
+    /// Lets the recipient decline a draft stream that was created for them.
+    ///
+    /// Only a stream still in [`StreamStatus::Draft`] can be rejected. The full
+    /// `total_amount` escrowed by `create_draft_stream` is refunded to the
+    /// sender, the stream moves to [`StreamStatus::Cancelled`] (terminal), and
+    /// the sender's active-stream count is decremented exactly as
+    /// [`Contract::cancel_stream`] does. A stream that has been started,
+    /// paused, settled, or cancelled can no longer be rejected.
+    ///
+    /// @param `stream_id` — Numeric ID of the draft stream to reject.
+    ///
+    /// @return The updated [`Stream`] record (status `Cancelled`).
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the global pause flag is set.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::InvalidState`] if the stream is not in `Draft` status
+    /// (including a second reject of an already-rejected stream).
+    ///
+    /// @custom:auth Requires authorisation from the stream's `recipient`.
+    pub fn reject_stream(env: Env, stream_id: u64) -> Result<Stream, Error> {
+        require_not_paused(&env)?;
+        let mut stream = get_existing_stream(&env, stream_id)?;
+        stream.recipient.require_auth();
+
+        if stream.status != StreamStatus::Draft {
+            return Err(Error::InvalidState);
+        }
+
+        let now = env.ledger().timestamp();
+        // A draft has never vested anything, so the whole escrow goes back.
+        let returned_amount = stream.total_amount;
+
+        #[allow(clippy::needless_borrows_for_generic_args)]
+        token::Client::new(&env, &stream.token).transfer(
+            &env.current_contract_address(),
+            &stream.sender,
+            &returned_amount,
+        );
+
+        stream.status = StreamStatus::Cancelled;
+        stream.last_update = now;
+
+        limits::decrement_sender_stream_count(&env, &stream.sender);
+        storage::set_stream(&env, stream_id, &stream);
+
+        events::rejected(&env, stream_id, &stream.recipient, returned_amount, now);
+
+        Ok(stream)
+    }
+
     /// Amends an active or paused stream to change its rate (via a new
     /// end-time) with overflow-safe, rate-aware validation.
     ///

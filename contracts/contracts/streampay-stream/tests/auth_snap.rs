@@ -370,6 +370,16 @@ fn auth_snap_start_stream() {
 
 #[test]
 #[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_reject_stream() {
+    let data = auth_setup();
+    let (client, draft_id) = make_draft(&data);
+
+    data.env.mock_auths(&[]);
+    client.reject_stream(&draft_id);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_add_withdrawer() {
     let data = auth_setup();
     let (client, id) = auth_with_stream(&data);
