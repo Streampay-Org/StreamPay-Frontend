@@ -3,6 +3,9 @@ import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
 import { getStore, withLock } from "@/app/lib/db";
 import { toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
 import type { Stream } from "@/app/types/openapi";
+import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
+import { getLimitForRoute } from "@/app/lib/rate-limit-config";
+import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 
 interface BatchUpdateRequest {
   updates: Array<{
@@ -21,6 +24,16 @@ interface BatchUpdateRequest {
  * Response: { "streams": StreamV2[] } (200)
  */
 export async function POST(req: NextRequest) {
+  const path = "/api/v2/streams/batch";
+  const limitType = getLimitForRoute("POST", path);
+  const identity = getClientIdentity(req);
+  const rateLimitResult = await checkRateLimit(identity, limitType);
+  if (!rateLimitResult.allowed) {
+    recordThrottle(path, limitType, identity.type, identity.displayValue);
+    return rateLimitResponse(rateLimitResult.retryAfter!);
+  }
+  recordRequest(path);
+
   const auth = req.headers.get("authorization");
   if (!auth?.startsWith("Bearer ")) {
     return errorResponse(ErrorCode.UNAUTHORIZED, "Bearer token required.", 401);

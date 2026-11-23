@@ -32,6 +32,24 @@ function createAuditRecord(exportId: string, type: "export.requested" | "export.
   });
 }
 
+async function enforceExportRateLimit(request: Request, method: "GET" | "POST", walletAddress: string) {
+  const url = getRequestUrl(request);
+  const limitType = getLimitForRoute(method, url.pathname);
+  const identity: ClientIdentity = {
+    type: "wallet",
+    value: walletAddress,
+    displayValue: walletAddress.slice(0, 16) + "...",
+  };
+  const result = await checkRateLimit(identity, limitType);
+
+  if (!result.allowed) {
+    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
+    return rateLimitResponse(result.retryAfter!);
+  }
+  recordRequest(url.pathname);
+  return null;
+}
+
 function escapeCsvField(value: string | undefined): string {
   const safe = String(value ?? "").replace(/"/g, '""');
   return `"${safe}"`;
@@ -113,7 +131,6 @@ function scheduleExportJob(jobId: string) {
 }
 
 export async function POST(request: Request) {
-  const { exportRepository } = getStore();
   const actor = tryAuthenticateRequest(request);
   if (!actor) {
     return createErrorResponse("UNAUTHORIZED", "Missing or invalid authorization header", 401);
@@ -121,21 +138,10 @@ export async function POST(request: Request) {
 
   // Limit by the verified wallet, after auth, so a forged bearer token can
   // neither mint fresh buckets nor spend another user's budget.
-  const url = getRequestUrl(request);
-  const limitType = getLimitForRoute("POST", url.pathname);
-  const identity: ClientIdentity = {
-    type: "wallet",
-    value: actor.walletAddress,
-    displayValue: actor.walletAddress.slice(0, 16) + "...",
-  };
-  const rateCheck = await checkRateLimit(identity, limitType);
+  const rateLimited = await enforceExportRateLimit(request, "POST", actor.walletAddress);
+  if (rateLimited) return rateLimited;
 
-  if (!rateCheck.allowed) {
-    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
-    return rateLimitResponse(rateCheck.retryAfter!);
-  }
-  recordRequest(url.pathname);
-
+  const { exportRepository } = getStore();
   const id = crypto.randomUUID();
   const requestedAt = new Date().toISOString();
   const expiresAt = new Date(Date.now() + EXPORT_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
@@ -155,4 +161,18 @@ export async function POST(request: Request) {
   scheduleExportJob(id);
 
   return NextResponse.json({ data: job, links: { self: `/api/exports/${id}` } }, { status: 201 });
+}
+
+export async function GET(request: Request) {
+  const actor = tryAuthenticateRequest(request);
+  if (!actor) {
+    return createErrorResponse("UNAUTHORIZED", "Missing or invalid authorization header", 401);
+  }
+
+  const rateLimited = await enforceExportRateLimit(request, "GET", actor.walletAddress);
+  if (rateLimited) return rateLimited;
+
+  const jobs = Array.from(getStore().exportRepository.jobs.values())
+    .filter((job) => job.ownerId === actor.walletAddress);
+  return NextResponse.json({ data: jobs });
 }

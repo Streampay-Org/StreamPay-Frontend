@@ -101,5 +101,8 @@ export function setRateLimitStore(store: RateLimitStore): void {
 }
 
 export function resetRateLimitStore(): void {
+  if (globalStore instanceof InMemoryRateLimitStore) {
+    globalStore.destroy();
+  }
   globalStore = null;
 }

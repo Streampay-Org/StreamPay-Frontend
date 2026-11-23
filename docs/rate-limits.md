@@ -58,9 +58,17 @@ All API endpoints are rate limited:
 | POST | `/api/streams/{id}/start` | Write |
 | POST | `/api/streams/{id}/pause` | Write |
 | POST | `/api/streams/{id}/stop` | Write |
+| POST | `/api/streams/{id}/cancel` | Write |
+| POST | `/api/streams/{id}/resume` | Write |
 | POST | `/api/streams/{id}/settle` | Write |
 | POST | `/api/streams/{id}/withdraw` | Write |
 | POST | `/api/streams/{id}/webhooks/test` | Write |
+| GET | `/api/v2/streams` and `/api/v2/streams/{id}[/*]` | Read |
+| POST | `/api/v2/streams[/*]` | Write |
+| DELETE | `/api/v2/streams/{id}` | Write |
+| GET | `/api/audit` | Read |
+| GET | `/api/audit/export` and `/api/audit/archive` | Export |
+| GET | `/api/exports` and `/api/exports/{id}` | Export |
 | GET | `/api/activity` | Read |
 | GET | `/api/identity/me` | Read |
 | GET | `/api/auth/wallet` | Challenge (20 req/min per IP) |

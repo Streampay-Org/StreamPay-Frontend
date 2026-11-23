@@ -32,30 +32,59 @@ export const ROUTE_LIMITS: Record<string, LimitType> = {
   "POST:/api/streams/*/start": "write",
   "POST:/api/streams/*/pause": "write",
   "POST:/api/streams/*/stop": "write",
+  "POST:/api/streams/*/cancel": "write",
+  "POST:/api/streams/*/resume": "write",
   "POST:/api/streams/*/settle": "write",
   "POST:/api/streams/*/withdraw": "write",
   "POST:/api/streams/*/webhooks/test": "write",
   "POST:/api/exports": "export",
+  "GET:/api/exports": "export",
+  "GET:/api/exports/*": "export",
+  "GET:/api/audit": "read",
+  "GET:/api/audit/*": "read",
+  "GET:/api/audit/export": "export",
+  "GET:/api/audit/archive": "export",
+  "GET:/api/v2/streams": "read",
+  "GET:/api/v2/streams/*": "read",
+  "POST:/api/v2/streams": "write",
+  "POST:/api/v2/streams/*": "write",
+  "POST:/api/v2/streams/multi/*/pause": "write",
+  "DELETE:/api/v2/streams/*": "write",
 };
 
 export const STORE_TYPE = process.env.RATE_LIMIT_STORE_TYPE || "in-memory";
 
+// Route buckets: reads and audit listings use read; mutations use write;
+// export creation/downloads and audit exports use export.
 export function getLimitForRoute(method: string, path: string): LimitType {
-  const exactKey = `${method}:${path}`;
+  const normalizedPath = path.replace(/\/+$/, "") || "/";
+  const exactKey = `${method}:${normalizedPath}`;
   if (ROUTE_LIMITS[exactKey]) {
     return ROUTE_LIMITS[exactKey];
   }
 
-  // Handle wildcards in the middle: /api/streams/123/start -> /api/streams/*/start
-  const middleWildcardKey = `${method}:${path.replace(/\/streams\/[^/]+\//, "/streams/*/")}`;
-  if (ROUTE_LIMITS[middleWildcardKey]) {
-    return ROUTE_LIMITS[middleWildcardKey];
-  }
+  const pathSegments = normalizedPath.split("/").filter(Boolean);
+  const matchingMethodRoutes = Object.entries(ROUTE_LIMITS)
+    .filter(([key]) => key.slice(0, key.indexOf(":")) === method)
+    .sort(([left], [right]) => {
+      const leftPattern = left.slice(left.indexOf(":") + 1);
+      const rightPattern = right.slice(right.indexOf(":") + 1);
+      const leftWildcards = (leftPattern.match(/\*/g) ?? []).length;
+      const rightWildcards = (rightPattern.match(/\*/g) ?? []).length;
+      return leftWildcards - rightWildcards || rightPattern.length - leftPattern.length;
+    });
 
-  // Handle wildcards at the end: /api/streams/123 -> /api/streams/*
-  const endWildcardKey = `${method}:${path.replace(/\/[^/]+$/, "/*")}`;
-  if (ROUTE_LIMITS[endWildcardKey]) {
-    return ROUTE_LIMITS[endWildcardKey];
+  for (const [key, limitType] of matchingMethodRoutes) {
+    const separatorIndex = key.indexOf(":");
+    const patternSegments = key.slice(separatorIndex + 1).replace(/\/+$/, "").split("/").filter(Boolean);
+    const hasTrailingWildcard = patternSegments.at(-1) === "*";
+    if (hasTrailingWildcard ? pathSegments.length < patternSegments.length : pathSegments.length !== patternSegments.length) {
+      continue;
+    }
+
+    if (patternSegments.every((segment, index) => segment === "*" || segment === pathSegments[index])) {
+      return limitType;
+    }
   }
 
   return method === "GET" ? "read" : "write";

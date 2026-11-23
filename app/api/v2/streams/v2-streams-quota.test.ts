@@ -30,6 +30,7 @@ import {
   getOrgQuotaMetrics,
 } from "@/app/lib/org-quota-metrics";
 import { ORG_DAILY_STREAM_QUOTA } from "@/app/lib/rate-limit-config";
+import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -68,6 +69,7 @@ beforeEach(() => {
 
 afterEach(() => {
   quotaStore.destroy();
+  resetRateLimitStore();
   resetOrgQuotaStore();
 });
 

@@ -21,12 +21,12 @@
 import { NextResponse } from "next/server";
 import { db, encodeCursor, decodeCursor, idempotencyToken, getStore } from "@/app/lib/db";
 import { getCorrelationContext } from "@/app/lib/logger";
-import { getClientIdentity } from "@/app/lib/rate-limit";
+import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { checkOrgDailyQuota, orgQuotaResponse } from "@/app/lib/org-quota";
 import { toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
 import type { Stream } from "@/app/types/openapi";
-import { getClientIdentity } from "@/app/lib/rate-limit";
-import { checkOrgDailyQuota, orgQuotaResponse } from "@/app/lib/org-quota";
+import { getLimitForRoute } from "@/app/lib/rate-limit-config";
+import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 
 function errorResponse(code: string, message: string, status: number) {
   const requestId = getCorrelationContext()?.request_id ?? `req-${crypto.randomUUID()}`;
@@ -35,7 +35,17 @@ function errorResponse(code: string, message: string, status: number) {
 
 /** GET /api/v2/streams — paginated stream list in v2 shape. */
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
+  const url = new URL(request.url);
+  const { searchParams } = url;
+  const limitType = getLimitForRoute("GET", url.pathname);
+  const identity = getClientIdentity(request);
+  const rateLimitResult = await checkRateLimit(identity, limitType);
+  if (!rateLimitResult.allowed) {
+    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
+    return rateLimitResponse(rateLimitResult.retryAfter!);
+  }
+  recordRequest(url.pathname);
+
   const cursor = searchParams.get("cursor");
   const status = searchParams.get("status");
   const limit = Math.min(parseInt(searchParams.get("limit") ?? "20", 10), 100);
@@ -71,6 +81,16 @@ export async function GET(request: Request) {
  * POST /api/v2/streams — create a stream, respond with v2 shape.
  */
 export async function POST(request: Request) {
+  const url = new URL(request.url);
+  const limitType = getLimitForRoute("POST", url.pathname);
+  const identity = getClientIdentity(request);
+  const rateLimitResult = await checkRateLimit(identity, limitType);
+  if (!rateLimitResult.allowed) {
+    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
+    return rateLimitResponse(rateLimitResult.retryAfter!);
+  }
+  recordRequest(url.pathname);
+
   // ── 1. Idempotency ────────────────────────────────────────────────────────
   const idempotencyKey = request.headers.get("Idempotency-Key");
   const token = idempotencyKey
@@ -91,7 +111,6 @@ export async function POST(request: Request) {
   //
   // The quota is checked *before* body parsing so the 429 is returned cheaply
   // and the counter is incremented atomically inside checkOrgDailyQuota.
-  const identity = getClientIdentity(request);
   const quota = await checkOrgDailyQuota(identity.value);
 
   if (!quota.allowed) {
