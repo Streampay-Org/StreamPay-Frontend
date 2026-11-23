@@ -89,10 +89,18 @@ describe("logAccessEvent", () => {
   it("omits actorId field when not provided (anonymous request)", () => {
     (getCorrelationContext as jest.Mock).mockReturnValue(undefined);
 
-    logAccessEvent({ method: "POST", path: "/api/exports", status: 401 });
+    logAccessEvent({
+      method: "POST",
+      path: "/api/exports",
+      status: 401,
+      actorId: undefined,
+      exportJobId: undefined,
+    });
 
     const [, payload] = (logger.info as jest.Mock).mock.calls[0];
     expect(payload).not.toHaveProperty("actorId");
+    expect(payload).not.toHaveProperty("exportJobId");
+    expect(JSON.stringify(payload)).not.toMatch(/"(actorId|exportJobId)":null/);
   });
 
   it("includes exportJobId when provided", () => {

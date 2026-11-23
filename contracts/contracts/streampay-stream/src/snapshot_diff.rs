@@ -258,6 +258,7 @@ mod tests {
             paused_at,
             total_paused_duration,
             fee_bps: 0,
+            cliff_time: 0,
         }
     }
 

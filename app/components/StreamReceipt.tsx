@@ -17,6 +17,7 @@ function formatUtc(iso: string): string {
 
 const STATUS_LABELS: Record<string, string> = {
   active: "Active",
+  cancelled: "Cancelled",
   draft: "Draft",
   ended: "Ended",
   paused: "Paused",
