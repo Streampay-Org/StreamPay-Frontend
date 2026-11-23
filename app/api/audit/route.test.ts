@@ -84,6 +84,32 @@ describe("GET /api/audit", () => {
     expect(row.requestId).toBe("req-audit-json");
   });
 
+  it("filters entries by startDate and endDate", async () => {
+    auditLogStore.append({
+      action: "stream.create",
+      actor: { id: "ops-admin-42", role: "admin" },
+      requestId: "req-audit-early",
+      target: { id: "stream-early", type: "stream" },
+      timestamp: "2026-04-20T08:00:00.000Z",
+    });
+
+    const request = new Request(
+      "http://localhost/api/audit?startDate=2026-04-25T00:00:00.000Z&endDate=2026-04-30T23:59:59.999Z",
+      {
+        headers: {
+          authorization: `Bearer ${signAccessToken("compliance", "comp-1")}`,
+        },
+      },
+    );
+
+    const response = await GET(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].requestId).toBe("req-audit-json");
+  });
+
   it("rate limits audit exports in the export bucket", async () => {
     const request = new Request("http://localhost/api/audit?export=ndjson", {
       headers: {

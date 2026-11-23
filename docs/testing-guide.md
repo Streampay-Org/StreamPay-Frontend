@@ -29,6 +29,32 @@ npm run test:e2e
 (cd contracts && cargo test)
 ```
 
+## CI caching
+
+The `build-test` job can cache only `.next/cache` to reuse Next.js incremental
+build data; generated build output is still produced by each run. The proposed
+cache key combines the runner OS, Node 20, the `package-lock.json` hash, and a
+hash of application/source files plus `next.config.ts`:
+
+```text
+nextjs-${{ runner.os }}-node20-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**', 'lib/**', 'src/**', 'next.config.ts') }}
+```
+
+Restore keys fall back first to the lockfile-specific prefix and then to the
+OS prefix.
+
+To force a fresh cache, delete the entry in the repository's GitHub Actions
+caches or bump the `nextjs-` key prefix (and its restore-key prefixes) in the
+workflow.
+
+## OpenAPI lint
+
+Run the pinned Spectral CLI against the repository ruleset:
+
+```bash
+npx --yes @stoplight/spectral-cli@6 lint openapi.json --ruleset .spectral.yaml
+```
+
 ## Conventions
 
 - Prefer black-box assertions against module exports — internal helpers

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { idempotencyKeyErrorResponse, validateIdempotencyKey } from "@/app/lib/idempotency";
 import {
   checkIdempotency,
   computeFingerprint,
@@ -45,7 +46,15 @@ function resolveEventActor(request: Request): string | undefined {
  */
 export async function POST(request: NextRequest) {
   const { idempotencyStore, streamRepository } = getStore();
-  const idempotencyKey = getHeader(request, "Idempotency-Key");
+  const rawIdempotencyKey = getHeader(request, "Idempotency-Key");
+  let idempotencyKey: string | null = null;
+  if (rawIdempotencyKey !== null) {
+    const keyValidation = validateIdempotencyKey(rawIdempotencyKey);
+    if (!keyValidation.ok) {
+      return idempotencyKeyErrorResponse(keyValidation.reason);
+    }
+    idempotencyKey = keyValidation.key;
+  }
   const token = idempotencyKey ? idempotencyToken("streams.batch.stop", idempotencyKey) : null;
   let body: unknown;
 

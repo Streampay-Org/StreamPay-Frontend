@@ -15,7 +15,16 @@ export const exportRequestSchema = z
     startDate: z.string().datetime().optional(),
     endDate: z.string().datetime().optional(),
   })
-  .strict("Unknown fields are not allowed.");
+  .strict("Unknown fields are not allowed.")
+  .superRefine((data, ctx) => {
+    if (data.startDate && data.endDate && new Date(data.startDate) > new Date(data.endDate)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["startDate"],
+        message: "startDate must be on or before endDate",
+      });
+    }
+  });
 
 export interface ValidationError {
   field: string;

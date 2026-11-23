@@ -8,10 +8,45 @@ import {
   RetryConfig,
   DEFAULT_RETRY_CONFIG,
   calculateNextRetryDelay,
+  isRetryableStatus,
 } from "./webhook-delivery";
 import { webhookDeliveryStore } from "./webhook-delivery-store";
 import { webhookOutboxStore, WebhookOutboxEntry } from "./webhook-outbox";
 import { isCircuitBreakerOpen } from "./admin-guard";
+import {
+  observeWebhookDelivery,
+  type WebhookDeliveryOutcome,
+} from "../../src/metrics/registry";
+
+function classifyDeliveryAttemptOutcome(result: {
+  success: boolean;
+  statusCode?: number;
+  error?: string;
+  shouldRetry: boolean;
+  deferred?: boolean;
+}): WebhookDeliveryOutcome {
+  if (result.deferred) {
+    return "deferred";
+  }
+  if (result.error?.includes("Circuit breaker open")) {
+    return "circuit_open";
+  }
+  if (result.success) {
+    return "success";
+  }
+  if (!result.statusCode && result.error?.toLowerCase().includes("timeout")) {
+    return "timeout";
+  }
+  if (result.shouldRetry) {
+    return "retryable_failure";
+  }
+  if (result.statusCode !== undefined) {
+    return isRetryableStatus(result.statusCode)
+      ? "retryable_failure"
+      : "non_retryable_failure";
+  }
+  return "retryable_failure";
+}
 
 export class WebhookDeliveryWorker {
   private client: WebhookDeliveryClient;
@@ -72,9 +107,16 @@ export class WebhookDeliveryWorker {
       webhookDeliveryStore.createDelivery(deliveryId, endpoint, event, reissuedFrom);
 
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const attemptStartNs = process.hrtime.bigint();
         const result = await this.client.attemptDelivery(
           endpoint, event, deliveryId, attempt,
           webhookDeliveryStore.getDelivery(deliveryId)?.attempts ?? [],
+        );
+        const attemptDurationSeconds =
+          Number(process.hrtime.bigint() - attemptStartNs) / 1e9;
+        observeWebhookDelivery(
+          classifyDeliveryAttemptOutcome(result),
+          attemptDurationSeconds,
         );
 
         // ── Global admin breaker → hold, do NOT DLQ ──────────────────────────
