@@ -131,6 +131,7 @@ fn err_conversion_roundtrip() {
         Error::CooloffActive,
         Error::AmountTooLarge,
         Error::NoPendingTransfer,
+        Error::InvalidSchedule,
     ];
 
     for &variant in &variants {
@@ -183,6 +184,7 @@ fn err_xdr_roundtrip_via_soroban_env() {
         Error::CooloffActive,
         Error::AmountTooLarge,
         Error::NoPendingTransfer,
+        Error::InvalidSchedule,
     ];
 
     for &variant in &variants {
@@ -190,4 +192,9 @@ fn err_xdr_roundtrip_via_soroban_env() {
         let deserialized: Error = env.from_xdr(&xdr_bytes);
         assert_eq!(deserialized, variant, "XDR roundtrip failed");
     }
+}
+
+#[test]
+fn err_discriminant_24_is_stable() {
+    assert_eq!(Error::InvalidSchedule as u32, 24);
 }

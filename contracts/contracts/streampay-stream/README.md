@@ -13,6 +13,8 @@ Linear payment streams on Stellar/Soroban.
 | `set_token_allowed` | Yes | `admin` | Allows or blocks a token for future stream creation. |
 | `create_stream` | Yes | `sender` | Creates a stream and escrows funds from the sender (no cliff; `cliff_time = 0`). |
 | `create_stream_with_cliff` | Yes | `sender` | Creates a stream with an optional `cliff_time` (`0` = no cliff, or `start_time <= cliff_time <= end_time`); vested amount is `0` before the cliff and jumps to linear accrual at/after the cliff. |
+| `create_stream` | Yes | `sender` | Creates a linear stream and escrows funds from the sender. |
+| `create_stream_with_milestones` | Yes | `sender` | Creates a stream with a stepped milestone release schedule (`ReleaseCurve::Milestones`) and escrows funds from the sender. |
 | `start_stream` | Yes | `stream.sender` | Activates a draft stream, anchoring its time bounds. |
 | `pause` | Yes | `stream.sender` | Freezes accrual for an active stream. |
 | `resume` | Yes | `stream.sender` | Resumes a paused stream, extending the end time. |
@@ -68,6 +70,15 @@ Linear payment streams on Stellar/Soroban.
 | `clear_token_fee_bps` | Yes | `admin` | Removes a per-token protocol fee override. |
 | `get_token_fee_bps` | No | None | Returns the per-token override, or `null` when unset. |
 | `get_stream_fee_bps` | No | None | Returns the effective fee for a stream after precedence resolution. |
+
+## Milestone release schedules
+
+In addition to continuous linear vesting (`ReleaseCurve::Linear`, created via `create_stream`), streams can be created with discrete stepped release schedules (`ReleaseCurve::Milestones(Vec<Milestone>)`) via `create_stream_with_milestones`:
+
+- Each `Milestone { time, cumulative_bps }` unlocks `floor(total_amount * cumulative_bps / 10_000)` once the stream's effective timestamp reaches `time`.
+- Schedules must contain `1..=MAX_MILESTONES` (`32`) entries, strictly increasing timestamps within `[start_time, end_time]`, non-decreasing `cumulative_bps`, and end at exactly `10_000`; invalid schedules are rejected with `Error::InvalidSchedule` (`24`).
+- Pausing freezes effective time identically to linear streams so no additional milestones unlock while paused.
+- `amend_stream` is restricted to linear streams and returns `Error::InvalidState` on milestone streams.
 
 ## Protocol fees
 

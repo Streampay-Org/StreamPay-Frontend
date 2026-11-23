@@ -20,6 +20,7 @@
 //! | `1`     | Initial layout marker (no data transformation). |
 //! | `2`     | Pause bookkeeping normalised on split and recurring records. |
 //! | `3`     | Initialise `cliff_time = 0` on existing `Stream` records. |
+//! | `3`     | Stream records gain `curve: ReleaseCurve` (default `Linear`). |
 //!
 //! When a new version of the contract requires a storage layout change,
 //! a new migration step is added to this module and the version
@@ -52,8 +53,8 @@
 use core::cmp::{max, min};
 
 use crate::error::Error;
-use crate::storage;
-use soroban_sdk::{contracttype, Address, Env};
+use crate::storage::{self, DataKey, ReleaseCurve, Stream, StreamStatus};
+use soroban_sdk::{contracttype, Address, Env, TryFromVal, Val};
 
 // ── Version constants ─────────────────────────────────────────────────────────
 
@@ -215,6 +216,70 @@ fn migrate_streams_cliff_step(env: &Env) -> bool {
     }
 }
 
+/// Legacy v2 `Stream` layout prior to the addition of `curve: ReleaseCurve`.
+#[derive(Clone, Debug)]
+#[contracttype]
+struct LegacyStreamV2 {
+    pub id: u64,
+    pub sender: Address,
+    pub recipient: Address,
+    pub token: Address,
+    pub total_amount: i128,
+    pub released_amount: i128,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub duration: u64,
+    pub last_update: u64,
+    pub status: StreamStatus,
+    pub paused_at: u64,
+    pub total_paused_duration: u64,
+    pub fee_bps: u32,
+}
+
+/// Migrates existing v2 [`Stream`] records to v3 by attaching
+/// `curve: ReleaseCurve::Linear`.
+///
+/// Records are rewritten in bounded batches of [`MIGRATION_BATCH_SIZE`].
+/// Already-migrated v3 records and missing IDs are skipped (idempotent).
+fn migrate_stream_curves_step(env: &Env) -> bool {
+
+
+    }
+
+    let mut id = start;
+    while id < end {
+        let key = DataKey::Stream(id);
+        let raw: Option<Val> = env.storage().persistent().get(&key);
+        if let Some(val) = raw {
+            if Stream::try_from_val(env, &val).is_err() {
+                if let Ok(legacy) = LegacyStreamV2::try_from_val(env, &val) {
+                    let upgraded = Stream {
+                        id: legacy.id,
+                        sender: legacy.sender,
+                        recipient: legacy.recipient,
+                        token: legacy.token,
+                        total_amount: legacy.total_amount,
+                        released_amount: legacy.released_amount,
+                        start_time: legacy.start_time,
+                        end_time: legacy.end_time,
+                        duration: legacy.duration,
+                        last_update: legacy.last_update,
+                        status: legacy.status,
+                        paused_at: legacy.paused_at,
+                        total_paused_duration: legacy.total_paused_duration,
+                        fee_bps: legacy.fee_bps,
+                        curve: ReleaseCurve::Linear,
+                    };
+                    storage::set_stream(env, id, &upgraded);
+                }
+            }
+        }
+        id = id.saturating_add(1);
+    }
+
+    }
+}
+
 // ── Migration engine ─────────────────────────────────────────────────────────
 
 /// Runs all pending migration steps to bring the contract's storage up
@@ -287,6 +352,11 @@ pub fn migrate_internal(env: &Env, caller: &Address) -> Result<(), Error> {
     if v == 2 && migrate_streams_cliff_step(env) {
         set_version(env, 3);
         v = 3;
+    }
+
+    // Step 2 → 3: backfill `curve: ReleaseCurve::Linear` on legacy v2 Stream
+    // records in bounded batches.
+    if v == 2 && migrate_stream_curves_step(env) {
     }
 
     // ── Future steps ───────────────────────────────────────────────────

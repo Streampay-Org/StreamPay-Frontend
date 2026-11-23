@@ -259,6 +259,7 @@ mod tests {
             total_paused_duration,
             fee_bps: 0,
             cliff_time: 0,
+            curve: crate::storage::ReleaseCurve::Linear,
         }
     }
 

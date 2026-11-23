@@ -45,6 +45,15 @@ and must never be reused — see the module rustdoc for details.
     `("stream", "dorm_swp")`.
   - Appended error codes `NotDormant = 24` and `DormancyDisabled = 25`.
   or sender can cancel before acceptance. Appended `Error::NoPendingTransfer = 24`
+- **Stepped milestone release schedules (`ReleaseCurve`).** Streams now carry a
+  `curve: ReleaseCurve` field (`Linear` by default, or `Milestones(Vec<Milestone>)`).
+  The new `create_stream_with_milestones` entrypoint creates a milestone stream
+  with `1..=32` strictly increasing timestamps in `[start_time, end_time]` and
+  non-decreasing `cumulative_bps` ending at `10_000` (invalid schedules return
+  `Error::InvalidSchedule = 24`). `release::vested_amount` uses the same
+  pause-aware effective-time computation for milestones, `amend_stream` rejects
+  milestone streams with `Error::InvalidState`, and `migrate` advances storage
+  to version `3` to backfill `curve: ReleaseCurve::Linear` on legacy v2 records.
 - **Split stream pause/resume.** `pause_split_stream` and
   `resume_split_stream` let a split stream's sender freeze and restart
   accrual for every recipient. Pausing records `pause_time`; resuming adds the

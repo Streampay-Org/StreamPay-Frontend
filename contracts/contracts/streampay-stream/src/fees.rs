@@ -707,6 +707,7 @@ mod tests {
             total_paused_duration: 0,
             fee_bps,
             cliff_time: 0,
+            curve: crate::storage::ReleaseCurve::Linear,
         };
         crate::storage::set_stream(env, stream_id, &stream);
     }

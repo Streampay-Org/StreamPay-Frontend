@@ -78,3 +78,6 @@ fn err_discriminants_24_to_25_are_stable() {
 fn err_discriminant_24_is_stable() {
     assert_eq!(Error::NoPendingTransfer as u32, 24);
 }
+
+    assert_eq!(Error::InvalidSchedule as u32, 24);
+}

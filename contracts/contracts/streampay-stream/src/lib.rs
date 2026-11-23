@@ -50,7 +50,7 @@ pub use snapshot_diff::{SnapshotDiff, StreamSnapshot};
 use soroban_sdk::contracttype;
 use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env};
 pub(crate) use storage::DataKey;
-pub use storage::{Stream, StreamStatus};
+pub use storage::{Milestone, ReleaseCurve, Stream, StreamStatus, MAX_MILESTONES};
 pub use views::{RecurringStreamPage, SplitStreamPage};
 
 /// Maximum number of stream IDs accepted in a single [`Contract::withdraw_many`] call.
@@ -1126,6 +1126,7 @@ impl Contract {
             total_paused_duration: 0,
             fee_bps,
             cliff_time,
+            curve: ReleaseCurve::Linear,
         };
 
         storage::set_stream(&env, id, &stream);
@@ -1145,6 +1146,108 @@ impl Contract {
             fee_bps,
             duration,
             cliff_time,
+            now,
+        );
+
+        Ok(id)
+    }
+
+    /// Creates an active stream with a stepped milestone release schedule,
+    /// escrowing `total_amount` from `sender`.
+    ///
+    /// Identical to [`Contract::create_stream`] except that funds vest in
+    /// discrete steps defined by `milestones` (`[Milestone { time, cumulative_bps }]`)
+    /// rather than linearly.
+    ///
+    /// @custom:error [`Error::InvalidSchedule`] if `milestones` is empty, exceeds
+    /// [`MAX_MILESTONES`], has non-increasing or out-of-window timestamps, or
+    /// invalid cumulative basis points (must be non-decreasing and end at `10_000`).
+    /// @custom:auth Requires authorisation from `sender`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_stream_with_milestones(
+        env: Env,
+        sender: Address,
+        recipient: Address,
+        token: Address,
+        total_amount: i128,
+        start_time: u64,
+        end_time: u64,
+        fee_bps: u32,
+        milestones: soroban_sdk::Vec<Milestone>,
+    ) -> Result<u64, Error> {
+        require_not_paused(&env)?;
+        sender.require_auth();
+        limits::check_sender_limit(&env, &sender)?;
+        cooloff::check_and_update_cooloff(&env, &sender)?;
+
+        fees::validate_fee_bps(fee_bps)?;
+
+        if total_amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        limits::check_max_stream_amount(&env, &token, total_amount)?;
+
+        if sender == recipient {
+            return Err(Error::SelfStream);
+        }
+
+        if storage::is_token_blocked(&env, &token) {
+            return Err(Error::TokenNotAllowed);
+        }
+
+        require_recipient_trustline(&env, &token, &recipient)?;
+
+        if end_time <= start_time {
+            return Err(Error::InvalidTimeRange);
+        }
+
+        let now = env.ledger().timestamp();
+        if start_time < now {
+            return Err(Error::InvalidTimeRange);
+        }
+
+        release::validate_milestones(&milestones, start_time, end_time)?;
+
+        let duration = end_time
+            .checked_sub(start_time)
+            .ok_or(Error::InvalidTimeRange)?;
+        let id = storage::next_stream_id(&env);
+        let contract_address = env.current_contract_address();
+
+        token::Client::new(&env, &token).transfer(&sender, &contract_address, &total_amount);
+
+        let stream = Stream {
+            id,
+            sender,
+            recipient,
+            token,
+            total_amount,
+            released_amount: 0,
+            start_time,
+            end_time,
+            duration,
+            last_update: start_time,
+            status: StreamStatus::Active,
+            paused_at: 0,
+            total_paused_duration: 0,
+            fee_bps,
+            curve: ReleaseCurve::Milestones(milestones),
+        };
+
+        storage::set_stream(&env, id, &stream);
+        if fee_bps > 0 {
+            fees::set_stream_fee_bps(&env, id, fee_bps);
+        }
+        events::created(
+            &env,
+            id,
+            &stream.sender,
+            &stream.recipient,
+            &stream.token,
+            stream.total_amount,
+            fee_bps,
+            duration,
             now,
         );
 
@@ -1221,6 +1324,7 @@ impl Contract {
             total_paused_duration: 0,
             fee_bps: 0,
             cliff_time: 0,
+            curve: ReleaseCurve::Linear,
         };
 
         storage::set_stream(&env, id, &stream);
@@ -2087,6 +2191,12 @@ impl Contract {
         stream.sender.require_auth();
 
         if stream.status == StreamStatus::Settled || stream.status == StreamStatus::Cancelled {
+            return Err(Error::InvalidState);
+        }
+
+        // Milestone streams have discrete schedules and cannot be amended via
+        // linear rate/end-time parameters.
+        if !matches!(stream.curve, ReleaseCurve::Linear) {
             return Err(Error::InvalidState);
         }
 
