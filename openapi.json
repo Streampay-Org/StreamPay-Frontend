@@ -3644,10 +3644,22 @@
       "post": {
         "operationId": "updateStream",
         "summary": "Update a payment stream (v1, deprecated)",
-        "description": "Partially updates a stream by merging the request body fields. **Deprecated** — there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.\n\nThe `updatedAt` field is always refreshed. Cache is invalidated on success.",
+        "description": "Partially updates a stream by merging the request body fields. **Deprecated** — there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.\n\nRequires an `If-Match` header carrying the stream's current strong `ETag` (or `*`) for optimistic concurrency control. Returns `428 Precondition Required` when missing (unless relaxed via `STREAMPAY_REQUIRE_IF_MATCH=false`) and `412 Precondition Failed` (with the current `ETag` header) when stale. The `updatedAt` field is always refreshed and cache is invalidated on success.",
         "deprecated": true,
         "tags": [
           "Streams v1"
+        ],
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "Strong ETag from the latest `GET /api/streams/{id}` response (or `*`). Compared using RFC 9110 strong comparison; weak (`W/`) tags never match.",
+            "schema": {
+              "type": "string",
+              "example": "\"5f9c1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab\""
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -3691,6 +3703,15 @@
         "responses": {
           "200": {
             "description": "Stream updated.",
+            "headers": {
+              "ETag": {
+                "description": "Fresh strong entity-tag computed for the updated stream.",
+                "schema": {
+                  "type": "string",
+                  "example": "\"a1b2c3d4e5f6...\""
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -3775,6 +3796,49 @@
           },
           "404": {
             "$ref": "#/components/responses/404"
+          },
+          "412": {
+            "description": "Precondition failed — the `If-Match` ETag does not match the current stream state.",
+            "headers": {
+              "ETag": {
+                "description": "Current strong entity-tag of the stream.",
+                "schema": {
+                  "type": "string",
+                  "example": "\"5f9c1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab\""
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "PRECONDITION_FAILED",
+                    "message": "Stream has been modified since the provided ETag; re-fetch and retry",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition required — `If-Match` header is missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "PRECONDITION_REQUIRED",
+                    "message": "If-Match header with the current stream ETag is required for updates",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
           },
           "429": {
             "description": "Rate limit exceeded.",
