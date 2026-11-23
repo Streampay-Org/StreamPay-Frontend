@@ -1,4 +1,5 @@
 import {
+  CLIENT_SCHEDULES,
   MAX_FILE_BYTES,
   MAX_ROWS,
   checkFile,
@@ -7,8 +8,9 @@ import {
   toApiRows,
   type ParseResult,
 } from "./parseCsv";
+import { SUPPORTED_SCHEDULES, validateCreateStreamBody } from "@/app/lib/stream-validation";
 
-// Must be checksum-valid Stellar keys; swap in keys from app/streams/fixtures.ts if these fail.
+// Must be checksum-valid Stellar keys.
 const ADDR_A = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
 const ADDR_B = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H";
 const HEADER = "recipient,rate,schedule,token,memo,external_id";
@@ -214,5 +216,32 @@ describe("errorRowsToCsv", () => {
         "",
       ].join("\r\n"),
     );
+  });
+});
+
+describe("client validation matches the server validator", () => {
+  it("uses the same schedule list", () => {
+    expect([...CLIENT_SCHEDULES]).toEqual([...SUPPORTED_SCHEDULES]);
+  });
+
+  it.each([
+    `${ADDR_A},10,day,,,`,
+    `${ADDR_A},10,DAY,,,`,
+    `not-a-key,10,day,,,`,
+    `${ADDR_A},0,day,,,`,
+    `${ADDR_A},0.0000000,day,,,`,
+    `${ADDR_A},1.12345678,day,,,`,
+    `${ADDR_A},99999999999999999999,day,,,`,
+    `${ADDR_A},abc,day,,,`,
+    `${ADDR_A},-5,day,,,`,
+    `${ADDR_A},,day,,,`,
+    `${ADDR_A},5,fortnight,,,`,
+    `,5,day,,,`,
+    `${ADDR_A},5,,,,`,
+  ])("same error codes for %s", (line) => {
+    const parsed = ok(parseImportCsv(csv(HEADER, line)));
+    const client = parsed.rows[0].errors.map((e) => `${e.field}:${e.code}`);
+    const server = validateCreateStreamBody(parsed.rows[0].values).map((e) => `${e.field}:${e.code}`);
+    expect(client).toEqual(server);
   });
 });

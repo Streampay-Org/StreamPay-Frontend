@@ -7,7 +7,14 @@
  * this module only catches problems early.
  */
 
-import { validateCreateStreamBody } from "@/app/lib/stream-validation";
+import { isValidStellarPublicKey } from "@/app/lib/stellar-address";
+import { STELLAR_MAX_I64, STROOPS_SCALE } from "@/app/lib/amount";
+
+/** Keep in sync with SUPPORTED_SCHEDULES in app/lib/stream-validation.ts (a test enforces this). */
+export const CLIENT_SCHEDULES = ["second", "minute", "hour", "day", "week", "month", "year"] as const;
+
+const DECIMAL_PATTERN = /^\d+(?:\.\d+)?$/;
+const MAX_DECIMALS = 7;
 
 export const MAX_ROWS = 500;
 export const MAX_FILE_BYTES = 1024 * 1024; // 1 MB
@@ -122,12 +129,52 @@ function toImportRow(raw: Record<string, string>): ImportRow {
   };
 }
 
+/**
+ * Browser-safe copy of the server's field rules for recipient, rate and
+ * schedule, with the same error codes. (The shared server validator imports
+ * Node's `crypto`, so it cannot be bundled into client code.)
+ */
 function validateRow(values: ImportRow): RowIssue[] {
-  return validateCreateStreamBody(values).map(({ field, code, message }) => ({
-    field,
-    code,
-    message,
-  }));
+  const errors: RowIssue[] = [];
+  const add = (field: string, code: string, message: string) =>
+    errors.push({ field, code, message });
+
+  if (!values.recipient) {
+    add("recipient", "MISSING_FIELD", "recipient is required and must be a non-empty string.");
+  } else if (!isValidStellarPublicKey(values.recipient)) {
+    add(
+      "recipient",
+      "INVALID_STELLAR_KEY",
+      "recipient must be a valid Stellar public key (56-char string starting with G).",
+    );
+  }
+
+  const rate = values.rate;
+  if (!rate) {
+    add("rate", "MISSING_FIELD", "rate is required and must be a non-empty string.");
+  } else if (!DECIMAL_PATTERN.test(rate)) {
+    add("rate", "INVALID_RATE_FORMAT", "rate must be a positive decimal number (e.g. 100 or 50.5).");
+  } else {
+    const [whole = "", fraction = ""] = rate.split(".");
+    const allZeros = /^0+$/.test(whole) && (fraction.length === 0 || /^0+$/.test(fraction));
+    if (allZeros) add("rate", "RATE_NOT_POSITIVE", "rate must be greater than zero.");
+    if (fraction.length > MAX_DECIMALS) {
+      add("rate", "DECIMAL_PRECISION_EXCEEDED", `rate supports at most ${MAX_DECIMALS} decimal places.`);
+    } else if (!allZeros) {
+      const stroops = BigInt(whole) * STROOPS_SCALE + BigInt(`${fraction}0000000`.slice(0, 7));
+      if (stroops > STELLAR_MAX_I64) {
+        add("rate", "RATE_TOO_LARGE", "rate exceeds Stellar int64 stroop bounds.");
+      }
+    }
+  }
+
+  if (!values.schedule) {
+    add("schedule", "MISSING_FIELD", "schedule is required and must be a non-empty string.");
+  } else if (!(CLIENT_SCHEDULES as readonly string[]).includes(values.schedule.toLowerCase())) {
+    add("schedule", "INVALID_SCHEDULE", `schedule must be one of: ${CLIENT_SCHEDULES.join(", ")}.`);
+  }
+
+  return errors;
 }
 
 export function parseImportCsv(input: string): ParseResult {
