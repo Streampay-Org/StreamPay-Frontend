@@ -21,12 +21,13 @@
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-import { applyRateLimit } from "@/src/middleware/rateLimit";
+import { withRouteSpan } from "@/lib/routeSpan";
+import { applyRateLimit, withRateLimitHeaders } from "@/src/middleware/rateLimit";
 import { getIndexerStatus } from "./status";
 
-export async function GET(request: Request) {
-  const rateLimited = await applyRateLimit(request, "indexer/status", "GET");
-  if (rateLimited) return rateLimited;
+async function handleIndexerStatusGet(request: Request) {
+  const rateLimitResult = await applyRateLimit(request, "indexer/status", "GET");
+  if (!rateLimitResult.allowed) return rateLimitResult.response;
 
   const encoder = new TextEncoder();
 
@@ -55,12 +56,19 @@ export async function GET(request: Request) {
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
-  });
+  return withRateLimitHeaders(
+    new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      },
+    }),
+    rateLimitResult.headers,
+  );
+}
+
+export async function GET(request: Request) {
+  return withRouteSpan("/api/indexer/status", () => handleIndexerStatusGet(request))(request);
 }

@@ -7,13 +7,13 @@
 
 import type {
   StreamPayError,
+  JsonValue,
   BackendApiErrorResponse,
   HorizonError,
   ErrorNormalizationOptions,
   ErrorCode,
 } from './types';
 import {
-  ERROR_REGISTRY,
   HORIZON_ERROR_MAPPING,
   BACKEND_ERROR_CODE_MAPPING,
   SOROBAN_ERROR_MAPPING,
@@ -24,7 +24,6 @@ import {
 /**
  * Detect if we're in a browser environment
  */
-const isBrowser = typeof window !== 'undefined';
 
 /**
  * Get current environment
@@ -54,7 +53,7 @@ function shouldIncludeDebug(options: ErrorNormalizationOptions): boolean {
 /**
  * Sanitize error metadata to remove sensitive data
  */
-function sanitizeMetadata(meta: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+function sanitizeMetadata(meta: Record<string, unknown> | undefined): Record<string, JsonValue | undefined> | undefined {
   if (!meta) return undefined;
   
   const sensitiveKeys = [
@@ -62,7 +61,7 @@ function sanitizeMetadata(meta: Record<string, unknown> | undefined): Record<str
     'private', 'signature', 'seed', 'mnemonic', 'wallet',
   ];
   
-  const sanitized: Record<string, unknown> = {};
+  const sanitized: Record<string, JsonValue | undefined> = {};
   
   for (const [key, value] of Object.entries(meta)) {
     const lowerKey = key.toLowerCase();
@@ -71,7 +70,7 @@ function sanitizeMetadata(meta: Record<string, unknown> | undefined): Record<str
     if (isSensitive) {
       sanitized[key] = '[REDACTED]';
     } else {
-      sanitized[key] = value;
+      sanitized[key] = toJsonValue(value);
     }
   }
   
@@ -207,7 +206,7 @@ export function normalizeBackendError(
     normalized.debug = {
       originalCode: backendError.code,
       originalMessage: backendError.message,
-      rawResponse: response,
+      rawResponse: toJsonValue(response),
       timestamp: new Date().toISOString(),
     };
   }
@@ -247,7 +246,7 @@ export function normalizeHorizonError(
     normalized.debug = {
       originalCode: horizonError.type,
       originalMessage: horizonError.detail,
-      rawResponse: horizonError,
+      rawResponse: toJsonValue(horizonError),
       timestamp: new Date().toISOString(),
     };
   }
@@ -375,6 +374,81 @@ export function normalizeGenericError(
 }
 
 /**
+ * Safely serialize an unknown value to JSON for diagnostics.
+ *
+ * Unlike `JSON.stringify`, this helper does not throw on circular
+ * references, BigInt, or other non-JSON values. Error objects are expanded
+ * to preserve their `name`, `message`, `stack`, `cause`, and enumerable
+ * properties so error context survives normalization.
+ */
+function toJsonValue(value: unknown): JsonValue | undefined {
+  const seen = new WeakSet<object>();
+
+  const serialize = (val: unknown): JsonValue | undefined => {
+    if (val === null) return null;
+
+    if (typeof val === 'bigint') return `${val.toString()}n`;
+    if (typeof val === 'undefined' || typeof val === 'function' || typeof val === 'symbol') {
+      return undefined;
+    }
+    if (typeof val === 'number' && !Number.isFinite(val)) return String(val);
+    if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') return val;
+    if (typeof val !== 'object') return undefined;
+    if (val instanceof Date) return val.toJSON();
+
+    if (seen.has(val)) return '[Circular]';
+
+    if (val instanceof Error) {
+      seen.add(val);
+      const error = val as Error & Record<string, unknown>;
+      const result: Record<string, JsonValue | undefined> = {
+        name: error.name,
+        message: error.message,
+      };
+      if (error.stack !== undefined) result.stack = error.stack;
+      if (error.cause !== undefined) result.cause = serialize(error.cause);
+      for (const key of Object.keys(error)) {
+        if (key === 'name' || key === 'message' || key === 'stack' || key === 'cause') continue;
+        result[key] = serialize(error[key]);
+      }
+      seen.delete(val);
+      return result;
+    }
+
+    seen.add(val);
+    let result: JsonValue;
+    if (Array.isArray(val)) {
+      result = val.map((item) => serialize(item) ?? null);
+    } else {
+      const obj = val as Record<string, unknown>;
+      const record: Record<string, JsonValue | undefined> = {};
+      for (const key of Object.keys(obj)) {
+        record[key] = serialize(obj[key]);
+      }
+      result = record;
+    }
+    seen.delete(val);
+    return result;
+  };
+
+  return serialize(value);
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    const serialized = toJsonValue(value);
+    if (serialized === undefined) return String(value);
+    return JSON.stringify(serialized) ?? String(value);
+  } catch {
+    try {
+      return String(value);
+    } catch {
+      return '[Unserializable Error]';
+    }
+  }
+}
+
+/**
  * Main error normalization function
  * Handles any error type and converts to StreamPayError
  */
@@ -441,6 +515,7 @@ export function normalizeError(
     
     // Check for Horizon-like structure
     if (errObj.type && errObj.title) {
+      // Horizon-like payloads are discriminated by type/title here; normalization tolerates missing optional fields.
       return normalizeHorizonError(errObj as unknown as HorizonError, options);
     }
   }
@@ -457,7 +532,7 @@ export function normalizeError(
     category: 'unknown',
     retry: metadata.retry,
     meta: {
-      originalError: typeof error === 'string' ? error : JSON.stringify(error),
+      originalError: typeof error === 'string' ? error : safeStringify(error),
     },
   };
 }
@@ -488,7 +563,8 @@ export function isSorobanError(
   error: unknown
 ): error is Error & { variant: string; meta?: Record<string, unknown>; statusCode?: number } {
   if (!(error instanceof Error)) return false;
-  const e = error as unknown as Record<string, unknown>;
+  if (!('variant' in error)) return false;
+  const e = error;
   return (
     typeof e.variant === 'string' &&
     e.variant.length > 0 &&

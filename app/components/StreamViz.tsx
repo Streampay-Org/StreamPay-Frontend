@@ -1,6 +1,12 @@
 "use client";
 
 import React, { useId, useMemo } from "react";
+import { logger } from "@/app/lib/logger";
+
+// Runtime safeguards
+const MAX_WIDTH = 1024;
+const MAX_HEIGHT = 768;
+const MAX_DATA_POINTS = 500;
 
 /**
  * StreamViz
@@ -131,33 +137,36 @@ function ChartLegend({ unit = "XLM" }: { unit?: string }) {
  * Skeleton placeholder that matches chart dimensions to prevent layout shift.
  */
 function ChartSkeleton({ width = 640, height = 280 }: { width?: number; height?: number }) {
+  // Clamp dimensions to maximum allowed values
+  const clampedWidth = Math.min(width, MAX_WIDTH);
+  const clampedHeight = Math.min(height, MAX_HEIGHT);
   return (
     <div
       className="stream-viz__skeleton"
-      style={{ width: "100%", maxWidth: width, height }}
+      style={{ width: "100%", maxWidth: clampedWidth, height: clampedHeight }}
       aria-hidden="true"
     >
       <svg
         width="100%"
-        height={height}
-        viewBox={`0 0 ${width} ${height}`}
+        height={clampedHeight}
+        viewBox={`0 0 ${clampedWidth} ${clampedHeight}`}
         focusable="false"
         aria-hidden="true"
       >
         <rect
           x="0" y="0"
-          width={width} height={height}
+          width={clampedWidth} height={clampedHeight}
           fill="var(--skeleton-base)"
           rx="8"
         />
         <line
-          x1="40" y1={height - 30}
-          x2={width - 20} y2={height - 30}
+          x1="40" y1={clampedHeight - 30}
+          x2={clampedWidth - 20} y2={clampedHeight - 30}
           stroke="var(--skeleton-shine)"
           strokeWidth="1"
         />
         <path
-          d={`M 40 ${height * 0.6} Q ${width * 0.3} ${height * 0.35} ${width - 20} ${height * 0.65}`}
+          d={`M 40 ${clampedHeight * 0.6} Q ${clampedWidth * 0.3} ${clampedHeight * 0.35} ${clampedWidth - 20} ${clampedHeight * 0.65}`}
           fill="none"
           stroke="var(--skeleton-shine)"
           strokeWidth="2"
@@ -180,51 +189,57 @@ function ChartSkeleton({ width = 640, height = 280 }: { width?: number; height?:
 function BurnDownChart({ dataPoints, unit = "XLM" }: { dataPoints: StreamVizDataPoint[]; unit?: string }) {
   const gradientId = useId();
 
-  const width = 640;
-  const height = 280;
+  const width = Math.min(640, MAX_WIDTH);
+  const height = Math.min(280, MAX_HEIGHT);
   const pad = { top: 24, right: 24, bottom: 40, left: 56 };
   const chartW = width - pad.left - pad.right;
   const chartH = height - pad.top - pad.bottom;
 
   const remainingColor = cssVar("--chart-remaining-line", "#86EFAC");
   const accruedColor = cssVar("--chart-accrual-line", "#7DD3FC");
+  // Limit data points to prevent excessive rendering
+  const limitedData = dataPoints.length > MAX_DATA_POINTS ? dataPoints.slice(-MAX_DATA_POINTS) : dataPoints;
+  if (dataPoints.length > MAX_DATA_POINTS) {
+    logger.warn(`StreamViz: dataPoints truncated from ${dataPoints.length} to ${MAX_DATA_POINTS}`);
+  }
+
 
   const values = useMemo(() => {
-    const remaining = dataPoints.map((d) => d.remaining);
-    const accrued = dataPoints.map((d) => d.accrued);
+    const remaining = limitedData.map((d) => d.remaining);
+    const accrued = limitedData.map((d) => d.accrued);
     const all = [...remaining, ...accrued];
     const maxVal = Math.max(...all, 1);
     const minVal = 0;
     const range = maxVal - minVal || 1;
     return { remaining, accrued, maxVal, minVal, range };
-  }, [dataPoints]);
+  }, [limitedData]);
 
   const xScale = (i: number) =>
-    pad.left + dataPoints.length > 1
-      ? pad.left + (i / (dataPoints.length - 1)) * chartW
+    pad.left + limitedData.length > 1
+      ? pad.left + (i / (limitedData.length - 1)) * chartW
       : pad.left + chartW / 2;
 
   const yScale = (v: number) =>
     pad.top + chartH - ((v - values.minVal) / values.range) * chartH;
 
-  const remainingPath = dataPoints
+  const remainingPath = limitedData
     .map((d, i) => `${i === 0 ? "M" : "L"} ${xScale(i)} ${yScale(d.remaining)}`)
     .join(" ");
 
-  const accruedPath = dataPoints
+  const accruedPath = limitedData
     .map((d, i) => `${i === 0 ? "M" : "L"} ${xScale(i)} ${yScale(d.accrued)}`)
     .join(" ");
 
-  const remainingArea = `${remainingPath} L ${xScale(dataPoints.length - 1)} ${yScale(0)} L ${xScale(0)} ${yScale(0)} Z`;
-  const accruedArea = `${accruedPath} L ${xScale(dataPoints.length - 1)} ${yScale(0)} L ${xScale(0)} ${yScale(0)} Z`;
+  const remainingArea = `${remainingPath} L ${xScale(limitedData.length - 1)} ${yScale(0)} L ${xScale(0)} ${yScale(0)} Z`;
+  const accruedArea = `${accruedPath} L ${xScale(limitedData.length - 1)} ${yScale(0)} L ${xScale(0)} ${yScale(0)} Z`;
 
-  const latestRemaining = dataPoints[dataPoints.length - 1]?.remaining ?? 0;
-  const latestAccrued = dataPoints[dataPoints.length - 1]?.accrued ?? 0;
+  const latestRemaining = limitedData[limitedData.length - 1]?.remaining ?? 0;
+  const latestAccrued = limitedData[limitedData.length - 1]?.accrued ?? 0;
 
   // Axis labels: first, middle, last
-  const axisLabels = dataPoints.length > 2
-    ? [dataPoints[0], dataPoints[Math.floor(dataPoints.length / 2)], dataPoints[dataPoints.length - 1]]
-    : dataPoints;
+  const axisLabels = limitedData.length > 2
+    ? [limitedData[0], limitedData[Math.floor(limitedData.length / 2)], limitedData[limitedData.length - 1]]
+    : limitedData;
 
   const remainingPercent = values.maxVal > 0
     ? Math.round((latestRemaining / values.maxVal) * 100)
@@ -411,26 +426,32 @@ function SparklineChart({
   const yTop = pad;
   const yBottom = height - pad;
 
-  const values = dataPoints.map((d) => d.remaining);
+  // Limit data points to prevent excessive rendering
+  const limitedData = dataPoints.length > MAX_DATA_POINTS ? dataPoints.slice(-MAX_DATA_POINTS) : dataPoints;
+  if (dataPoints.length > MAX_DATA_POINTS) {
+    logger.warn(`StreamViz: dataPoints truncated from ${dataPoints.length} to ${MAX_DATA_POINTS}`);
+  }
+
+  const values = limitedData.map((d) => d.remaining);
   const maxVal = Math.max(...values, 1);
   const minVal = 0;
   const range = maxVal - minVal || 1;
 
   const xScale = (i: number) =>
-    dataPoints.length > 1
-      ? x0 + (i / (dataPoints.length - 1)) * (x1 - x0)
+    limitedData.length > 1
+      ? x0 + (i / (limitedData.length - 1)) * (x1 - x0)
       : x0 + (x1 - x0) / 2;
 
   const yScale = (v: number) =>
     yBottom - ((v - minVal) / range) * (yBottom - yTop);
 
-  const linePath = dataPoints
+  const linePath = limitedData
     .map((d, i) => `${i === 0 ? "M" : "L"} ${xScale(i)} ${yScale(d.remaining)}`)
     .join(" ");
 
-  const areaPath = `${linePath} L ${xScale(dataPoints.length - 1)} ${yBottom} L ${xScale(0)} ${yBottom} Z`;
+  const areaPath = `${linePath} L ${xScale(limitedData.length - 1)} ${yBottom} L ${xScale(0)} ${yBottom} Z`;
 
-  const latest = dataPoints[dataPoints.length - 1]?.remaining ?? 0;
+  const latest = limitedData[limitedData.length - 1]?.remaining ?? 0;
   const remainingPercent = maxVal > 0 ? Math.round((latest / maxVal) * 100) : 0;
 
   return (
@@ -502,7 +523,7 @@ function DataTableView({
   }
 
   return (
-    <div className="stream-viz__table-wrap" role="region" aria-label="Stream data table">
+    <div className="stream-viz__table-wrap" role="region" aria-label="Stream data table" tabIndex={0}>
       <table className="stream-viz__table">
         <caption className="sr-only">Stream funds over time</caption>
         <thead>

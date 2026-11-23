@@ -4,6 +4,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import '../src/styles/typography.css'; // Adjust path if needed
 import styles from './StreamTypeChip.module.css';
 import { LiveRegion } from '../src/components/LiveRegion';
+import { EmptyState } from '../src/components/EmptyState';
+import { Skeleton } from '../src/components/Skeleton';
+import { KbdHint } from '../src/components/KbdHint';
+import StreamTypeChipEmptyIllustration from './StreamTypeChipEmptyIllustration';
 
 /**
  * Tracks the user's `prefers-reduced-motion` setting.
@@ -55,10 +59,61 @@ export interface StreamTypeChipProps {
   type: string;
   amount: number;
   isLoading?: boolean;
+  status?: StreamStatus | null;
+  className?: string;
+  isEmpty?: boolean;
+  emptyTitle?: string;
+  emptyDescription?: string;
+  emptyCtaText?: string;
+  onEmptyCtaClick?: () => void;
+  kbdHint?: string;
 }
 
-export const StreamTypeChip: React.FC<StreamTypeChipProps> = ({ type, amount, isLoading = false }) => {
+export const StreamTypeChip: React.FC<StreamTypeChipProps> = ({
+  type,
+  amount,
+  isLoading = false,
+  status,
+  className = '',
+  isEmpty,
+  emptyTitle,
+  emptyDescription,
+  emptyCtaText,
+  onEmptyCtaClick,
+  kbdHint,
+}) => {
   const prefersReducedMotion = usePrefersReducedMotion();
+  // ── ARIA live announcements ────────────────────────────────────────────────
+  const [srAnnouncement, setSrAnnouncement] = useState('');
+  const prevTypeRef = useRef<string | null>(null);
+  const prevAmountRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const prevType = prevTypeRef.current;
+    const prevAmount = prevAmountRef.current;
+
+    // First render — seed refs without announcing (avoid false positives).
+    if (prevType === null) {
+      prevTypeRef.current = type;
+      prevAmountRef.current = amount;
+      return;
+    }
+
+    const typeChanged = prevType !== type;
+    const amountChanged = prevAmount !== amount;
+
+    if (typeChanged && amountChanged) {
+      setSrAnnouncement(`Stream type ${type}, amount ${amount}`);
+    } else if (typeChanged) {
+      setSrAnnouncement(`Stream type changed to ${type}`);
+    } else if (amountChanged) {
+      setSrAnnouncement(`Stream amount updated to ${amount}`);
+    }
+
+    prevTypeRef.current = type;
+    prevAmountRef.current = amount;
+  }, [type, amount]);
+
   const showEmpty =
     isEmpty ||
     type === undefined ||
@@ -105,37 +160,6 @@ export const StreamTypeChip: React.FC<StreamTypeChipProps> = ({ type, amount, is
       </div>
     );
   }
-
-  // ── ARIA live announcements ────────────────────────────────────────────────
-  const [srAnnouncement, setSrAnnouncement] = useState('');
-  const prevTypeRef = useRef<string | null>(null);
-  const prevAmountRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    const prevType = prevTypeRef.current;
-    const prevAmount = prevAmountRef.current;
-
-    // First render — seed refs without announcing (avoid false positives).
-    if (prevType === null) {
-      prevTypeRef.current = type;
-      prevAmountRef.current = amount;
-      return;
-    }
-
-    const typeChanged = prevType !== type;
-    const amountChanged = prevAmount !== amount;
-
-    if (typeChanged && amountChanged) {
-      setSrAnnouncement(`Stream type ${type}, amount ${amount}`);
-    } else if (typeChanged) {
-      setSrAnnouncement(`Stream type changed to ${type}`);
-    } else if (amountChanged) {
-      setSrAnnouncement(`Stream amount updated to ${amount}`);
-    }
-
-    prevTypeRef.current = type;
-    prevAmountRef.current = amount;
-  }, [type, amount]);
 
   return (
     <div

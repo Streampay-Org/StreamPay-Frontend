@@ -106,7 +106,7 @@ export function EmptyState({
           style={{
             padding: "0.75rem 1.5rem",
             borderRadius: "9999px",
-            backgroundColor: "var(--primary, #3B82F6)",
+            backgroundColor: "var(--accent)",
             color: "#FFFFFF",
             border: "none",
             fontSize: "0.875rem",

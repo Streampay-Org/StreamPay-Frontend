@@ -56,6 +56,9 @@ function seedStream(count = 3) {
 
 beforeEach(() => {
   resetDb();
+  // Start every case from an empty stream table; the demo seed would otherwise
+  // leak into list/pagination assertions.
+  getStore().streamRepository.streams.clear();
   resetRateLimitStore();
   _resetAllowlistForTesting();
   addAllowedToken("XLM");
@@ -78,12 +81,20 @@ describe("GET /api/streams", () => {
   });
 
   describe("rate limiting", () => {
-    it("returns 200 when under rate limit", async () => {
-      const res = await GET(getRequest());
-      expect(res.status).toBe(200);
+    it("returns 200 with X-RateLimit-* headers when under rate limit and decrements Remaining", async () => {
+      const res1 = await GET(getRequest());
+      expect(res1.status).toBe(200);
+      expect(res1.headers.get("X-RateLimit-Limit")).toBe("60");
+      expect(res1.headers.get("X-RateLimit-Remaining")).toBe("59");
+      expect(Number(res1.headers.get("X-RateLimit-Reset"))).toBeGreaterThan(1_000_000_000);
+
+      const res2 = await GET(getRequest());
+      expect(res2.status).toBe(200);
+      expect(res2.headers.get("X-RateLimit-Limit")).toBe("60");
+      expect(res2.headers.get("X-RateLimit-Remaining")).toBe("58");
     });
 
-    it("returns 429 when rate limit is exceeded", async () => {
+    it("returns 429 with X-RateLimit-* and Retry-After headers when rate limit is exceeded", async () => {
       setRateLimitStore({
         check: async () => ({
           allowed: false,
@@ -95,6 +106,10 @@ describe("GET /api/streams", () => {
 
       const res = await GET(getRequest());
       expect(res.status).toBe(429);
+      expect(res.headers.get("Retry-After")).toBe("60");
+      expect(res.headers.get("X-RateLimit-Limit")).toBe("60");
+      expect(res.headers.get("X-RateLimit-Remaining")).toBe("0");
+      expect(res.headers.get("X-RateLimit-Reset")).toBe("123456");
 
       const body = await res.json();
       expect(body.error.code).toBe("rate_limit_exceeded");
@@ -403,7 +418,7 @@ describe("POST /api/streams", () => {
 
     it("returns 422 for token not in allowlist", async () => {
       _resetAllowlistForTesting();
-      addAllowedToken("USDC");
+      addAllowedToken(`USDC:${VALID_RECIPIENT}`);
 
       const res = await POST(postRequest({ recipient: VALID_RECIPIENT, rate: "50", schedule: "month", token: "XLM" }));
       expect(res.status).toBe(422);

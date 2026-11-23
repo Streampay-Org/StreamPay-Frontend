@@ -139,14 +139,19 @@ describe("deriveHealthStatus", () => {
     expect(deriveHealthStatus(healthySubs, emptyStats)).toBe("ok");
   });
 
-  it("returns 'degraded' when any subscriptions are degraded", () => {
+  it("returns 'stale' when any subscriptions are degraded and no deliveries have failed", () => {
     const subs: WebhookSubscriptionStats = { ...healthySubs, degraded: 1 };
-    expect(deriveHealthStatus(subs, emptyStats)).toBe("degraded");
+    expect(deriveHealthStatus(subs, emptyStats)).toBe("stale");
   });
 
-  it("returns 'degraded' when DLQ depth > 0", () => {
+  it("returns 'failed' when DLQ depth > 0", () => {
     const stats: WebhookDeliveryStats = { ...emptyStats, dlq: 3 };
-    expect(deriveHealthStatus(healthySubs, stats)).toBe("degraded");
+    expect(deriveHealthStatus(healthySubs, stats)).toBe("failed");
+  });
+
+  it("returns 'failed' when there are failed deliveries", () => {
+    const stats: WebhookDeliveryStats = { ...emptyStats, total: 2, failed: 2, success_rate_pct: 0 };
+    expect(deriveHealthStatus(healthySubs, stats)).toBe("failed");
   });
 
   it("returns 'unhealthy' when more than 50% of subscriptions are degraded or disabled", () => {

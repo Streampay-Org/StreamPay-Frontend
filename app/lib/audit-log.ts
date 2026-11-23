@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "crypto";
+import { createHmac, randomUUID } from "crypto";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { attachRequestFingerprintMetadata } from "@/lib/fingerprint";
 import type {
@@ -10,9 +10,22 @@ import type {
   AuditListFilters,
   AuditMetadataValue,
   AuditPurgeResult,
+  AuditCheckpoint,
 } from "@/app/types/audit";
 import type { DeepArchiveEntry, DeepArchiveResult } from "@/app/types/audit";
-export type { DeepArchiveEntry, DeepArchiveResult };
+import type {
+  AuditLogStore,
+  AuditLogStoreMode,
+  AuditPaginatedResult,
+} from "@/app/lib/audit-log-store";
+export type {
+  DeepArchiveEntry,
+  DeepArchiveResult,
+  AuditCheckpoint,
+  AuditLogStore,
+  AuditLogStoreMode,
+  AuditPaginatedResult,
+};
 
 export const AUDIT_LOG_RETENTION_DAYS = 30;
 
@@ -46,8 +59,57 @@ function sortKeys(value: unknown): unknown {
   return value;
 }
 
+/**
+ * Fixed test key used in dev/test when AUDIT_CHAIN_KEY is not set.
+ * Never used in production — validateConfig() throws if missing.
+ */
+const TEST_AUDIT_CHAIN_KEY = "test-audit-chain-key-do-not-use-in-prod";
+
+function getAuditChainKey(): string {
+  const key = process.env.AUDIT_CHAIN_KEY;
+  if (key) return key;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("AUDIT_CHAIN_KEY is required in production");
+  }
+  // Dev/test fallback
+  return TEST_AUDIT_CHAIN_KEY;
+}
+
+export function hashAuditValue(value: unknown): string {
+  const key = getAuditChainKey();
+  return createHmac("sha256", key).update(JSON.stringify(sortKeys(value))).digest("hex");
+}
+
+export interface ComputeEntryHashInput {
+  action: string;
+  actor: AuditActor;
+  afterHash: string | null;
+  beforeHash: string | null;
+  diffHash: string | null;
+  metadata?: Record<string, AuditMetadataValue> | null;
+  prevHash: string | null;
+  requestId: string;
+  target: AuditEntry["target"];
+  timestamp: string;
+}
+
+export function computeEntryHash(input: ComputeEntryHashInput): string {
+  return hashAuditValue({
+    action: input.action,
+    actor: input.actor,
+    afterHash: input.afterHash,
+    beforeHash: input.beforeHash,
+    diffHash: input.diffHash,
+    metadata: input.metadata ?? null,
+    prevHash: input.prevHash,
+    requestId: input.requestId,
+    target: input.target,
+    timestamp: input.timestamp,
+  });
+}
+
 function hashValue(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(sortKeys(value))).digest("hex");
+  return hashAuditValue(value);
 }
 
 function cloneValue<T>(value: T): T {
@@ -71,13 +133,17 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-function addRetention(timestamp: string): string {
+export function addAuditRetention(timestamp: string): string {
   const retentionDate = new Date(timestamp);
   retentionDate.setUTCDate(retentionDate.getUTCDate() + AUDIT_LOG_RETENTION_DAYS);
   return retentionDate.toISOString();
 }
 
-function redactTargetAccount(account: string | undefined): string | null {
+function addRetention(timestamp: string): string {
+  return addAuditRetention(timestamp);
+}
+
+export function redactTargetAccount(account: string | undefined): string | null {
   if (!account) {
     return null;
   }
@@ -87,10 +153,33 @@ function redactTargetAccount(account: string | undefined): string | null {
   return `${account.slice(0, 4)}***${account.slice(-4)}`;
 }
 
-export class AppendOnlyAuditLogStore {
+export function toAuditExportRow(entry: AuditEntry): AuditExportRow {
+  return {
+    action: entry.action,
+    actorId: entry.actor.id,
+    actorRole: entry.actor.role,
+    afterHash: entry.afterHash,
+    beforeHash: entry.beforeHash,
+    diffHash: entry.diffHash,
+    entryHash: entry.entryHash,
+    id: entry.id,
+    metadata: entry.metadata,
+    prevHash: entry.prevHash,
+    redactedTargetAccount: redactTargetAccount(entry.target.account),
+    redactionPolicy: "mask-target-account",
+    requestId: entry.requestId,
+    retentionUntil: entry.retentionUntil,
+    targetId: entry.target.id,
+    targetType: entry.target.type,
+    timestamp: entry.timestamp,
+  };
+}
+
+export class AppendOnlyAuditLogStore implements AuditLogStore {
   private readonly entries: AuditEntry[] = [];
   private readonly archivedEntries: AuditEntry[] = [];
   private readonly deepArchivedEntries: DeepArchiveEntry[] = [];
+  private readonly checkpoints: AuditCheckpoint[] = [];
 
   append(input: AuditEntryInput): AuditEntry {
     const lastEntry = this.entries[this.entries.length - 1];
@@ -106,7 +195,7 @@ export class AppendOnlyAuditLogStore {
           })
         : null);
     const prevHash = lastEntry?.entryHash ?? null;
-    const entryHash = hashValue({
+    const entryHash = computeEntryHash({
       action: input.action,
       actor: input.actor,
       afterHash,
@@ -140,77 +229,128 @@ export class AppendOnlyAuditLogStore {
   }
 
   list(filters: AuditListFilters = {}): AuditEntry[] {
+    return this.getPaginated(filters).data;
+  }
+
+  getPaginated(filters: AuditListFilters = {}): { data: AuditEntry[]; hasNext: boolean; nextCursor: string | null; total: number } {
     const limit = Math.min(Math.max(filters.limit ?? 50, 1), 250);
 
-    const results = this.entries
-      .filter((entry) => {
-        if (filters.actorId && entry.actor.id !== filters.actorId) {
-          return false;
+    let results = this.entries.filter((entry) => {
+      if (filters.actorId && entry.actor.id !== filters.actorId) return false;
+      if (filters.role && entry.actor.role !== filters.role) return false;
+      if (filters.action && entry.action !== filters.action) return false;
+      if (filters.targetId && entry.target.id !== filters.targetId) return false;
+      if (filters.requestId && entry.requestId !== filters.requestId) return false;
+      if (filters.orgId && entry.metadata?.orgId !== filters.orgId) return false;
+      if (filters.startDate && entry.timestamp < filters.startDate) return false;
+      if (filters.endDate && entry.timestamp > filters.endDate) return false;
+      if (filters.q) {
+        const haystack = [
+          entry.actor.id,
+          entry.actor.role,
+          entry.action,
+          entry.target.id,
+          entry.target.account ?? "",
+          entry.requestId,
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(filters.q.toLowerCase())) return false;
+      }
+      return true;
+    });
+
+    const total = results.length;
+
+    results = results.sort((left, right) => {
+      const tsCmp = right.timestamp.localeCompare(left.timestamp);
+      return tsCmp !== 0 ? tsCmp : right.id.localeCompare(left.id);
+    });
+
+    if (filters.cursor) {
+      // Decode composite cursor
+      let cursorTimestamp = "";
+      let cursorId = "";
+      try {
+        const decoded = Buffer.from(filters.cursor, "base64").toString("utf-8");
+        const parts = decoded.split("|");
+        if (parts.length === 2) {
+          cursorTimestamp = parts[0];
+          cursorId = parts[1];
         }
-        if (filters.role && entry.actor.role !== filters.role) {
-          return false;
-        }
-        if (filters.action && entry.action !== filters.action) {
-          return false;
-        }
-        if (filters.targetId && entry.target.id !== filters.targetId) {
-          return false;
-        }
-        if (filters.requestId && entry.requestId !== filters.requestId) {
-          return false;
-        }
-        if (filters.orgId && entry.metadata?.orgId !== filters.orgId) {
-          return false;
-        }
-        if (filters.startDate && entry.timestamp < filters.startDate) {
-          return false;
-        }
-        if (filters.endDate && entry.timestamp > filters.endDate) {
-          return false;
-        }
-        if (filters.q) {
-          const haystack = [
-            entry.actor.id,
-            entry.actor.role,
-            entry.action,
-            entry.target.id,
-            entry.target.account ?? "",
-            entry.requestId,
-          ]
-            .join(" ")
-            .toLowerCase();
-          if (!haystack.includes(filters.q.toLowerCase())) {
-            return false;
+      } catch {
+        // Invalid cursor format handled by returning no results or ignoring?
+        // We'll throw an error and let the caller handle it or just return empty
+      }
+
+      if (cursorTimestamp && cursorId) {
+        const cursorIndex = results.findIndex((entry) => {
+          const tsCmp = entry.timestamp.localeCompare(cursorTimestamp);
+          return tsCmp < 0 || (tsCmp === 0 && entry.id.localeCompare(cursorId) <= 0);
+        });
+        if (cursorIndex >= 0) {
+          // Because we sort descending, we want items after the cursor
+          // Actually, if the cursor is an item, we want to start from the item AFTER it in the sorted array
+          // The cursorIndex points to an item that is <= cursor in sorting.
+          // Since it's exactly the cursor, we skip it.
+          const exactIndex = results.findIndex(e => e.id === cursorId);
+          if (exactIndex >= 0) {
+             results = results.slice(exactIndex + 1);
+          } else {
+             results = results.filter((entry) => {
+               const tsCmp = entry.timestamp.localeCompare(cursorTimestamp);
+               // Because it's descending, we want entries that are OLDER (smaller timestamp)
+               // or SAME timestamp but smaller ID.
+               if (tsCmp !== 0) return tsCmp < 0; // older
+               return entry.id.localeCompare(cursorId) < 0; // smaller id
+             });
           }
         }
-        return true;
-      })
-      .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
-      .slice(0, limit);
+      }
+    }
 
-    return results.map((entry) => cloneValue(entry));
+    const hasNext = results.length > limit;
+    const paginatedResults = results.slice(0, limit);
+
+    let nextCursor: string | null = null;
+    if (hasNext && paginatedResults.length > 0) {
+      const lastEntry = paginatedResults[paginatedResults.length - 1];
+      nextCursor = Buffer.from(`${lastEntry.timestamp}|${lastEntry.id}`).toString("base64");
+    }
+
+    return {
+      data: paginatedResults.map((entry) => cloneValue(entry)),
+      hasNext,
+      nextCursor,
+      total,
+    };
   }
 
   exportRows(filters: AuditListFilters = {}): AuditExportRow[] {
-    return this.list(filters).map((entry) => ({
-      action: entry.action,
-      actorId: entry.actor.id,
-      actorRole: entry.actor.role,
-      afterHash: entry.afterHash,
-      beforeHash: entry.beforeHash,
-      diffHash: entry.diffHash,
-      entryHash: entry.entryHash,
-      id: entry.id,
-      metadata: entry.metadata,
-      prevHash: entry.prevHash,
-      redactedTargetAccount: redactTargetAccount(entry.target.account),
-      redactionPolicy: "mask-target-account",
-      requestId: entry.requestId,
-      retentionUntil: entry.retentionUntil,
-      targetId: entry.target.id,
-      targetType: entry.target.type,
-      timestamp: entry.timestamp,
-    }));
+    return this.getPaginated({ ...filters, limit: Number.MAX_SAFE_INTEGER }).data
+      .map((entry) => this.toExportRow(entry));
+  }
+
+  /**
+   * Export rows for archived entries (soft-archived by retention plus
+   * deep-archived cold-storage entries). Uses the same redacted projection as
+   * `exportRows` so archived downloads never leak unredacted target accounts.
+   *
+   * Rows are ordered newest-first and capped by `limit` (1–250, default 250)
+   * for deterministic, bounded output.
+   */
+  exportArchivedRows(limit = 250): AuditExportRow[] {
+    const rows: AuditExportRow[] = [];
+    for (const entry of this.archivedEntries) {
+      rows.push(this.toExportRow(entry));
+    }
+    for (const deepEntry of this.deepArchivedEntries) {
+      rows.push(this.toExportRow(deepEntry.entry));
+    }
+    const capped = Math.min(Math.max(limit, 1), 250);
+    return rows
+      .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
+      .slice(0, capped);
   }
 
   archiveExpiredEntries(referenceTimestamp: string | Date = new Date().toISOString()): AuditEntry[] {
@@ -249,10 +389,21 @@ export class AppendOnlyAuditLogStore {
 
   assertIntegrity(): boolean {
     const chain = [...this.archivedEntries, ...this.entries];
-    let previousHash: string | null = null;
+    if (chain.length === 0) return true;
+
+    // The first entry's prevHash must be null (genesis) or match a checkpoint's
+    // lastPurgedHash (the chain was truncated at a checkpoint).
+    const firstPrev = chain[0].prevHash;
+    const validGenesis = firstPrev === null;
+    const validCheckpoint = this.checkpoints.some(
+      (cp) => cp.lastPurgedHash === firstPrev,
+    );
+    if (!validGenesis && !validCheckpoint) return false;
+
+    let previousHash: string | null = chain[0].prevHash;
 
     for (const entry of chain) {
-      const recalculatedHash = hashValue({
+      const recalculatedHash = computeEntryHash({
         action: entry.action,
         actor: entry.actor,
         afterHash: entry.afterHash,
@@ -279,11 +430,11 @@ export class AppendOnlyAuditLogStore {
     return true;
   }
 
-  updateEntry(_id: string, _changes: Partial<AuditEntry>) {
+  updateEntry(_id: string, _changes: Partial<AuditEntry>): never {
     throw new Error("AUDIT_LOG_APPEND_ONLY");
   }
 
-  deleteEntry(_id: string) {
+  deleteEntry(_id: string): never {
     throw new Error("AUDIT_LOG_APPEND_ONLY");
   }
 
@@ -297,19 +448,59 @@ export class AppendOnlyAuditLogStore {
     const purged = this.entries.filter((entry) => Date.parse(entry.timestamp) < cutoffMs);
     const retained = this.entries.filter((entry) => Date.parse(entry.timestamp) >= cutoffMs);
 
-    if (execute && purged.length > 0) {
-      const rebased = this.rebaseChain(retained);
-      this.entries.splice(0, this.entries.length, ...rebased);
+    if (!execute) {
+      // Dry run: no checkpoint, no mutation
+      return {
+        chainIntactAfter: chainIntactBefore,
+        chainIntactBefore,
+        cutoffTimestamp: new Date(cutoffMs).toISOString(),
+        executed: false,
+        purgedEntries: purged.length,
+        purgedIds: purged.map((entry) => entry.id),
+        retainedEntries: retained.length,
+        checkpointId: null,
+      };
     }
 
+    if (purged.length === 0) {
+      return {
+        chainIntactAfter: chainIntactBefore,
+        chainIntactBefore,
+        cutoffTimestamp: new Date(cutoffMs).toISOString(),
+        executed: true,
+        purgedEntries: 0,
+        purgedIds: [],
+        retainedEntries: retained.length,
+        checkpointId: null,
+      };
+    }
+
+    // Create a checkpoint recording what was removed
+    const lastPurged = purged[purged.length - 1];
+    const checkpointId = `audit-checkpoint-${randomUUID()}`;
+    const checkpoint: AuditCheckpoint = {
+      checkpointId,
+      purgedCount: purged.length,
+      firstPurgedId: purged[0].id,
+      lastPurgedId: lastPurged.id,
+      lastPurgedHash: lastPurged.entryHash,
+      cutoff: new Date(cutoffMs).toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+    this.checkpoints.push(checkpoint);
+
+    // Retained entries keep their original prevHash — no rebasing.
+    this.entries.splice(0, this.entries.length, ...retained);
+
     return {
-      chainIntactAfter: execute ? this.assertIntegrity() : chainIntactBefore,
+      chainIntactAfter: this.assertIntegrity(),
       chainIntactBefore,
       cutoffTimestamp: new Date(cutoffMs).toISOString(),
-      executed: execute,
+      executed: true,
       purgedEntries: purged.length,
       purgedIds: purged.map((entry) => entry.id),
       retainedEntries: retained.length,
+      checkpointId,
     };
   }
 
@@ -350,21 +541,27 @@ export class AppendOnlyAuditLogStore {
         chainIntactAfter: chainIntactBefore,
         cutoffTimestamp: new Date(cutoffMs).toISOString(),
         archivedAt,
+        checkpointId: null,
       };
     }
 
-    const rebased = this.rebaseChain([...remainingArchived, ...remainingEntries]);
+    // Create a checkpoint recording what was archived
+    const lastArchived = toArchive[toArchive.length - 1];
+    const checkpointId = `audit-checkpoint-${randomUUID()}`;
+    const checkpoint: AuditCheckpoint = {
+      checkpointId,
+      purgedCount: toArchive.length,
+      firstPurgedId: toArchive[0].id,
+      lastPurgedId: lastArchived.id,
+      lastPurgedHash: lastArchived.entryHash,
+      cutoff: new Date(cutoffMs).toISOString(),
+      createdAt: archivedAt,
+    };
+    this.checkpoints.push(checkpoint);
 
-    this.archivedEntries.splice(
-      0,
-      this.archivedEntries.length,
-      ...rebased.slice(0, remainingArchived.length),
-    );
-    this.entries.splice(
-      0,
-      this.entries.length,
-      ...rebased.slice(remainingArchived.length),
-    );
+    // Retained entries keep their original prevHash — no rebasing.
+    this.archivedEntries.splice(0, this.archivedEntries.length, ...remainingArchived);
+    this.entries.splice(0, this.entries.length, ...remainingEntries);
 
     this.deepArchivedEntries.push(
       ...toArchive.map((entry) => ({
@@ -382,6 +579,7 @@ export class AppendOnlyAuditLogStore {
       chainIntactAfter,
       cutoffTimestamp: new Date(cutoffMs).toISOString(),
       archivedAt,
+      checkpointId,
     };
   }
 
@@ -396,33 +594,20 @@ export class AppendOnlyAuditLogStore {
     this.entries.splice(0, this.entries.length);
     this.archivedEntries.splice(0, this.archivedEntries.length);
     this.deepArchivedEntries.splice(0, this.deepArchivedEntries.length);
+    this.checkpoints.splice(0, this.checkpoints.length);
     for (const entry of seedEntries) {
       this.append(entry);
     }
   }
 
-  private rebaseChain(entries: AuditEntry[]): AuditEntry[] {
-    let previousHash: string | null = null;
-
-    return entries.map((entry) => {
-      const nextEntry = cloneValue(entry);
-      nextEntry.prevHash = previousHash;
-      nextEntry.entryHash = hashValue({
-        action: nextEntry.action,
-        actor: nextEntry.actor,
-        afterHash: nextEntry.afterHash,
-        beforeHash: nextEntry.beforeHash,
-        diffHash: nextEntry.diffHash,
-        metadata: nextEntry.metadata ?? null,
-        prevHash: nextEntry.prevHash,
-        requestId: nextEntry.requestId,
-        target: nextEntry.target,
-        timestamp: nextEntry.timestamp,
-      });
-      previousHash = nextEntry.entryHash;
-      return deepFreeze(nextEntry);
-    });
+  getCheckpoints(): AuditCheckpoint[] {
+    return this.checkpoints.map((cp) => ({ ...cp }));
   }
+
+  private toExportRow(entry: AuditEntry): AuditExportRow {
+    return toAuditExportRow(entry);
+  }
+
 }
 
 function normalizeRole(role: string | null): AuditActorRole | null {

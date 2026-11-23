@@ -512,6 +512,19 @@ export const ERROR_REGISTRY: Record<ErrorCode, ErrorCodeMetadata> = {
     typeUri: `${BASE_TYPE_URI}/stream-creation-failed`,
   },
 
+  AMOUNT_TOO_LARGE: {
+    code: "AMOUNT_TOO_LARGE",
+    httpStatus: 422,
+    category: "validation",
+    title: "Amount Too Large",
+    userMessage:
+      "The stream amount exceeds the maximum allowed cap for this token.",
+    technicalDescription:
+      "Contract Error::AmountTooLarge (23): total_amount exceeds the configured per-token maximum stream amount",
+    retry: { retryable: false },
+    typeUri: `${BASE_TYPE_URI}/amount-too-large`,
+  },
+
   SETTLEMENT_FAILED: {
     code: "SETTLEMENT_FAILED",
     httpStatus: 500,
@@ -685,6 +698,18 @@ export const ERROR_REGISTRY: Record<ErrorCode, ErrorCodeMetadata> = {
     typeUri: `${BASE_TYPE_URI}/invalid-field-value`,
   },
 
+  CSRF_TOKEN_INVALID: {
+    code: "CSRF_TOKEN_INVALID",
+    httpStatus: 403,
+    category: "auth",
+    title: "Invalid Security Token",
+    userMessage:
+      "Your session has expired or the security token is invalid. Please refresh the page.",
+    technicalDescription: "CSRF token validation failed for a state-changing request",
+    retry: { retryable: false },
+    typeUri: `${BASE_TYPE_URI}/csrf-token-invalid`,
+  },
+
   // Catch-all
   UNKNOWN_ERROR: {
     code: "UNKNOWN_ERROR",
@@ -839,6 +864,7 @@ export const BACKEND_ERROR_CODE_MAPPING: Record<string, ErrorCode> = {
 
   // Processing errors
   STREAM_CREATION_FAILED: "STREAM_CREATION_FAILED",
+  AMOUNT_TOO_LARGE: "AMOUNT_TOO_LARGE",
   SETTLEMENT_FAILED: "SETTLEMENT_FAILED",
   WITHDRAWAL_FAILED: "WITHDRAWAL_FAILED",
   INTERNAL_ERROR: "INTERNAL_ERROR",
@@ -863,5 +889,77 @@ export const SOROBAN_ERROR_MAPPING: Record<string, ErrorCode> = {
   'ContractNotFound': 'SOROBAN_CONTRACT_NOT_FOUND',
   'StreamNotFound': 'SOROBAN_STREAM_NOT_FOUND',
   'StreamAlreadyExists': 'SOROBAN_STREAM_ALREADY_EXISTS',
+  'AmountTooLarge': 'AMOUNT_TOO_LARGE',
   'Unknown': 'SOROBAN_UNKNOWN',
 };
+
+/**
+ * Safely serialize a value to JSON while preserving error context.
+ *
+ * JSON.stringify drops non-enumerable Error properties such as `name`,
+ * `message`, `stack`, and `cause`. This helper replaces Error instances with
+ * a JSON-safe object containing those properties plus any custom `context`
+ * (and other own properties) attached to the error. Circular references and
+ * BigInt values are converted deterministically instead of throwing.
+ */
+export function safeJsonStringify(value: unknown, space?: string | number): string {
+  const seen = new WeakSet<object>();
+
+  const replacer = (_key: string, val: unknown): unknown => {
+    if (typeof val === "bigint") {
+      return val.toString();
+    }
+
+    if (typeof val === "function" || typeof val === "symbol") {
+      return String(val);
+    }
+
+    if (val instanceof Error) {
+      if (seen.has(val)) {
+        return "[Circular Error]";
+      }
+      seen.add(val);
+
+      const error = val as Error & {
+        context?: unknown;
+        [key: string]: unknown;
+      };
+
+      const serialized: Record<string, unknown> = {
+        name: error.name,
+        message: error.message,
+      };
+
+      if (error.stack !== undefined) {
+        serialized.stack = error.stack;
+      }
+
+      if (error.cause !== undefined) {
+        serialized.cause = error.cause;
+      }
+
+      if (error.context !== undefined) {
+        serialized.context = error.context;
+      }
+
+      for (const key of Object.getOwnPropertyNames(error)) {
+        if (!(key in serialized)) {
+          serialized[key] = error[key];
+        }
+      }
+
+      return serialized;
+    }
+
+    if (typeof val === "object" && val !== null) {
+      if (seen.has(val)) {
+        return "[Circular]";
+      }
+      seen.add(val);
+    }
+
+    return val;
+  };
+
+  return JSON.stringify(value, replacer, space);
+}

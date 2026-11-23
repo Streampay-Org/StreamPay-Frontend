@@ -1,4 +1,5 @@
 import { AuditResponseSchema, AuditEntrySchema } from "./audit.dto";
+import { AppendOnlyAuditLogStore } from "@/app/lib/audit-log";
 
 describe("Audit DTOs", () => {
   it("validates a correct AuditEntry", () => {
@@ -68,10 +69,28 @@ describe("Audit DTOs", () => {
         chainIntact: true,
         retentionDays: 365,
         total: 0,
+        hasNext: false,
+        nextCursor: null,
       },
     };
 
     const result = AuditResponseSchema.safeParse(validResponse);
+    expect(result.success).toBe(true);
+  });
+
+  it("parses a real auditLogStore.append() entry", () => {
+    const store = new AppendOnlyAuditLogStore();
+    const entry = store.append({
+      action: "stream.create",
+      actor: { id: "user-1", role: "admin" },
+      target: { id: "stream-1", type: "stream", account: "acct_123" },
+      requestId: "req-test-audit",
+      before: { status: "pending" },
+      after: { status: "active" },
+      metadata: { note: "test entry" },
+    });
+
+    const result = AuditEntrySchema.safeParse(entry);
     expect(result.success).toBe(true);
   });
 });

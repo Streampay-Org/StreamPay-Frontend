@@ -1,4 +1,4 @@
-import { CorrelationContext, withCorrelationContext, getCorrelationContext, logger } from './logger';
+import { CorrelationContext, getCorrelationContext, logger } from './logger';
 
 // Mock job interface
 export interface Job<T = unknown> {
@@ -28,8 +28,8 @@ function resolveMaxActiveJobs(value: string | undefined): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 1000;
 }
 
-// Mock queue for demonstration
-export class MockQueue {
+// In-memory queue implementation used for background job processing and monitoring
+export class InMemoryQueue {
   private jobs: Map<string, Job> = new Map();
   private deadLetters: Map<string, DeadLetteredJob> = new Map();
   private queueName: string;
@@ -173,7 +173,10 @@ export class MockQueue {
   }
 }
 
-// Mock queue instances
-export const settlementQueue = new MockQueue('settlement-queue');
-export const webhookQueue = new MockQueue('webhook-queue');
-export const retryQueue = new MockQueue('retry-queue');
+// In-memory queue instances used by background operations and admin/jobs monitoring
+export const settlementQueue = new InMemoryQueue('settlement-queue');
+export const webhookQueue = new InMemoryQueue('webhook-queue');
+export const retryQueue = new InMemoryQueue('retry-queue');
+
+// Backward-compatibility alias for test consumers
+export { InMemoryQueue as MockQueue };

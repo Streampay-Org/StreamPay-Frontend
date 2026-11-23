@@ -1,7 +1,9 @@
-import crypto from "crypto";
 import jwt from "jsonwebtoken";
+import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
+import { resolveRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
 import type { AuditActorRole } from "@/app/types/audit";
+import { getTokenDenylist } from "@/app/lib/token-denylist";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -62,10 +64,22 @@ function resolveJwtSecret(): string {
 }
 
 /**
- * The resolved JWT secret. Validated at module load — throws in production
- * if the secret is missing or too short.
+ * Resolve the JWT secret at call time.
+ *
+ * Prefer this over importing a module-level constant: environment changes
+ * (e.g. secret rotation or test overrides) made after this module is imported
+ * are picked up on the next call.
  */
-export const JWT_SECRET: string = resolveJwtSecret();
+export function getJwtSecret(): string {
+  return resolveJwtSecret();
+}
+
+/**
+ * @deprecated Use `getJwtSecret()` instead. This module-level snapshot does not
+ * observe `process.env.JWT_SECRET` changes after import and will be removed
+ * after one release.
+ */
+export const JWT_SECRET: string = getJwtSecret();
 
 interface JwtKeyConfig {
   kid: string;
@@ -80,12 +94,8 @@ function getPreviousKeyId(): string {
   return process.env.JWT_PREVIOUS_KEY_ID?.trim() || "streampay-previous";
 }
 
-function toBase64url(value: string): string {
-  return Buffer.from(value).toString("base64url");
-}
-
 function getConfiguredJwtSecrets(): JwtKeyConfig[] {
-  const currentSecret = resolveJwtSecret();
+  const currentSecret = getJwtSecret();
   const secrets: JwtKeyConfig[] = [{ kid: getCurrentKeyId(), secret: currentSecret }];
   const previousSecret = process.env.JWT_PREVIOUS_SECRET?.trim();
 
@@ -129,6 +139,9 @@ function getJwtSecretCandidates(token: string): string[] {
   return orderedSecrets;
 }
 
+// HS256 keys are symmetric: publishing the key material lets anyone mint valid
+// tokens. Only key metadata (kid/alg) is exposed so clients can see which key
+// ids are active during rotation; the secret itself never leaves the server.
 export function getJwtJwks() {
   return {
     keys: getConfiguredJwtSecrets().map((entry) => ({
@@ -136,7 +149,6 @@ export function getJwtJwks() {
       use: "sig",
       alg: "HS256",
       kid: entry.kid,
-      k: toBase64url(entry.secret),
     })),
   };
 }
@@ -187,37 +199,38 @@ interface TokenClaims {
   actorId?: string;
   iss?: string;
   aud?: string | string[];
+  /** Unique token id, used for revocation. */
+  jti?: string;
+  /** Expiry, seconds since the epoch. */
+  exp?: number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function createErrorResponse(code: string, message: string, status: number) {
+function createErrorResponse(
+  request: Request,
+  code: string,
+  message: string,
+  status: number,
+) {
+  const requestId = resolveRequestId(request.headers);
   return NextResponse.json(
-    { error: { code, message, request_id: "mock-request-id" } },
-    { status },
+    { error: { code, message, request_id: requestId } },
+    {
+      status,
+      headers: { [REQUEST_ID_HEADER]: requestId },
+    },
   );
 }
 
 /**
  * Validates double-submit CSRF tokens using constant-time comparison.
  * Protects wallet authentication endpoints from timing and CSRF attacks.
+ *
+ * The single implementation lives in `lib/csrf.ts` so the middleware and the
+ * route handlers can never drift apart.
  */
-export function validateCsrfToken(cookieToken: string | null, headerToken: string | null): boolean {
-  if (!cookieToken || !headerToken) return false;
-
-  try {
-    const bufCookie = Buffer.from(cookieToken);
-    const bufHeader = Buffer.from(headerToken);
-
-    if (bufCookie.length !== bufHeader.length) {
-      return false;
-    }
-
-    return crypto.timingSafeEqual(bufCookie, bufHeader);
-  } catch {
-    return false;
-  }
-}
+export { validateCsrfToken } from "@/lib/csrf";
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -228,23 +241,43 @@ export function signToken(
   walletAddress: string,
   extra: Record<string, unknown> = {},
 ): string {
-  const currentSecret = resolveJwtSecret();
+  const currentSecret = getJwtSecret();
   return jwt.sign(
-    { sub: walletAddress, iss: JWT_ISSUER, aud: JWT_AUDIENCE, ...extra },
+    {
+      sub: walletAddress,
+      iss: JWT_ISSUER,
+      aud: JWT_AUDIENCE,
+      jti: randomUUID(),
+      ...extra,
+    },
     currentSecret,
     {
       expiresIn: JWT_EXPIRES_IN,
       algorithm: "HS256",
-      header: { kid: getCurrentKeyId() },
+      header: { alg: "HS256", kid: getCurrentKeyId() },
     },
   );
 }
 
 /**
- * Attempt to authenticate an incoming request via its `Authorization: Bearer`
- * header.
+ * Result of verifying a bearer token without consulting the denylist.
+ *
+ * Logout needs this: a token that was already revoked must still be
+ * verifiable so a repeated logout stays idempotent.
  */
-export function tryAuthenticateRequest(request: Request): AuthenticatedActor | null {
+export interface VerifiedToken {
+  actor: AuthenticatedActor;
+  /** Token id, absent on tokens issued before revocation existed. */
+  jti?: string;
+  /** Expiry, seconds since the epoch. */
+  exp?: number;
+}
+
+/**
+ * Verifies the request's `Authorization: Bearer` token against the configured
+ * signing keys. Revocation is not checked here.
+ */
+export function verifyRequestToken(request: Request): VerifiedToken | null {
   const authHeader = request.headers?.get?.("authorization") ?? null;
   if (!authHeader?.startsWith("Bearer ")) return null;
 
@@ -269,12 +302,16 @@ export function tryAuthenticateRequest(request: Request): AuthenticatedActor | n
       if (!verified.sub) return null;
 
       return {
-        actorId:
-          typeof verified.actorId === "string" && verified.actorId.length > 0
-            ? verified.actorId
-            : verified.sub,
-        walletAddress: verified.sub,
-        role: normalizeRole(verified.role),
+        actor: {
+          actorId:
+            typeof verified.actorId === "string" && verified.actorId.length > 0
+              ? verified.actorId
+              : verified.sub,
+          walletAddress: verified.sub,
+          role: normalizeRole(verified.role),
+        },
+        jti: verified.jti,
+        exp: verified.exp,
       };
     } catch {
       // Try the next configured secret.
@@ -282,6 +319,23 @@ export function tryAuthenticateRequest(request: Request): AuthenticatedActor | n
   }
 
   return null;
+}
+
+/**
+ * Attempt to authenticate an incoming request via its `Authorization: Bearer`
+ * header. Tokens whose `jti` has been revoked are rejected.
+ */
+export function tryAuthenticateRequest(request: Request): AuthenticatedActor | null {
+  const verified = verifyRequestToken(request);
+  if (!verified) return null;
+
+  // Tokens issued before revocation existed have no `jti` and stay valid
+  // until they expire.
+  if (verified.jti && getTokenDenylist().isRevoked(verified.jti)) {
+    return null;
+  }
+
+  return verified.actor;
 }
 
 /**
@@ -295,6 +349,7 @@ export function requireAuditLogAccess(
   const actor = tryAuthenticateRequest(request);
   if (!actor) {
     return createErrorResponse(
+      request,
       "UNAUTHORIZED",
       "Missing or invalid authorization header",
       401,
@@ -305,6 +360,7 @@ export function requireAuditLogAccess(
     access === "export" ? AUDIT_LOG_EXPORT_ROLES : AUDIT_LOG_READ_ROLES;
   if (!allowedRoles.has(actor.role)) {
     return createErrorResponse(
+      request,
       "FORBIDDEN",
       "You do not have permission to access audit logs",
       403,

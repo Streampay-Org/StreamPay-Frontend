@@ -9,8 +9,12 @@ import { resolveRequestId } from './requestId';
  *   - all other /api/* paths                   → 256 KB (MAX_STREAM_BODY_BYTES)
  *   - non-API paths                            → no middleware-level cap
  *
- * The check is O(1): reads Content-Length only; bodies without this header
- * are allowed through and left to the application layer.
+ * Enforcement is two-layered:
+ *   1. Middleware (`checkRequestBodySize`) is O(1) and compares the
+ *      Content-Length header before the handler runs.
+ *   2. Routes call `readJsonBody` (`lib/readJsonBody.ts`), which streams and
+ *      counts the actual bytes, so chunked or Content-Length-less requests
+ *      are capped as well.
  *
  * Operators may override the defaults via environment variables:
  *   - MAX_STREAM_BODY_BYTES (default limit for API routes, default 256 KB)
@@ -156,7 +160,8 @@ export function createBodySizeTooLargeResponse(
  *
  * The check is intentionally O(1): we read the Content-Length header rather
  * than buffering the body. Clients that omit Content-Length are allowed
- * through — the application layer is responsible for streaming limits.
+ * through — route handlers enforce the same limit by streaming the body with
+ * `readJsonBody` (lib/readJsonBody.ts).
  *
  * Only write methods (POST, PUT, PATCH) are checked; safe methods (GET, HEAD,
  * OPTIONS, DELETE) are not expected to carry a body and are skipped.

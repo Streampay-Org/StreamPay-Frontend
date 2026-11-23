@@ -57,6 +57,8 @@ export const AuditResponseSchema = z.object({
     chainIntact: z.boolean(),
     retentionDays: z.number(),
     total: z.number(),
+    hasNext: z.boolean(),
+    nextCursor: z.string().nullable(),
   }),
 });
 

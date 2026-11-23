@@ -41,7 +41,9 @@ describe("Privacy Services", () => {
       // Ensure user exists first
       db.users.set(walletAddress, {
         wallet_address: walletAddress,
-        email: "ada@creativestudio.io",
+        // The seeded demo stream-ada carries this email; association now goes
+        // through stream.email since seeds hold G-address recipients.
+        email: "fixture-user-1@example.test",
         display_name: "Ada",
         avatar_url: null,
         created_at: new Date().toISOString(),

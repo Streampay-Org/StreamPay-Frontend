@@ -100,6 +100,8 @@ streampay_metrics_up 1
 | `streampay_metrics_up` | gauge | Whether the metrics endpoint is serving (always 1) |
 | `webhook_requests_total` | counter | Total `/api/webhooks` requests, labelled by status and event type |
 | `webhook_request_duration_seconds` | histogram | Latency of `/api/webhooks` handlers, labelled by status and event type |
+| `export_requests_total` | counter | Total `/api/exports` requests, labelled by status and method |
+| `export_request_duration_seconds` | histogram | Latency of `/api/exports` handlers, labelled by status and method |
 | `wallet_auth_requests_total` | counter | Per-endpoint `/api/auth/wallet` request counter (see below) |
 | `wallet_auth_request_duration_seconds` | histogram | Per-endpoint `/api/auth/wallet` latency histogram (see below) |
 | `process_*`, `nodejs_*` | various | Default Node.js process metrics from `prom-client` |
@@ -178,6 +180,65 @@ sum by (status) (
 - The histogram buckets were sized to span the wallet route's per-request
   deadline (5 s default) plus headroom for the sub-millisecond
   rate-limit-exceeded fast-path and 504 timeouts.
+
+## Per-endpoint metrics for `/api/exports`
+
+Two metrics back per-endpoint observability of the exports API:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `export_requests_total` | counter | Total number of `/api/exports` requests, labelled by HTTP status and method. |
+| `export_request_duration_seconds` | histogram | Wall-clock duration of every `/api/exports` request in seconds, labelled by HTTP status and method. Bucket set: `[0.1, 0.5, 1, 2, 5, 15]` (the 15 s bucket matches the exports timeout budget). |
+
+### Labels
+
+| Label | Values | Notes |
+|-------|--------|-------|
+| `status` | HTTP status code as string (`"200"`, `"201"`, `"304"`, `"401"`, `"422"`, `"429"`, `"500"`, …) | Final HTTP status returned to the client. |
+| `method` | `GET`, `POST` | HTTP method that served the request. |
+
+Every handler code path — including the pre-validation `401` fast-path, the
+`422` validation envelope, the `429` rate-limit response and unhandled
+`500`s — produces exactly one counter increment and one histogram
+observation.
+
+### Example PromQL queries
+
+**Export create success rate:**
+```promql
+sum(rate(export_requests_total{method="POST",status="201"}[5m]))
+/
+sum(rate(export_requests_total{method="POST"}[5m]))
+```
+
+**p99 list latency:**
+```promql
+histogram_quantile(
+  0.99,
+  sum by (le) (
+    rate(export_request_duration_seconds_bucket{method="GET"}[5m])
+  )
+)
+```
+
+**Rejected requests by status:**
+```promql
+sum by (status) (
+  rate(export_requests_total{status!~"2.."}[5m])
+)
+```
+
+### Notes
+
+- These metrics are emitted from `app/api/exports/route.ts` and live on the
+  shared `prom-client` registry, so they are concatenated into the body
+  returned by `GET /api/metrics` alongside the `streampay_*` series.
+- The focused suite lives at `app/api/exports/exports.metrics.test.ts` and
+  is no longer quarantined in `jest.config.js`:
+
+```bash
+npm test app/api/exports/exports.metrics.test.ts
+```
 
 ## Usage Examples
 

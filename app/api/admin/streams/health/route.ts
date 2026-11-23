@@ -76,7 +76,7 @@ export async function GET(request: Request) {
         const status = s.status ?? "unknown";
         counts[status] = (counts[status] ?? 0) + 1;
 
-        if (status === "errored" || status === "stuck") {
+        if ((status as string) === "errored" || (status as string) === "stuck") {
           const createdAt = s.createdAt ?? "";
           if (createdAt) {
             if (!oldestStuckAt || createdAt < oldestStuckAt) {

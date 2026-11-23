@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withTimeout, WEBHOOK_TIMEOUT_MS } from "@/src/middleware/timeout";
 import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
 import { webhookDeliveryStore } from "@/app/lib/webhook-delivery-store";
 import { getOutboxStore } from "@/lib/outbox";

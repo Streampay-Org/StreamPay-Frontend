@@ -17,7 +17,17 @@ import { Skeleton } from "../components/Skeleton";
 import { PageError } from "../components/PageError";
 import { EmptyState } from "../components/EmptyState";
 import { DensityToggle, type Density } from "../components/DensityToggle";
+import {
+  SortDropdown,
+  isSortOption,
+  type SortOption,
+} from "../components/SortDropdown";
 import { TagChips } from "../components/TagChips";
+import { safeStorage } from "../lib/safeStorage";
+import { mockStreams } from "./fixtures";
+import { sortStreams } from "./sortStreams";
+
+const SORT_STORAGE_KEY = "streampay-streams-sort";
 
 export type StreamsViewState = "loading" | "populated" | "empty" | "error";
 export type DensityMode = "comfortable" | "compact";
@@ -52,37 +62,6 @@ const streamListCopy = {
   exportCta: "Export History",
 } as const;
 
-/** Demonstration data used when the `streams` prop is omitted. */
-export const mockStreams: StreamRowData[] = [
-  {
-    id: "stream-ada",
-    nextAction: "Pause",
-    rate: "120 XLM / month",
-    recipient: "Ada Creative Studio",
-    schedule: "Pays every 30 days",
-    status: "active",
-    tags: ["design", "vendor"],
-  },
-  {
-    id: "stream-kemi",
-    nextAction: "Start",
-    rate: "32 XLM / week",
-    recipient: "Kemi Onboarding Support",
-    schedule: "Draft stream ready to launch",
-    status: "draft",
-    tags: ["onboarding"],
-  },
-  {
-    id: "stream-yusuf",
-    nextAction: "Withdraw",
-    rate: "18 XLM / day",
-    recipient: "Yusuf QA Partnership",
-    schedule: "Ended yesterday with funds available",
-    status: "ended",
-    tags: ["qa", "vendor"],
-  },
-];
-
 type StreamsPageContentProps = {
   /** Page-level view state. */
   state?: StreamsViewState;
@@ -103,6 +82,8 @@ type StreamsPageContentProps = {
   onClearFilters?: () => void;
   /** Seed density on mount (tests use this to skip the localStorage effect). */
   initialDensity?: Density;
+  /** Seed sort order on mount (tests use this to skip the storage effect). */
+  initialSort?: SortOption;
 };
 
 /* ─── Loading skeleton ──────────────────────────────────────────────────── */
@@ -158,6 +139,7 @@ export function StreamsPageContent({
   emptyStateVariant = "default",
   onClearFilters,
   initialDensity,
+  initialSort,
 }: StreamsPageContentProps) {
   /* ── Density toggle (radiogroup; persists to localStorage) ── */
   const [density, setDensity] = useState<Density>(initialDensity ?? "cozy");
@@ -182,6 +164,23 @@ export function StreamsPageContent({
     }
   };
 
+  /* ── Sort dropdown (persists via safeStorage) ── */
+  const [sort, setSort] = useState<SortOption>(initialSort ?? "newest");
+
+  /* Sync from safeStorage after hydration (skipped when initialSort is provided) */
+  useEffect(() => {
+    if (initialSort !== undefined) return;
+    const stored = safeStorage.getItem(SORT_STORAGE_KEY);
+    if (isSortOption(stored)) {
+      setSort(stored);
+    }
+  }, [initialSort]);
+
+  const handleSortChange = (next: SortOption) => {
+    setSort(next);
+    safeStorage.setItem(SORT_STORAGE_KEY, next);
+  };
+
   /* ── Tag filter ── */
   const allTags = useMemo(
     () =>
@@ -198,6 +197,11 @@ export function StreamsPageContent({
         ? streams.filter((s) => s.tags?.includes(selectedTag))
         : streams,
     [streams, selectedTag],
+  );
+
+  const sortedStreams = useMemo(
+    () => sortStreams(filteredStreams, sort),
+    [filteredStreams, sort],
   );
 
   /* ── Derived view state ── */
@@ -258,9 +262,19 @@ export function StreamsPageContent({
               </p>
             </div>
 
-            {/* Density toggle — only shown when the list is populated */}
+            {/* Sort dropdown + Density toggle — only shown when the list is populated */}
             {showToolbar && (
-              <DensityToggle value={density} onChange={handleDensityChange} />
+              <div
+                style={{
+                  display: "flex",
+                  gap: "0.75rem",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                }}
+              >
+                <SortDropdown value={sort} onChange={handleSortChange} />
+                <DensityToggle value={density} onChange={handleDensityChange} />
+              </div>
             )}
           </div>
 
@@ -325,7 +339,7 @@ export function StreamsPageContent({
             aria-label="Streams list"
             className={`stream-list${density === "compact" ? " stream-list--compact" : ""}`}
           >
-            {filteredStreams.map((stream, index) => (
+            {sortedStreams.map((stream, index) => (
               <div
                 key={stream.id}
                 className="stream-cascade-item"

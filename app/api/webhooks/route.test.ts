@@ -7,15 +7,35 @@ jest.mock("@/app/lib/logger", () => ({
   },
 }));
 
-function makeRequest(body: unknown, shouldThrow = false) {
-  return {
-    json: async () => {
-      if (shouldThrow) {
-        throw new Error("invalid json");
+const encoder = new TextEncoder();
+
+function streamFromChunks(chunks: Array<string | Uint8Array>): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(
+          typeof chunk === "string" ? encoder.encode(chunk) : chunk,
+        );
       }
-      return body;
+      controller.close();
     },
+  });
+}
+
+function makeRequest(
+  body: unknown,
+  shouldThrow = false,
+): import("next/server").NextRequest {
+  const text = shouldThrow ? "{" : (JSON.stringify(body) ?? "");
+  return {
+    body: streamFromChunks([text]),
   } as unknown as import("next/server").NextRequest;
+}
+
+function makeStreamRequest(
+  body: ReadableStream<Uint8Array> | null,
+): import("next/server").NextRequest {
+  return { body } as unknown as import("next/server").NextRequest;
 }
 
 describe("POST /api/webhooks", () => {
@@ -42,6 +62,26 @@ describe("POST /api/webhooks", () => {
     const data = await response.json();
     expect(data.error.code).toBe("INVALID_INPUT");
     expect(data.error.message).toBe("Request body must be valid JSON.");
+  });
+
+  it("returns 400 EMPTY_BODY for an empty body", async () => {
+    const response = await POST(makeStreamRequest(streamFromChunks([])));
+
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error.code).toBe("EMPTY_BODY");
+  });
+
+  it("returns 413 for a chunked body over the webhook limit", async () => {
+    const response = await POST(
+      makeStreamRequest(streamFromChunks([new Uint8Array(2 * 1024 * 1024)])),
+    );
+
+    expect(response.status).toBe(413);
+    const data = await response.json();
+    expect(data.error.code).toBe("REQUEST_TOO_LARGE");
+    expect(data.error.message).toContain("1048576-byte limit");
+    expect(data.error.request_id).toBeDefined();
   });
 
   it("returns 400 when eventType is missing", async () => {
