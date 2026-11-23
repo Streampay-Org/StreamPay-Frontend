@@ -183,6 +183,12 @@ pub struct RecipientTransferCancelled {
     pub timestamp: u64,
 }
 
+}
+
+}
+
+}
+
 pub fn created(
     env: &Env,
     stream_id: u64,

@@ -74,3 +74,7 @@ fn err_discriminants_24_to_25_are_stable() {
     assert_eq!(Error::NotDormant as u32, 24);
     assert_eq!(Error::DormancyDisabled as u32, 25);
 }
+
+fn err_discriminant_24_is_stable() {
+    assert_eq!(Error::NoPendingTransfer as u32, 24);
+}

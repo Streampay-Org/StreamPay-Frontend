@@ -44,6 +44,7 @@ and must never be reused — see the module rustdoc for details.
     consistent with `withdraw`, marks the stream `Settled`, and emits
     `("stream", "dorm_swp")`.
   - Appended error codes `NotDormant = 24` and `DormancyDisabled = 25`.
+  or sender can cancel before acceptance. Appended `Error::NoPendingTransfer = 24`
 - **Split stream pause/resume.** `pause_split_stream` and
   `resume_split_stream` let a split stream's sender freeze and restart
   accrual for every recipient. Pausing records `pause_time`; resuming adds the

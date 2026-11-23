@@ -75,4 +75,6 @@ pub enum Error {
     DormancyDisabled = 25,
     /// 26: No pending recipient transfer proposal exists for the stream.
     NoPendingTransfer = 26,
+    /// 24: No pending recipient transfer proposal exists for the stream.
+    NoPendingTransfer = 24,
 }
