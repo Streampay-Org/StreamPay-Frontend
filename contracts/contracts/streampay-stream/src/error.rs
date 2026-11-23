@@ -68,4 +68,11 @@ pub enum Error {
     CooloffActive = 22,
     /// 23: Stream `total_amount` exceeds the configured per-token maximum cap.
     AmountTooLarge = 23,
+    /// 24: Stream is not yet eligible for dormant sweeping (not ended, nothing
+    ///     withdrawable, or grace period has not elapsed).
+    NotDormant = 24,
+    /// 25: Dormant-stream sweeping is disabled (`DormancyGrace == 0`).
+    DormancyDisabled = 25,
+    /// 26: No pending recipient transfer proposal exists for the stream.
+    NoPendingTransfer = 26,
 }

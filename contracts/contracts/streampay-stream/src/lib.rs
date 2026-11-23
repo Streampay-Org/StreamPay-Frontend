@@ -731,6 +731,40 @@ impl Contract {
         cooloff::get_cooloff_duration(&env)
     }
 
+    /// Sets the global dormant-stream grace period in seconds.
+    ///
+    /// After a stream reaches `end_time`, if the recipient does not withdraw
+    /// for at least `seconds` after `max(end_time, last_withdraw_time)`, the
+    /// stream sender may reclaim the unclaimed vested balance via
+    /// [`Contract::sweep_dormant_stream`].
+    ///
+    /// A value of `0` disables dormant-stream sweeping (the default).
+    ///
+    /// @param `admin`   — Must match the admin set at initialisation.
+    /// @param `seconds` — Grace period in seconds. `0` disables sweeping.
+    ///
+    /// @custom:error [`Error::Unauthorized`] if `admin` is not the initialised admin.
+    /// @custom:error [`Error::NotFound`] if the contract has not been initialised.
+    ///
+    /// @custom:auth Requires authorisation from `admin`.
+    pub fn set_dormancy_grace(env: Env, admin: Address, seconds: u64) -> Result<(), Error> {
+        require_admin(&env, &admin)?;
+        storage::set_dormancy_grace(&env, seconds);
+        events::dormancy_grace_set(&env, &admin, seconds, env.ledger().timestamp());
+        Ok(())
+    }
+
+    /// Returns the current global dormant-stream grace period in seconds.
+    ///
+    /// A return value of `0` means dormant-stream sweeping is disabled (default).
+    ///
+    /// @return The dormancy grace period in seconds.
+    ///
+    /// @custom:error This entrypoint is read-only and never returns an error.
+    pub fn get_dormancy_grace(env: Env) -> u64 {
+        storage::get_dormancy_grace(&env)
+    }
+
     /// Returns the ledger timestamp until which `sender` is blocked from
     /// creating a new stream.
     ///
@@ -1398,14 +1432,6 @@ impl Contract {
         let recipient = stream.recipient.clone();
         let ts = execute_withdraw(&env, stream_id, &mut stream, amount, &recipient)?;
 
-        // Resolve the effective fee: explicit per-stream fee, then the token
-        // override, then the global default.  If no fee collector has been
-        // configured the full `amount` goes to the recipient regardless of the
-        // effective fee.
-        let effective_fee_bps =
-            fees::resolve_stream_fee_bps(&env, stream_id, &stream.token, stream.fee_bps);
-        let fee_result = fees::apply_fee(amount, effective_fee_bps)?;
-                    effective_fee_bps,
         events::withdrawn(&env, stream_id, &stream.recipient, amount, ts);
         if stream.status == StreamStatus::Settled {
             events::settled(&env, stream_id, &stream.recipient, stream.total_amount, ts);
@@ -1524,6 +1550,152 @@ impl Contract {
         // Verify the stream exists before returning the allowlist.
         get_existing_stream(&env, stream_id)?;
         Ok(storage::get_withdrawer_allowlist(&env, stream_id))
+    }
+
+    /// Proposes transferring a stream's recipient role to `new_recipient`.
+    ///
+    /// This is step 1 of the two-step recipient transfer flow. Only the
+    /// stream's current recipient may propose a transfer. Calling this again
+    /// while a proposal is already pending overwrites the previous proposal.
+    /// Proposals are permitted on `Draft`, `Active`, and `Paused` streams,
+    /// and rejected on terminal (`Settled`, `Cancelled`) streams.
+    ///
+    /// @param `stream_id`     — Numeric ID of the stream.
+    /// @param `new_recipient` — Proposed new recipient address.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the contract is globally paused.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::InvalidState`] if the stream is `Settled` or `Cancelled`.
+    /// @custom:error [`Error::SelfStream`] if `new_recipient` equals the current recipient or the sender.
+    /// @custom:error [`Error::RecipientTrustlineMissing`] if `new_recipient` cannot hold the stream token.
+    ///
+    /// @custom:auth Requires authorisation from the stream's current `recipient`.
+    pub fn propose_recipient_transfer(
+        env: Env,
+        stream_id: u64,
+        new_recipient: Address,
+    ) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        let stream = get_existing_stream(&env, stream_id)?;
+        stream.recipient.require_auth();
+
+        if stream.status == StreamStatus::Settled || stream.status == StreamStatus::Cancelled {
+            return Err(Error::InvalidState);
+        }
+
+        if new_recipient == stream.recipient || new_recipient == stream.sender {
+            return Err(Error::SelfStream);
+        }
+
+        require_recipient_trustline(&env, &stream.token, &new_recipient)?;
+
+        storage::set_pending_recipient(&env, stream_id, &new_recipient);
+        events::recipient_transfer_proposed(
+            &env,
+            stream_id,
+            &stream.recipient,
+            &new_recipient,
+            env.ledger().timestamp(),
+        );
+        Ok(())
+    }
+
+    /// Accepts a pending recipient transfer for `stream_id`.
+    ///
+    /// This is step 2 of the two-step recipient transfer flow. Only the
+    /// proposed `new_recipient` may accept. On acceptance:
+    /// - `stream.recipient` is updated to the new address (which also updates
+    ///   all recipient-indexed listing views).
+    /// - The pending proposal is cleared.
+    /// - The previous recipient's per-stream withdrawer allowlist is cleared so
+    ///   delegated withdrawers of the old recipient cannot withdraw the new
+    ///   recipient's funds.
+    /// - Already-released funds remain released; remaining vesting accrues to
+    ///   the new recipient.
+    ///
+    /// @param `stream_id` — Numeric ID of the stream.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the contract is globally paused.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::InvalidState`] if the stream is `Settled` or `Cancelled`.
+    /// @custom:error [`Error::NoPendingTransfer`] if no transfer proposal is pending.
+    /// @custom:error [`Error::RecipientTrustlineMissing`] if the pending recipient cannot hold the stream token.
+    ///
+    /// @custom:auth Requires authorisation from the pending recipient.
+    pub fn accept_recipient_transfer(env: Env, stream_id: u64) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        let mut stream = get_existing_stream(&env, stream_id)?;
+
+        if stream.status == StreamStatus::Settled || stream.status == StreamStatus::Cancelled {
+            return Err(Error::InvalidState);
+        }
+
+        let new_recipient =
+            storage::get_pending_recipient(&env, stream_id).ok_or(Error::NoPendingTransfer)?;
+        new_recipient.require_auth();
+
+        require_recipient_trustline(&env, &stream.token, &new_recipient)?;
+
+        let old_recipient = stream.recipient.clone();
+        let now = env.ledger().timestamp();
+        stream.recipient = new_recipient.clone();
+        stream.last_update = now;
+
+        storage::set_stream(&env, stream_id, &stream);
+        storage::clear_pending_recipient(&env, stream_id);
+        storage::clear_withdrawer_allowlist(&env, stream_id);
+
+        events::recipient_transfer_accepted(&env, stream_id, &old_recipient, &new_recipient, now);
+        Ok(())
+    }
+
+    /// Cancels a pending recipient transfer proposal for `stream_id`.
+    ///
+    /// Either the current `recipient` or the stream `sender` may cancel an
+    /// unaccepted proposal.
+    ///
+    /// @param `stream_id` — Numeric ID of the stream.
+    /// @param `caller`    — Address cancelling the proposal (must be `stream.recipient` or `stream.sender`).
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the contract is globally paused.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::Unauthorized`] if `caller` is neither the current recipient nor the sender.
+    /// @custom:error [`Error::NoPendingTransfer`] if no transfer proposal is pending.
+    ///
+    /// @custom:auth Requires authorisation from `caller`.
+    pub fn cancel_recipient_transfer(
+        env: Env,
+        stream_id: u64,
+        caller: Address,
+    ) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        let stream = get_existing_stream(&env, stream_id)?;
+
+        if caller != stream.recipient && caller != stream.sender {
+            return Err(Error::Unauthorized);
+        }
+        caller.require_auth();
+
+        let pending =
+            storage::get_pending_recipient(&env, stream_id).ok_or(Error::NoPendingTransfer)?;
+        storage::clear_pending_recipient(&env, stream_id);
+
+        events::recipient_transfer_cancelled(
+            &env,
+            stream_id,
+            &stream.recipient,
+            &pending,
+            env.ledger().timestamp(),
+        );
+        Ok(())
+    }
+
+    /// Returns the pending recipient transfer target for `stream_id`, if any.
+    ///
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    pub fn get_pending_recipient(env: Env, stream_id: u64) -> Result<Option<Address>, Error> {
+        get_existing_stream(&env, stream_id)?;
+        Ok(storage::get_pending_recipient(&env, stream_id))
     }
 
     /// Pauses an active stream, freezing accrual while preserving vested funds.
@@ -1653,6 +1825,7 @@ impl Contract {
         stream.last_update = now;
 
         limits::decrement_sender_stream_count(&env, &stream.sender);
+        storage::clear_pending_recipient(&env, stream_id);
         storage::set_stream(&env, stream_id, &stream);
         events::settled(
             &env,
@@ -1663,6 +1836,133 @@ impl Contract {
         );
 
         Ok(())
+    }
+
+    /// Reclaims unclaimed vested funds from a dormant stream back to the
+    /// stream's `sender` and marks the stream `Settled`.
+    ///
+    /// A stream is dormant when:
+    /// 1. The global `DormancyGrace` period is non-zero.
+    /// 2. The stream is in `Active` or `Ended` status and `now >= end_time`.
+    /// 3. There is a positive withdrawable balance (`withdrawable > 0`).
+    /// 4. `now >= max(end_time, last_withdraw_time) + grace`.
+    ///
+    /// Protocol fee handling is consistent with [`Contract::withdraw`]: if the
+    /// stream has a non-zero `fee_bps` and a fee collector is configured, the
+    /// fee is transferred to the collector and the net amount is returned to
+    /// `sender`. If no fee collector is configured, the full unclaimed amount
+    /// is returned to `sender`.
+    ///
+    /// @param `stream_id` — Numeric ID of the dormant stream to sweep.
+    ///
+    /// @return The gross unclaimed amount swept (before protocol fee deduction).
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the contract is globally paused.
+    /// @custom:error [`Error::DormancyDisabled`] if `DormancyGrace == 0`.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::AlreadySettled`] if the stream is already `Settled`.
+    /// @custom:error [`Error::InvalidState`] if the stream is `Draft`, `Paused`, or `Cancelled`.
+    /// @custom:error [`Error::NotDormant`] if `now < end_time`, nothing is withdrawable,
+    ///               or the dormancy grace window has not yet elapsed.
+    ///
+    /// @custom:auth Requires authorisation from the stream's `sender`.
+    pub fn sweep_dormant_stream(env: Env, stream_id: u64) -> Result<i128, Error> {
+        require_not_paused(&env)?;
+
+        let grace = storage::get_dormancy_grace(&env);
+        if grace == 0 {
+            return Err(Error::DormancyDisabled);
+        }
+
+        let mut stream = get_existing_stream(&env, stream_id)?;
+        stream.sender.require_auth();
+
+        if stream.status == StreamStatus::Settled {
+            return Err(Error::AlreadySettled);
+        }
+
+        if stream.status != StreamStatus::Active && stream.status != StreamStatus::Ended {
+            return Err(Error::InvalidState);
+        }
+
+        let now = env.ledger().timestamp();
+        if now < stream.end_time {
+            return Err(Error::NotDormant);
+        }
+
+        let sweep_amount = release::withdrawable(&stream, now)?;
+        if sweep_amount <= 0 {
+            return Err(Error::NotDormant);
+        }
+
+        let last_withdraw = storage::get_last_withdraw_time(&env, stream_id);
+        let reference_time = core::cmp::max(stream.end_time, last_withdraw);
+        let dormant_at = reference_time.checked_add(grace).ok_or(Error::NotDormant)?;
+        if now < dormant_at {
+            return Err(Error::NotDormant);
+        }
+
+        // Fee split consistent with `execute_withdraw`.
+        let fee_result = fees::apply_fee(sweep_amount, stream.fee_bps)?;
+        let maybe_collector = fees::get_fee_collector(&env);
+
+        let (net_to_sender, fee_paid) = match maybe_collector {
+            Some(ref collector) if fee_result.fee_amount > 0 => {
+                #[allow(clippy::needless_borrows_for_generic_args)]
+                token::Client::new(&env, &stream.token).transfer(
+                    &env.current_contract_address(),
+                    &stream.sender,
+                    &fee_result.net_amount,
+                );
+                #[allow(clippy::needless_borrows_for_generic_args)]
+                token::Client::new(&env, &stream.token).transfer(
+                    &env.current_contract_address(),
+                    collector,
+                    &fee_result.fee_amount,
+                );
+                events::fee_charged(
+                    &env,
+                    stream_id,
+                    fee_result.fee_amount,
+                    stream.fee_bps,
+                    collector,
+                    now,
+                );
+                (fee_result.net_amount, fee_result.fee_amount)
+            }
+            _ => {
+                // No collector configured or zero fee: return full sweep_amount to sender.
+                #[allow(clippy::needless_borrows_for_generic_args)]
+                token::Client::new(&env, &stream.token).transfer(
+                    &env.current_contract_address(),
+                    &stream.sender,
+                    &sweep_amount,
+                );
+                (sweep_amount, 0)
+            }
+        };
+
+        stream.released_amount = stream
+            .released_amount
+            .checked_add(sweep_amount)
+            .ok_or(Error::Overflow)?;
+        stream.status = StreamStatus::Settled;
+        stream.last_update = now;
+
+        limits::decrement_sender_stream_count(&env, &stream.sender);
+        storage::set_stream(&env, stream_id, &stream);
+
+        events::dormant_swept(
+            &env,
+            stream_id,
+            &stream.sender,
+            sweep_amount,
+            net_to_sender,
+            fee_paid,
+            now,
+        );
+
+        Ok(sweep_amount)
     }
 
     /// Cancels an active, paused, or draft stream, returning unvested funds to
@@ -1732,6 +2032,7 @@ impl Contract {
         stream.last_update = now;
 
         limits::decrement_sender_stream_count(&env, &stream.sender);
+        storage::clear_pending_recipient(&env, stream_id);
         storage::set_stream(&env, stream_id, &stream);
 
         events::cancelled(
@@ -2618,6 +2919,7 @@ fn execute_withdraw(
     }
 
     storage::set_stream(env, stream_id, stream);
+    storage::set_last_withdraw_time(env, stream_id, now);
     Ok(stream.last_update)
 }
 
@@ -2747,6 +3049,7 @@ fn withdraw_inner(
     }
 
     storage::set_stream(env, stream_id, &stream);
+    storage::set_last_withdraw_time(env, stream_id, now);
     let ts = stream.last_update;
     events::withdrawn(env, stream_id, &stream.recipient, amount, ts);
     if stream.status == StreamStatus::Settled {
