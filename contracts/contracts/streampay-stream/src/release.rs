@@ -9,12 +9,63 @@
 //! functions explicitly use checked operations to guarantee safety at the
 //! type level and make the invariants clear to reviewers.
 
-use super::{Error, Stream, StreamStatus};
+use super::{Error, Milestone, ReleaseCurve, Stream, StreamStatus, MAX_MILESTONES};
 use core::cmp::{max, min};
+use soroban_sdk::Vec;
+
+/// Basis-point denominator representing 100%.
+pub const BPS_DENOMINATOR: u32 = 10_000;
+
+/// Validates a milestone release schedule against `[start_time, end_time]`.
+///
+/// Rules:
+/// - Must contain between `1` and [`MAX_MILESTONES`] (inclusive) entries.
+/// - `time` must be strictly increasing and within `[start_time, end_time]`.
+/// - `cumulative_bps` must be non-decreasing, at most `10_000`, and the final
+///   milestone must have `cumulative_bps == 10_000`.
+///
+/// # Errors
+/// Returns [`Error::InvalidSchedule`] if any rule is violated.
+pub fn validate_milestones(
+    milestones: &Vec<Milestone>,
+    start_time: u64,
+    end_time: u64,
+) -> Result<(), Error> {
+    let len = milestones.len();
+    if len == 0 || len > MAX_MILESTONES {
+        return Err(Error::InvalidSchedule);
+    }
+
+    let mut prev_time: Option<u64> = None;
+    let mut prev_bps: u32 = 0;
+
+    for m in milestones.iter() {
+        if m.time < start_time || m.time > end_time {
+            return Err(Error::InvalidSchedule);
+        }
+        if let Some(pt) = prev_time {
+            if m.time <= pt {
+                return Err(Error::InvalidSchedule);
+            }
+        }
+        if m.cumulative_bps < prev_bps || m.cumulative_bps > BPS_DENOMINATOR {
+            return Err(Error::InvalidSchedule);
+        }
+        prev_time = Some(m.time);
+        prev_bps = m.cumulative_bps;
+    }
+
+    if prev_bps != BPS_DENOMINATOR {
+        return Err(Error::InvalidSchedule);
+    }
+
+    Ok(())
+}
 
 /// Computes the total amount that has vested at a given ledger timestamp.
 ///
 /// Accounts for paused duration: time "stops" while the stream is paused.
+/// Supports both [`ReleaseCurve::Linear`] and [`ReleaseCurve::Milestones`].
 ///
 /// # Returns
 ///
@@ -25,11 +76,20 @@ pub fn vested_amount(stream: &Stream, now: u64) -> Result<i128, Error> {
         return Ok(0);
     }
 
+    // Nothing vests before the stream's start_time (even if a milestone sits
+    // at start_time).
+    if now < stream.start_time {
+        return Ok(0);
+    }
+
     // Clamp now to [start_time, end_time]
     let mut effective_now = max(stream.start_time, min(now, stream.end_time));
 
     // If currently paused, accrual stopped at paused_at
     if stream.status == StreamStatus::Paused {
+        if stream.paused_at < stream.start_time {
+            return Ok(0);
+        }
         effective_now = min(effective_now, stream.paused_at);
     }
 
@@ -43,14 +103,45 @@ pub fn vested_amount(stream: &Stream, now: u64) -> Result<i128, Error> {
         return Ok(stream.total_amount);
     }
 
-    // vested = total_amount * elapsed / duration
-    // All casts from u64 to i128 are safe because u64::MAX < i128::MAX.
-    stream
-        .total_amount
-        .checked_mul(i128::from(elapsed)) // total_amount ∈ [0, i128::MAX], elapsed cast is lossless
-        .ok_or(Error::Overflow)? // propagate overflow
-        .checked_div(i128::from(stream.duration)) // duration > 0 at this point, cast is lossless
-        .ok_or(Error::Overflow) // propagate overflow (shouldn't happen for division by non-zero)
+    match &stream.curve {
+        ReleaseCurve::Linear => {
+            // vested = total_amount * elapsed / duration
+            // All casts from u64 to i128 are safe because u64::MAX < i128::MAX.
+            stream
+                .total_amount
+                .checked_mul(i128::from(elapsed)) // total_amount ∈ [0, i128::MAX], elapsed cast is lossless
+                .ok_or(Error::Overflow)? // propagate overflow
+                .checked_div(i128::from(stream.duration)) // duration > 0 at this point, cast is lossless
+                .ok_or(Error::Overflow) // propagate overflow (shouldn't happen for division by non-zero)
+        }
+        ReleaseCurve::Milestones(milestones) => {
+            // Effective schedule timestamp accounting for pauses.
+            let effective_time = stream.start_time.saturating_add(elapsed);
+
+            let mut cumulative_bps: u32 = 0;
+            for m in milestones.iter() {
+                if m.time <= effective_time {
+                    cumulative_bps = m.cumulative_bps;
+                } else {
+                    break;
+                }
+            }
+
+            if cumulative_bps == 0 {
+                return Ok(0);
+            }
+            if cumulative_bps >= BPS_DENOMINATOR {
+                return Ok(stream.total_amount);
+            }
+
+            stream
+                .total_amount
+                .checked_mul(i128::from(cumulative_bps))
+                .ok_or(Error::Overflow)?
+                .checked_div(i128::from(BPS_DENOMINATOR))
+                .ok_or(Error::Overflow)
+        }
+    }
 }
 
 /// Computes the amount available for withdrawal (vested - already released).
@@ -99,6 +190,7 @@ mod tests {
             paused_at: 0,
             total_paused_duration: 0,
             fee_bps: 0,
+            curve: ReleaseCurve::Linear,
         }
     }
 
@@ -272,5 +364,287 @@ mod tests {
                 case.0, case.1, case.2, case.3, case.4, case.5, result
             );
         }
+    }
+
+    // ── Milestone release curve tests ────────────────────────────────────────
+
+    fn milestone_stream(
+        env: &soroban_sdk::Env,
+        total_amount: i128,
+        start_time: u64,
+        end_time: u64,
+        steps: &[(u64, u32)],
+    ) -> Stream {
+        let mut ms = Vec::new(env);
+        for &(time, cumulative_bps) in steps {
+            ms.push_back(Milestone {
+                time,
+                cumulative_bps,
+            });
+        }
+        Stream {
+            id: 1,
+            sender: Address::generate(env),
+            recipient: Address::generate(env),
+            token: Address::generate(env),
+            total_amount,
+            released_amount: 0,
+            start_time,
+            end_time,
+            duration: end_time - start_time,
+            last_update: start_time,
+            status: StreamStatus::Active,
+            paused_at: 0,
+            total_paused_duration: 0,
+            fee_bps: 0,
+            curve: ReleaseCurve::Milestones(ms),
+        }
+    }
+
+    #[test]
+    fn test_milestone_before_between_on_and_after() {
+        let env = soroban_sdk::Env::default();
+        let stream = milestone_stream(
+            &env,
+            10_000,
+            1000,
+            2000,
+            &[(1250, 2_500), (1500, 6_000), (2000, 10_000)],
+        );
+
+        // Before start and before first milestone
+        assert_eq!(vested_amount(&stream, 500), Ok(0));
+        assert_eq!(vested_amount(&stream, 1000), Ok(0));
+        assert_eq!(vested_amount(&stream, 1249), Ok(0));
+
+        // Exactly on first milestone and between 1st and 2nd
+        assert_eq!(vested_amount(&stream, 1250), Ok(2_500));
+        assert_eq!(vested_amount(&stream, 1499), Ok(2_500));
+
+        // Exactly on second milestone and between 2nd and 3rd
+        assert_eq!(vested_amount(&stream, 1500), Ok(6_000));
+        assert_eq!(vested_amount(&stream, 1999), Ok(6_000));
+
+        // At and after last milestone / end_time
+        assert_eq!(vested_amount(&stream, 2000), Ok(10_000));
+        assert_eq!(vested_amount(&stream, 5000), Ok(10_000));
+    }
+
+    #[test]
+    fn test_milestone_single_100_percent() {
+        let env = soroban_sdk::Env::default();
+        let stream = milestone_stream(&env, 5_000, 1000, 2000, &[(1800, 10_000)]);
+
+        assert_eq!(vested_amount(&stream, 1000), Ok(0));
+        assert_eq!(vested_amount(&stream, 1799), Ok(0));
+        assert_eq!(vested_amount(&stream, 1800), Ok(5_000));
+        assert_eq!(vested_amount(&stream, 2000), Ok(5_000));
+    }
+
+    #[test]
+    fn test_milestone_at_start_time() {
+        let env = soroban_sdk::Env::default();
+        let stream = milestone_stream(
+            &env,
+            10_000,
+            1000,
+            2000,
+            &[(1000, 2_000), (2000, 10_000)],
+        );
+
+        // Before start_time nothing vests even with a milestone at start_time
+        assert_eq!(vested_amount(&stream, 999), Ok(0));
+        // At start_time the initial milestone unlocks immediately
+        assert_eq!(vested_amount(&stream, 1000), Ok(2_000));
+        assert_eq!(vested_amount(&stream, 1999), Ok(2_000));
+        assert_eq!(vested_amount(&stream, 2000), Ok(10_000));
+    }
+
+    #[test]
+    fn test_milestone_paused_mid_schedule_never_vests_extra() {
+        let env = soroban_sdk::Env::default();
+        let mut stream = milestone_stream(
+            &env,
+            10_000,
+            1000,
+            2000,
+            &[(1250, 2_500), (1500, 6_000), (2000, 10_000)],
+        );
+
+        // Pause at 1400 (after 1st milestone, before 2nd)
+        stream.status = StreamStatus::Paused;
+        stream.paused_at = 1400;
+
+        // Even well past 1500 and 2000, vested stays frozen at 2_500
+        assert_eq!(vested_amount(&stream, 1400), Ok(2_500));
+        assert_eq!(vested_amount(&stream, 1500), Ok(2_500));
+        assert_eq!(vested_amount(&stream, 3000), Ok(2_500));
+
+        // Resume after 300s pause: end_time extended by 300, total_paused_duration = 300
+        stream.status = StreamStatus::Active;
+        stream.paused_at = 0;
+        stream.total_paused_duration = 300;
+        stream.end_time = 2300;
+
+        // Effective time at now=1700 is 1400 -> still 2_500
+        assert_eq!(vested_amount(&stream, 1700), Ok(2_500));
+        // Effective time at now=1800 is 1500 -> 2nd milestone unlocks
+        assert_eq!(vested_amount(&stream, 1800), Ok(6_000));
+        // Effective time at now=2300 is 2000 -> fully vested
+        assert_eq!(vested_amount(&stream, 2300), Ok(10_000));
+    }
+
+    #[test]
+    fn test_milestone_small_amount_rounding_and_large_amount_overflow() {
+        let env = soroban_sdk::Env::default();
+        // 1 stroop: 50% floors to 0, 100% vests 1
+        let tiny = milestone_stream(&env, 1, 1000, 2000, &[(1500, 5_000), (2000, 10_000)]);
+        assert_eq!(vested_amount(&tiny, 1500), Ok(0));
+        assert_eq!(vested_amount(&tiny, 2000), Ok(1));
+
+        // i128::MAX at intermediate milestone overflows cleanly; at 10_000 bps returns total_amount
+        let huge = milestone_stream(
+            &env,
+            i128::MAX,
+            1000,
+            2000,
+            &[(1500, 5_000), (2000, 10_000)],
+        );
+        assert_eq!(vested_amount(&huge, 1500), Err(Error::Overflow));
+        assert_eq!(vested_amount(&huge, 2000), Ok(i128::MAX));
+    }
+
+    #[test]
+    fn test_validate_milestones_accepts_and_rejects() {
+        let env = soroban_sdk::Env::default();
+
+        // Empty -> InvalidSchedule
+        let empty: Vec<Milestone> = Vec::new(&env);
+        assert_eq!(
+            validate_milestones(&empty, 1000, 2000),
+            Err(Error::InvalidSchedule)
+        );
+
+        // Too many (> MAX_MILESTONES) -> InvalidSchedule
+        let mut too_many = Vec::new(&env);
+        for i in 0..=MAX_MILESTONES {
+            let bps = if i == MAX_MILESTONES { 10_000 } else { i * 100 };
+            too_many.push_back(Milestone {
+                time: 1000 + u64::from(i),
+                cumulative_bps: bps,
+            });
+        }
+        assert_eq!(
+            validate_milestones(&too_many, 1000, 2000),
+            Err(Error::InvalidSchedule)
+        );
+
+        // Duplicate timestamps -> InvalidSchedule
+        let mut dup = Vec::new(&env);
+        dup.push_back(Milestone {
+            time: 1500,
+            cumulative_bps: 5_000,
+        });
+        dup.push_back(Milestone {
+            time: 1500,
+            cumulative_bps: 10_000,
+        });
+        assert_eq!(
+            validate_milestones(&dup, 1000, 2000),
+            Err(Error::InvalidSchedule)
+        );
+
+        // Unsorted timestamps -> InvalidSchedule
+        let mut unsorted = Vec::new(&env);
+        unsorted.push_back(Milestone {
+            time: 1600,
+            cumulative_bps: 5_000,
+        });
+        unsorted.push_back(Milestone {
+            time: 1400,
+            cumulative_bps: 10_000,
+        });
+        assert_eq!(
+            validate_milestones(&unsorted, 1000, 2000),
+            Err(Error::InvalidSchedule)
+        );
+
+        // Outside [start_time, end_time] -> InvalidSchedule
+        let mut before_start = Vec::new(&env);
+        before_start.push_back(Milestone {
+            time: 999,
+            cumulative_bps: 10_000,
+        });
+        assert_eq!(
+            validate_milestones(&before_start, 1000, 2000),
+            Err(Error::InvalidSchedule)
+        );
+
+        let mut after_end = Vec::new(&env);
+        after_end.push_back(Milestone {
+            time: 2001,
+            cumulative_bps: 10_000,
+        });
+        assert_eq!(
+            validate_milestones(&after_end, 1000, 2000),
+            Err(Error::InvalidSchedule)
+        );
+
+        // Over 10_000 bps -> InvalidSchedule
+        let mut over_bps = Vec::new(&env);
+        over_bps.push_back(Milestone {
+            time: 2000,
+            cumulative_bps: 10_001,
+        });
+        assert_eq!(
+            validate_milestones(&over_bps, 1000, 2000),
+            Err(Error::InvalidSchedule)
+        );
+
+        // Decreasing bps -> InvalidSchedule
+        let mut dec_bps = Vec::new(&env);
+        dec_bps.push_back(Milestone {
+            time: 1500,
+            cumulative_bps: 6_000,
+        });
+        dec_bps.push_back(Milestone {
+            time: 1800,
+            cumulative_bps: 4_000,
+        });
+        dec_bps.push_back(Milestone {
+            time: 2000,
+            cumulative_bps: 10_000,
+        });
+        assert_eq!(
+            validate_milestones(&dec_bps, 1000, 2000),
+            Err(Error::InvalidSchedule)
+        );
+
+        // Does not end at 10_000 -> InvalidSchedule
+        let mut short_bps = Vec::new(&env);
+        short_bps.push_back(Milestone {
+            time: 2000,
+            cumulative_bps: 9_999,
+        });
+        assert_eq!(
+            validate_milestones(&short_bps, 1000, 2000),
+            Err(Error::InvalidSchedule)
+        );
+
+        // Valid schedule
+        let mut valid = Vec::new(&env);
+        valid.push_back(Milestone {
+            time: 1000,
+            cumulative_bps: 2_500,
+        });
+        valid.push_back(Milestone {
+            time: 1500,
+            cumulative_bps: 2_500,
+        }); // non-decreasing allowed
+        valid.push_back(Milestone {
+            time: 2000,
+            cumulative_bps: 10_000,
+        });
+        assert_eq!(validate_milestones(&valid, 1000, 2000), Ok(()));
     }
 }

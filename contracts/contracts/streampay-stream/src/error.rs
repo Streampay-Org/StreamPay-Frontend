@@ -68,4 +68,8 @@ pub enum Error {
     CooloffActive = 22,
     /// 23: Stream `total_amount` exceeds the configured per-token maximum cap.
     AmountTooLarge = 23,
+    /// 24: Milestone release schedule is empty, exceeds the maximum length,
+    ///     has unsorted or out-of-window timestamps, or invalid cumulative
+    ///     basis points.
+    InvalidSchedule = 24,
 }

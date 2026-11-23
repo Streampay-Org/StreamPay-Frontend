@@ -21,7 +21,7 @@
 #![allow(clippy::unwrap_used)] // proptest closures require `unwrap`
 #![allow(clippy::expect_used)]
 
-use crate::{release, Error, Stream, StreamStatus};
+use crate::{release, Error, Milestone, ReleaseCurve, Stream, StreamStatus};
 use proptest::prelude::*;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::Address;
@@ -53,6 +53,8 @@ fn make_stream(
         status: StreamStatus::Active,
         paused_at: 0,
         total_paused_duration: 0,
+        fee_bps: 0,
+        curve: ReleaseCurve::Linear,
     }
 }
 
@@ -244,5 +246,63 @@ proptest! {
         let mut stream = make_stream(&env, total, 0, start, end);
         stream.status = StreamStatus::Draft;
         prop_assert_eq!(release::vested_amount(&stream, now), Ok(0));
+    }
+
+    /// P9: Milestone streams are monotonically non-decreasing in time,
+    /// bounded by `total_amount`, and equal `total_amount` at `end_time`.
+    #[test]
+    fn prop_milestone_monotonic_bounded_and_full_at_end(
+        total in 1_i128..=1_000_000_000_i128,
+        start in 1_000_u64..=10_000_u64,
+        d1 in 1_u64..=1_000_u64,
+        d2 in 1_u64..=1_000_u64,
+        bps1 in 0_u32..=10_000_u32,
+        t1_offset in 0_u64..=3_000_u64,
+        dt in 0_u64..=1_000_u64,
+    ) {
+        let env = soroban_sdk::Env::default();
+        let m1_time = start + d1;
+        let end = m1_time + d2;
+        let mut ms = soroban_sdk::Vec::new(&env);
+        ms.push_back(Milestone { time: m1_time, cumulative_bps: bps1 });
+        ms.push_back(Milestone { time: end, cumulative_bps: 10_000 });
+
+        let mut stream = make_stream(&env, total, 0, start, end);
+        stream.curve = ReleaseCurve::Milestones(ms);
+
+        let now1 = start.saturating_add(t1_offset);
+        let now2 = now1.saturating_add(dt);
+
+        let v1 = release::vested_amount(&stream, now1).unwrap();
+        let v2 = release::vested_amount(&stream, now2).unwrap();
+        let v_end = release::vested_amount(&stream, end).unwrap();
+
+        prop_assert!(v1 >= 0 && v1 <= total);
+        prop_assert!(v2 >= 0 && v2 <= total);
+        prop_assert!(v1 <= v2, "milestone vested decreased: v1={v1} > v2={v2}");
+        prop_assert_eq!(v_end, total);
+    }
+
+    /// P10: Linear streams match the legacy formula `total * elapsed / duration`.
+    #[test]
+    fn prop_linear_matches_legacy_formula(
+        total in 1_i128..=1_000_000_000_i128,
+        start in 0_u64..=100_000_u64,
+        duration in 1_u64..=100_000_u64,
+        now in 0_u64..=250_000_u64,
+    ) {
+        let env = soroban_sdk::Env::default();
+        let end = start + duration;
+        let stream = make_stream(&env, total, 0, start, end);
+
+        let clamped = now.max(start).min(end);
+        let elapsed = clamped.saturating_sub(start);
+        let expected = if elapsed >= duration {
+            total
+        } else {
+            total * i128::from(elapsed) / i128::from(duration)
+        };
+
+        prop_assert_eq!(release::vested_amount(&stream, now), Ok(expected));
     }
 }

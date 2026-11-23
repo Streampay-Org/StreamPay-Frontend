@@ -38,12 +38,41 @@ pub enum StreamStatus {
     Cancelled,
 }
 
+/// Maximum number of milestones allowed in a [`ReleaseCurve::Milestones`] schedule.
+pub const MAX_MILESTONES: u32 = 32;
+
+/// A single stepped release checkpoint in a milestone schedule.
+///
+/// Once the stream's effective timestamp reaches `time`, at least
+/// `total_amount * cumulative_bps / 10_000` is vested.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct Milestone {
+    /// Ledger timestamp (seconds) at which this milestone unlocks.
+    pub time: u64,
+    /// Cumulative basis points vested at or after `time` (`0..=10_000`).
+    pub cumulative_bps: u32,
+}
+
+/// Vesting curve governing how a [`Stream`] releases funds over time.
+///
+/// - [`ReleaseCurve::Linear`] — continuous pro-rata vesting (default).
+/// - [`ReleaseCurve::Milestones`] — discrete stepped releases at configured
+///   `(time, cumulative_bps)` checkpoints.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum ReleaseCurve {
+    Linear,
+    Milestones(Vec<Milestone>),
+}
+
 /// On-chain record for a single payment stream.
 ///
 /// Each stream escrows `total_amount` from `sender` and releases it
-/// linearly to `recipient` from `start_time` to `end_time`. The
-/// `released_amount` tracks cumulative withdrawals; when it reaches
-/// `total_amount` the stream transitions to `Settled`.
+/// to `recipient` from `start_time` to `end_time` according to `curve`
+/// (linear by default, or discrete milestones). The `released_amount`
+/// tracks cumulative withdrawals; when it reaches `total_amount` the
+/// stream transitions to `Settled`.
 ///
 /// Paused streams record `paused_at` and `total_paused_duration` so
 /// that the resumption logic can extend `end_time` by the pause length
@@ -71,6 +100,8 @@ pub struct Stream {
     /// collector has been configured, the fee is skipped regardless of this
     /// value.
     pub fee_bps: u32,
+    /// Release schedule curve (`Linear` by default, or stepped `Milestones`).
+    pub curve: ReleaseCurve,
 }
 
 #[derive(Clone)]
@@ -527,6 +558,7 @@ mod tests {
             paused_at: 0,
             total_paused_duration: 0,
             fee_bps: 0,
+            curve: ReleaseCurve::Linear,
         }
     }
 
