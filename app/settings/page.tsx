@@ -160,8 +160,9 @@ export function SettingsPageContent({
           <p className="page-hero__description">
             Manage your account preferences and appearance settings.
           </p>
-          <nav aria-label="More settings">
+          <nav aria-label="More settings" style={{ display: 'flex', gap: '1rem' }}>
             <Link href="/settings/webhooks">Webhook console</Link>
+            <Link href="/exports">Data exports</Link>
           </nav>
         </div>
       </header>
