@@ -1822,6 +1822,7 @@
             "schema": {
               "type": "string",
               "pattern": "^G[A-Z2-7]{55}$",
+              "example": "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ"
               "example": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
             }
           }
@@ -3386,6 +3387,113 @@
         }
       }
     },
+    "/api/streams/stats": {
+      "get": {
+        "tags": ["Streams"],
+        "summary": "Get aggregate stream statistics",
+        "description": "Returns aggregate counts by stream status and exact BigInt escrowed/released totals per token for all streams visible to the caller in the resolved tenant.",
+        "operationId": "getStreamStats",
+        "parameters": [
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Strong ETag from a previous response for conditional 304 revalidation.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aggregate stream statistics.",
+            "headers": {
+              "ETag": {
+                "description": "Strong ETag of the stats payload.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "links"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["counts", "totals", "skipped"],
+                      "properties": {
+                        "counts": {
+                          "type": "object",
+                          "required": ["draft", "active", "paused", "ended", "withdrawn", "cancelled"],
+                          "properties": {
+                            "draft": { "type": "integer", "minimum": 0 },
+                            "active": { "type": "integer", "minimum": 0 },
+                            "paused": { "type": "integer", "minimum": 0 },
+                            "ended": { "type": "integer", "minimum": 0 },
+                            "withdrawn": { "type": "integer", "minimum": 0 },
+                            "cancelled": { "type": "integer", "minimum": 0 }
+                          }
+                        },
+                        "totals": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "required": ["escrowed", "released"],
+                            "properties": {
+                              "escrowed": {
+                                "type": "string",
+                                "pattern": "^\\d+$",
+                                "description": "Total escrowed base units as a base-10 integer string."
+                              },
+                              "released": {
+                                "type": "string",
+                                "pattern": "^\\d+$",
+                                "description": "Total released base units as a base-10 integer string."
+                              }
+                            }
+                          }
+                        },
+                        "skipped": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Number of streams skipped from totals due to unparsable amount strings."
+                        }
+                      }
+                    },
+                    "links": {
+                      "type": "object",
+                      "required": ["self"],
+                      "properties": {
+                        "self": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Not Modified — ETag matched If-None-Match."
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
     "/api/streams/{id}": {
       "parameters": [
         {
@@ -3546,10 +3654,22 @@
       "post": {
         "operationId": "updateStream",
         "summary": "Update a payment stream (v1, deprecated)",
-        "description": "Partially updates a stream by merging the request body fields. **Deprecated** — there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.\n\nThe `updatedAt` field is always refreshed. Cache is invalidated on success.",
+        "description": "Partially updates a stream by merging the request body fields. **Deprecated** — there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.\n\nRequires an `If-Match` header carrying the stream's current strong `ETag` (or `*`) for optimistic concurrency control. Returns `428 Precondition Required` when missing (unless relaxed via `STREAMPAY_REQUIRE_IF_MATCH=false`) and `412 Precondition Failed` (with the current `ETag` header) when stale. The `updatedAt` field is always refreshed and cache is invalidated on success.",
         "deprecated": true,
         "tags": [
           "Streams v1"
+        ],
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "Strong ETag from the latest `GET /api/streams/{id}` response (or `*`). Compared using RFC 9110 strong comparison; weak (`W/`) tags never match.",
+            "schema": {
+              "type": "string",
+              "example": "\"5f9c1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab\""
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -3593,6 +3713,15 @@
         "responses": {
           "200": {
             "description": "Stream updated.",
+            "headers": {
+              "ETag": {
+                "description": "Fresh strong entity-tag computed for the updated stream.",
+                "schema": {
+                  "type": "string",
+                  "example": "\"a1b2c3d4e5f6...\""
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -3677,6 +3806,49 @@
           },
           "404": {
             "$ref": "#/components/responses/404"
+          },
+          "412": {
+            "description": "Precondition failed — the `If-Match` ETag does not match the current stream state.",
+            "headers": {
+              "ETag": {
+                "description": "Current strong entity-tag of the stream.",
+                "schema": {
+                  "type": "string",
+                  "example": "\"5f9c1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab\""
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "PRECONDITION_FAILED",
+                    "message": "Stream has been modified since the provided ETag; re-fetch and retry",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition required — `If-Match` header is missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "PRECONDITION_REQUIRED",
+                    "message": "If-Match header with the current stream ETag is required for updates",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
           },
           "429": {
             "description": "Rate limit exceeded.",
@@ -4803,6 +4975,44 @@
             "bearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "description": "Maximum number of streams to return per page."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque pagination cursor returned by a previous page."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "active",
+                "paused",
+                "ended"
+              ]
+            },
+            "description": "Filter streams by lifecycle status."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Paginated stream list.",
@@ -4864,7 +5074,7 @@
                           "settlement": {
                             "tx_hash": "c3f8a12e4b76",
                             "settled_at": "2024-02-01T12:00:00.000Z",
-                            "amount": "360 XLM",
+                            "amount": "3600000000",
                             "currency": "XLM"
                           }
                         }
@@ -4882,7 +5092,42 @@
                   "empty-list": {
                     "summary": "No streams for this user",
                     "value": {
-                      "streams": []
+                      "streams": [],
+                      "meta": {
+                        "hasNext": false,
+                        "nextCursor": null,
+                        "total": 0
+                      },
+                      "links": {
+                        "self": "/api/v2/streams?limit=20"
+                      }
+                    }
+                  },
+                  "paginated-first-page": {
+                    "summary": "First page with more results available",
+                    "value": {
+                      "streams": [
+                        {
+                          "id": "stream_lf3k9z",
+                          "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                          "rate": "120 XLM/month",
+                          "status": "active",
+                          "allowed_actions": [
+                            "pause",
+                            "stop"
+                          ],
+                          "created_at": "2024-01-15T10:00:00.000Z",
+                          "settlement": null
+                        }
+                      ],
+                      "meta": {
+                        "hasNext": true,
+                        "nextCursor": "eyJpZCI6InN0cmVhbV9sZjNrOXoifQ==",
+                        "total": 25
+                      },
+                      "links": {
+                        "self": "/api/v2/streams?limit=1"
+                      }
                     }
                   }
                 }
@@ -4900,6 +5145,7 @@
       "post": {
         "operationId": "createStreamV2",
         "summary": "Create a payment stream (v2)",
+        "description": "Creates a payment stream using the v2 request and response shape. Requires bearer authentication and returns the created stream.",
         "description": "Creates a v2 payment stream for the authenticated sender and returns its initial representation.",
         "tags": [
           "Streams"
@@ -4982,16 +5228,35 @@
                 "schema": {
                   "$ref": "#/components/schemas/StreamV2"
                 },
-                "example": {
-                  "id": "stream_lf3k9z",
-                  "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
-                  "rate": "120 XLM/month",
-                  "status": "draft",
-                  "allowed_actions": [
-                    "start"
-                  ],
-                  "created_at": "2024-01-15T10:00:00.000Z",
-                  "settlement": null
+                "examples": {
+                  "draft-xlm": {
+                    "summary": "Created draft stream in XLM",
+                    "value": {
+                      "id": "stream_lf3k9z",
+                      "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                      "rate": "120 XLM/month",
+                      "status": "draft",
+                      "allowed_actions": [
+                        "start"
+                      ],
+                      "created_at": "2024-01-15T10:00:00.000Z",
+                      "settlement": null
+                    }
+                  },
+                  "draft-usdc": {
+                    "summary": "Created draft stream in USDC",
+                    "value": {
+                      "id": "stream_usdc01",
+                      "recipient": "GDEF1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFGH",
+                      "rate": "500 USDC/week",
+                      "status": "draft",
+                      "allowed_actions": [
+                        "start"
+                      ],
+                      "created_at": "2024-01-15T10:00:00.000Z",
+                      "settlement": null
+                    }
+                  }
                 }
               }
             }
@@ -5288,7 +5553,7 @@
                         "settlement": {
                           "tx_hash": "c3f8a12e4b76",
                           "settled_at": "2024-02-01T12:00:00.000Z",
-                          "amount": "360 XLM",
+                          "amount": "3600000000",
                           "currency": "XLM"
                         }
                       },
@@ -5674,7 +5939,7 @@
                       "settlement": {
                         "tx_hash": "c3f8a12e4b76",
                         "settled_at": "2024-02-01T12:00:00.000Z",
-                        "amount": "360 XLM",
+                        "amount": "3600000000",
                         "currency": "XLM"
                       }
                     }
@@ -5689,9 +5954,10 @@
                       "allowed_actions": [],
                       "created_at": "2024-01-20T09:00:00.000Z",
                       "settlement": {
+                        "tx_hash": "000000000000",
                         "tx_hash": "a9d2c17e5f43",
                         "settled_at": "2024-01-20T09:05:00.000Z",
-                        "amount": "0 XLM",
+                        "amount": "0",
                         "currency": "XLM"
                       }
                     }
@@ -5799,6 +6065,19 @@
                 "properties": {
                   "eventType": {
                     "type": "string",
+                    "enum": ["second", "minute", "hour", "day", "week", "month", "year"],
+                    "description": "Payment interval.",
+                    "example": "month"
+                  },
+                  "token": {
+                    "type": "string",
+                    "description": "Stellar asset code (optional, defaults to XLM).",
+                    "example": "XLM"
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "description": "Optional organization that owns this stream and whose configured quota applies.",
+                    "example": "org-acme"
                     "example": "payment.received"
                   }
                 }
@@ -5842,6 +6121,23 @@
               }
             }
           },
+          "422": { "$ref": "#/components/responses/422" },
+          "429": {
+            "description": "Rate limit or configured stream quota exceeded. Retry-After is set for rate limits and monthly-volume quota rejections.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the client may retry. Present for rate limits and monthly-volume quota rejections.",
+                "schema": { "type": "integer" }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "error": {
+                    "code": "QUOTA_ACTIVE_STREAMS_EXCEEDED",
+                    "message": "The user has 2 active streams; the configured limit is 2.",
+                    "request_id": "req_01HZ9ABCDEF"
           "500": {
             "$ref": "#/components/responses/500"
           }
@@ -5905,6 +6201,7 @@
       "get": {
         "operationId": "listWebhookDeliveries",
         "summary": "List webhook delivery attempts",
+        "description": "Returns paginated webhook delivery attempts, including their status, retry count, and related endpoint.",
         "description": "Lists webhook delivery attempts with pagination for the authenticated caller.",
         "security": [],
         "tags": [
@@ -6172,6 +6469,7 @@
                         "failed": 2,
                         "pending": 0,
                         "dlq": 0,
+                        "stale": 0,
                         "success_rate_pct": 99.87
                       }
                     }
@@ -6193,7 +6491,8 @@
                         "failed": 8,
                         "pending": 2,
                         "dlq": 3,
-                        "success_rate_pct": 99.33
+                        "stale": 1,
+                        "success_rate_pct": 99.27
                       }
                     }
                   },
@@ -6214,7 +6513,8 @@
                         "failed": 50,
                         "pending": 30,
                         "dlq": 15,
-                        "success_rate_pct": 60
+                        "stale": 5,
+                        "success_rate_pct": 64.86
                       }
                     }
                   }
@@ -6957,6 +7257,41 @@
           "content": {
             "application/json": {
               "schema": {
+                "type": "object",
+                "required": ["recipient", "rate", "schedule"],
+                "properties": {
+                  "recipient": {
+                    "type": "string",
+                    "description": "Stellar public key of the recipient (56-character G… address).",
+                    "example": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG"
+                  },
+                  "rate": {
+                    "type": "string",
+                    "description": "Positive decimal payment amount per schedule interval (max 7 decimal places).",
+                    "example": "120"
+                  },
+                  "schedule": {
+                    "type": "string",
+                    "enum": ["second", "minute", "hour", "day", "week", "month", "year"],
+                    "description": "Payment interval.",
+                    "example": "month"
+                  },
+                  "token": {
+                    "type": "string",
+                    "description": "Stellar asset code (optional, defaults to XLM).",
+                    "example": "XLM"
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "description": "Optional organization that owns this stream and whose configured quota applies.",
+                    "example": "org-acme"
+                  }
+                }
+              },
+              "example": {
+                "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                "rate": "120",
+                "schedule": "month"
                 "type": "object"
               }
             }
@@ -6973,11 +7308,39 @@
               }
             }
           },
+          "400": { "$ref": "#/components/responses/400" },
+          "401": { "$ref": "#/components/responses/401" },
+          "422": { "$ref": "#/components/responses/422" },
+          "429": {
+            "description": "Daily creation limit or configured stream quota exceeded. Retry-After indicates when the applicable quota resets.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the daily limit resets at UTC midnight or monthly volume quota resets at the next UTC month.",
+                "schema": { "type": "integer" }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "error": {
+                    "code": "QUOTA_MONTHLY_VOLUME_EXCEEDED",
+                    "message": "The user has used 1000000000 of 1000000000 monthly XLM stroops.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "500": { "$ref": "#/components/responses/500" }
           "400": {
             "$ref": "#/components/responses/400"
           },
           "401": {
             "$ref": "#/components/responses/401"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
           }
         }
       }
@@ -7561,6 +7924,7 @@
               }
             }
           },
+          "412": {
           "409": {
             "description": "Optimistic concurrency conflict (If-Match ETag mismatch)",
             "content": {

@@ -76,6 +76,7 @@ describe('CORS middleware', () => {
     delete (process.env as any).JWT_SECRET;
     delete (process.env as any).NODE_ENV;
     delete (process.env as any).ALLOWED_ORIGINS;
+    delete (process.env as any).CORS_MAX_AGE_SECONDS;
   });
 
   it('adds CORS headers for allowed origins on normal requests', async () => {
@@ -88,6 +89,7 @@ describe('CORS middleware', () => {
 
     expect(response.headers.get('access-control-allow-origin')).toBe('https://allowed.example.com');
     expect(response.headers.get('vary')).toBe('Origin');
+    expect(response.headers.get('access-control-max-age')).toBeNull();
   });
 
   it('rejects disallowed origin with 403 and error envelope', async () => {
@@ -125,6 +127,44 @@ describe('CORS middleware', () => {
     expect(response.headers.get('access-control-allow-origin')).toBe('https://allowed.example.com');
     expect(response.headers.get('access-control-allow-methods')).toContain('GET');
     expect(response.headers.get('access-control-allow-headers')).toContain('authorization');
+    expect(response.headers.get('access-control-max-age')).toBe('600');
+  });
+
+  it('uses the configured max-age on preflight responses', async () => {
+    jest.resetModules();
+    (process.env as any).CORS_MAX_AGE_SECONDS = '120';
+    const imported = await import('./middleware');
+
+    const request = new Request('https://api.example.com/api/health', {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://allowed.example.com',
+        'access-control-request-method': 'POST',
+      },
+    });
+
+    const response = await imported.middleware(request as any);
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get('access-control-max-age')).toBe('120');
+  });
+
+  it('falls back to the default max-age for invalid configuration', async () => {
+    jest.resetModules();
+    (process.env as any).CORS_MAX_AGE_SECONDS = 'invalid';
+    const imported = await import('./middleware');
+
+    const request = new Request('https://api.example.com/api/health', {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://allowed.example.com',
+        'access-control-request-method': 'POST',
+      },
+    });
+
+    const response = await imported.middleware(request as any);
+
+    expect(response.status).toBe(204);
     expect(response.headers.get('access-control-max-age')).toBe('600');
   });
 

@@ -167,7 +167,7 @@ describe("Stream Details Route - GET /api/streams/:id and mutations", () => {
       // POST updates stream and invalidates cache
       const reqPOST = new Request(`http://localhost/api/streams/${streamId}`, {
         method: "POST",
-        headers: { "x-tenant-id": tenantId, "Content-Type": "application/json" },
+        headers: { "x-tenant-id": tenantId, "Content-Type": "application/json", "If-Match": "*" },
         body: JSON.stringify({ label: "Updated Label" }),
       });
       const resPOST = await POST(reqPOST, { params: Promise.resolve({ id: streamId }) });
@@ -218,7 +218,7 @@ describe("Stream Details Route - GET /api/streams/:id and mutations", () => {
   it("handles malformed JSON body in POST", async () => {
     const reqPOST = new Request(`http://localhost/api/streams/${streamId}`, {
       method: "POST",
-      headers: { "x-tenant-id": tenantId, "Content-Type": "application/json" },
+      headers: { "x-tenant-id": tenantId, "Content-Type": "application/json", "If-Match": "*" },
       body: "invalid-json",
     });
     const resPOST = await POST(reqPOST, { params: Promise.resolve({ id: streamId }) });
@@ -436,14 +436,17 @@ describe("Stream Details Route - GET /api/streams/:id ETag + 304 short-circuit",
 
     const req = new Request(`http://localhost/api/streams/${streamId}`, {
       method: "POST",
-      headers: { "x-tenant-id": tenantId, "Content-Type": "application/json" },
+      headers: { "x-tenant-id": tenantId, "Content-Type": "application/json", "If-Match": before },
       body: JSON.stringify({ label: "Renamed Stream" }),
     });
     const post = await POST(req, { params: Promise.resolve({ id: streamId }) });
     expect(post.status).toBe(200);
+    expect(post.headers.get("ETag")).toBeTruthy();
+    expect(post.headers.get("ETag")).not.toBe(before);
 
     const after = await getEtag(streamId, tenantId);
     expect(after).not.toBe(before);
+    expect(post.headers.get("ETag")).toBe(after);
   });
 
   it("replays the same ETag for two back-to-back GETs of the same resource", async () => {
@@ -504,4 +507,218 @@ describe("Stream Details Route - GET /api/streams/:id ETag + 304 short-circuit",
     expect(res.status).toBe(200);
     return res.headers.get("ETag") as string;
   }
+});
+
+describe("Stream Details Route - POST /api/streams/:id If-Match optimistic concurrency", () => {
+  const streamId = "stream-ada";
+  const tenantId = "org-acme";
+
+  beforeEach(() => {
+    resetDb();
+    resetRateLimitStore();
+    delete process.env.STREAMPAY_REQUIRE_IF_MATCH;
+    process.env.STREAMPAY_CACHE_DISABLED = "true";
+
+    const stream = db.streams.get(streamId);
+    if (stream) {
+      (stream as any).tenant = tenantId;
+      db.streams.set(streamId, stream);
+    }
+  });
+
+  afterEach(() => {
+    delete process.env.STREAMPAY_REQUIRE_IF_MATCH;
+  });
+
+  async function fetchCurrentEtag(id = streamId, tenant = tenantId): Promise<string> {
+    const res = await GET(
+      new Request(`http://localhost/api/streams/${id}`, {
+        method: "GET",
+        headers: { "x-tenant-id": tenant },
+      }),
+      { params: Promise.resolve({ id }) }
+    );
+    expect(res.status).toBe(200);
+    return res.headers.get("ETag") as string;
+  }
+
+  it("returns 428 PRECONDITION_REQUIRED when If-Match is missing and does not modify stream", async () => {
+    const before = { ...db.streams.get(streamId) };
+    const req = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: { "x-tenant-id": tenantId, "Content-Type": "application/json" },
+      body: JSON.stringify({ rate: "999" }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: streamId }) });
+    expect(res.status).toBe(428);
+    const body = await res.json();
+    expect(body.error.code).toBe("PRECONDITION_REQUIRED");
+    expect(body.error.message).toBeTruthy();
+    expect(db.streams.get(streamId)).toEqual(before);
+  });
+
+  it("allows missing If-Match when STREAMPAY_REQUIRE_IF_MATCH=false, but still rejects stale If-Match", async () => {
+    process.env.STREAMPAY_REQUIRE_IF_MATCH = "false";
+
+    const reqNoHeader = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: { "x-tenant-id": tenantId, "Content-Type": "application/json" },
+      body: JSON.stringify({ rate: "250" }),
+    });
+    const resOk = await POST(reqNoHeader, { params: Promise.resolve({ id: streamId }) });
+    expect(resOk.status).toBe(200);
+    expect(resOk.headers.get("ETag")).toMatch(/^"[0-9a-f]{64}"$/);
+
+    const reqStale = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": '"stale-tag"',
+      },
+      body: JSON.stringify({ rate: "300" }),
+    });
+    const resStale = await POST(reqStale, { params: Promise.resolve({ id: streamId }) });
+    expect(resStale.status).toBe(412);
+  });
+
+  it("returns 412 PRECONDITION_FAILED with current ETag when If-Match is stale and does not modify stream", async () => {
+    const currentEtag = await fetchCurrentEtag();
+    const before = { ...db.streams.get(streamId) };
+
+    const req = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": '"0000000000000000000000000000000000000000000000000000000000000000"',
+      },
+      body: JSON.stringify({ rate: "999" }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: streamId }) });
+    expect(res.status).toBe(412);
+    expect(res.headers.get("ETag")).toBe(currentEtag);
+    const body = await res.json();
+    expect(body.error.code).toBe("PRECONDITION_FAILED");
+    expect(body.error.message).toBeTruthy();
+    expect(db.streams.get(streamId)).toEqual(before);
+  });
+
+  it("rejects weak ETag (W/) in If-Match with 412 per RFC 9110 strong comparison", async () => {
+    const currentEtag = await fetchCurrentEtag();
+    const before = { ...db.streams.get(streamId) };
+
+    const req = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": `W/${currentEtag}`,
+      },
+      body: JSON.stringify({ rate: "999" }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: streamId }) });
+    expect(res.status).toBe(412);
+    expect(res.headers.get("ETag")).toBe(currentEtag);
+    expect(db.streams.get(streamId)).toEqual(before);
+  });
+
+  it("accepts matching strong ETag in a multi-tag If-Match list and returns a fresh ETag", async () => {
+    const currentEtag = await fetchCurrentEtag();
+
+    const req = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": `"other-tag", ${currentEtag}, W/"weak-tag"`,
+      },
+      body: JSON.stringify({ rate: "321" }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: streamId }) });
+    expect(res.status).toBe(200);
+    const newEtag = res.headers.get("ETag");
+    expect(newEtag).toMatch(/^"[0-9a-f]{64}"$/);
+    expect(newEtag).not.toBe(currentEtag);
+  });
+
+  it("accepts wildcard If-Match: * and returns a fresh ETag", async () => {
+    const currentEtag = await fetchCurrentEtag();
+
+    const req = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": "*",
+      },
+      body: JSON.stringify({ rate: "456" }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: streamId }) });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("ETag")).not.toBe(currentEtag);
+  });
+
+  it("returns 412 when the stream is mutated by a lifecycle action between GET and POST", async () => {
+    const initialEtag = await fetchCurrentEtag();
+
+    // Simulate a lifecycle mutation (e.g. pause) changing the stream in DB
+    const stream = db.streams.get(streamId)!;
+    db.streams.set(streamId, {
+      ...stream,
+      status: "paused",
+      updatedAt: "2099-01-01T00:00:00.000Z",
+    });
+
+    const req = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": initialEtag,
+      },
+      body: JSON.stringify({ rate: "777" }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: streamId }) });
+    expect(res.status).toBe(412);
+    expect(res.headers.get("ETag")).not.toBe(initialEtag);
+  });
+
+  it("serializes two concurrent writers with the same ETag: one gets 200, one gets 412", async () => {
+    const initialEtag = await fetchCurrentEtag();
+
+    const req1 = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": initialEtag,
+      },
+      body: JSON.stringify({ rate: "111" }),
+    });
+    const req2 = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": initialEtag,
+      },
+      body: JSON.stringify({ rate: "222" }),
+    });
+
+    const [res1, res2] = await Promise.all([
+      POST(req1, { params: Promise.resolve({ id: streamId }) }),
+      POST(req2, { params: Promise.resolve({ id: streamId }) }),
+    ]);
+
+    const statuses = [res1.status, res2.status].sort((a, b) => a - b);
+    expect(statuses).toEqual([200, 412]);
+
+    const winner = res1.status === 200 ? res1 : res2;
+    const loser = res1.status === 412 ? res1 : res2;
+    const winnerEtag = winner.headers.get("ETag");
+    expect(winnerEtag).toBeTruthy();
+    expect(winnerEtag).not.toBe(initialEtag);
+    expect(loser.headers.get("ETag")).toBe(winnerEtag);
+  });
 });

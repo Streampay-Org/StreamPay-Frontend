@@ -133,18 +133,21 @@ pub fn sweep_fees(env: &Env, admin: &Address, stream_ids: &Vec<u64>) -> Result<S
             continue;
         }
 
-        // Resolve the token address for this stream.  If the stream row is
-        // missing (e.g. the caller passed a stale or invalid ID) we skip it
-        // rather than aborting the whole sweep.
-        let stream = match storage::get_stream(env, stream_id) {
-            Some(s) => s,
-            None => continue,
+        // Resolve the token address for this stream (single-stream or split
+        // stream).  If the stream row is missing (e.g. the caller passed a
+        // stale or invalid ID) we skip it rather than aborting the whole sweep.
+        let token = match storage::get_stream(env, stream_id) {
+            Some(s) => s.token,
+            None => match crate::multi::peek_split_stream(env, stream_id) {
+                Some(s) => s.token,
+                None => continue,
+            },
         };
 
         // Checked accumulation to prevent integer manipulation attacks.
         total_swept = total_swept.checked_add(balance).ok_or(Error::Overflow)?;
 
-        streams_with_fees.push_back((stream_id, stream.token, balance));
+        streams_with_fees.push_back((stream_id, token, balance));
     }
 
     // ── 5. Guard: nothing to sweep ───────────────────────────────────────────

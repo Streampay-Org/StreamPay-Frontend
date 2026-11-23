@@ -1057,3 +1057,40 @@ fn gas_snap_no_panic_on_large_values() {
     // Large values should not cause ceiling blowout beyond what is reasonable.
     assert_budget_ceiling(&snap, 320_000, 60_000, 100, 1_400);
 }
+
+/// Gas snapshot for `withdraw_many` across 5 active streams.
+#[test]
+fn gas_snap_withdraw_many() {
+    let data = gas_setup();
+    let client = gas_initialized(&data);
+
+    let mut ids = soroban_sdk::Vec::new(&data.env);
+    for i in 0..5u64 {
+        let start = 1_100 + i * 10;
+        let end = start + 1_000;
+        let id = client.create_stream(
+            &data.sender,
+            &data.recipient,
+            &data.token,
+            &1_000i128,
+            &start,
+            &end,
+            &0u32,
+        );
+        ids.push_back(id);
+    }
+
+    // Advance to midpoint so all 5 streams have withdrawable balances.
+    data.env.ledger().set_timestamp(1_600);
+
+    let (outcomes, snap) =
+        measure_invocation(&data.env, || client.withdraw_many(&data.recipient, &ids));
+
+    assert_eq!(outcomes.len(), 5);
+    for outcome in outcomes.iter() {
+        assert_eq!(outcome.error, None);
+        assert!(outcome.amount > 0);
+    }
+
+    assert_budget_ceiling(&snap, 1_500_000, 250_000, 100, 5_000);
+}

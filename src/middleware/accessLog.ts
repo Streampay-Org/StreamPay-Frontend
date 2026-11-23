@@ -1,4 +1,6 @@
 import { getCorrelationContext, logger } from "@/app/lib/logger";
+import { isInsideRouteSpan } from "@/lib/routeSpan";
+import { observeHttpRequest } from "@/src/metrics/registry";
 
 export interface AccessLogContext {
   method: string;
@@ -76,4 +78,13 @@ export function logAccessEvent(context: AccessLogContext): void {
   }
 
   logger.info("http access", payload);
+
+  if (!isInsideRouteSpan() && context.durationMs !== undefined) {
+    observeHttpRequest(
+      context.method,
+      context.path,
+      context.status,
+      context.durationMs / 1000,
+    );
+  }
 }

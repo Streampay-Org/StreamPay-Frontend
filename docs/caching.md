@@ -58,6 +58,29 @@ emit a fresh `ETag`. Because `updatedAt` is updated on every successful
 `POST`, even a no-op body change produces a new ETag if the timestamp tick
 advances.
 
+## Optimistic Concurrency: `If-Match` on `POST /api/streams/{id}`
+
+To prevent concurrent editors from silently overwriting each other,
+`POST /api/streams/{id}` enforces optimistic concurrency control using the
+strong `ETag` returned by `GET /api/streams/{id}`:
+
+- **Missing `If-Match`** — returns `428 Precondition Required`
+  (`code: "PRECONDITION_REQUIRED"`).
+- **Stale or weak `If-Match`** — evaluated using RFC 9110 §8.8.3.2 **strong
+  comparison** (`W/` weak tags never match). On mismatch, returns
+  `412 Precondition Failed` (`code: "PRECONDITION_FAILED"`) with the current
+  `ETag` header so the client can re-fetch and retry.
+- **Matching `If-Match` (or `*`)** — applies the update inside the per-stream
+  lock (`withLock`), invalidates the cache, and returns `200 OK` with the fresh
+  `ETag` header.
+
+### Migration Transition Flag
+
+`If-Match` is required by default. During client migration windows, set
+`STREAMPAY_REQUIRE_IF_MATCH=false` (or `0`) to relax the `428` requirement when
+the header is omitted. Even when relaxed, any `If-Match` header that *is*
+supplied is still validated and returns `412` on mismatch.
+
 ## Example Session
 
 ```http

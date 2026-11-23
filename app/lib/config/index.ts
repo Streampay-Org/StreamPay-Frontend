@@ -63,7 +63,13 @@ interface OptionalEnvVars {
   ANOMALY_SETTLE_THRESHOLD?: string;
   /** Anomaly detection threshold for stream cancel burst */
   ANOMALY_CANCEL_THRESHOLD?: string;
+  /** Audit log persistence backend: memory (default) or postgres */
+  AUDIT_LOG_STORE?: string;
+  /** Postgres connection URL (required when AUDIT_LOG_STORE=postgres) */
+  DATABASE_URL?: string;
 }
+
+export type EventBusTransportType = 'memory' | 'redis';
 
 /**
  * Validated configuration
@@ -84,6 +90,10 @@ export interface ValidatedConfig {
     currentKeyId: string;
     keys: Record<string, string>;
     allowedClockSkewSeconds: number;
+  };
+  auditLog: {
+    store: 'memory' | 'postgres';
+    databaseUrl?: string;
   };
 }
 
@@ -420,6 +430,104 @@ function validateAnomalyThresholds(
 }
 
 /**
+ * Validate event bus transport configuration.
+ * Defaults to 'memory'. When 'redis' is selected, EVENT_BUS_REDIS_URL is required
+ * and must be a valid redis:// or rediss:// URL.
+ */
+export function validateEventBusConfig(
+  transportRaw?: string,
+  redisUrlRaw?: string
+): { transport: EventBusTransportType; redisUrl?: string } {
+  const normalized = (transportRaw ?? '').trim().toLowerCase();
+  const transport: EventBusTransportType =
+    normalized === '' ? 'memory' : (normalized as EventBusTransportType);
+
+  if (transport !== 'memory' && transport !== 'redis') {
+    throw new ConfigValidationError(
+      `Invalid EVENT_BUS_TRANSPORT: ${transportRaw}. Supported transports: memory, redis`
+    );
+  }
+
+  if (transport === 'redis') {
+    const redisUrl = (redisUrlRaw ?? '').trim();
+    if (!redisUrl) {
+      throw new ConfigValidationError(
+        'EVENT_BUS_REDIS_URL environment variable is required when EVENT_BUS_TRANSPORT=redis'
+      );
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(redisUrl);
+    } catch {
+      throw new ConfigValidationError(
+        'EVENT_BUS_REDIS_URL must be a valid redis:// or rediss:// URL'
+      );
+    }
+
+    if (parsed.protocol !== 'redis:' && parsed.protocol !== 'rediss:') {
+      throw new ConfigValidationError(
+        `EVENT_BUS_REDIS_URL must use redis:// or rediss:// protocol (received: ${parsed.protocol})`
+      );
+    }
+
+    return { transport, redisUrl };
+  }
+
+  return { transport };
+}
+
+/**
+ * Validate audit log storage configuration
+ */
+function validateAuditLogConfig(
+  storeRaw?: string,
+  databaseUrl?: string
+): ValidatedConfig['auditLog'] {
+  const store = (storeRaw?.trim() || 'memory').toLowerCase();
+
+  if (store !== 'memory' && store !== 'postgres') {
+    throw new ConfigValidationError(
+      `Invalid AUDIT_LOG_STORE: ${storeRaw}. Supported values: memory, postgres`
+    );
+  }
+
+  if (store === 'postgres') {
+    const trimmedUrl = databaseUrl?.trim();
+    if (!trimmedUrl) {
+      throw new ConfigValidationError(
+        'DATABASE_URL environment variable is required when AUDIT_LOG_STORE=postgres'
+      );
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmedUrl);
+    } catch {
+      throw new ConfigValidationError(
+        'DATABASE_URL must be a valid Postgres connection URL (postgres:// or postgresql://)'
+      );
+    }
+
+    if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') {
+      throw new ConfigValidationError(
+        'DATABASE_URL must use the postgres:// or postgresql:// protocol'
+      );
+    }
+
+    return {
+      store: 'postgres',
+      databaseUrl: trimmedUrl,
+    };
+  }
+
+  return {
+    store: 'memory',
+    databaseUrl: databaseUrl?.trim() || undefined,
+  };
+}
+
+/**
  * Main configuration validation function
  * Call this at application boot to fail-fast on invalid configuration
  * 
@@ -452,6 +560,7 @@ export function validateConfig(): ValidatedConfig {
   );
 
   const internalServiceAuth = validateInternalServiceAuth(env);
+  const auditLog = validateAuditLogConfig(env.AUDIT_LOG_STORE, env.DATABASE_URL);
   
   const config: ValidatedConfig = {
     network: networkProfile,
@@ -462,9 +571,41 @@ export function validateConfig(): ValidatedConfig {
     allowedOrigins,
     anomalyThresholds,
     internalServiceAuth,
+    auditLog,
   };
-  
+
+  if (lastValidatedNetwork !== null && lastValidatedNetwork !== networkProfile.name) {
+    notifyNetworkChange();
+  }
+  lastValidatedNetwork = networkProfile.name;
+
   return config;
+}
+
+/**
+ * Listener invoked when the active Stellar network changes or config cache is reset.
+ */
+export type NetworkChangeListener = () => void;
+
+const networkChangeListeners = new Set<NetworkChangeListener>();
+let lastValidatedNetwork: StellarNetwork | null = null;
+
+function notifyNetworkChange(): void {
+  for (const listener of networkChangeListeners) {
+    listener();
+  }
+}
+
+/**
+ * Register a callback to be invoked whenever the configured Stellar network
+ * changes on re-validation or when `resetConfigCache()` is called explicitly.
+ * Returns an unsubscribe function.
+ */
+export function onNetworkChange(listener: NetworkChangeListener): () => void {
+  networkChangeListeners.add(listener);
+  return () => {
+    networkChangeListeners.delete(listener);
+  };
 }
 
 /**
@@ -480,8 +621,11 @@ export function getConfig(): ValidatedConfig {
 }
 
 /**
- * Reset cached configuration (useful for testing)
+ * Reset cached configuration (useful for testing).
+ * Always notifies registered network-change listeners so caches are flushed immediately.
  */
 export function resetConfigCache(): void {
   cachedConfig = null;
+  lastValidatedNetwork = null;
+  notifyNetworkChange();
 }

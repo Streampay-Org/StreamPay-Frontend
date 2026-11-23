@@ -19,7 +19,7 @@
  * wallet partners still on v1 (sunset: 2026-12-31).
  */
 
-import { resetDb } from "@/app/lib/db";
+import { getStore, resetDb } from "@/app/lib/db";
 import { GET as getStreams, POST as createStream } from "@/app/api/streams/route";
 import { resetRateLimitStore, InMemoryRateLimitStore, setRateLimitStore } from "@/app/lib/rate-limit-store";
 import { readFileSync } from "fs";
@@ -108,6 +108,9 @@ let rateLimitStore: InMemoryRateLimitStore;
 
 beforeEach(() => {
   resetDb();
+  // Start each test with an empty stream store so snapshots only capture
+  // streams explicitly seeded by that test rather than mutable demo fixtures.
+  getStore().streamRepository.streams.clear();
   rateLimitStore = new InMemoryRateLimitStore(/* maxTokensPerBucket */ 10_000);
   setRateLimitStore(rateLimitStore);
 });

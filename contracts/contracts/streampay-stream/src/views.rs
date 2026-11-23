@@ -38,7 +38,7 @@
 //! );
 //! ```
 
-use crate::{storage, Stream, StreamStatus};
+use crate::{multi, recurring, storage, RecurringStream, SplitStream, Stream, StreamStatus};
 use soroban_sdk::{contracttype, Address, Env, Vec};
 
 /// Maximum number of streams returned in a single paginated query.
@@ -58,6 +58,34 @@ pub const MAX_PAGE_SIZE: u64 = 100;
 pub struct StreamPage {
     /// Streams in this page, ordered by ascending stream ID.
     pub streams: Vec<Stream>,
+    /// Exclusive cursor for the next page. `None` if this is the last page.
+    pub next_cursor: Option<u64>,
+}
+
+/// Paginated result containing split streams and an optional continuation cursor.
+///
+/// Off-chain consumers should check `next_cursor` after each query:
+/// - `Some(id)` → more split streams may exist; pass `id` as `start_after` to the next call.
+/// - `None` → end of result set; no further pages.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct SplitStreamPage {
+    /// Split streams in this page, ordered by ascending stream ID.
+    pub streams: Vec<SplitStream>,
+    /// Exclusive cursor for the next page. `None` if this is the last page.
+    pub next_cursor: Option<u64>,
+}
+
+/// Paginated result containing recurring streams and an optional continuation cursor.
+///
+/// Off-chain consumers should check `next_cursor` after each query:
+/// - `Some(id)` → more recurring streams may exist; pass `id` as `start_after` to the next call.
+/// - `None` → end of result set; no further pages.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct RecurringStreamPage {
+    /// Recurring streams in this page, ordered by ascending stream ID.
+    pub streams: Vec<RecurringStream>,
     /// Exclusive cursor for the next page. `None` if this is the last page.
     pub next_cursor: Option<u64>,
 }
@@ -359,6 +387,111 @@ pub fn list_streams_by_sender_and_status(
     }
 }
 
+/// Returns a paginated list of split streams where `recipient` is one of the
+/// stream's allocated recipients, ordered by ascending split stream ID.
+///
+/// A recipient that appears in multiple allocations within the same split
+/// stream is returned at most once for that stream.
+///
+/// # Parameters
+///
+/// - `recipient` — Filter: only return split streams containing `recipient`.
+/// - `start_after` — Exclusive cursor: return split streams with `id > start_after`.
+///   Pass `None` to start from split stream ID 1.
+/// - `limit` — Maximum number of split streams to return. Capped at [`MAX_PAGE_SIZE`].
+///
+/// # Returns
+///
+/// A [`SplitStreamPage`] with up to `limit` matching split streams.
+pub fn list_split_streams_by_recipient(
+    env: &Env,
+    recipient: &Address,
+    start_after: Option<u64>,
+    limit: u64,
+) -> SplitStreamPage {
+    let effective_limit = limit.min(MAX_PAGE_SIZE);
+    let start_id = start_after.unwrap_or(0).saturating_add(1);
+    let max_id = multi::peek_next_split_id(env);
+
+    let mut streams = Vec::new(env);
+    let mut current_id = start_id;
+    let mut collected = 0u64;
+
+    while current_id < max_id && collected < effective_limit {
+        if let Some(stream) = multi::peek_split_stream(env, current_id) {
+            if stream
+                .recipients
+                .iter()
+                .any(|alloc| alloc.recipient == *recipient)
+            {
+                streams.push_back(stream);
+                collected = collected.saturating_add(1);
+            }
+        }
+        current_id = current_id.saturating_add(1);
+    }
+
+    let next_cursor = if current_id < max_id {
+        Some(current_id.saturating_sub(1))
+    } else {
+        None
+    };
+
+    SplitStreamPage {
+        streams,
+        next_cursor,
+    }
+}
+
+/// Returns a paginated list of recurring streams created by `sender`, ordered
+/// by ascending recurring stream ID.
+///
+/// # Parameters
+///
+/// - `sender` — Filter: only return recurring streams where `stream.sender == sender`.
+/// - `start_after` — Exclusive cursor: return recurring streams with `id > start_after`.
+///   Pass `None` to start from recurring stream ID 1.
+/// - `limit` — Maximum number of recurring streams to return. Capped at [`MAX_PAGE_SIZE`].
+///
+/// # Returns
+///
+/// A [`RecurringStreamPage`] with up to `limit` matching recurring streams.
+pub fn list_recurring_by_sender(
+    env: &Env,
+    sender: &Address,
+    start_after: Option<u64>,
+    limit: u64,
+) -> RecurringStreamPage {
+    let effective_limit = limit.min(MAX_PAGE_SIZE);
+    let start_id = start_after.unwrap_or(0).saturating_add(1);
+    let max_id = recurring::peek_next_recurring_id(env);
+
+    let mut streams = Vec::new(env);
+    let mut current_id = start_id;
+    let mut collected = 0u64;
+
+    while current_id < max_id && collected < effective_limit {
+        if let Some(stream) = recurring::peek_recurring_stream(env, current_id) {
+            if stream.sender == *sender {
+                streams.push_back(stream);
+                collected = collected.saturating_add(1);
+            }
+        }
+        current_id = current_id.saturating_add(1);
+    }
+
+    let next_cursor = if current_id < max_id {
+        Some(current_id.saturating_sub(1))
+    } else {
+        None
+    };
+
+    RecurringStreamPage {
+        streams,
+        next_cursor,
+    }
+}
+
 /// Returns a bitmask of the contract's supported capabilities.
 ///
 /// This read-only view allows off-chain indexers and dApps to programmatically
@@ -423,6 +556,8 @@ mod tests {
                 paused_at: 0,
                 total_paused_duration: 0,
                 fee_bps: 0,
+                cliff_time: 0,
+                curve: crate::storage::ReleaseCurve::Linear,
             };
             storage::set_stream(env, i, &stream);
         }
@@ -610,6 +745,8 @@ mod tests {
                     paused_at: 0,
                     total_paused_duration: 0,
                     fee_bps: 0,
+                    cliff_time: 0,
+                    curve: crate::storage::ReleaseCurve::Linear,
                 };
                 storage::set_stream(&env, *i, &stream);
             }

@@ -179,6 +179,7 @@ export function _resetOrgDbForTesting(): void {
       },
       tokenAllowlist: org.tokenAllowlist ? [...org.tokenAllowlist] : undefined,
     });
+    orgDb.orgs.set(org.id, cloneSeedOrg(org));
   }
   orgDb.streamOwnership.clear();
   orgDb.streamOwnership.set("stream-ada", "org-acme");

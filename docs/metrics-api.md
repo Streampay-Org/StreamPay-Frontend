@@ -100,10 +100,12 @@ streampay_metrics_up 1
 | `streampay_metrics_up` | gauge | Whether the metrics endpoint is serving (always 1) |
 | `webhook_requests_total` | counter | Total `/api/webhooks` requests, labelled by status and event type |
 | `webhook_request_duration_seconds` | histogram | Latency of `/api/webhooks` handlers, labelled by status and event type |
+| `webhook_delivery_attempt_duration_seconds` | histogram | Outbound webhook delivery attempt latency in seconds, labelled by `outcome` (`success`, `retryable_failure`, `non_retryable_failure`, `timeout`, `deferred`, `circuit_open`); buckets `[0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30]`. Deferred and circuit-open attempts are recorded explicitly under their own `outcome` labels so they do not pollute network latency series. |
 | `export_requests_total` | counter | Total `/api/exports` requests, labelled by status and method |
 | `export_request_duration_seconds` | histogram | Latency of `/api/exports` handlers, labelled by status and method |
 | `wallet_auth_requests_total` | counter | Per-endpoint `/api/auth/wallet` request counter (see below) |
 | `wallet_auth_request_duration_seconds` | histogram | Per-endpoint `/api/auth/wallet` latency histogram (see below) |
+| `http_request_duration_seconds` | histogram | Uniform API request duration in seconds, labelled by `method`, `route`, and `status_class` (see below) |
 | `process_*`, `nodejs_*` | various | Default Node.js process metrics from `prom-client` |
 
 ### Labels
@@ -113,6 +115,36 @@ streampay_metrics_up 1
 - `status`: HTTP status code (export/webhook endpoint metrics)
 - `method`: HTTP method (`GET` / `POST`) for export endpoint metrics
 - `event_type`: Webhook event type label
+
+## Generic HTTP request duration (`http_request_duration_seconds`)
+
+A uniform, route-labelled histogram covers API routes via `withRouteSpan` (and
+falls back to `logAccessEvent` when a route is not wrapped by `withRouteSpan`,
+without double-counting):
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `http_request_duration_seconds` | histogram | Wall-clock HTTP request duration in seconds. Bucket set: `[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]`. |
+
+### Labels
+
+| Label | Values | Notes |
+|-------|--------|-------|
+| `method` | Uppercase HTTP method (`GET`, `POST`, `HEAD`, `OPTIONS`, …) | Normalized to uppercase. |
+| `route` | Canonical route template (e.g. `/api/streams`, `/api/streams/:id`) or `unmatched` | Parameterised IDs/UUIDs/hashes are collapsed to `:id` via `normalizeRoute()`. Unknown paths are grouped as `unmatched` to keep cardinality bounded. |
+| `status_class` | `1xx`, `2xx`, `3xx`, `4xx`, `5xx` | Derived from the HTTP response status (thrown handler errors are recorded as `5xx`). |
+
+### Example PromQL query
+
+**p95 latency by route:**
+```promql
+histogram_quantile(
+  0.95,
+  sum by (route, le) (
+    rate(http_request_duration_seconds_bucket[5m])
+  )
+)
+```
 
 ## Per-endpoint metrics for `/api/auth/wallet`
 
