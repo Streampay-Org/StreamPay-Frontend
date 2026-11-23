@@ -98,10 +98,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "app/streams/new/components/StepIndicator.test.tsx",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/streams/new/multi.test.tsx",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
