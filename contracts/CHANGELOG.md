@@ -13,6 +13,16 @@ and must never be reused — see the module rustdoc for details.
 ## [Unreleased]
 
 ### Added
+- **Optional cliff vesting (`cliff_time`).** `Stream` now includes
+  `cliff_time: u64` (`0` = no cliff) and an additive
+  `create_stream_with_cliff` entrypoint (preserving ABI compatibility for
+  `create_stream`). When `cliff_time > 0`, it must satisfy
+  `start_time <= cliff_time <= end_time` (otherwise `InvalidTimeRange` is
+  returned); `vested_amount` / `withdrawable` return `0` until active elapsed
+  time reaches `cliff_time - start_time`, at which point vesting jumps to the
+  linear accrued amount and still reaches `total_amount` at `end_time`.
+  `StreamCreated` now includes `cliff_time`, and `migrate` advances storage to
+  version `3` by initialising `cliff_time = 0` on pre-existing streams.
 - **Split stream pause/resume.** `pause_split_stream` and
   `resume_split_stream` let a split stream's sender freeze and restart
   accrual for every recipient. Pausing records `pause_time`; resuming adds the

@@ -11,7 +11,8 @@ Linear payment streams on Stellar/Soroban.
 | `set_paused` | Yes | `admin` | Sets the global emergency pause flag. |
 | `set_admin` | Yes | `admin` | Transfers the admin role to a new address. |
 | `set_token_allowed` | Yes | `admin` | Allows or blocks a token for future stream creation. |
-| `create_stream` | Yes | `sender` | Creates a stream and escrows funds from the sender. |
+| `create_stream` | Yes | `sender` | Creates a stream and escrows funds from the sender (no cliff; `cliff_time = 0`). |
+| `create_stream_with_cliff` | Yes | `sender` | Creates a stream with an optional `cliff_time` (`0` = no cliff, or `start_time <= cliff_time <= end_time`); vested amount is `0` before the cliff and jumps to linear accrual at/after the cliff. |
 | `start_stream` | Yes | `stream.sender` | Activates a draft stream, anchoring its time bounds. |
 | `pause` | Yes | `stream.sender` | Freezes accrual for an active stream. |
 | `resume` | Yes | `stream.sender` | Resumes a paused stream, extending the end time. |
@@ -31,6 +32,8 @@ Linear payment streams on Stellar/Soroban.
 | `list_streams_by_status` | No | None | Returns a paginated page of streams filtered by status. |
 | `list_streams_recipient_status` | No | None | Returns a paginated page of streams filtered by recipient and status (compound). |
 | `list_streams_sender_status` | No | None | Returns a paginated page of streams filtered by sender and status (compound). |
+| `list_split_streams_by_recipient` | No | None | Returns a paginated page of split streams containing the given recipient address. |
+| `list_recurring_by_sender` | No | None | Returns a paginated page of recurring streams filtered by sender address. |
 | `set_cooloff_duration` | Yes | `admin` | Sets the per-user cooloff duration (in seconds) between stream creations. |
 | `get_cooloff_duration` | No | None | Returns the current per-user cooloff duration in seconds. |
 | `get_cooloff_until` | No | None | Returns the timestamp until which a sender is blocked by cooloff. |

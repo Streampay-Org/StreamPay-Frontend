@@ -125,6 +125,7 @@ Edit `.github/security-exemptions.json`:
 - **Auto-renewal:** Disabled (requires manual review)
 - **Notification:** 14 days before expiry
 - **Review required:** Yes, security team must approve
+- **Expired exemptions:** Fail validation and must be removed or renewed after review.
 
 ### Exemption Review Process
 

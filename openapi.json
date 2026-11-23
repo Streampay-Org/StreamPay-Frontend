@@ -3386,6 +3386,113 @@
         }
       }
     },
+    "/api/streams/stats": {
+      "get": {
+        "tags": ["Streams"],
+        "summary": "Get aggregate stream statistics",
+        "description": "Returns aggregate counts by stream status and exact BigInt escrowed/released totals per token for all streams visible to the caller in the resolved tenant.",
+        "operationId": "getStreamStats",
+        "parameters": [
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Strong ETag from a previous response for conditional 304 revalidation.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aggregate stream statistics.",
+            "headers": {
+              "ETag": {
+                "description": "Strong ETag of the stats payload.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "links"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["counts", "totals", "skipped"],
+                      "properties": {
+                        "counts": {
+                          "type": "object",
+                          "required": ["draft", "active", "paused", "ended", "withdrawn", "cancelled"],
+                          "properties": {
+                            "draft": { "type": "integer", "minimum": 0 },
+                            "active": { "type": "integer", "minimum": 0 },
+                            "paused": { "type": "integer", "minimum": 0 },
+                            "ended": { "type": "integer", "minimum": 0 },
+                            "withdrawn": { "type": "integer", "minimum": 0 },
+                            "cancelled": { "type": "integer", "minimum": 0 }
+                          }
+                        },
+                        "totals": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "required": ["escrowed", "released"],
+                            "properties": {
+                              "escrowed": {
+                                "type": "string",
+                                "pattern": "^\\d+$",
+                                "description": "Total escrowed base units as a base-10 integer string."
+                              },
+                              "released": {
+                                "type": "string",
+                                "pattern": "^\\d+$",
+                                "description": "Total released base units as a base-10 integer string."
+                              }
+                            }
+                          }
+                        },
+                        "skipped": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Number of streams skipped from totals due to unparsable amount strings."
+                        }
+                      }
+                    },
+                    "links": {
+                      "type": "object",
+                      "required": ["self"],
+                      "properties": {
+                        "self": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Not Modified — ETag matched If-None-Match."
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
     "/api/streams/{id}": {
       "parameters": [
         {
@@ -4803,6 +4910,44 @@
             "bearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "description": "Maximum number of streams to return per page."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque pagination cursor returned by a previous page."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "active",
+                "paused",
+                "ended"
+              ]
+            },
+            "description": "Filter streams by lifecycle status."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Paginated stream list.",
@@ -4882,7 +5027,42 @@
                   "empty-list": {
                     "summary": "No streams for this user",
                     "value": {
-                      "streams": []
+                      "streams": [],
+                      "meta": {
+                        "hasNext": false,
+                        "nextCursor": null,
+                        "total": 0
+                      },
+                      "links": {
+                        "self": "/api/v2/streams?limit=20"
+                      }
+                    }
+                  },
+                  "paginated-first-page": {
+                    "summary": "First page with more results available",
+                    "value": {
+                      "streams": [
+                        {
+                          "id": "stream_lf3k9z",
+                          "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                          "rate": "120 XLM/month",
+                          "status": "active",
+                          "allowed_actions": [
+                            "pause",
+                            "stop"
+                          ],
+                          "created_at": "2024-01-15T10:00:00.000Z",
+                          "settlement": null
+                        }
+                      ],
+                      "meta": {
+                        "hasNext": true,
+                        "nextCursor": "eyJpZCI6InN0cmVhbV9sZjNrOXoifQ==",
+                        "total": 25
+                      },
+                      "links": {
+                        "self": "/api/v2/streams?limit=1"
+                      }
                     }
                   }
                 }
@@ -4982,16 +5162,35 @@
                 "schema": {
                   "$ref": "#/components/schemas/StreamV2"
                 },
-                "example": {
-                  "id": "stream_lf3k9z",
-                  "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
-                  "rate": "120 XLM/month",
-                  "status": "draft",
-                  "allowed_actions": [
-                    "start"
-                  ],
-                  "created_at": "2024-01-15T10:00:00.000Z",
-                  "settlement": null
+                "examples": {
+                  "draft-xlm": {
+                    "summary": "Created draft stream in XLM",
+                    "value": {
+                      "id": "stream_lf3k9z",
+                      "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                      "rate": "120 XLM/month",
+                      "status": "draft",
+                      "allowed_actions": [
+                        "start"
+                      ],
+                      "created_at": "2024-01-15T10:00:00.000Z",
+                      "settlement": null
+                    }
+                  },
+                  "draft-usdc": {
+                    "summary": "Created draft stream in USDC",
+                    "value": {
+                      "id": "stream_usdc01",
+                      "recipient": "GDEF1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFGH",
+                      "rate": "500 USDC/week",
+                      "status": "draft",
+                      "allowed_actions": [
+                        "start"
+                      ],
+                      "created_at": "2024-01-15T10:00:00.000Z",
+                      "settlement": null
+                    }
+                  }
                 }
               }
             }
@@ -6172,6 +6371,7 @@
                         "failed": 2,
                         "pending": 0,
                         "dlq": 0,
+                        "stale": 0,
                         "success_rate_pct": 99.87
                       }
                     }
@@ -6193,7 +6393,8 @@
                         "failed": 8,
                         "pending": 2,
                         "dlq": 3,
-                        "success_rate_pct": 99.33
+                        "stale": 1,
+                        "success_rate_pct": 99.27
                       }
                     }
                   },
@@ -6214,7 +6415,8 @@
                         "failed": 50,
                         "pending": 30,
                         "dlq": 15,
-                        "success_rate_pct": 60
+                        "stale": 5,
+                        "success_rate_pct": 64.86
                       }
                     }
                   }
@@ -6978,6 +7180,9 @@
           },
           "401": {
             "$ref": "#/components/responses/401"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
           }
         }
       }
@@ -7561,6 +7766,7 @@
               }
             }
           },
+          "412": {
           "409": {
             "description": "Optimistic concurrency conflict (If-Match ETag mismatch)",
             "content": {

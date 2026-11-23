@@ -35,3 +35,9 @@ build.rs              @greatest0fallt1me
 *.dll                 @greatest0fallt1me
 *.so                  @greatest0fallt1me
 *.dylib               @greatest0fallt1me
+
+# API, contract and middleware code is security-sensitive.
+/app/api/             @greatest0fallt1me
+/contracts/           @greatest0fallt1me
+/middleware.ts        @greatest0fallt1me
+/src/middleware/      @greatest0fallt1me

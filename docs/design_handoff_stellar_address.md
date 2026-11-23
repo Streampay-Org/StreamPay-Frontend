@@ -48,6 +48,11 @@
 *   `verifiedStatus`: Boolean or Enum (`NONE`, `VERIFIED`, `SUSPICIOUS`).
 *   `avatarUrl` (Optional): URI for the user's abstract or custom avatar.
 
+Stellar destination validation also accepts SEP-23 muxed account addresses
+(`M...`). A muxed destination identifies its underlying `G...` account and
+carries a 64-bit memo ID. Preserve that ID when handling a payment destination;
+wallet identity and signing continue to use the underlying `G...` account.
+
 ## WCAG Self-Check
 *   **Contrast:** All text meets AA (4.5:1) minimum against dark mode backgrounds. Accent colors tested for readability.
 *   **Keyboard:** Full tab progression tested for input -> copy button -> submit.

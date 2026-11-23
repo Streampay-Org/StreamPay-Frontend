@@ -108,6 +108,21 @@ fn next_split_id(env: &Env) -> u64 {
     id
 }
 
+/// Reads the next split stream ID counter without mutating storage or extending TTLs.
+pub(crate) fn peek_next_split_id(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&SplitDataKey::NextSplitStreamId)
+        .unwrap_or(1u64)
+}
+
+/// Reads a split stream by ID without extending its TTL.
+pub(crate) fn peek_split_stream(env: &Env, stream_id: u64) -> Option<SplitStream> {
+    env.storage()
+        .persistent()
+        .get(&SplitDataKey::SplitStream(stream_id))
+}
+
 /// Find the index of `recipient` in the allocations vec.
 fn find_recipient_index(
     recipients: &Vec<RecipientAllocation>,

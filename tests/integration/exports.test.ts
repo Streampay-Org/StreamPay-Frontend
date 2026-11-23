@@ -147,10 +147,10 @@ describe("exports API integration", () => {
 
     const response = await createExport(request);
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(422);
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "VALIDATION_FAILED",
+        code: "VALIDATION_ERROR",
         message: "Invalid export filters",
         details: expect.arrayContaining([
           expect.objectContaining({ field: "format" }),
@@ -176,10 +176,10 @@ describe("exports API integration", () => {
 
     const response = await createExport(request);
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(422);
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "VALIDATION_FAILED",
+        code: "VALIDATION_ERROR",
         message: "Invalid export filters",
         details: expect.arrayContaining([
           expect.objectContaining({ message: "Unknown fields are not allowed.", code: "UNRECOGNIZED_KEYS" }),

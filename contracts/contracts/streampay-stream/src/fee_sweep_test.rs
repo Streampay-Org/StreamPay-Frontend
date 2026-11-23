@@ -91,6 +91,7 @@ fn insert_stream(env: &Env, _contract_id: &Address, stream_id: u64, token: &Addr
         paused_at: 0,
         total_paused_duration: 0,
         fee_bps: 100,
+        cliff_time: 0,
     };
     storage::set_stream(env, stream_id, &stream);
 }

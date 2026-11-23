@@ -106,6 +106,71 @@ describe("Exports API — authentication and scoping", () => {
       const json = await res.json();
       expect(json.data.fileName).toMatch(/\.json$/);
     });
+
+    it("returns 401 before parsing or validating an invalid body when unauthenticated", async () => {
+      const res = await createExport(new Request("http://localhost/api/exports", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{not valid json"
+      }));
+      expect(res.status).toBe(401);
+      const json = await res.json();
+      expect(json.error.code).toBe("UNAUTHORIZED");
+    });
+
+    it("returns 400 for empty JSON body", async () => {
+      const token = makeToken("GOWNER1");
+      const res = await createExport(new Request("http://localhost/api/exports", {
+        method: "POST",
+        headers: { "authorization": `Bearer ${token}`, "content-type": "application/json" },
+        body: ""
+      }));
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error.code).toBe("INVALID_JSON");
+    });
+
+    it("returns 422 for array body", async () => {
+      const token = makeToken("GOWNER1");
+      const res = await createExport(new Request("http://localhost/api/exports", {
+        method: "POST",
+        headers: { "authorization": `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify([])
+      }));
+      expect(res.status).toBe(422);
+      const json = await res.json();
+      expect(json.error.code).toBe("VALIDATION_ERROR");
+      expect(json.error.details[0].field).toBe("body");
+    });
+
+    it("returns 422 when startDate is after endDate", async () => {
+      const token = makeToken("GOWNER1");
+      const res = await createExport(new Request("http://localhost/api/exports", {
+        method: "POST",
+        headers: { "authorization": `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          startDate: "2026-07-25T00:00:00Z",
+          endDate: "2026-07-24T00:00:00Z",
+        })
+      }));
+      expect(res.status).toBe(422);
+      const json = await res.json();
+      expect(json.error.code).toBe("VALIDATION_ERROR");
+      expect(json.error.details[0].field).toBe("startDate");
+    });
+
+    it("returns 422 for extra whitespace in format", async () => {
+      const token = makeToken("GOWNER1");
+      const res = await createExport(new Request("http://localhost/api/exports", {
+        method: "POST",
+        headers: { "authorization": `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ format: " json " })
+      }));
+      expect(res.status).toBe(422);
+      const json = await res.json();
+      expect(json.error.code).toBe("VALIDATION_ERROR");
+      expect(json.error.details[0].field).toBe("format");
+    });
   });
 
   // ── GET /api/exports (List) ────────────────────────────────────────────────

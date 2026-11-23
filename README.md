@@ -23,7 +23,7 @@ and let the recipient withdraw what has vested.
 
 ## Quick start
 
-Requires Node.js 20+.
+Requires Node.js 20. Run `nvm use` from the repository root before installing dependencies.
 
 ```bash
 git clone https://github.com/Streampay-Org/StreamPay-Frontend.git
