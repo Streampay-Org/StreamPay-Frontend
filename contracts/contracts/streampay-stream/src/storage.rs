@@ -71,6 +71,14 @@ pub struct Stream {
     /// collector has been configured, the fee is skipped regardless of this
     /// value.
     pub fee_bps: u32,
+    /// Optional cliff timestamp (ledger seconds).
+    ///
+    /// `0` means no cliff — tokens vest linearly from `start_time`.
+    /// When non-zero, `start_time <= cliff_time <= end_time`: vested amount
+    /// remains `0` until the active elapsed time reaches
+    /// `cliff_time - start_time`, at which point vesting jumps to the linear
+    /// accrued amount for the elapsed time.
+    pub cliff_time: u64,
 }
 
 #[derive(Clone)]
@@ -88,6 +96,12 @@ pub(crate) enum DataKey {
     FeeBps,
     /// Per-stream withdrawer allowlist keyed by stream id (persistent storage).
     WithdrawerAllowlist(u64),
+    /// Pending recipient address for a two-step recipient transfer (persistent storage).
+    PendingRecipient(u64),
+    /// Global dormant-stream grace period in seconds (instance storage; 0 = disabled).
+    DormancyGrace,
+    /// Per-stream timestamp of the most recent recipient withdrawal (persistent storage).
+    LastWithdrawTime(u64),
 }
 
 /// Threshold and absolute target values are expressed in ledger sequences.
@@ -493,6 +507,88 @@ pub fn get_withdrawer_allowlist(env: &Env, stream_id: u64) -> soroban_sdk::Vec<A
     }
 }
 
+/// Clears the per-stream withdrawer allowlist for `stream_id`.
+pub fn clear_withdrawer_allowlist(env: &Env, stream_id: u64) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::WithdrawerAllowlist(stream_id));
+}
+
+// ---------------------------------------------------------------------------
+// Pending recipient transfer
+// ---------------------------------------------------------------------------
+
+/// Records a pending recipient transfer target for `stream_id` in persistent
+/// storage and extends its TTL.
+pub fn set_pending_recipient(env: &Env, stream_id: u64, recipient: &Address) {
+    let key = DataKey::PendingRecipient(stream_id);
+    env.storage().persistent().set(&key, recipient);
+    extend_persistent_ttl(env, &key);
+}
+
+/// Returns the pending recipient transfer target for `stream_id`, if any,
+/// extending its TTL on read.
+pub fn get_pending_recipient(env: &Env, stream_id: u64) -> Option<Address> {
+    let key = DataKey::PendingRecipient(stream_id);
+    let pending: Option<Address> = env.storage().persistent().get(&key);
+    if pending.is_some() {
+        extend_persistent_ttl(env, &key);
+    }
+    pending
+}
+
+/// Removes any pending recipient transfer proposal for `stream_id`.
+pub fn clear_pending_recipient(env: &Env, stream_id: u64) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::PendingRecipient(stream_id));
+}
+
+/// Returns the global dormant-stream grace period in seconds (`0` = disabled).
+pub fn get_dormancy_grace(env: &Env) -> u64 {
+    let stored: Option<u64> = env.storage().instance().get(&DataKey::DormancyGrace);
+    if stored.is_some() {
+        extend_instance_ttl(env, &DataKey::DormancyGrace);
+    }
+    stored.unwrap_or(0)
+}
+
+/// Sets the global dormant-stream grace period in seconds (`0` = disabled).
+pub fn set_dormancy_grace(env: &Env, seconds: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::DormancyGrace, &seconds);
+    extend_instance_ttl(env, &DataKey::DormancyGrace);
+}
+
+/// Returns the timestamp of the most recent recipient withdrawal for `stream_id`,
+/// or `0` if no withdrawal has occurred yet.
+pub fn get_last_withdraw_time(env: &Env, stream_id: u64) -> u64 {
+    let key = DataKey::LastWithdrawTime(stream_id);
+    let stored: Option<u64> = env.storage().persistent().get(&key);
+    if stored.is_some() {
+        extend_persistent_ttl(env, &key);
+    }
+    stored.unwrap_or(0)
+}
+
+/// Records the timestamp of the most recent recipient withdrawal for `stream_id`.
+pub fn set_last_withdraw_time(env: &Env, stream_id: u64, timestamp: u64) {
+    let key = DataKey::LastWithdrawTime(stream_id);
+    env.storage().persistent().set(&key, &timestamp);
+    extend_persistent_ttl(env, &key);
+}
+
+}
+
+
+}
+
+    }
+}
+
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -527,6 +623,7 @@ mod tests {
             paused_at: 0,
             total_paused_duration: 0,
             fee_bps: 0,
+            cliff_time: 0,
         }
     }
 

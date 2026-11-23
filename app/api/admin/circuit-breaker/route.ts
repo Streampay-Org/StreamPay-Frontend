@@ -37,7 +37,12 @@ function err(code: string, message: string, status: number) {
   return NextResponse.json({ error: { code, message } }, { status });
 }
 
+const MIN_REASON_LENGTH = 10;
+
 export async function POST(request: Request) {
+  const authResult = requireAdmin(request);
+  if (authResult instanceof NextResponse) return authResult;
+
   // Unrelated to client-error ingestion; left unchanged.
   let body: unknown;
   try {
@@ -47,7 +52,7 @@ export async function POST(request: Request) {
   }
 
   // Unrelated to client-error ingestion; left unchanged.
-  const { target, open } = body as Record<string, unknown>;
+  const { target, open, reason } = body as Record<string, unknown>;
 
   if (typeof target !== "string" || target.trim().length === 0) {
     return err(
@@ -67,25 +72,38 @@ export async function POST(request: Request) {
     // No client-error reporting changes here.
   }
 
+  if (typeof reason !== "string" || reason.trim().length < MIN_REASON_LENGTH) {
+    return err(
+      "VALIDATION_ERROR",
+      `Body must contain a reason string of at least ${MIN_REASON_LENGTH} characters`,
+      422,
+    );
+  }
+
+  const trimmedTarget = target.trim();
+  const trimmedReason = reason.trim();
   const before = getCircuitBreakers();
-  const result = setCircuitBreaker(request, target.trim(), open);
+  const result = setCircuitBreaker(request, trimmedTarget, open);
   if (result instanceof NextResponse) return result;
 
   // Audit event unchanged by the client-error feature.
-  recordPrivilegedStreamAuditEvent({
+  const auditEntry = recordPrivilegedStreamAuditEvent({
     action: open
-      ? `admin.circuit-breaker.${target}.trip`
-      : `admin.circuit-breaker.${target}.reset`,
-    before: { circuitBreaker: { target, open: before[target as keyof typeof before]?.open } },
-    after:  { circuitBreaker: { target, open } },
-    metadata: { updatedAt: result.circuitBreakers[target as "indexer" | "webhook"]?.updatedAt },
+      ? `admin.circuit-breaker.${trimmedTarget}.trip`
+      : `admin.circuit-breaker.${trimmedTarget}.reset`,
+    before: { circuitBreaker: { target: trimmedTarget, open: before[trimmedTarget as keyof typeof before]?.open } },
+    after:  { circuitBreaker: { target: trimmedTarget, open } },
+    metadata: {
+      updatedAt: result.circuitBreakers[trimmedTarget as "indexer" | "webhook"]?.updatedAt,
+      reason: trimmedReason,
+    },
     request,
     streamId: "global",
     targetAccount: result.adminAddress,
   });
 
   // Response unchanged by the client-error feature.
-  return NextResponse.json({ data: result.circuitBreakers });
+  return NextResponse.json({ data: result.circuitBreakers, auditRequestId: auditEntry.requestId });
 }
 
 export async function GET(request: Request) {

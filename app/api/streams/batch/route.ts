@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { idempotencyKeyErrorResponse, validateIdempotencyKey } from "@/app/lib/idempotency";
 import {
   checkIdempotency,
   computeFingerprint,
@@ -118,7 +119,15 @@ export async function POST(request: NextRequest) {
     return errorResponse(ErrorCode.UNAUTHORIZED, "Bearer token required.", 401);
   }
 
-  const idempotencyKey = getHeader(request, "Idempotency-Key");
+  const rawIdempotencyKey = getHeader(request, "Idempotency-Key");
+  let idempotencyKey: string | null = null;
+  if (rawIdempotencyKey !== null) {
+    const keyValidation = validateIdempotencyKey(rawIdempotencyKey);
+    if (!keyValidation.ok) {
+      return idempotencyKeyErrorResponse(keyValidation.reason);
+    }
+    idempotencyKey = keyValidation.key;
+  }
   const idempotencyTokenValue = idempotencyKey
     ? idempotencyToken("streams.batch.create", idempotencyKey)
     : null;

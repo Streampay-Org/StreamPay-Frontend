@@ -28,6 +28,8 @@ function buildFilters(request: Request): AuditListFilters {
     role: searchParams.get("role") as AuditActorRole | null,
     targetId: searchParams.get("targetId"),
     cursor: searchParams.get("cursor"),
+    startDate: searchParams.get("startDate"),
+    endDate: searchParams.get("endDate"),
   };
 }
 

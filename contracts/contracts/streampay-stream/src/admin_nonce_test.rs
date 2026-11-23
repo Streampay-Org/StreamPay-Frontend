@@ -94,6 +94,7 @@ mod admin_nonce_tests {
                 status: StreamStatus::Active,
                 paused_at: 0,
                 total_paused_duration: 0,
+                cliff_time: 0,
             };
             self.env.as_contract(&self.contract_id, || {
                 crate::storage::set_stream(&self.env, stream_id, &stream);

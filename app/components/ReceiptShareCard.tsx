@@ -28,7 +28,7 @@ export function maskAddress(address: string): string {
   return `${address.slice(0, 4)}…${address.slice(-4)}`;
 }
 
-const COPY_FEEDBACK_MS = 2_000;
+export const COPY_FEEDBACK_MS = 2_000;
 
 export function ReceiptShareCard({
   streamId,
