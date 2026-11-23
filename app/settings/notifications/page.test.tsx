@@ -28,7 +28,7 @@ describe('NotificationsPage', () => {
     
     expect(screen.getByText('User Settings')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Notifications' })).toBeInTheDocument();
-    expect(screen.getByText(/Manage instant push prompts for GrantFox/i)).toBeInTheDocument();
+    expect(screen.getByText(/Manage per-category StreamPay/i)).toBeInTheDocument();
     expect(screen.getByTestId('mock-notification-settings')).toBeInTheDocument();
   });
 

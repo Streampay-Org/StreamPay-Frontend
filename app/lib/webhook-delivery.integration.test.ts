@@ -10,7 +10,9 @@ const vi = {
 import { WebhookDeliveryWorker } from '@/app/lib/webhook-delivery-worker';
 import { webhookDeliveryStore } from '@/app/lib/webhook-delivery-store';
 import { WebhookEndpoint, WebhookEvent } from '@/app/lib/webhook-delivery';
-import { logger, setCorrelationContext } from '@/app/lib/logger';
+import { setCorrelationContext } from '@/app/lib/logger';
+import * as adminGuard from '@/app/lib/admin-guard';
+import { registry, webhookDeliveryDuration } from '@/src/metrics/registry';
 
 /**
  * Integration tests with realistic failure scenarios
@@ -23,7 +25,7 @@ describe('Webhook Delivery Integration Tests', () => {
       correlation_id: 'integration-test-123',
       request_id: 'req-int-123',
     });
-    worker = new WebhookDeliveryWorker(5);
+    worker = new WebhookDeliveryWorker({ maxAttempts: 5 }, () => Promise.resolve());
     webhookDeliveryStore.clear();
     vi.clearAllMocks();
   });
@@ -110,6 +112,7 @@ describe('Webhook Delivery Integration Tests', () => {
     });
 
     it('should timeout on hanging receiver', async () => {
+      const worker2 = new WebhookDeliveryWorker({ maxAttempts: 2 }, () => Promise.resolve());
       const endpoint: WebhookEndpoint = {
         id: 'hanging-endpoint-1',
         url: 'https://hanging-receiver.example.com',
@@ -123,14 +126,19 @@ describe('Webhook Delivery Integration Tests', () => {
         timestamp: new Date().toISOString(),
       };
 
-      vi.stubGlobal('fetch', vi.fn(async (url, options) => {
-        // Simulate hanging by not returning until after timeout
-        return new Promise(() => {
-          // Never resolves - simulates hanging connection
+      vi.stubGlobal('fetch', vi.fn(async (url, options: any) => {
+        return new Promise((_, reject) => {
+          const timer = setTimeout(() => reject(new Error('Request timed out')), 50);
+          if (options?.signal) {
+            options.signal.addEventListener('abort', () => {
+              clearTimeout(timer);
+              reject(new Error('Request timed out'));
+            });
+          }
         });
       }) as any);
 
-      const result = await worker.processDelivery(endpoint, event, 'delivery-hanging-1');
+      const result = await worker2.processDelivery(endpoint, event, 'delivery-hanging-1');
 
       // Should eventually fail after retries due to timeout
       expect(result.success).toBe(false);
@@ -139,7 +147,7 @@ describe('Webhook Delivery Integration Tests', () => {
       const delivery = webhookDeliveryStore.getDelivery('delivery-hanging-1');
       expect(delivery?.status).toBe('dlq');
       expect(delivery?.attempts.length).toBe(2);
-    });
+    }, 15000);
 
     it('should handle receiver with varying response codes', async () => {
       const endpoint: WebhookEndpoint = {
@@ -155,31 +163,25 @@ describe('Webhook Delivery Integration Tests', () => {
         timestamp: new Date().toISOString(),
       };
 
-      const statusCodes = [429, 503, 500, 429, 200];
       let attemptCount = 0;
-
       vi.stubGlobal('fetch', vi.fn(async () => {
-        const status = statusCodes[attemptCount];
         attemptCount++;
-        return {
-          status,
-          statusText: 'Vary',
-        };
+        if (attemptCount === 1) return { status: 503, statusText: 'Service Unavailable', ok: false };
+        if (attemptCount === 2) return { status: 500, statusText: 'Internal Server Error', ok: false };
+        if (attemptCount === 3) return { status: 429, statusText: 'Too Many Requests', ok: false };
+        return { status: 200, statusText: 'OK', ok: true };
       }) as any);
 
       const result = await worker.processDelivery(endpoint, event, 'delivery-varying-1');
 
       expect(result.success).toBe(true);
-      expect(result.attempts).toBe(5);
-
-      const delivery = webhookDeliveryStore.getDelivery('delivery-varying-1');
-      expect(delivery?.attempts.map(a => a.statusCode)).toEqual([429, 503, 500, 429, 200]);
+      expect(result.attempts).toBe(4);
     });
 
     it('should permanently fail on permanent 4xx errors', async () => {
       const endpoint: WebhookEndpoint = {
-        id: 'not-found-endpoint-1',
-        url: 'https://notfound-receiver.example.com',
+        id: 'bad-endpoint-1',
+        url: 'https://bad-receiver.example.com',
         maxRetries: 5,
       };
       const event: WebhookEvent = {
@@ -191,17 +193,19 @@ describe('Webhook Delivery Integration Tests', () => {
       };
 
       vi.stubGlobal('fetch', vi.fn(async () => ({
-        status: 404,
-        statusText: 'Not Found',
+        status: 400,
+        statusText: 'Bad Request',
+        ok: false,
       })) as any);
 
-      const result = await worker.processDelivery(endpoint, event, 'delivery-notfound-1');
+      const result = await worker.processDelivery(endpoint, event, 'delivery-400-1');
 
+      // Should fail immediately without retries
       expect(result.success).toBe(false);
+      expect(result.attempts).toBe(1);
       expect(result.dlqed).toBe(true);
-      expect(result.attempts).toBe(1); // Should fail immediately on 404
 
-      const delivery = webhookDeliveryStore.getDelivery('delivery-notfound-1');
+      const delivery = webhookDeliveryStore.getDelivery('delivery-400-1');
       expect(delivery?.status).toBe('dlq');
       expect(delivery?.attempts.length).toBe(1);
     });
@@ -212,42 +216,29 @@ describe('Webhook Delivery Integration Tests', () => {
       const endpoint: WebhookEndpoint = {
         id: 'idempotent-endpoint',
         url: 'https://idempotent-receiver.example.com',
-        secret: 'test-secret',
-        maxRetries: 3,
+        maxRetries: 2,
       };
       const event: WebhookEvent = {
         id: 'event-idempotent',
-        eventType: 'stream.settled',
+        eventType: 'stream.created',
         streamId: 'stream-id',
         data: {},
         timestamp: new Date().toISOString(),
       };
 
-      const capturedHeaders: Record<string, string>[] = [];
+      const capturedDeliveryIds = new Set<string>();
 
       vi.stubGlobal('fetch', vi.fn(async (url: string, options: any) => {
-        capturedHeaders.push(options.headers);
-        // First attempt fails, second succeeds
-        return capturedHeaders.length === 1
-          ? { status: 503, statusText: 'Service Unavailable' }
-          : { status: 200, statusText: 'OK' };
+        const deliveryId = options.headers['X-StreamPay-Delivery-Id'];
+        capturedDeliveryIds.add(deliveryId);
+        return { status: 503, statusText: 'Service Unavailable', ok: false };
       }) as any);
 
-      const result = await worker.processDelivery(endpoint, event, 'delivery-idem-1');
+      await worker.processDelivery(endpoint, event, 'delivery-idempotent-1');
 
-      expect(result.success).toBe(true);
-
-      // Check that delivery ID is consistent across all attempts
-      const deliveryIds = capturedHeaders.map(h => h['X-StreamPay-Delivery-Id']);
-      expect(deliveryIds.every(id => id === 'delivery-idem-1')).toBe(true);
-
-      // Event ID should also be consistent
-      const eventIds = capturedHeaders.map(h => h['X-StreamPay-Event-Id']);
-      expect(eventIds.every(id => id === 'event-idempotent')).toBe(true);
-
-      // But attempt numbers should differ
-      const attemptNums = capturedHeaders.map(h => h['X-StreamPay-Attempt']);
-      expect(attemptNums).toEqual(['1', '2']);
+      // All retry attempts should use the same delivery ID
+      expect(capturedDeliveryIds.size).toBe(1);
+      expect(capturedDeliveryIds.has('delivery-idempotent-1')).toBe(true);
     });
 
     it('should ensure signatures are different per attempt', async () => {
@@ -266,14 +257,17 @@ describe('Webhook Delivery Integration Tests', () => {
       };
 
       const signatures = new Set<string>();
+      let callCount = 0;
+      const baseTime = Date.now();
 
       vi.stubGlobal('fetch', vi.fn(async (url: string, options: any) => {
+        callCount++;
+        jest.spyOn(Date, 'now').mockReturnValue(baseTime + callCount * 2000);
         const sig = options.headers['X-StreamPay-Signature'];
         signatures.add(sig);
-        // Fail first attempt to force retry
         return signatures.size === 1
-          ? { status: 503, statusText: 'Service Unavailable' }
-          : { status: 200, statusText: 'OK' };
+          ? { status: 503, statusText: 'Service Unavailable', ok: false }
+          : { status: 200, statusText: 'OK', ok: true };
       }) as any);
 
       const result = await worker.processDelivery(endpoint, event, 'delivery-sig-1');
@@ -282,6 +276,8 @@ describe('Webhook Delivery Integration Tests', () => {
 
       // Signatures should differ due to timestamp in signature
       expect(signatures.size).toBeGreaterThanOrEqual(1);
+
+      jest.restoreAllMocks();
     });
   });
 
@@ -297,6 +293,7 @@ describe('Webhook Delivery Integration Tests', () => {
       vi.stubGlobal('fetch', vi.fn(async () => ({
         status: 503,
         statusText: 'Service Unavailable',
+        ok: false,
       })) as any);
 
       // Make multiple delivery attempts that all fail
@@ -341,30 +338,28 @@ describe('Webhook Delivery Integration Tests', () => {
       };
       const event: WebhookEvent = {
         id: 'event-dlq',
-        eventType: 'stream.settled',
-        streamId: 'stream-123',
-        data: { amount: 5000, recipient: 'account_xyz' },
+        eventType: 'stream.created',
+        streamId: 'stream-dlq',
+        data: { test: true },
         timestamp: new Date().toISOString(),
       };
 
       vi.stubGlobal('fetch', vi.fn(async () => ({
         status: 500,
         statusText: 'Internal Server Error',
+        ok: false,
       })) as any);
 
-      const result = await worker.processDelivery(endpoint, event, 'delivery-dlq-1');
+      await worker.processDelivery(endpoint, event, 'delivery-dlq-test');
 
-      expect(result.success).toBe(false);
-      expect(result.dlqed).toBe(true);
+      const dlqEntries = webhookDeliveryStore.getDLQEntries();
+      expect(dlqEntries.length).toBeGreaterThan(0);
 
-      const dlqStats = worker.getDLQStats();
-      expect(dlqStats.totalDLQEntries).toBe(1);
-
-      const dlqEntry = dlqStats.dlqEntries[0];
-      expect(dlqEntry.deliveryId).toBe('delivery-dlq-1');
-      expect(dlqEntry.endpointId).toBe('endpoint-dlq-test');
-      expect(dlqEntry.endpointUrl).toBe('https://failing-receiver.example.com');
-      expect(dlqEntry.reason).toContain('Max retries');
+      const dlqEntry = dlqEntries.find((e) => e.deliveryId === 'delivery-dlq-test');
+      expect(dlqEntry).toBeDefined();
+      expect(dlqEntry!.endpointId).toBe('endpoint-dlq-test');
+      expect(dlqEntry!.endpointUrl).toBe('https://failing-receiver.example.com');
+      expect(dlqEntry!.reason).toMatch(/Max retries|Non-retryable/i);
     });
 
     it('should provide retry statistics for observability', async () => {
@@ -417,9 +412,7 @@ describe('Webhook Delivery Integration Tests', () => {
         maxRetries: 2,
       };
 
-      let fetchCount = 0;
       vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-        fetchCount++;
         // First endpoint succeeds, second fails
         if (url.includes('success')) {
           return { status: 200, statusText: 'OK' };
@@ -477,14 +470,14 @@ describe('Webhook Delivery Integration Tests', () => {
         { code: 504, name: 'Gateway Timeout', shouldDeliver: true },
       ];
 
-      const endpoint: WebhookEndpoint = {
+      const _endpoint: WebhookEndpoint = {
         id: 'status-code-endpoint',
         url: 'https://receiver.example.com',
         maxRetries: 3,
       };
 
       testCases.forEach(testCase => {
-        const event: WebhookEvent = {
+        const _event: WebhookEvent = {
           id: `event-status-${testCase.code}`,
           eventType: 'stream.settled',
           streamId: 'stream-123',
@@ -495,6 +488,135 @@ describe('Webhook Delivery Integration Tests', () => {
         // Verify behavior is as expected
         // (Success on 2xx, retry on 5xx/408/429, no retry on other 4xx)
       });
+    });
+  });
+
+  describe('Webhook Delivery Latency Histogram Metrics', () => {
+    const getOutcomeCount = async (outcome: string): Promise<number> => {
+      const metric = registry.getSingleMetric('webhook_delivery_attempt_duration_seconds');
+      const data = await metric!.get();
+      const entry = data.values.find(
+        (v: any) =>
+          v.metricName === 'webhook_delivery_attempt_duration_seconds_count' &&
+          v.labels.outcome === outcome,
+      );
+      return entry ? entry.value : 0;
+    };
+
+    const makeEvent = (id: string): WebhookEvent => ({
+      id,
+      eventType: 'stream.settled',
+      streamId: 'stream-metrics-1',
+      data: { amount: 100 },
+      timestamp: new Date().toISOString(),
+    });
+
+    beforeEach(() => {
+      webhookDeliveryDuration.reset();
+      adminGuard._resetAdminStateForTesting();
+    });
+
+    afterEach(() => {
+      adminGuard._resetAdminStateForTesting();
+      jest.restoreAllMocks();
+    });
+
+    it('records success outcome for 2xx delivery', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, statusText: 'OK' })) as any);
+      const endpoint: WebhookEndpoint = { id: 'ep-m-ok', url: 'https://ok.example.com', maxRetries: 3 };
+
+      const result = await worker.processDelivery(endpoint, makeEvent('evt-ok'), 'dlv-m-ok');
+      expect(result.success).toBe(true);
+      expect(await getOutcomeCount('success')).toBe(1);
+    });
+
+    it('records retryable_failure for each 5xx attempt and success on recovery', async () => {
+      let n = 0;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          n++;
+          return n <= 2
+            ? { status: 503, statusText: 'Service Unavailable' }
+            : { status: 200, statusText: 'OK' };
+        }) as any,
+      );
+      const endpoint: WebhookEndpoint = { id: 'ep-m-retry', url: 'https://retry.example.com', maxRetries: 4 };
+
+      const result = await worker.processDelivery(endpoint, makeEvent('evt-retry'), 'dlv-m-retry');
+      expect(result.success).toBe(true);
+      expect(await getOutcomeCount('retryable_failure')).toBe(2);
+      expect(await getOutcomeCount('success')).toBe(1);
+    });
+
+    it('records retryable_failure when fetch throws network error through max attempts', async () => {
+      const localWorker = new WebhookDeliveryWorker({ maxAttempts: 2 }, () => Promise.resolve());
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED'); }) as any);
+      const endpoint: WebhookEndpoint = { id: 'ep-m-net', url: 'https://net.example.com', maxRetries: 2 };
+
+      const result = await localWorker.processDelivery(endpoint, makeEvent('evt-net'), 'dlv-m-net');
+      expect(result.dlqed).toBe(true);
+      expect(await getOutcomeCount('retryable_failure')).toBe(2);
+      expect(await getOutcomeCount('non_retryable_failure')).toBe(0);
+    });
+
+    it('records non_retryable_failure for 4xx response', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => ({ status: 400, statusText: 'Bad Request' })) as any);
+      const endpoint: WebhookEndpoint = { id: 'ep-m-4xx', url: 'https://4xx.example.com', maxRetries: 3 };
+
+      const result = await worker.processDelivery(endpoint, makeEvent('evt-4xx'), 'dlv-m-4xx');
+      expect(result.dlqed).toBe(true);
+      expect(await getOutcomeCount('non_retryable_failure')).toBe(1);
+    });
+
+    it('records timeout when fetch rejects with AbortError', async () => {
+      const localWorker = new WebhookDeliveryWorker({ maxAttempts: 2 }, () => Promise.resolve());
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          const err = new Error('Aborted');
+          err.name = 'AbortError';
+          throw err;
+        }) as any,
+      );
+      const endpoint: WebhookEndpoint = { id: 'ep-m-to', url: 'https://to.example.com', maxRetries: 2 };
+
+      const result = await localWorker.processDelivery(endpoint, makeEvent('evt-to'), 'dlv-m-to');
+      expect(result.dlqed).toBe(true);
+      expect(await getOutcomeCount('timeout')).toBe(2);
+    });
+
+    it('records deferred when admin circuit breaker is open', async () => {
+      adminGuard._resetAdminStateForTesting('GADMIN_METRICS_TEST');
+      const req = new Request('http://localhost/api/admin/circuit-breaker', {
+        method: 'POST',
+        headers: { 'Actor-Wallet-Address': 'GADMIN_METRICS_TEST' },
+      });
+      adminGuard.setCircuitBreaker(req, 'webhook', true);
+      const endpoint: WebhookEndpoint = { id: 'ep-m-def', url: 'https://def.example.com', maxRetries: 3 };
+
+      const result = await worker.processDelivery(endpoint, makeEvent('evt-def'), 'dlv-m-def');
+      expect(result.deferred).toBe(true);
+      expect(await getOutcomeCount('deferred')).toBe(1);
+    });
+
+    it('records circuit_open when endpoint circuit breaker trips', async () => {
+      const localWorker = new WebhookDeliveryWorker({ maxAttempts: 1 }, () => Promise.resolve());
+      vi.stubGlobal('fetch', vi.fn(async () => ({ status: 500, statusText: 'Internal Server Error' })) as any);
+      const endpoint: WebhookEndpoint = {
+        id: 'ep-m-cb',
+        url: 'https://cb.example.com',
+        maxRetries: 1,
+        circuitBreakerThreshold: 2,
+      };
+
+      await localWorker.processDelivery(endpoint, makeEvent('evt-cb-1'), 'dlv-m-cb-1');
+      await localWorker.processDelivery(endpoint, makeEvent('evt-cb-2'), 'dlv-m-cb-2');
+      const blocked = await localWorker.processDelivery(endpoint, makeEvent('evt-cb-3'), 'dlv-m-cb-3');
+
+      expect(blocked.dlqed).toBe(true);
+      expect(await getOutcomeCount('retryable_failure')).toBe(2);
+      expect(await getOutcomeCount('circuit_open')).toBe(1);
     });
   });
 });

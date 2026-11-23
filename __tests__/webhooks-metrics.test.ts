@@ -1,6 +1,7 @@
 import { GET, POST } from '@/app/api/webhooks/route';
 import { registry, webhookCounter, webhookDuration } from '@/src/metrics/registry';
 import { NextRequest } from 'next/server';
+import { resetRateLimitStore } from '@/app/lib/rate-limit-store';
 
 jest.mock('@/app/lib/logger', () => ({
   logger: {
@@ -13,13 +14,18 @@ describe('Webhooks API Route with Metrics', () => {
   beforeEach(() => {
     registry.resetMetrics();
     jest.clearAllMocks();
+    resetRateLimitStore();
+  });
+
+  afterEach(() => {
+    resetRateLimitStore();
   });
 
   it('GET /api/webhooks returns prometheus metrics', async () => {
     // Increment a metric to ensure it appears in the output
     webhookCounter.inc({ status: '200', event_type: 'test_event' });
 
-    const response = await GET();
+    const response = await GET(new Request('http://localhost/api/webhooks'));
     
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toContain('text/plain');

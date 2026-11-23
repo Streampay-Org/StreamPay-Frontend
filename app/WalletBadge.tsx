@@ -2,6 +2,9 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { LiveRegion } from "../src/components/LiveRegion";
+import { KbdHint } from "../src/components/KbdHint";
+import { EmptyState } from "../src/components/EmptyState";
+import { WalletBadgeSkeleton } from "./components/Skeleton";
 import styles from "./WalletBadge.module.css";
 
 export type WalletState = "disconnected" | "connecting" | "connected" | "error" | "disconnecting";
@@ -17,6 +20,8 @@ export interface WalletBadgeProps {
   network?: string;
   /** Formatted balance string (e.g. "100.00 XLM") */
   balance?: string;
+  /** Keyboard shortcut hint */
+  shortcut?: string;
   /** Error details if state === "error" */
   errorMessage?: string;
   /** Callback triggered when user clicks connect */
@@ -33,11 +38,60 @@ export interface WalletBadgeProps {
   className?: string;
   /** Whether to show a detailed empty state when disconnected */
   showEmptyState?: boolean;
+  /**
+   * When `true`, renders a themed skeleton placeholder instead of the real
+   * badge content.  Use on first paint while the wallet connection state is
+   * still being resolved (e.g. before the Freighter SDK responds).
+   *
+   * Pass `showExtendedSkeleton` alongside to also display network + balance
+   * placeholder slots, matching a fully-connected badge appearance.
+   */
+  loading?: boolean;
+  /**
+   * Controls whether the loading skeleton shows the extended network + balance
+   * placeholder slots.  Only relevant when `loading={true}`.
+   * @default false
+   */
+  showExtendedSkeleton?: boolean;
+}
+
+/**
+ * Tracks the user's `prefers-reduced-motion` setting.
+ *
+ * Returns `true` when reduced motion is requested. SSR-safe: defaults to
+ * `false` before hydration and updates live if the preference changes.
+ * Used to swap animated connecting/status transitions for a static fallback.
+ */
+function usePrefersReducedMotion(): boolean {
+  const [prefersReduced, setPrefersReduced] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setPrefersReduced(query.matches);
+
+    const onChange = (event: MediaQueryListEvent) => setPrefersReduced(event.matches);
+
+    if (typeof query.addEventListener === "function") {
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    }
+
+    query.addListener(onChange);
+    return () => query.removeListener(onChange);
+  }, []);
+
+  return prefersReduced;
 }
 
 /**
  * WalletBadge displays current wallet status and announces state changes via an ARIA live region.
  * Refactored for Issue #1072 with responsive breakpoint layout rules, design tokens, and WCAG accessibility.
+ * Issue #1073: `loading` prop renders a themed skeleton on first paint before wallet state is known.
+ * Issue #1078: static fallback when `prefers-reduced-motion: reduce` is set.
  */
 export function WalletBadge({
   state = "disconnected",
@@ -45,6 +99,7 @@ export function WalletBadge({
   providerName,
   network,
   balance,
+  shortcut,
   errorMessage,
   onConnect,
   onDisconnect,
@@ -53,8 +108,11 @@ export function WalletBadge({
   announcement,
   className = "",
   showEmptyState = false,
+  loading = false,
+  showExtendedSkeleton = false,
 }: WalletBadgeProps) {
   const [srMessage, setSrMessage] = useState<string>("");
+  const prefersReducedMotion = usePrefersReducedMotion();
 
   const formattedAddress = useMemo(() => {
     if (!address) return "";
@@ -130,13 +188,42 @@ export function WalletBadge({
     }
   };
 
+  const getPatternClass = (): string => {
+    switch (state) {
+      case "connected":
+        return "cb-pattern--ended";
+      case "connecting":
+        return "cb-pattern--active";
+      case "disconnecting":
+        return "cb-pattern--paused";
+      case "error":
+        return "cb-pattern--cancelled";
+      case "disconnected":
+      default:
+        return "cb-pattern--draft";
+    }
+  };
+
   const isInteractive = Boolean(onClick || (state === "disconnected" && onConnect));
+
+  // ─── Loading skeleton ─────────────────────────────────────────────────────
+  // Rendered on first paint while wallet connection state is being resolved.
+  // The skeleton exactly mirrors the real badge's inline-flex layout so the
+  // page does not shift once data arrives.
+  if (loading) {
+    return (
+      <WalletBadgeSkeleton
+        showExtended={showExtendedSkeleton}
+        className={className}
+      />
+    );
+  }
 
   if (showEmptyState && state === "disconnected") {
     return (
       <EmptyState
         title="Wallet Disconnected"
-        description="Connect your Stellar wallet to participate in the GrantFox campaign."
+        description="Connect your Stellar wallet to create and manage payment streams."
         illustration={
           <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
@@ -152,20 +239,33 @@ export function WalletBadge({
     );
   }
 
+  const motionClass = prefersReducedMotion ? styles.badgeStatic : styles.badgeAnimated;
+
   return (
     <div
-      className={`wallet-badge wallet-badge--${state} ${styles.badge} ${isInteractive ? styles.badgeInteractive : ""} ${className}`.trim()}
+      className={`wallet-badge wallet-badge--${state} ${styles.badge} ${motionClass} ${isInteractive ? styles.badgeInteractive : ""} ${className}`.trim()}
       onClick={handleAction}
       onKeyDown={isInteractive ? handleKeyDown : undefined}
       role={isInteractive ? "button" : "region"}
       tabIndex={isInteractive ? 0 : undefined}
       aria-label={`Wallet status: ${state}`}
       data-testid="wallet-badge"
+      data-reduced-motion={prefersReducedMotion ? "true" : "false"}
+      style={{
+        transition: prefersReducedMotion
+          ? "none"
+          : "background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease",
+      }}
     >
-      {/* Status Dot */}
+      {/* Status Dot with color-blind-safe pattern overlay (shape + texture beyond colour) */}
       <span
-        className={`wallet-badge__dot ${styles.dot} ${getDotStyleClass()}`}
+        className={`wallet-badge__dot ${styles.dot} ${getDotStyleClass()} cb-pattern ${getPatternClass()}`}
         aria-hidden="true"
+        data-reduced-motion={prefersReducedMotion ? "true" : "false"}
+        style={{
+          transition: prefersReducedMotion ? "none" : "background-color 0.2s ease",
+          animation: prefersReducedMotion ? "none" : undefined,
+        }}
       />
 
       {/* Main Content */}
@@ -200,6 +300,11 @@ export function WalletBadge({
         <span className={`wallet-badge__balance ${styles.balance}`}>
           {balance}
         </span>
+      )}
+
+      {/* Keyboard Shortcut Hint */}
+      {shortcut && isInteractive && (
+        <KbdHint shortcut={shortcut} className={`wallet-badge__kbd ${styles.kbdHint}`} />
       )}
 
       {/* Disconnect Action Button */}

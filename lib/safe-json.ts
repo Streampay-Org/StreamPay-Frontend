@@ -46,3 +46,12 @@ export function stringifyWithBigInts(value: unknown): string {
     typeof val === 'bigint' ? val.toString() : val,
   );
 }
+
+/** JSON.stringify that tolerates bigint/circular values; returns "{}" on failure. */
+export function safeJson(value: unknown): string {
+  try {
+    return stringifyWithBigInts(value);
+  } catch {
+    return '{}';
+  }
+}

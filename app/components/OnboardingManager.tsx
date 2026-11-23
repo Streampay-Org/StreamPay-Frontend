@@ -25,8 +25,18 @@ export default function OnboardingManager() {
   const [tourVisible, setTourVisible] = useState(false);
 
   useEffect(() => {
-    const bannerDismissed = localStorage.getItem(ONBOARDING_KEY);
-    const tourDismissed = localStorage.getItem(WELCOME_TOUR_KEY);
+    let bannerDismissed: string | null;
+    let tourDismissed: string | null;
+    try {
+      bannerDismissed = localStorage.getItem(ONBOARDING_KEY);
+      tourDismissed = localStorage.getItem(WELCOME_TOUR_KEY);
+    } catch {
+      // Storage is blocked (privacy mode): dismissal cannot be remembered, so
+      // fall back to the lightweight banner instead of a modal tour that
+      // would reappear on every visit.
+      setOnboardingVisible(true);
+      return;
+    }
 
     if (!tourDismissed) {
       // First-ever visit — show the full tour; suppress the plain banner.
@@ -39,7 +49,11 @@ export default function OnboardingManager() {
 
   const handleBannerDismiss = () => {
     setOnboardingVisible(false);
-    localStorage.setItem(ONBOARDING_KEY, "true");
+    try {
+      localStorage.setItem(ONBOARDING_KEY, "true");
+    } catch {
+      // Storage is blocked or full; the banner simply stays dismissed for now.
+    }
   };
 
   // When the tour is dismissed mark the banner dismissed too so it doesn't

@@ -21,4 +21,10 @@ describe("shared color-blind pattern layer", () => {
     expect(styleText.replace(/\r\n/g, "\n")).toContain("background-image:\n      var(--cb-pattern-active),");
     expect(styleText).toContain("background-blend-mode: multiply;");
   });
+
+  it("includes WalletBadge dot pattern rules with optimised tile size", () => {
+    expect(styleText).toContain(".wallet-badge__dot.cb-pattern::before");
+    expect(styleText).toContain("background-size: 8px 8px");
+    expect(styleText).toContain("border-radius: 50%");
+  });
 });

@@ -40,10 +40,17 @@ The `WalletBadge` component provides real-time display of Stellar wallet connect
    - Secondary Text: `var(--muted-light, #9ca3af)`
    - Focus Ring: `var(--accent, #22c55e)`
    - Status Dot Indicators:
-     - `connected`: `var(--accent, #10b981)`
-     - `connecting` / `disconnecting`: `var(--system-warning-border, #f59e0b)`
-     - `error`: `var(--system-error-border, #ef4444)`
-     - `disconnected`: `var(--muted, #9ca3af)`
+     - `connected`: `var(--accent, #10b981)` + crosshatch texture
+     - `connecting`: `var(--system-warning-border, #f59e0b)` + diagonal stripe texture
+     - `disconnecting`: `var(--system-warning-border, #f59e0b)` + horizontal bar texture
+     - `error`: `var(--system-error-border, #ef4444)` + reverse-diagonal stripe texture
+     - `disconnected`: `var(--muted, #9ca3af)` + spaced dot texture
+
+4. **Color-Blind Safe Pattern Overlays (v7):**
+   - Each wallet connection state is now distinguished by **geometric texture *in addition to* colour**, ensuring the status remains legible under protanopia, deuteranopia, tritanopia, and achromatopsia.
+   - Pattern textures are defined as SVG data URIs in `app/styles/patterns.css` and applied to the status dot via the shared `cb-pattern` utility layer.
+   - The status dot was increased from `8px` to `10px` to make the texture overlay clearly visible.
+   - Pattern tile size is optimised for the compact dot surface (8px tiles at 85% of the base pattern opacity).
 
 4. **Motion Preferences:**
    - Background and status transitions respect `@media (prefers-reduced-motion: reduce)` by disabling transitions.
@@ -76,4 +83,15 @@ export interface WalletBadgeProps {
 ## Verification
 
 - **Unit & Integration Tests:** `app/WalletBadge.test.tsx`
+- **Pattern Layer Tests:** `app/styles/patterns.css.test.tsx`
 - **Lint Verification:** `npm run lint`
+
+## Pattern Mapping Reference
+
+| Wallet State | CSS Pattern Class | Visual Texture | Semantics |
+|-------------|-------------------|---------------|-----------|
+| `disconnected` | `cb-pattern--draft` | Spaced dots (···) | Waiting / not connected |
+| `connecting` | `cb-pattern--active` | Diagonal stripes (///) | In motion / flowing |
+| `connected` | `cb-pattern--ended` | Crosshatch (×××) | Established / complete |
+| `error` | `cb-pattern--cancelled` | Reverse-diagonal (\\\) | Failed / aborted |
+| `disconnecting` | `cb-pattern--paused` | Horizontal bars (≡) | Pausing / transitioning |

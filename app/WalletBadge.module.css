@@ -1,16 +1,24 @@
 /* WalletBadge.module.css - Responsive design system styles for WalletBadge (v7) */
 
 .badge {
+  /* Spacing & Typography Tokens */
+  --wb-gap: var(--space-2);
+  --wb-pad-y: var(--space-1);
+  --wb-pad-x: var(--space-3);
+  --wb-font-size: var(--text-sm, 0.875rem);
+  --wb-font-weight: var(--font-medium, 500);
+  --wb-radius: var(--radius-full, 9999px);
+
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.8rem;
-  border-radius: 9999px;
+  gap: var(--wb-gap);
+  padding: var(--wb-pad-y) var(--wb-pad-x);
+  border-radius: var(--wb-radius);
   border: 1px solid var(--border, #374151);
   background-color: var(--panel, #1f2937);
   color: var(--foreground, #f9fafb);
-  font-size: 0.875rem;
-  font-weight: 500;
+  font-size: var(--wb-font-size);
+  font-weight: var(--wb-font-weight);
   user-select: none;
   position: relative;
   max-width: 100%;
@@ -21,7 +29,7 @@
 /* Touch target for interactive badge (WCAG 2.1 AA min 44px height) */
 .badgeInteractive {
   cursor: pointer;
-  min-height: 44px;
+  min-height: var(--touch-target);
 }
 
 .badgeInteractive:hover {
@@ -32,15 +40,24 @@
 .badgeInteractive:focus-visible {
   outline: 2px solid var(--accent, #22c55e);
   outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--background, #1f2937);
 }
 
-/* Status dot indicator */
+.badgeInteractive:focus:not(:focus-visible) {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Status dot indicator — size increased to 10px so the color-blind-safe
+   pattern overlay is clearly legible (the ::before pseudo-element from
+   the .cb-pattern system overlays a distinct SVG texture per state). */
 .dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   display: inline-block;
   flex-shrink: 0;
+  position: relative;
   transition: background-color 0.2s ease;
 }
 
@@ -53,6 +70,31 @@
 .dotDisconnecting {
   background-color: var(--system-warning-border, #f59e0b);
   box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
+  animation: wallet-badge-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes wallet-badge-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.85);
+  }
+}
+
+/* JS-driven motion modifiers (Issue #1078) */
+.badgeAnimated {
+  /* default — animations enabled via .dotConnecting / transitions */
+}
+
+.badgeStatic .dotConnecting,
+.badgeStatic .dotDisconnecting {
+  animation: none !important;
+  opacity: 1;
+  transform: none;
 }
 
 .dotError {
@@ -76,14 +118,14 @@
 
 .providerPrefix {
   opacity: 0.8;
-  margin-right: 0.25rem;
+  margin-right: var(--space-1);
 }
 
 /* Network tag */
 .network {
-  font-size: 0.75rem;
-  padding: 0.15rem 0.45rem;
-  border-radius: 4px;
+  font-size: var(--text-xs, 0.75rem);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm, 4px);
   background-color: rgba(255, 255, 255, 0.1);
   color: var(--muted-light, #9ca3af);
   line-height: 1;
@@ -92,7 +134,7 @@
 
 /* Balance tag */
 .balance {
-  font-weight: 600;
+  font-weight: var(--font-semibold, 600);
   white-space: nowrap;
 }
 
@@ -102,11 +144,11 @@
   border: none;
   color: var(--muted-light, #9ca3af);
   cursor: pointer;
-  font-size: 0.875rem;
-  padding: 0.5rem;
-  margin-left: 0.1rem;
-  min-width: 44px;
-  min-height: 44px;
+  font-size: var(--text-sm, 0.875rem);
+  padding: var(--space-2);
+  margin-left: var(--space-1);
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -123,18 +165,30 @@
 .disconnect:focus-visible {
   outline: 2px solid var(--accent, #22c55e);
   outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--background, #1f2937);
+}
+
+.disconnect:focus:not(:focus-visible) {
+  outline: none;
+  box-shadow: none;
 }
 
 /* ─────────────────────────────────────────────────────────────
  * Responsive Breakpoint Audit Specifications (Issue #1072)
  * ───────────────────────────────────────────────────────────── */
 
+.kbdHint {
+  /* Responsive display for keyboard shortcut hint */
+}
+
+
 /* Mobile / Narrow Viewport (< 480px / 30rem) */
 @media (max-width: 29.9375rem) {
   .badge {
-    padding: 0.35rem 0.65rem;
-    gap: 0.35rem;
-    font-size: 0.8125rem;
+    --wb-pad-y: var(--space-1);
+    --wb-pad-x: var(--space-3);
+    --wb-gap: var(--space-1);
+    --wb-font-size: var(--text-sm);
   }
 
   .label {
@@ -147,6 +201,10 @@
   }
 
   .providerPrefix {
+    display: none;
+  }
+
+  .kbdHint {
     display: none;
   }
 }
@@ -169,8 +227,9 @@
 /* Desktop & Wide Viewports (>= 1024px / 64rem) */
 @media (min-width: 64rem) {
   .badge {
-    padding: 0.45rem 0.9rem;
-    gap: 0.6rem;
+    --wb-pad-y: var(--space-2);
+    --wb-pad-x: var(--space-4);
+    --wb-gap: var(--space-2);
   }
 
   .label {
@@ -186,11 +245,84 @@
   }
 }
 
-/* Prefers Reduced Motion */
+/* Prefers Reduced Motion — CSS-level static fallback (Issue #1078) */
 @media (prefers-reduced-motion: reduce) {
   .badge,
   .dot,
   .disconnect {
     transition: none !important;
+  }
+
+  .dotConnecting,
+  .dotDisconnecting {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+ * WalletBadge skeleton (Issue #1073)
+ * Mirrors the real badge's inline-flex shape so no layout
+ * shift occurs when the live badge replaces the placeholder.
+ * ───────────────────────────────────────────────────────────── */
+
+/* The skeleton wrapper reuses the same .badge base so dimensions,
+   padding, radius, and border are identical to the real badge. */
+:global(.wallet-badge-skeleton) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wb-gap, var(--space-2));
+  padding: var(--wb-pad-y, var(--space-1)) var(--wb-pad-x, var(--space-3));
+  border-radius: var(--wb-radius, var(--radius-full, 9999px));
+  border: 1px solid var(--border, #374151);
+  background-color: var(--panel, #1f2937);
+  min-height: var(--touch-target);
+  box-sizing: border-box;
+  /* Prevent interaction on the placeholder */
+  pointer-events: none;
+  user-select: none;
+}
+
+:global(.wallet-badge-skeleton__dot),
+:global(.wallet-badge-skeleton__label),
+:global(.wallet-badge-skeleton__network),
+:global(.wallet-badge-skeleton__balance) {
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* Responsive: mirror the real badge breakpoints */
+@media (max-width: 29.9375rem) {
+  :global(.wallet-badge-skeleton) {
+    padding: var(--space-1) var(--space-3);
+    gap: var(--space-1);
+  }
+
+  /* Hide network + balance slots on narrow screens, matching the real badge */
+  :global(.wallet-badge-skeleton__network),
+  :global(.wallet-badge-skeleton__balance) {
+    display: none;
+  }
+
+  :global(.wallet-badge-skeleton__label) {
+    width: 72px !important;
+  }
+}
+
+@media (min-width: 64rem) {
+  :global(.wallet-badge-skeleton) {
+    padding: var(--space-2) var(--space-4);
+    gap: var(--space-2);
+  }
+}
+
+/* Suppress animation for users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  :global(.wallet-badge-skeleton__dot),
+  :global(.wallet-badge-skeleton__label),
+  :global(.wallet-badge-skeleton__network),
+  :global(.wallet-badge-skeleton__balance) {
+    animation: none !important;
   }
 }

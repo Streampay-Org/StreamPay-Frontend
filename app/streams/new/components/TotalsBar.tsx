@@ -12,7 +12,7 @@ export const TotalsBar: React.FC<TotalsBarProps> = ({
   recipientCount = 0,
 }) => {
   return (
-    <div className="sticky bottom-0 left-0 right-0 z-50 w-full border-t border-slate-200 bg-white/80 p-4 backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/80 transition-colors duration-200">
+    <div className="w-full rounded-2xl border border-slate-200 bg-white/80 p-4 dark:border-slate-800 dark:bg-slate-900/80 transition-colors duration-200">
       <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 sm:flex-row px-4">
         <div className="flex flex-wrap items-center gap-6 text-sm md:text-base text-slate-600">
           <div className="flex items-center gap-2">
@@ -29,7 +29,7 @@ export const TotalsBar: React.FC<TotalsBarProps> = ({
         </div>
         
         <div className="text-xs text-slate-400 dark:text-slate-500 italic">
-          Running Campaign Totals
+          Running totals
         </div>
       </div>
     </div>

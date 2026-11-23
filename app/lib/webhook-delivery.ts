@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { logger, withWebhookContext, getCorrelationContext } from './logger';
 import { getActiveSigningSecrets } from '@/app/lib/webhook-secrets';
+import { isCircuitBreakerOpen } from '@/app/lib/admin-guard';
 
 /**
  * Idempotent webhook delivery with exponential backoff + full jitter and DLQ support.
@@ -20,6 +21,21 @@ import { getActiveSigningSecrets } from '@/app/lib/webhook-secrets';
  * - 4xx (except 408, 429) → non-retryable client error, go straight to DLQ
  * - 408, 429, 5xx    → retryable server/transient error
  * - network timeout  → retryable
+ *
+ * ## Two distinct circuit breakers
+ * This module is subject to two independent breakers. They are NOT the same
+ * mechanism and must not be conflated:
+ *
+ * 1. **Global admin breaker** — `isCircuitBreakerOpen("webhook")` from
+ *    admin-guard. Manually toggled subsystem-wide via
+ *    `POST /api/admin/circuit-breaker`. Checked FIRST. When open, no endpoint
+ *    is contacted at all. Deliveries are held (`deferred: true`), NOT DLQed —
+ *    an operator pausing dispatch during an incident must not lose events.
+ *
+ * 2. **Per-endpoint failure breaker** — `WebhookDeliveryClient.isCircuitOpen`.
+ *    Trips itself after N consecutive failures to one endpoint and auto-resets
+ *    after 5 min. When open, that endpoint's delivery goes to DLQ, because the
+ *    endpoint itself is demonstrably broken.
  */
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -390,9 +406,31 @@ export class WebhookDeliveryClient {
     error?: string;
     shouldRetry: boolean;
     nextRetryAt?: string;
+    /**
+     * Set when the global admin breaker held this delivery. The caller must
+     * leave the delivery pending rather than DLQing it — see the module
+     * docblock on the two breakers.
+     */
+    deferred?: boolean;
   }> {
     const context = getCorrelationContext();
     withWebhookContext(deliveryId);
+
+    // ── Global admin breaker (checked before anything endpoint-specific) ─────
+    // Operator-controlled kill switch. Hold the delivery; do not DLQ it and do
+    // not record a failure against the endpoint — the endpoint is not at fault.
+    if (isCircuitBreakerOpen('webhook')) {
+      const error = 'Webhook dispatch halted: admin circuit breaker is open';
+      logger.warn('Webhook delivery deferred by admin circuit breaker', {
+        delivery_id: deliveryId,
+        endpoint_id: endpoint.id,
+        endpoint_url: endpoint.url,
+        event_id: event.id,
+        breaker: 'admin.webhook',
+        correlation_id: context?.correlation_id,
+      });
+      return { success: false, error, shouldRetry: false, deferred: true };
+    }
 
     if (this.isCircuitOpen(endpoint.id, endpoint.circuitBreakerThreshold)) {
       const error = 'Circuit breaker open: endpoint experiencing repeated failures';

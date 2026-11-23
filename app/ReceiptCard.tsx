@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import styles from "./ReceiptCard.module.css";
+import { KbdHint } from "../src/components/KbdHint";
+import { isTextEntry } from "@/lib/keyboard";
 
 const STATUS_LABELS: Record<string, string> = {
   active: "Active",
@@ -20,6 +22,8 @@ export type ReceiptCardProps = {
   status?: string;
   network?: "testnet" | "mainnet";
   defaultMasked?: boolean;
+  /** Whether to render keyboard shortcut hints (default true) */
+  showKbdHints?: boolean;
 };
 
 export function maskAddress(address: string): string {
@@ -29,6 +33,25 @@ export function maskAddress(address: string): string {
 
 const COPY_FEEDBACK_MS = 2000;
 
+/**
+ * Returns true when the user has requested reduced motion via OS/UA settings.
+ * Falls back to false when the `matchMedia` API is unavailable (SSR, legacy).
+ */
+function usePrefersReducedMotion(): boolean {
+  const [prefersReduced, setPrefersReduced] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setPrefersReduced(mq.matches);
+
+    const handler = (e: MediaQueryListEvent) => setPrefersReduced(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
+  return prefersReduced;
+}
+
 export function ReceiptCard({
   streamId,
   recipient,
@@ -37,9 +60,11 @@ export function ReceiptCard({
   status,
   network,
   defaultMasked = true,
+  showKbdHints = true,
 }: ReceiptCardProps) {
   const [masked, setMasked] = useState(defaultMasked);
   const [copied, setCopied] = useState(false);
+  const prefersReducedMotion = usePrefersReducedMotion();
 
   const shownRecipient = masked ? maskAddress(recipient) : recipient;
   const networkLabel = network === "mainnet" ? "Stellar Mainnet" : "Stellar Testnet";
@@ -50,17 +75,43 @@ export function ReceiptCard({
     if (navigator.clipboard) {
       navigator.clipboard.writeText(shareText).then(() => {
         setCopied(true);
-        setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
+        if (!prefersReducedMotion) {
+          setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
+        }
       }).catch((e) => {
         console.error("Failed to copy", e);
       });
     }
-  }, [streamId, amount, assetCode, shownRecipient]);
+  }, [streamId, amount, assetCode, shownRecipient, prefersReducedMotion]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (isTextEntry(event.target)) {
+        return;
+      }
+
+      if (event.key === "c" || event.key === "C") {
+        if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+          event.preventDefault();
+          handleCopy();
+        }
+      } else if (event.key === "m" || event.key === "M") {
+        if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+          event.preventDefault();
+          setMasked((prev) => !prev);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleCopy]);
 
   return (
     <article
-      className={styles.card}
+      className={`${styles.card} ${prefersReducedMotion ? styles.cardReducedMotion : ""}`}
       aria-label="Stream receipt card"
+      tabIndex={0}
     >
       <header className={styles.header}>
         <div className={styles.brand}>
@@ -130,18 +181,26 @@ export function ReceiptCard({
               checked={masked}
               onChange={(e) => setMasked(e.target.checked)}
               aria-label="Mask recipient address for privacy"
+              aria-keyshortcuts="M"
               className={styles.maskInput}
             />
-            Mask
+            <span>Mask</span>
+            {showKbdHints && (
+              <KbdHint keys="M" variant="subtle" size="sm" ariaLabel="Shortcut: M" testId="receipt-kbd-mask" />
+            )}
           </label>
 
           <button
             type="button"
             onClick={handleCopy}
             aria-label={copied ? "Share text copied" : "Copy share text"}
+            aria-keyshortcuts="C"
             className={`${styles.copyBtn} ${copied ? styles.copyBtnCopied : styles.copyBtnDefault}`}
           >
-            {copied ? "Copied" : "Copy"}
+            <span>{copied ? "Copied" : "Copy"}</span>
+            {showKbdHints && (
+              <KbdHint keys="C" variant="subtle" size="sm" ariaLabel="Shortcut: C" testId="receipt-kbd-copy" />
+            )}
           </button>
         </div>
       </div>

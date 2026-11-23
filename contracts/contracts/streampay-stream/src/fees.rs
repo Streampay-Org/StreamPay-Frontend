@@ -33,6 +33,21 @@
 //! | `FeeDataKey::DefaultFeeBps` | Instance | Global default `fee_bps` used when streams do not specify one. Defaults to `0`. |
 //! | `FeeDataKey::FeeCollector` | Instance | Address that receives collected fees. |
 //! | `FeeDataKey::StreamFeeBps(id)` | Persistent | Per-stream `fee_bps` override written at creation time. |
+//! | `FeeDataKey::TokenFeeBps(token)` | Persistent | Per-token `fee_bps` override that outranks the default. |
+//!
+//! ## Precedence
+//!
+//! The effective fee for a stream is resolved in this order:
+//!
+//! 1. the explicit per-stream value (`StreamFeeBps`);
+//! 2. the stream row's stored `fee_bps`, when non-zero;
+//! 3. the per-token override (`TokenFeeBps`);
+//! 4. the global default (`DefaultFeeBps`).
+//!
+//! A stream created with a non-zero `fee_bps` keeps that value for its whole
+//! life: setting a token override later never rewrites an existing stream row.
+//! A stream created with `fee_bps = 0` has no per-stream fee and therefore
+//! follows the token override and then the default.
 
 use soroban_sdk::{contracttype, Address, Env};
 
@@ -59,6 +74,10 @@ const INSTANCE_TTL_EXTEND_TO: u32 = 518_400; // ~1 month at 5-second ledgers
 const STREAM_FEE_TTL_MIN_REMAINING: u32 = 241_920; // ~2 weeks at 5-second ledgers
 /// Persistent-storage TTL target for per-stream fee-bps entries.
 const STREAM_FEE_TTL_EXTEND_TO: u32 = 1_555_200; // ~3 months at 5-second ledgers
+/// Persistent-storage TTL threshold for per-token fee-bps entries.
+const TOKEN_FEE_TTL_MIN_REMAINING: u32 = 241_920; // ~2 weeks at 5-second ledgers
+/// Persistent-storage TTL target for per-token fee-bps entries.
+const TOKEN_FEE_TTL_EXTEND_TO: u32 = 1_555_200; // ~3 months at 5-second ledgers
 /// Persistent-storage TTL threshold for accumulated-fee balance entries.
 /// Matches the stream-row cadence so a fee balance cannot archive before its stream.
 const ACCUM_FEE_TTL_MIN_REMAINING: u32 = 241_920; // ~2 weeks at 5-second ledgers
@@ -83,6 +102,10 @@ pub(crate) enum FeeDataKey {
     /// storage alongside the stream row. Written at stream-creation time and
     /// read on every withdrawal.
     StreamFeeBps(u64),
+    /// Per-token `fee_bps` override keyed by token address. Stored in
+    /// persistent storage. Takes precedence over `DefaultFeeBps` for streams
+    /// that do not carry an explicit per-stream fee.
+    TokenFeeBps(Address),
     /// Accumulated (un-swept) protocol fee balance for a stream, denominated in
     /// the stream's token's smallest unit.  Written by the withdraw path every
     /// time a fee is charged, and zeroed by `fee_sweep.rs` after each sweep.
@@ -120,6 +143,20 @@ fn extend_stream_fee_ttl(env: &Env, stream_id: u64) {
         .extend_ttl(&FeeDataKey::StreamFeeBps(stream_id), threshold, target);
 }
 
+fn extend_token_fee_ttl(env: &Env, token: &Address) {
+    let threshold = env
+        .ledger()
+        .sequence()
+        .saturating_add(TOKEN_FEE_TTL_MIN_REMAINING);
+    let target = env
+        .ledger()
+        .sequence()
+        .saturating_add(TOKEN_FEE_TTL_EXTEND_TO);
+    env.storage()
+        .persistent()
+        .extend_ttl(&FeeDataKey::TokenFeeBps(token.clone()), threshold, target);
+}
+
 fn extend_accum_fee_ttl(env: &Env, stream_id: u64) {
     let threshold = env
         .ledger()
@@ -129,9 +166,11 @@ fn extend_accum_fee_ttl(env: &Env, stream_id: u64) {
         .ledger()
         .sequence()
         .saturating_add(ACCUM_FEE_TTL_EXTEND_TO);
-    env.storage()
-        .persistent()
-        .extend_ttl(&FeeDataKey::AccumulatedFees(stream_id), threshold, target);
+    env.storage().persistent().extend_ttl(
+        &FeeDataKey::AccumulatedFees(stream_id),
+        threshold,
+        target,
+    );
 }
 
 // ── Public API: validation ────────────────────────────────────────────────────
@@ -186,9 +225,7 @@ pub fn apply_fee(amount: i128, fee_bps: u32) -> Result<FeeResult, Error> {
         .checked_div(BPS_DIVISOR)
         .ok_or(Error::Overflow)?;
 
-    let net_amount = amount
-        .checked_sub(fee_amount)
-        .ok_or(Error::Overflow)?;
+    let net_amount = amount.checked_sub(fee_amount).ok_or(Error::Overflow)?;
 
     Ok(FeeResult {
         fee_amount,
@@ -265,20 +302,93 @@ pub fn set_stream_fee_bps(env: &Env, stream_id: u64, fee_bps: u32) {
 
 /// Returns the effective `fee_bps` for `stream_id`.
 ///
-/// If no per-stream override exists, falls back to the global default from
-/// [`get_default_fee_bps`]. This means streams created before the fee system
-/// was deployed inherit the default (which is `0` unless explicitly set).
+/// Resolution order:
+/// 1. the explicit per-stream override written at creation time, when present;
+/// 2. the stream row's stored `fee_bps`, when non-zero;
+/// 3. the per-token override for the stream's token, when present;
+/// 4. the global default.
+///
+/// A stream created with `fee_bps = 0` carries no per-stream fee, so it follows
+/// token and default changes. A stream created with a non-zero `fee_bps` keeps
+/// that value for its whole life; later token overrides never rewrite it.
 pub fn get_stream_fee_bps(env: &Env, stream_id: u64) -> u32 {
-    let val: Option<u32> = env
+    let explicit: Option<u32> = env
         .storage()
         .persistent()
         .get(&FeeDataKey::StreamFeeBps(stream_id));
-    if let Some(bps) = val {
+    if let Some(bps) = explicit {
         extend_stream_fee_ttl(env, stream_id);
-        bps
-    } else {
-        get_default_fee_bps(env)
+        return bps;
     }
+
+    match crate::storage::get_stream(env, stream_id) {
+        Some(stream) => resolve_stream_fee_bps(env, stream_id, &stream.token, stream.fee_bps),
+        None => get_default_fee_bps(env),
+    }
+}
+
+/// Resolves the effective `fee_bps` for a stream the caller has already read.
+///
+/// Applies the same precedence as [`get_stream_fee_bps`]: explicit per-stream
+/// override, stored stream value, token override, default.
+pub fn resolve_stream_fee_bps(
+    env: &Env,
+    stream_id: u64,
+    token: &Address,
+    stored_fee_bps: u32,
+) -> u32 {
+    let explicit: Option<u32> = env
+        .storage()
+        .persistent()
+        .get(&FeeDataKey::StreamFeeBps(stream_id));
+    if let Some(bps) = explicit {
+        extend_stream_fee_ttl(env, stream_id);
+        return bps;
+    }
+
+    if stored_fee_bps > 0 {
+        return stored_fee_bps;
+    }
+
+    resolve_fee_bps(env, token)
+}
+
+// ── Public API: per-token fee storage ────────────────────────────────────────
+
+/// Writes the `fee_bps` override for `token` into persistent storage.
+///
+/// The value must have been validated via [`validate_fee_bps`] before calling
+/// this function. A stored value of `0` is meaningful: it makes the token
+/// fee-free even when the global default is non-zero.
+pub fn set_token_fee_bps(env: &Env, token: &Address, fee_bps: u32) {
+    env.storage()
+        .persistent()
+        .set(&FeeDataKey::TokenFeeBps(token.clone()), &fee_bps);
+    extend_token_fee_ttl(env, token);
+}
+
+/// Removes the per-token override so the token follows the global default.
+pub fn clear_token_fee_bps(env: &Env, token: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&FeeDataKey::TokenFeeBps(token.clone()));
+}
+
+/// Returns the per-token override for `token`, if one is configured.
+pub fn get_token_fee_bps(env: &Env, token: &Address) -> Option<u32> {
+    let val: Option<u32> = env
+        .storage()
+        .persistent()
+        .get(&FeeDataKey::TokenFeeBps(token.clone()));
+    if val.is_some() {
+        extend_token_fee_ttl(env, token);
+    }
+    val
+}
+
+/// Resolves the fee for `token`: its override when present, else the default.
+pub fn resolve_fee_bps(env: &Env, token: &Address) -> u32 {
+    get_token_fee_bps(env, token).unwrap_or_else(|| get_default_fee_bps(env))
 }
 
 // ── Public API: accumulated fee balance storage ───────────────────────────────
@@ -343,9 +453,9 @@ pub fn clear_accumulated_fees(env: &Env, stream_id: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Contract;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::{Address, Env};
-    use crate::Contract;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -433,7 +543,12 @@ mod tests {
     /// Fee and net amount must always sum back to the original amount.
     #[test]
     fn apply_fee_amounts_sum_to_original() {
-        for (amount, bps) in [(1, 1), (999, 100), (1_000_000, 333), (i128::MAX / 10_001, 9_999)] {
+        for (amount, bps) in [
+            (1, 1),
+            (999, 100),
+            (1_000_000, 333),
+            (i128::MAX / 10_001, 9_999),
+        ] {
             let r = apply_fee(amount, bps).unwrap();
             assert_eq!(
                 r.fee_amount + r.net_amount,
@@ -570,6 +685,101 @@ mod tests {
             set_default_fee_bps(&env, 500);
             set_stream_fee_bps(&env, 3, 0);
             assert_eq!(get_stream_fee_bps(&env, 3), 0);
+        });
+    }
+
+    // ── per-token fee storage ─────────────────────────────────────────────────
+
+    fn write_stream(env: &Env, stream_id: u64, token: &Address, fee_bps: u32) {
+        let stream = crate::storage::Stream {
+            id: stream_id,
+            sender: Address::generate(env),
+            recipient: Address::generate(env),
+            token: token.clone(),
+            total_amount: 1_000,
+            released_amount: 0,
+            start_time: 0,
+            end_time: 0,
+            duration: 0,
+            last_update: 0,
+            status: crate::storage::StreamStatus::Active,
+            paused_at: 0,
+            total_paused_duration: 0,
+            fee_bps,
+            cliff_time: 0,
+            curve: crate::storage::ReleaseCurve::Linear,
+        };
+        crate::storage::set_stream(env, stream_id, &stream);
+    }
+
+    #[test]
+    fn token_fee_roundtrip_and_clear() {
+        let (env, contract_id) = setup();
+        let token = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            assert_eq!(get_token_fee_bps(&env, &token), None);
+            set_token_fee_bps(&env, &token, 250);
+            assert_eq!(get_token_fee_bps(&env, &token), Some(250));
+            clear_token_fee_bps(&env, &token);
+            assert_eq!(get_token_fee_bps(&env, &token), None);
+        });
+    }
+
+    #[test]
+    fn resolve_fee_bps_prefers_token_override() {
+        let (env, contract_id) = setup();
+        let token = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            set_default_fee_bps(&env, 100);
+            assert_eq!(resolve_fee_bps(&env, &token), 100);
+            set_token_fee_bps(&env, &token, 400);
+            assert_eq!(resolve_fee_bps(&env, &token), 400);
+        });
+    }
+
+    #[test]
+    fn zero_token_override_makes_token_fee_free() {
+        let (env, contract_id) = setup();
+        let token = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            set_default_fee_bps(&env, 500);
+            set_token_fee_bps(&env, &token, 0);
+            assert_eq!(resolve_fee_bps(&env, &token), 0);
+        });
+    }
+
+    #[test]
+    fn stream_without_explicit_fee_uses_token_override() {
+        let (env, contract_id) = setup();
+        let token = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            set_default_fee_bps(&env, 100);
+            set_token_fee_bps(&env, &token, 300);
+            write_stream(&env, 11, &token, 0);
+            assert_eq!(get_stream_fee_bps(&env, 11), 300);
+        });
+    }
+
+    #[test]
+    fn explicit_stream_fee_beats_token_override() {
+        let (env, contract_id) = setup();
+        let token = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            set_token_fee_bps(&env, &token, 300);
+            write_stream(&env, 12, &token, 0);
+            set_stream_fee_bps(&env, 12, 700);
+            assert_eq!(get_stream_fee_bps(&env, 12), 700);
+        });
+    }
+
+    #[test]
+    fn stream_without_explicit_fee_falls_back_to_default() {
+        let (env, contract_id) = setup();
+        let token = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            set_default_fee_bps(&env, 125);
+            write_stream(&env, 13, &token, 0);
+            assert_eq!(get_stream_fee_bps(&env, 13), 125);
         });
     }
 }

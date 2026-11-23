@@ -14,12 +14,14 @@ interface BottomSheetProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
+  reducedMotion?: boolean;
 }
 
 export const BottomSheet: React.FC<PropsWithChildren<BottomSheetProps>> = ({
   isOpen,
   onClose,
   title,
+  reducedMotion = false,
   children,
 }) => {
   const [shouldRender, setShouldRender] = useState(isOpen);
@@ -137,6 +139,7 @@ export const BottomSheet: React.FC<PropsWithChildren<BottomSheetProps>> = ({
   return (
     <div
       data-testid="bottom-sheet-overlay"
+      role="presentation"
       onMouseDown={handleOverlayPointerDown}
       onClick={handleOverlayClick}
       onAnimationEnd={handleAnimationEnd}
@@ -149,17 +152,22 @@ export const BottomSheet: React.FC<PropsWithChildren<BottomSheetProps>> = ({
         alignItems: "flex-end",
         justifyContent: "center",
         zIndex: 1000,
-        animation: `${isOpen ? "sheetFadeIn" : "sheetFadeOut"} var(--motion-duration-medium, 200ms) var(--motion-easing, cubic-bezier(0.16, 1, 0.3, 1)) forwards`,
+        ...(reducedMotion
+          ? { opacity: isOpen ? 1 : 0 }
+          : { animation: `${isOpen ? "sheetFadeIn" : "sheetFadeOut"} var(--motion-duration-medium, 200ms) var(--motion-easing, cubic-bezier(0.16, 1, 0.3, 1)) forwards` }),
       }}
     >
+      {/* Clicks inside the dialog must not reach the backdrop's dismiss handler;
+          keyboard interaction is handled by onKeyDown. */}
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <div
         ref={containerRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
+        onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
           maxHeight: "90vh",
@@ -169,7 +177,9 @@ export const BottomSheet: React.FC<PropsWithChildren<BottomSheetProps>> = ({
           padding: "1.5rem 1.5rem calc(2rem + env(safe-area-inset-bottom)) 1.5rem",
           boxShadow: "0 -10px 25px rgba(0, 0, 0, 0.4)",
           overflowY: "auto",
-          animation: `${isOpen ? "sheetSlideUp" : "sheetSlideDown"} var(--motion-duration-medium, 200ms) var(--motion-easing, cubic-bezier(0.16, 1, 0.3, 1)) forwards`,
+          ...(reducedMotion
+            ? { transform: isOpen ? "translateY(0)" : "translateY(100%)" }
+            : { animation: `${isOpen ? "sheetSlideUp" : "sheetSlideDown"} var(--motion-duration-medium, 200ms) var(--motion-easing, cubic-bezier(0.16, 1, 0.3, 1)) forwards` }),
         }}
       >
         {/* Grab Handle */}

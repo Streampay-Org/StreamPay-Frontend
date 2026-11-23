@@ -43,11 +43,57 @@ describe("EmptyState", () => {
   it("keeps aria-labelledby pointing at the h2 (screen-reader accessible)", () => {
     const { container } = render(<EmptyState {...DEFAULT_PROPS} />);
     const section = container.querySelector("section.empty-state")!;
+    const heading = screen.getByRole("heading", { level: 2, name: DEFAULT_PROPS.title });
     const headingId = section.getAttribute("aria-labelledby");
     expect(headingId).toBeTruthy();
-    const h2 = section.querySelector("h2#" + headingId);
-    expect(h2).not.toBeNull();
-    expect(h2?.textContent).toBe(DEFAULT_PROPS.title);
+    expect(section).toHaveAttribute("aria-labelledby", heading.id);
+    expect(document.getElementById(headingId!)).toBe(heading);
+  });
+
+  it("uses unique semantic labels when multiple empty states render together", () => {
+    render(
+      <>
+        <EmptyState {...DEFAULT_PROPS} title="First empty state" />
+        <EmptyState {...DEFAULT_PROPS} title="Second empty state" />
+      </>
+    );
+
+    const sections = screen.getAllByRole("region");
+    expect(sections).toHaveLength(2);
+
+    const labelledBy = sections.map((section) => section.getAttribute("aria-labelledby"));
+    const describedBy = sections.map((section) => section.getAttribute("aria-describedby"));
+
+    expect(new Set(labelledBy).size).toBe(2);
+    expect(new Set(describedBy).size).toBe(2);
+    sections.forEach((section) => {
+      const titleId = section.getAttribute("aria-labelledby");
+      const descriptionId = section.getAttribute("aria-describedby");
+      expect(titleId).toBeTruthy();
+      expect(descriptionId).toBeTruthy();
+      expect(document.getElementById(titleId!)).not.toBeNull();
+      expect(document.getElementById(descriptionId!)).not.toBeNull();
+    });
+  });
+
+  it("keeps the CTA semantically tied to the empty-state explanation", () => {
+    const steps = ["Pick a recipient", "Set a cadence"] as const;
+    render(<EmptyState {...DEFAULT_PROPS} guidanceSteps={steps} onAction={jest.fn()} />);
+
+    const button = screen.getByRole("button", { name: DEFAULT_PROPS.actionLabel });
+    const describedBy = button.getAttribute("aria-describedby") ?? "";
+
+    expect(describedBy.split(" ")).toHaveLength(2);
+    describedBy.split(" ").forEach((id) => {
+      expect(document.getElementById(id)).not.toBeNull();
+    });
+    expect(button).not.toBeDisabled();
+  });
+
+  it("renders a disabled CTA when no action handler is available", () => {
+    render(<EmptyState {...DEFAULT_PROPS} />);
+
+    expect(screen.getByRole("button", { name: DEFAULT_PROPS.actionLabel })).toBeDisabled();
   });
 
   it("renders supporting children when provided", () => {

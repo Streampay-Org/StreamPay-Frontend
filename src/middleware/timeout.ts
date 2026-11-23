@@ -57,6 +57,25 @@ export const WALLET_CHALLENGE_TIMEOUT_MS =
 export const WALLET_VERIFY_TIMEOUT_MS =
   Number(process.env.AUTH_WALLET_VERIFY_TIMEOUT_MS) || 5_000;
 
+/**
+ * Default wall-clock budget for /api/streams.
+ * Override via the `STREAMS_TIMEOUT_MS` environment variable.
+ */
+export const STREAMS_TIMEOUT_MS =
+  Number(process.env.STREAMS_TIMEOUT_MS) || 5_000;
+
+/**
+ * Default wall-clock budget applied by `withRouteTimeout` to general API
+ * route handlers.  Override via the `ROUTE_TIMEOUT_MS` environment variable.
+ *
+ * This is the route-level safety net for handlers that do not have a more
+ * specific budget (e.g. `WALLET_*_TIMEOUT_MS`, `STREAMS_TIMEOUT_MS`).  It is
+ * intentionally larger than the auth/streams budgets because most read/write
+ * routes are in-memory and fast, while still bounding pathological cases.
+ */
+export const ROUTE_TIMEOUT_MS =
+  Number(process.env.ROUTE_TIMEOUT_MS) || 10_000;
+
 // ── Core helper ───────────────────────────────────────────────────────────────
 
 /**
@@ -76,11 +95,11 @@ export const WALLET_VERIFY_TIMEOUT_MS =
  * @param work        Async route body.  Receives an `AbortSignal`; wire it
  *                    into fetch/DB calls so they can cancel cooperatively.
  */
-export async function withTimeout(
+export async function withTimeout<T extends Response>(
   timeoutMs: number,
   request: { method?: string; url?: string; headers?: Headers },
-  work: (signal: AbortSignal) => Promise<NextResponse>,
-): Promise<NextResponse> {
+  work: (signal: AbortSignal) => Promise<T>,
+): Promise<T | NextResponse> {
   const startedAt = Date.now();
 
   try {
@@ -121,3 +140,44 @@ export async function withTimeout(
     throw error;
   }
 }
+
+// ── Route-level convenience wrapper ───────────────────────────────────────────
+
+/**
+ * Route-level timeout cancellation for a Next.js App Router handler body.
+ *
+ * This is a thin convenience over {@link withTimeout} that defaults the budget
+ * to {@link ROUTE_TIMEOUT_MS} and accepts the standard `Request` object a
+ * route handler already receives, so adopting it is a one-line change:
+ *
+ * ```ts
+ * import { withRouteTimeout } from '@/src/middleware/timeout';
+ *
+ * export async function GET(request: Request) {
+ *   return withRouteTimeout(request, async (signal) => {
+ *     // ... existing handler body; thread `signal` into fetch/DB calls
+ *   });
+ * }
+ * ```
+ *
+ * Behavior is identical to `withTimeout`: on deadline expiry the work is
+ * aborted via the `AbortSignal`, a `504 Gateway Timeout` envelope is returned,
+ * and a structured warning is logged (method, path, duration, correlation id)
+ * so timeouts are diagnosable without leaking payload data.
+ *
+ * @param request   Incoming request (used for logging + deadline enforcement).
+ * @param work      The handler body; receives an `AbortSignal` for cooperative
+ *                  cancellation of fetches / DB queries.
+ * @param timeoutMs Budget override; defaults to `ROUTE_TIMEOUT_MS`.
+ */
+export async function withRouteTimeout<T extends Response>(
+  request: Request,
+  work: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number = ROUTE_TIMEOUT_MS,
+): Promise<T | NextResponse> {
+  return withTimeout(timeoutMs, request, work);
+}
+
+/** Default wall-clock budget for webhook routes. Override via `WEBHOOK_TIMEOUT_MS`. */
+export const WEBHOOK_TIMEOUT_MS =
+  Number(process.env.WEBHOOK_TIMEOUT_MS) || 10_000;

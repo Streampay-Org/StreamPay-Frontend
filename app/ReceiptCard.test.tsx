@@ -88,4 +88,46 @@ describe("ReceiptCard", () => {
     expect(badge).toHaveClass("cb-pattern");
     expect(badge).toHaveClass("cb-pattern--withdrawn");
   });
+
+  describe("reduced-motion fallback", () => {
+    beforeEach(() => {
+      // Mock matchMedia to simulate prefers-reduced-motion: reduce
+      Object.defineProperty(window, "matchMedia", {
+        writable: true,
+        value: jest.fn().mockImplementation((query: string) => ({
+          matches: query === "(prefers-reduced-motion: reduce)",
+          media: query,
+          onchange: null,
+          addEventListener: jest.fn(),
+          removeEventListener: jest.fn(),
+          addListener: jest.fn(),
+          removeListener: jest.fn(),
+          dispatchEvent: jest.fn(),
+        })),
+      });
+    });
+
+    it("applies reduced-motion CSS class when prefers-reduced-motion is set", () => {
+      render(<ReceiptCard {...defaultProps} />);
+      const article = screen.getByLabelText("Stream receipt card");
+      expect(article.className).toContain("cardReducedMotion");
+    });
+
+    it("copies directly without timeout when prefers-reduced-motion is set", () => {
+      const mockClipboard = {
+        writeText: jest.fn().mockResolvedValue(undefined),
+      };
+      Object.assign(navigator, { clipboard: mockClipboard });
+
+      render(<ReceiptCard {...defaultProps} defaultMasked={false} />);
+      const copyButton = screen.getByRole("button", { name: "Copy share text" });
+      
+      fireEvent.click(copyButton);
+      
+      // Should still attempt the clipboard write
+      expect(mockClipboard.writeText).toHaveBeenCalledWith(
+        "StreamPay receipt stream-123456: 100.00 USDC to GB7ABCD...WXYZ"
+      );
+    });
+  });
 });

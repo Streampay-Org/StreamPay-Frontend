@@ -18,6 +18,25 @@
   }
 }
 
+/* ── Reduced motion fallback ───────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .card *,
+  .card *::before,
+  .card *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.cardReducedMotion .copyBtn {
+  transition: none;
+}
+
+/* ──────────────────────────────────────────────────────────────────────── */
+
 .header {
   margin-bottom: 16px;
 }
@@ -152,7 +171,7 @@
 .maskLabel {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   font-size: 0.75rem;
   color: var(--muted);
   cursor: pointer;
@@ -163,6 +182,9 @@
 }
 
 .copyBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border-radius: 4px;
   padding: 4px 8px;
   font-size: 0.75rem;

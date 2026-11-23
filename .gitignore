@@ -31,3 +31,5 @@ Desktop.ini
 *.tsbuildinfo
 
 litellm_config.yaml
+.vercel
+.lighthouseci/

@@ -25,8 +25,14 @@ export function parseAssetString(assetStr: string): StellarAsset {
   }
 
   if (assetStr.includes(':')) {
-    const [code, issuer] = assetStr.split(':');
-    if (code && issuer && issuer.length === 56 && issuer.startsWith('G')) {
+    const parts = assetStr.split(':');
+    const [code, issuer] = parts;
+    if (
+      parts.length === 2 &&
+      /^[A-Za-z0-9]{1,12}$/.test(code) &&
+      issuer.length === 56 &&
+      issuer.startsWith('G')
+    ) {
       return { code: code.toUpperCase(), issuer, isNative: false };
     }
   }

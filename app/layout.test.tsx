@@ -17,8 +17,12 @@ jest.mock("./components/ToastProvider", () => ({
   ),
 }));
 
-jest.mock("./components/CommandPaletteWrapper", () => ({
-  CommandPaletteWrapper: () => <div data-testid="command-palette" />,
+jest.mock("./components/CommandPaletteLauncher", () => ({
+  CommandPaletteLauncher: () => <div data-testid="command-palette" />,
+}));
+
+jest.mock("./components/ShortcutsOverlayLauncher", () => ({
+  ShortcutsOverlayLauncher: () => <div data-testid="shortcuts-overlay" />,
 }));
 
 jest.mock("./components/SplashScreenWrapper", () => ({
@@ -73,7 +77,7 @@ describe("RootLayout", () => {
     expect(script?.innerHTML).toContain("streampay-theme");
   });
 
-  it("composes ToastProvider, splash screen, command palette, page content, and bottom nav in order", () => {
+  it("composes ToastProvider, splash screen, command palette, shortcuts overlay, page content, and bottom nav in order", () => {
     render(
       <RootLayout>
         <div data-testid="page-content">Page</div>
@@ -83,6 +87,7 @@ describe("RootLayout", () => {
     expect(screen.getByTestId("toast-provider")).toBeInTheDocument();
     expect(screen.getByTestId("splash-screen")).toBeInTheDocument();
     expect(screen.getByTestId("command-palette")).toBeInTheDocument();
+    expect(screen.getByTestId("shortcuts-overlay")).toBeInTheDocument();
     expect(screen.getByTestId("page-content")).toBeInTheDocument();
     expect(screen.getByTestId("app-bottom-nav")).toBeInTheDocument();
   });
