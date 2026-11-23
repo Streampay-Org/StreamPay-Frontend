@@ -12,7 +12,13 @@ export class ReconciliationService {
     this.tolerance = options.tolerance ?? 0n;
   }
 
-  public async runReconciliation(options?: { streamId?: string; dryRun?: boolean; dbStreams?: DbStream[]; signal?: AbortSignal }): Promise<ReconciliationReport> {
+  public async runReconciliation(options?: {
+    streamId?: string;
+    dryRun?: boolean;
+    dbStreams?: DbStream[];
+    signal?: AbortSignal;
+    onProgress?: () => void;
+  }): Promise<ReconciliationReport> {
     const report: ReconciliationReport = {
       timestamp: new Date().toISOString(),
       totalStreamsChecked: 0,
@@ -50,6 +56,7 @@ export class ReconciliationService {
               error: err instanceof Error ? err.message : String(err),
             });
           }
+          options?.onProgress?.();
         }
       }
     } else {
@@ -69,6 +76,9 @@ export class ReconciliationService {
             streamId,
             error: err instanceof Error ? err.message : String(err),
           });
+        }
+        if (report.totalStreamsChecked > 0) {
+          options?.onProgress?.();
         }
       } else {
         // Process all streams using pagination
@@ -114,6 +124,7 @@ export class ReconciliationService {
                 error: err instanceof Error ? err.message : String(err),
               });
             }
+            options?.onProgress?.();
           }
 
           offset += limit;

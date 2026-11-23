@@ -29,6 +29,22 @@ describe('ReconciliationService', () => {
     expect(report.mismatches).toHaveLength(0);
   });
 
+  it('reports progress after each processed stream', async () => {
+    const onProgress = jest.fn();
+    (dbClient.getStreams as jest.Mock).mockResolvedValue([
+      { id: 's1', total_amount: '100', released_amount: '50', status: 'ACTIVE' },
+      { id: 's2', total_amount: '100', released_amount: '50', status: 'ACTIVE' },
+    ]);
+    (onChainClient.fetchStream as jest.Mock).mockResolvedValue({
+      id: 's1', total_amount: 100n, released_amount: 50n, status: ContractStreamStatus.ACTIVE,
+    });
+
+    const report = await service.runReconciliation({ onProgress });
+
+    expect(report.totalStreamsChecked).toBe(2);
+    expect(onProgress).toHaveBeenCalledTimes(2);
+  });
+
   it('should detect mismatches in released_amount', async () => {
     (dbClient.getStreams as jest.Mock).mockResolvedValue([
       { id: 's1', total_amount: '100', released_amount: '50', status: 'ACTIVE' }
