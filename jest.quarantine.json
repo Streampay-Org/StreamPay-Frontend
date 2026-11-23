@@ -42,10 +42,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "app/api/reconciliation/route.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/api/streams/__tests__/rateLimiterConsistency.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
