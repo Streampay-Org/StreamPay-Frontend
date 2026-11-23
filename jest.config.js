@@ -32,7 +32,6 @@ const config = {
     "<rootDir>/app/api/metrics/route.test.ts",
     "<rootDir>/app/api/orgs/\\[orgId\\]/token-allowlist/route.test.ts",
     "<rootDir>/app/api/reconciliation/route.test.ts",
-    "<rootDir>/app/api/streams/__tests__/rateLimiterConsistency.test.ts",
     "<rootDir>/app/api/streams/\\[id\\]/start/route.test.ts",
     "<rootDir>/app/api/streams/\\[id\\]/webhooks/test/route.test.ts",
     "<rootDir>/app/api/streams/\\[id\\]/withdraw/route.test.ts",

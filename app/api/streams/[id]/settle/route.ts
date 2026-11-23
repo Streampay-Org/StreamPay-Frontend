@@ -5,6 +5,7 @@ import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { getStellarSettlementClient } from "@/app/lib/stellar";
+import { streamsRateLimit } from "@/src/middleware/rateLimit";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -26,6 +27,14 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+
+  // Rate limit guard — applied before auth/RBAC so throttled callers cannot
+  // probe stream ownership by burning through the write bucket. Matches pause.
+  const rateCheck = await streamsRateLimit(request, "POST", `/api/streams/${id}/settle`);
+  if (!rateCheck.allowed) {
+    return rateCheck.response;
+  }
+
   // IDEMPOTENCY: Settle is non-idempotent by nature — this wrapper ensures retries return the original response without re-executing the settlement
   return withIdempotency(request, "settle", settleStore, async () => {
     return withLock(id, async () => {
