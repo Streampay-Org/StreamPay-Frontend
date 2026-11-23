@@ -71,6 +71,7 @@ pub struct SplitStream {
     pub total_paused_duration: u64,
     pub total_weight: u64,
     pub recipients: Vec<RecipientAllocation>,
+    pub fee_bps: u32,
 }
 ```
 
