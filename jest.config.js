@@ -46,7 +46,6 @@ const config = {
     "<rootDir>/app/lib/dtos/audit.dto.test.ts",
     "<rootDir>/app/lib/errors/index.test.ts",
     "<rootDir>/app/ReceiptCard.test.tsx",
-    "<rootDir>/app/streams/new/components/StepIndicator.test.tsx",
     "<rootDir>/app/streams/new/multi.test.tsx",
     "<rootDir>/app/streams/new/page.focus.test.tsx",
     "<rootDir>/app/streams/new/page.resp.test.tsx",
