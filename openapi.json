@@ -918,6 +918,11 @@
                     "type": "string",
                     "description": "Stellar asset code (optional, defaults to XLM).",
                     "example": "XLM"
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "description": "Optional organization that owns this stream and whose configured quota applies.",
+                    "example": "org-acme"
                   }
                 }
               },
@@ -984,14 +989,20 @@
           },
           "422": { "$ref": "#/components/responses/422" },
           "429": {
-            "description": "Rate limit exceeded.",
+            "description": "Rate limit or configured stream quota exceeded. Retry-After is set for rate limits and monthly-volume quota rejections.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the client may retry. Present for rate limits and monthly-volume quota rejections.",
+                "schema": { "type": "integer" }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
                 "example": {
                   "error": {
-                    "code": "RATE_LIMIT_EXCEEDED",
-                    "message": "Too many requests. Retry after 30 seconds.",
+                    "code": "QUOTA_ACTIVE_STREAMS_EXCEEDED",
+                    "message": "The user has 2 active streams; the configured limit is 2.",
                     "request_id": "req_01HZ9ABCDEF"
                   }
                 }
@@ -2004,6 +2015,11 @@
                     "type": "string",
                     "description": "Stellar asset code (optional, defaults to XLM).",
                     "example": "XLM"
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "description": "Optional organization that owns this stream and whose configured quota applies.",
+                    "example": "org-acme"
                   }
                 }
               },
@@ -2036,6 +2052,27 @@
           "400": { "$ref": "#/components/responses/400" },
           "401": { "$ref": "#/components/responses/401" },
           "422": { "$ref": "#/components/responses/422" },
+          "429": {
+            "description": "Daily creation limit or configured stream quota exceeded. Retry-After indicates when the applicable quota resets.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the daily limit resets at UTC midnight or monthly volume quota resets at the next UTC month.",
+                "schema": { "type": "integer" }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "error": {
+                    "code": "QUOTA_MONTHLY_VOLUME_EXCEEDED",
+                    "message": "The user has used 1000000000 of 1000000000 monthly XLM stroops.",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
           "500": { "$ref": "#/components/responses/500" }
         }
       }

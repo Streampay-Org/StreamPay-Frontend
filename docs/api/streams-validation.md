@@ -41,3 +41,22 @@ Behavior changes, all previously silent degradations:
 
 All failures use the same 422 `VALIDATION_ERROR` envelope with per-field
 `details` as the POST body path.
+
+## Stream creation quotas
+
+`POST /api/streams`, `POST /api/v2/streams`, batch creation, and CSV/JSON
+imports enforce configured quotas from `/api/admin/quotas` while holding the
+shared stream-creation lock.
+
+- A user quota is matched against the authenticated wallet in the bearer
+  token. Org-owned creates provide an optional `orgId` with the request.
+- `draft`, `active`, and `paused` streams count toward `maxActiveStreams`;
+  `ended`, `withdrawn`, and `cancelled` streams do not.
+- Monthly volume counts XLM streams created in the current UTC month. The
+  route's decimal XLM rate is converted directly to stroops; existing records
+  with `totalAmount` use that stored raw amount.
+- Org quotas are checked before user quotas. If either configured quota is
+  exceeded, creation returns the standard 429 error envelope. Monthly-volume
+  rejections include `Retry-After` seconds until the next UTC month.
+- Quota value `0` and a missing quota record mean unlimited. The current quota
+  model has no blocked sentinel, so these checks do not return 403.

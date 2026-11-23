@@ -1,5 +1,5 @@
 /**
- * POST /api/v2/streams — create a stream, enforcing a per-org daily quota.
+ * POST /api/v2/streams — create a stream, enforcing daily and configured quotas.
  * GET  /api/v2/streams — paginated stream list in v2 shape.
  *
  * Quota enforcement (POST only):
@@ -11,6 +11,9 @@
  *   When the quota is exceeded the handler returns 429 with a Retry-After
  *   header set to the number of seconds until UTC midnight, and a metric
  *   is emitted via org-quota-metrics.ts.
+ *
+ *   Admin-configured user/org active-stream and monthly XLM volume quotas are
+ *   checked under the shared creation lock before the stream is persisted.
  *
  * Breaking changes vs v1:
  *   - Response body uses `allowed_actions`, `created_at`, `updated_at`
@@ -25,8 +28,15 @@ import { getClientIdentity } from "@/app/lib/rate-limit";
 import { checkOrgDailyQuota, orgQuotaResponse } from "@/app/lib/org-quota";
 import { toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
 import type { Stream } from "@/app/types/openapi";
-import { getClientIdentity } from "@/app/lib/rate-limit";
-import { checkOrgDailyQuota, orgQuotaResponse } from "@/app/lib/org-quota";
+import { checkCreationQuota } from "@/app/lib/quota-enforcement";
+import {
+  creationQuotaResponse,
+  quotaUserId,
+  rateToStroops,
+  withStreamCreationQuotaLock,
+} from "@/app/lib/stream-create-core";
+import { recordCreationQuotaRejection } from "@/app/lib/org-quota-metrics";
+import { orgDb } from "@/app/lib/org-db";
 
 function errorResponse(code: string, message: string, status: number) {
   const requestId = getCorrelationContext()?.request_id ?? `req-${crypto.randomUUID()}`;
@@ -106,10 +116,11 @@ export async function POST(request: Request) {
     return errorResponse("INVALID_REQUEST", "Request body must be valid JSON", 400);
   }
 
-  const { recipient, rate, schedule } = body as {
+  const { recipient, rate, schedule, orgId: rawOrgId } = body as {
     recipient?: string;
     rate?: string;
     schedule?: string;
+    orgId?: string;
   };
 
   if (!recipient || !rate || !schedule) {
@@ -118,6 +129,11 @@ export async function POST(request: Request) {
       "Missing required fields: recipient, rate, schedule",
       422,
     );
+  }
+
+  const rateMatch = /^(\d+(?:\.\d{1,7})?)(?:\s+.*)?$/.exec(rate.trim());
+  if (!rateMatch || Number(rateMatch[1]) <= 0) {
+    return errorResponse("VALIDATION_ERROR", "rate must be a positive decimal with at most 7 decimal places.", 422);
   }
 
   // ── 4. Persist and respond ────────────────────────────────────────────────
@@ -135,12 +151,41 @@ export async function POST(request: Request) {
     token: "XLM",
   };
 
-  db.streams.set(id, newStream);
+  const userId = quotaUserId(identity);
+  const orgId = typeof rawOrgId === "string" && rawOrgId.trim()
+    ? rawOrgId.trim()
+    : undefined;
 
-  const stream = toV2Stream(dbStreamToV1(newStream));
-  const payload = stream;
- 
-  if (token) db.idempotency.set(token, payload);
- 
-  return NextResponse.json(payload, { status: 201 });
+  return withStreamCreationQuotaLock(async () => {
+    if (token && db.idempotency.has(token)) {
+      return NextResponse.json(db.idempotency.get(token), { status: 201 });
+    }
+
+    const quotaResult = checkCreationQuota({
+      userId,
+      orgId,
+      amountStroops: rateToStroops(rate, "XLM"),
+      now: new Date(now),
+    });
+    if (!quotaResult.allowed) {
+      recordCreationQuotaRejection(
+        quotaResult.scope,
+        quotaResult.subject,
+        quotaResult.code,
+      );
+      return creationQuotaResponse(quotaResult);
+    }
+
+    const storedStream: Stream = {
+      ...newStream,
+      ...(userId ? { senderAddress: userId } : {}),
+    };
+    db.streams.set(id, storedStream);
+    if (orgId) orgDb.streamOwnership.set(id, orgId);
+
+    const stream = toV2Stream(dbStreamToV1(newStream));
+    if (token) db.idempotency.set(token, stream);
+
+    return NextResponse.json(stream, { status: 201 });
+  });
 }

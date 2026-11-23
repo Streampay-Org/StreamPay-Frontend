@@ -13,6 +13,15 @@ import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { checkTokenAllowed, normaliseToken } from "@/app/lib/token-allowlist";
+import { checkCreationQuota } from "@/app/lib/quota-enforcement";
+import {
+  creationQuotaResponse,
+  quotaUserId,
+  rateToStroops,
+  withStreamCreationQuotaLock,
+} from "@/app/lib/stream-create-core";
+import { recordCreationQuotaRejection } from "@/app/lib/org-quota-metrics";
+import { orgDb } from "@/app/lib/org-db";
 import {
   validateCreateStreamBody,
   validateListStreamsQuery,
@@ -219,12 +228,48 @@ export async function POST(request: Request) {
     token: normalisedToken,
   };
 
-  streamRepository.streams.set(id, newStream);
-  const payload = { data: newStream, links: { self: `/api/v1/streams/${id}` } };
+  const userId = quotaUserId(identity);
+  const orgId = typeof body.orgId === "string" && body.orgId.trim()
+    ? body.orgId.trim()
+    : undefined;
 
-  if (token) {
-    setIdempotency(idempotencyStore, token, fingerprint, 201, payload);
-  }
+  return withStreamCreationQuotaLock(async () => {
+    if (token) {
+      const cached = checkIdempotency(idempotencyStore, token, fingerprint);
+      if (cached) {
+        if (!cached.ok) {
+          return NextResponse.json(
+            { error: { code: "IDEMPOTENCY_CONFLICT", message: "Idempotency key has been used with a different request." } },
+            { status: 409 },
+          );
+        }
+        return NextResponse.json(cached.body, { status: cached.status });
+      }
+    }
 
-  return NextResponse.json(payload, { status: 201 });
+    const quota = checkCreationQuota({
+      userId,
+      orgId,
+      amountStroops: rateToStroops(rateValue, normalisedToken),
+      now: new Date(now),
+    });
+    if (!quota.allowed) {
+      recordCreationQuotaRejection(quota.scope, quota.subject, quota.code);
+      return creationQuotaResponse(quota);
+    }
+
+    const storedStream: Stream = {
+      ...newStream,
+      ...(userId ? { senderAddress: userId } : {}),
+    };
+    streamRepository.streams.set(id, storedStream);
+    if (orgId) orgDb.streamOwnership.set(id, orgId);
+
+    const payload = { data: newStream, links: { self: `/api/v1/streams/${id}` } };
+    if (token) {
+      setIdempotency(idempotencyStore, token, fingerprint, 201, payload);
+    }
+
+    return NextResponse.json(payload, { status: 201 });
+  });
 }
