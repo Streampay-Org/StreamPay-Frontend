@@ -141,8 +141,8 @@ fn created_event_payload_fields() {
 
     // Deserialise as a vec of Val and check field count.
     let fields: soroban_sdk::Vec<soroban_sdk::Val> = payload.from_val(&data.env);
-    // stream_id | sender | recipient | token | total_amount | fee_bps | duration | timestamp = 8 fields
-    assert_eq!(fields.len(), 8, "StreamCreated payload must have 8 fields");
+    // stream_id | sender | recipient | token | total_amount | fee_bps | duration | cliff_time | timestamp = 9 fields
+    assert_eq!(fields.len(), 9, "StreamCreated payload must have 9 fields");
 
     // Field 0: stream_id
     let got_id: u64 = fields.get_unchecked(0).from_val(&data.env);
@@ -161,6 +161,13 @@ fn created_event_payload_fields() {
     assert_eq!(
         got_duration, 100u64,
         "duration should be end_time - start_time"
+    );
+
+    // Field 7: cliff_time
+    let got_cliff_time: u64 = fields.get_unchecked(7).from_val(&data.env);
+    assert_eq!(
+        got_cliff_time, 0u64,
+        "cliff_time should be 0 for standard streams"
     );
 }
 

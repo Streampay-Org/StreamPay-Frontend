@@ -22,10 +22,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "app/api/exports/exports.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/api/indexer/sse/route.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
@@ -138,15 +134,7 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "app/streams/new/wizardDraft.test.tsx",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/streams/page.test.tsx",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "app/streams/streams-cascade.test.tsx",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
@@ -174,8 +162,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "tests/integration/exports.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
     }
   ]
 }

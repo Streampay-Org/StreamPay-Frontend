@@ -1997,6 +1997,7 @@ fn vested_amount_extreme_values_overflow() {
         status: StreamStatus::Active,
         paused_at: 0,
         total_paused_duration: 0,
+        cliff_time: 0,
     };
 
     let result = release::vested_amount(&stream, 500);

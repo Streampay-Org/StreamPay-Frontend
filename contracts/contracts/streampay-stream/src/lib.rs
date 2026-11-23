@@ -969,6 +969,7 @@ impl Contract {
     /// @custom:error [`Error::InvalidTimeRange`] if `end_time <= start_time` or `start_time < now` (active only).
     ///
     /// @custom:auth Requires authorisation from `sender`.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_stream(
         env: Env,
         sender: Address,
@@ -978,6 +979,53 @@ impl Contract {
         start_time: u64,
         end_time: u64,
         fee_bps: u32,
+    ) -> Result<u64, Error> {
+        Self::create_stream_with_cliff(
+            env,
+            sender,
+            recipient,
+            token,
+            total_amount,
+            start_time,
+            end_time,
+            fee_bps,
+            0,
+        )
+    }
+
+    /// Creates a funded stream with an optional cliff timestamp and escrows
+    /// `total_amount` from `sender`.
+    ///
+    /// This is an additive entrypoint alongside [`Contract::create_stream`] to
+    /// preserve ABI compatibility for existing callers and snapshots. Passing
+    /// `cliff_time = 0` behaves identically to [`Contract::create_stream`].
+    ///
+    /// When `cliff_time > 0`, it must satisfy
+    /// `start_time <= cliff_time <= end_time`; otherwise
+    /// [`Error::InvalidTimeRange`] is returned. Before the cliff is reached,
+    /// `withdrawable` returns `0`. At and after the cliff, vesting jumps to
+    /// the linear accrued amount for the active elapsed time and reaches
+    /// `total_amount` at `end_time`.
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the global pause flag is set.
+    /// @custom:error [`Error::InvalidAmount`] if `total_amount <= 0`.
+    /// @custom:error [`Error::SelfStream`] if `sender == recipient`.
+    /// @custom:error [`Error::TokenNotAllowed`] if the token has been blocked by the admin.
+    /// @custom:error [`Error::InvalidTimeRange`] if `end_time <= start_time`, `start_time < now`,
+    /// or `cliff_time != 0 && (cliff_time < start_time || cliff_time > end_time)`.
+    ///
+    /// @custom:auth Requires authorisation from `sender`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_stream_with_cliff(
+        env: Env,
+        sender: Address,
+        recipient: Address,
+        token: Address,
+        total_amount: i128,
+        start_time: u64,
+        end_time: u64,
+        fee_bps: u32,
+        cliff_time: u64,
     ) -> Result<u64, Error> {
         require_not_paused(&env)?;
         sender.require_auth();
@@ -1016,6 +1064,10 @@ impl Contract {
             return Err(Error::InvalidTimeRange);
         }
 
+        if cliff_time != 0 && (cliff_time < start_time || cliff_time > end_time) {
+            return Err(Error::InvalidTimeRange);
+        }
+
         let duration = end_time
             .checked_sub(start_time)
             .ok_or(Error::InvalidTimeRange)?;
@@ -1039,6 +1091,7 @@ impl Contract {
             paused_at: 0,
             total_paused_duration: 0,
             fee_bps,
+            cliff_time,
         };
 
         storage::set_stream(&env, id, &stream);
@@ -1057,6 +1110,7 @@ impl Contract {
             stream.total_amount,
             fee_bps,
             duration,
+            cliff_time,
             now,
         );
 
@@ -1132,6 +1186,7 @@ impl Contract {
             paused_at: 0,
             total_paused_duration: 0,
             fee_bps: 0,
+            cliff_time: 0,
         };
 
         storage::set_stream(&env, id, &stream);
@@ -1145,6 +1200,7 @@ impl Contract {
             stream.total_amount,
             0,
             duration,
+            0,
             now,
         );
 
@@ -1342,6 +1398,14 @@ impl Contract {
         let recipient = stream.recipient.clone();
         let ts = execute_withdraw(&env, stream_id, &mut stream, amount, &recipient)?;
 
+        // Resolve the effective fee: explicit per-stream fee, then the token
+        // override, then the global default.  If no fee collector has been
+        // configured the full `amount` goes to the recipient regardless of the
+        // effective fee.
+        let effective_fee_bps =
+            fees::resolve_stream_fee_bps(&env, stream_id, &stream.token, stream.fee_bps);
+        let fee_result = fees::apply_fee(amount, effective_fee_bps)?;
+                    effective_fee_bps,
         events::withdrawn(&env, stream_id, &stream.recipient, amount, ts);
         if stream.status == StreamStatus::Settled {
             events::settled(&env, stream_id, &stream.recipient, stream.total_amount, ts);
@@ -2997,5 +3061,64 @@ mod claim_drip_test {
         let result = client.try_claim_drip(&9999u64);
         let err = result.expect_err("claim_drip on missing stream should fail");
         assert_eq!(err, Ok(Error::NotFound));
+    }
+
+    // ── Cliff stream tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn create_stream_with_cliff_rejects_invalid_cliff_times() {
+        let (env, client) = setup();
+        let (sender, recipient) = addresses(&env);
+        let (token, _) = token_and_client(&env, &sender);
+
+        client.initialize(&sender);
+        env.ledger().set_timestamp(1_000);
+
+        // cliff_time < start_time (non-zero)
+        let res_before = client.try_create_stream_with_cliff(
+            &sender, &recipient, &token, &1000i128, &1_100u64, &2_100u64, &0u32, &1_050u64,
+        );
+        assert_eq!(res_before.expect_err("cliff before start"), Ok(Error::InvalidTimeRange));
+
+        // cliff_time > end_time
+        let res_after = client.try_create_stream_with_cliff(
+            &sender, &recipient, &token, &1000i128, &1_100u64, &2_100u64, &0u32, &2_200u64,
+        );
+        assert_eq!(res_after.expect_err("cliff after end"), Ok(Error::InvalidTimeRange));
+    }
+
+    #[test]
+    fn create_stream_with_cliff_withholds_until_cliff_then_vests_linearly() {
+        let (env, client) = setup();
+        let (sender, recipient) = addresses(&env);
+        let (token, _) = token_and_client(&env, &sender);
+
+        client.initialize(&sender);
+        env.ledger().set_timestamp(1_000);
+
+        let id = client.create_stream_with_cliff(
+            &sender, &recipient, &token, &1000i128, &1_000u64, &2_000u64, &0u32, &1_500u64,
+        );
+
+        let stream = client.get_stream(&id);
+        assert_eq!(stream.cliff_time, 1_500);
+
+        // Before cliff: withdrawable is 0 and withdraw fails with OverWithdraw
+        env.ledger().set_timestamp(1_499);
+        assert_eq!(client.withdrawable(&id), 0);
+        let err = client
+            .try_withdraw(&recipient, &id, &1i128)
+            .expect_err("withdraw before cliff should fail");
+        assert_eq!(err, Ok(Error::OverWithdraw));
+
+        // At cliff: jumps to linear amount (500) and withdraw succeeds
+        env.ledger().set_timestamp(1_500);
+        assert_eq!(client.withdrawable(&id), 500);
+        client.withdraw(&recipient, &id, &500i128);
+        assert_eq!(client.withdrawable(&id), 0);
+
+        // At end_time: remaining 500 is withdrawable
+        env.ledger().set_timestamp(2_000);
+        assert_eq!(client.withdrawable(&id), 500);
     }
 }

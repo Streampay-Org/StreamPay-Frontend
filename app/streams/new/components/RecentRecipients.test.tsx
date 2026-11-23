@@ -6,19 +6,20 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 import { RecentRecipients } from "./RecentRecipients";
+import { encodeStellarPublicKey } from "../../../lib/stellar-address";
 import {
   addRecentRecipient,
   clearRecentRecipients,
   getRecentRecipients,
 } from "../../../state/recentRecipients";
 
-const ADDR_A = "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZK7G";
-const ADDR_B = "GBDE4S2PHRXBLPJFQVLZJ6VFBNEXDBKGKNXQY5FAFKPV7XTMHHFP2SU";
-const ADDR_C = "GC5M3NBSIFDIBZGBSMABKW7ZAQEYLQR6YIXMKBDGQCKIQE5KW7ZK7K3";
-const ADDR_D = "GD2GBFGQOFKSJAL5FXIJHQFPAJDP7GQFXHTDQYKFFNPIBZRPZJKFHTB";
-const ADDR_E = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGZQE3DCSSGNL4GQXHOPKC";
-const ADDR_F = "GBXGQJWVLKZX6HIWB3R4R5JXQFQBSKNYZTZM6FXQZN6ER6SDKZFM6O";
-const ADDR_G = "GDVXG2FMFFSUMMMBIUEMWPZAIU2FNCH7PNKEG3QAE6FAJQZF4KBPWF4";
+const ADDR_A = encodeStellarPublicKey(new Uint8Array(32).fill(1));
+const ADDR_B = encodeStellarPublicKey(new Uint8Array(32).fill(2));
+const ADDR_C = encodeStellarPublicKey(new Uint8Array(32).fill(3));
+const ADDR_D = encodeStellarPublicKey(new Uint8Array(32).fill(4));
+const ADDR_E = encodeStellarPublicKey(new Uint8Array(32).fill(5));
+const ADDR_F = encodeStellarPublicKey(new Uint8Array(32).fill(6));
+const ADDR_G = encodeStellarPublicKey(new Uint8Array(32).fill(7));
 
 beforeEach(() => {
   localStorage.clear();
@@ -169,7 +170,7 @@ describe("RecentRecipients component", () => {
     });
 
     const pill = screen.getByRole("button");
-    expect(pill.textContent).toMatch(/^GAHJJJ…AKZK7G$/);
+    expect(pill.textContent).toBe(`${ADDR_A.slice(0, 6)}…${ADDR_A.slice(-6)}`);
   });
 
   it("exposes the full address in aria-label for screen readers", async () => {
@@ -314,7 +315,7 @@ describe("RecentRecipients component", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 
-  it("short addresses are not truncated", async () => {
+  it("ignores invalid short addresses and keeps the empty state", async () => {
     const shortAddr = "GABC123";
     addRecentRecipient(shortAddr);
 
@@ -322,6 +323,8 @@ describe("RecentRecipients component", () => {
       render(<RecentRecipients onSelect={jest.fn()} />);
     });
 
-    expect(screen.getByRole("button").textContent).toBe(shortAddr);
+    expect(
+      screen.getByRole("heading", { name: "No recent recipients yet" })
+    ).toBeInTheDocument();
   });
 });
