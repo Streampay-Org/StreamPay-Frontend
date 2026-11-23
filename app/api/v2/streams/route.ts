@@ -20,6 +20,9 @@
 
 import { NextResponse } from "next/server";
 import { idempotencyKeyErrorResponse, validateIdempotencyKey } from "@/app/lib/idempotency";
+import { db, encodeCursor, decodeCursor, idempotencyToken, getStore } from "@/app/lib/db";
+import { getCorrelationContext } from "@/app/lib/logger";
+import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { db, idempotencyToken, getStore, newStreamId } from "@/app/lib/db";
 import { filterStreamsByTag } from "@/app/lib/stream-tags";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
@@ -34,6 +37,8 @@ import {
   type StreamCursor,
 } from "@/app/lib/stream-cursor";
 import type { Stream } from "@/app/types/openapi";
+import { getLimitForRoute } from "@/app/lib/rate-limit-config";
+import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { withRouteTimeout } from "@/src/middleware/timeout";
 import { createCacheHeaders, createStrongEtag, isIfNoneMatchMatch } from "@/src/middleware/etag";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
@@ -61,6 +66,21 @@ function getRequestUrl(request: Request, fallbackPath: string): URL {
 }
 
 /** GET /api/v2/streams — paginated stream list in v2 shape. */
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const { searchParams } = url;
+  const limitType = getLimitForRoute("GET", url.pathname);
+  const identity = getClientIdentity(request);
+  const rateLimitResult = await checkRateLimit(identity, limitType);
+  if (!rateLimitResult.allowed) {
+    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
+    return rateLimitResponse(rateLimitResult.retryAfter!);
+  }
+  recordRequest(url.pathname);
+
+  const cursor = searchParams.get("cursor");
+  const status = searchParams.get("status");
+  const limit = Math.min(parseInt(searchParams.get("limit") ?? "20", 10), 100);
 async function handleV2StreamsGet(request: Request) {
   if (!request.headers.get("authorization")) {
     return errorResponse("UNAUTHORIZED", "Bearer token required.", 401);
@@ -186,6 +206,16 @@ export async function GET(request: Request) {
 /**
  * POST /api/v2/streams — create a stream, respond with v2 shape.
  */
+export async function POST(request: Request) {
+  const url = new URL(request.url);
+  const limitType = getLimitForRoute("POST", url.pathname);
+  const identity = getClientIdentity(request);
+  const rateLimitResult = await checkRateLimit(identity, limitType);
+  if (!rateLimitResult.allowed) {
+    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
+    return rateLimitResponse(rateLimitResult.retryAfter!);
+  }
+  recordRequest(url.pathname);
 async function handleV2StreamsPost(request: Request) {
   if (!request.headers.get("authorization")) {
     return errorResponse("UNAUTHORIZED", "Bearer token required.", 401);
@@ -219,7 +249,6 @@ async function handleV2StreamsPost(request: Request) {
   //
   // The quota is checked *before* body parsing so the 429 is returned cheaply
   // and the counter is incremented atomically inside checkOrgDailyQuota.
-  const identity = getClientIdentity(request);
   const quota = await checkOrgDailyQuota(identity.value);
 
   if (!quota.allowed) {

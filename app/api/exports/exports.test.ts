@@ -6,7 +6,7 @@ import {
   InMemoryRateLimitStore,
   resetRateLimitStore,
 } from "@/app/lib/rate-limit-store";
-import { POST as createExport } from "./route";
+import { GET as listExports, POST as createExport } from "./route";
 import { GET as getExport } from "./[id]/route";
 
 const JWT_SECRET = "streampay-dev-secret-do-not-use-in-prod";
@@ -36,6 +36,36 @@ describe("Exports API — authentication and scoping", () => {
   beforeEach(() => {
     resetDb();
     resetRateLimitStore();
+  });
+
+  describe("GET /api/exports", () => {
+    it("lists only the authenticated actor's export jobs", async () => {
+      const ownerToken = makeToken("GOWNER1");
+      const otherToken = makeToken("GOTHER2");
+      await createExport(authRequest("http://localhost/api/exports", ownerToken));
+      await createExport(authRequest("http://localhost/api/exports", otherToken));
+
+      const response = await listExports(authRequest("http://localhost/api/exports", ownerToken));
+
+      expect(response.status).toBe(200);
+      const { data } = await response.json();
+      expect(data).toHaveLength(1);
+      expect(data[0].ownerId).toBe("GOWNER1");
+    });
+
+    it("returns the standard rate-limit response when the export bucket is exhausted", async () => {
+      const token = makeToken("GOWNER1");
+      for (let index = 0; index < 5; index += 1) {
+        expect((await listExports(authRequest("http://localhost/api/exports", token))).status).toBe(200);
+      }
+
+      const limited = await listExports(authRequest("http://localhost/api/exports", token));
+      expect(limited.status).toBe(429);
+      expect(limited.headers.get("Retry-After")).toBeTruthy();
+      expect(await limited.json()).toMatchObject({
+        error: { code: "rate_limit_exceeded", request_id: expect.any(String) },
+      });
+    });
   });
 
   // ── POST /api/exports ──────────────────────────────────────────────────────
@@ -274,6 +304,27 @@ describe("Exports API — authentication and scoping", () => {
         params: Promise.resolve({ id: "no-such-id" }),
       });
       expect(res.status).toBe(404);
+    });
+
+    it("rate limits export status reads", async () => {
+      const token = makeToken("GOWNER1");
+      for (let index = 0; index < 5; index += 1) {
+        const response = await getExport(
+          authRequest("http://localhost/api/exports/missing-export", token),
+          { params: Promise.resolve({ id: "missing-export" }) },
+        );
+        expect(response.status).toBe(404);
+      }
+
+      const limited = await getExport(
+        authRequest("http://localhost/api/exports/missing-export", token),
+        { params: Promise.resolve({ id: "missing-export" }) },
+      );
+      expect(limited.status).toBe(429);
+      expect(limited.headers.get("Retry-After")).toBeTruthy();
+      expect(await limited.json()).toMatchObject({
+        error: { code: "rate_limit_exceeded", request_id: expect.any(String) },
+      });
     });
 
     it("returns 410 when the job retention period has expired", async () => {
