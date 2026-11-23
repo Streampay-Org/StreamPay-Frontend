@@ -94,10 +94,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "app/components/EmptyState.test.tsx",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/components/ReceiptShareCard.test.tsx",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
