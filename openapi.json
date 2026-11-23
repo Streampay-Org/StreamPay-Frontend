@@ -6148,8 +6148,7 @@
       "post": {
         "operationId": "receiveDlqWebhook",
         "summary": "Receive a dead-letter-queue webhook event",
-        "description": "Accepts failed webhook events for reprocessing. No authentication required (secured at the network/gateway level).",
-        "security": [],
+        "description": "Accepts failed webhook events for reprocessing. Requires internal-service HMAC auth or an admin JWT. Structured `{ endpoint, event }` payloads are validated and enqueued idempotently into the outbox (202); legacy unstructured objects receive a 200 acknowledgement.",
         "tags": [
           "Webhooks"
         ],
@@ -6159,7 +6158,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "Arbitrary webhook event payload.",
+                "description": "Structured `{ endpoint, event }` payload for outbox reprocessing, or a legacy generic JSON object.",
                 "example": {
                   "event": "payment.failed",
                   "id": "evt_001"
@@ -6170,7 +6169,7 @@
         },
         "responses": {
           "200": {
-            "description": "Event accepted.",
+            "description": "Legacy unstructured event accepted.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6188,8 +6187,47 @@
               }
             }
           },
+          "202": {
+            "description": "Structured event enqueued (or deduplicated) in the outbox.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "received",
+                    "enqueued",
+                    "outboxId",
+                    "duplicate"
+                  ],
+                  "properties": {
+                    "received": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "enqueued": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "outboxId": {
+                      "type": "string"
+                    },
+                    "duplicate": {
+                      "type": "boolean",
+                      "example": false
+                    }
+                  }
+                }
+              }
+            }
+          },
           "400": {
             "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "422": {
+            "description": "Malformed structured payload or disallowed endpoint URL."
           },
           "500": {
             "$ref": "#/components/responses/500"
