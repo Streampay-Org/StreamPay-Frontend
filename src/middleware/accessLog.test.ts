@@ -1,5 +1,6 @@
 import { logAccessEvent } from "./accessLog";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
+import { httpRequestDuration, registry } from "@/src/metrics/registry";
 
 jest.mock("@/app/lib/logger", () => ({
   getCorrelationContext: jest.fn(),
@@ -264,6 +265,41 @@ describe("logAccessEvent", () => {
       actorId: "GSENDERXYZ",
       request_id: "req-get",
       correlation_id: "corr-get",
+    });
+  });
+
+  describe("http_request_duration_seconds fallback observation", () => {
+    beforeEach(() => {
+      httpRequestDuration.reset();
+    });
+
+    it("observes normalized route duration when outside withRouteSpan and durationMs is provided", async () => {
+      (getCorrelationContext as jest.Mock).mockReturnValue(undefined);
+
+      logAccessEvent({
+        method: "GET",
+        path: "/api/streams/abc123",
+        status: 200,
+        durationMs: 0,
+      });
+
+      const metrics = await registry.metrics();
+      expect(metrics).toContain(
+        'http_request_duration_seconds_count{method="GET",route="/api/streams/:id",status_class="2xx"} 1',
+      );
+    });
+
+    it("does not observe when durationMs is omitted", async () => {
+      (getCorrelationContext as jest.Mock).mockReturnValue(undefined);
+
+      logAccessEvent({
+        method: "POST",
+        path: "/api/exports",
+        status: 201,
+      });
+
+      const metrics = await registry.metrics();
+      expect(metrics).not.toContain('route="/api/exports"');
     });
   });
 });
