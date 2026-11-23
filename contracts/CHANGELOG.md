@@ -22,6 +22,16 @@ and must never be reused — see the module rustdoc for details.
   `InvalidState`.
 
 ### Changed
+- **Protocol fee on `withdraw_split` (#1966).** `SplitStream` now snapshots
+  `default_fee_bps` into a new `fee_bps` field at creation time (validated by
+  `fees::validate_fee_bps`). Each `withdraw_split` call applies floor-rounded
+  protocol fees (`fee = floor(amount * fee_bps / 10_000)`, `net = amount - fee`),
+  transfers `net` to the recipient and `fee` to the configured fee collector
+  (forwarding `fee` to the recipient when no collector is set), accrues the fee
+  via `fees::accrue_fees`, and emits `("stream", "fee")` when `fee > 0` and a
+  collector is configured. Gross-amount release and settlement bookkeeping are
+  unchanged, `sweep_fees` now also resolves split-stream tokens, and
+  `cancel_split_stream` remains fee-free for consistency with `cancel_stream`.
 - **Storage layout v2 migration.** `migrate` now advances contracts to storage
   version 2, normalising pause bookkeeping on split and recurring records
   (`pause_time` / `paused_at` are cleared unless the record is `Paused`) and

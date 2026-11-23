@@ -472,11 +472,41 @@ pub fn withdraw_split(
         stream.status = StreamStatus::Settled;
     }
 
-    token::Client::new(&env, &stream.token).transfer(
-        &env.current_contract_address(),
-        &recipient,
-        &amount,
-    );
+    // ── Fee split ──────────────────────────────────────────────────────────
+    // Compute fee and net amount using floor-per-withdrawal rounding:
+    //   fee = floor(amount * stream.fee_bps / 10_000)
+    //   net = amount - fee
+    // Bookkeeping (released_amount / total_released / Settled) stays on the
+    // gross `amount` so settlement and escrow drainage invariants are preserved.
+    // If no fee collector is configured, the full `amount` is forwarded to the
+    // recipient so no funds are stranded in the contract.
+    let fee_result = fees::apply_fee(amount, stream.fee_bps)?;
+    let maybe_collector = fees::get_fee_collector(&env);
+    let contract = env.current_contract_address();
+    let tkn = token::Client::new(&env, &stream.token);
+
+    if fee_result.net_amount > 0 {
+        tkn.transfer(&contract, &recipient, &fee_result.net_amount);
+    }
+
+    if fee_result.fee_amount > 0 {
+        if let Some(collector) = maybe_collector {
+            tkn.transfer(&contract, &collector, &fee_result.fee_amount);
+            fees::accrue_fees(&env, stream_id, fee_result.fee_amount)?;
+            events::fee_charged(
+                &env,
+                stream_id,
+                fee_result.fee_amount,
+                stream.fee_bps,
+                &collector,
+                now,
+            );
+        } else {
+            // No collector configured: forward fee to recipient as well so
+            // no funds are stranded in the contract.
+            tkn.transfer(&contract, &recipient, &fee_result.fee_amount);
+        }
+    }
 
     set_split(&env, stream_id, &stream);
     emit_withdrawn(&env, stream_id, &recipient, amount, now);
@@ -484,6 +514,11 @@ pub fn withdraw_split(
     Ok(amount)
 }
 
+/// Cancels a split stream, paying each recipient their vested-but-unreleased
+/// share and refunding the remaining unvested balance to the sender.
+///
+/// Consistent with single-stream [`crate::Contract::cancel_stream`],
+/// cancellation payouts do **not** charge the protocol fee.
 pub fn cancel_split_stream(env: Env, stream_id: u64) -> Result<SplitStream, Error> {
     let mut stream = get_existing_split(&env, stream_id)?;
     stream.sender.require_auth();
