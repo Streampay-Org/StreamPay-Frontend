@@ -186,4 +186,124 @@ describe("StreamsPageContent", () => {
       expect(compactBtn).toHaveAttribute("aria-checked", "true");
     });
   });
+
+  describe("stream comparison multi-select", () => {
+    it("disables Compare until exactly two streams are selected and disables the third checkbox", () => {
+      render(<StreamsPageContent state="populated" streams={mockStreams} />);
+
+      const compareBtn = screen.getByRole("button", { name: /compare/i });
+      expect(compareBtn).toBeDisabled();
+
+      const adaCheckbox = screen.getByRole("checkbox", {
+        name: "Select stream for comparison: Ada Creative Studio",
+      });
+      const kemiCheckbox = screen.getByRole("checkbox", {
+        name: "Select stream for comparison: Kemi Onboarding Support",
+      });
+      const yusufCheckbox = screen.getByRole("checkbox", {
+        name: "Select stream for comparison: Yusuf QA Partnership",
+      });
+
+      // Selecting 1 stream keeps Compare disabled
+      fireEvent.click(adaCheckbox);
+      expect(adaCheckbox).toBeChecked();
+      expect(compareBtn).toBeDisabled();
+      expect(yusufCheckbox).not.toBeDisabled();
+
+      // Selecting 2 streams enables Compare and disables the 3rd checkbox
+      fireEvent.click(kemiCheckbox);
+      expect(kemiCheckbox).toBeChecked();
+      expect(compareBtn).toBeEnabled();
+      expect(yusufCheckbox).toBeDisabled();
+
+      // Unchecking one re-enables the 3rd checkbox and disables Compare
+      fireEvent.click(kemiCheckbox);
+      expect(kemiCheckbox).not.toBeChecked();
+      expect(compareBtn).toBeDisabled();
+      expect(yusufCheckbox).not.toBeDisabled();
+    });
+
+    it("opens CompareStreamsModal with both selected streams and returns focus on Escape close", () => {
+      const streamsWithAmounts = [
+        {
+          ...mockStreams[0]!,
+          accruedAmount: 40,
+          totalAmount: 120,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          endsAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+        },
+        {
+          ...mockStreams[1]!,
+          // Intentionally missing accruedAmount / totalAmount / endsAt to test fallbacks
+        },
+        mockStreams[2]!,
+      ];
+
+      render(
+        <StreamsPageContent state="populated" streams={streamsWithAmounts} />,
+      );
+
+      fireEvent.click(
+        screen.getByRole("checkbox", {
+          name: "Select stream for comparison: Ada Creative Studio",
+        }),
+      );
+      fireEvent.click(
+        screen.getByRole("checkbox", {
+          name: "Select stream for comparison: Kemi Onboarding Support",
+        }),
+      );
+
+      const compareBtn = screen.getByRole("button", { name: /compare/i });
+      fireEvent.click(compareBtn);
+
+      const dialog = screen.getByRole("dialog");
+      expect(dialog).toBeInTheDocument();
+      expect(screen.getByText("Compare Streams")).toBeInTheDocument();
+      expect(screen.getByText("80 XLM remaining")).toBeInTheDocument();
+      expect(screen.getByText("Draft stream ready to launch")).toBeInTheDocument();
+
+      // Close via Escape and verify focus returns to Compare button
+      fireEvent.keyDown(dialog, { key: "Escape" });
+      expect(document.activeElement).toBe(compareBtn);
+    });
+
+    it("clears selection when the tag filter changes", () => {
+      render(<StreamsPageContent state="populated" streams={mockStreams} />);
+
+      const adaCheckbox = screen.getByRole("checkbox", {
+        name: "Select stream for comparison: Ada Creative Studio",
+      });
+      const kemiCheckbox = screen.getByRole("checkbox", {
+        name: "Select stream for comparison: Kemi Onboarding Support",
+      });
+
+      fireEvent.click(adaCheckbox);
+      fireEvent.click(kemiCheckbox);
+      expect(screen.getByRole("button", { name: /compare/i })).toBeEnabled();
+
+      // Filter by "vendor" tag (hides Kemi Onboarding Support)
+      fireEvent.click(screen.getByRole("button", { name: "vendor" }));
+
+      expect(screen.getByRole("button", { name: /compare/i })).toBeDisabled();
+      expect(
+        screen.getByRole("checkbox", {
+          name: "Select stream for comparison: Ada Creative Studio",
+        }),
+      ).not.toBeChecked();
+    });
+
+    it("keeps Compare disabled when fewer than two streams are in the list", () => {
+      render(
+        <StreamsPageContent state="populated" streams={[mockStreams[0]!]} />,
+      );
+
+      fireEvent.click(
+        screen.getByRole("checkbox", {
+          name: "Select stream for comparison: Ada Creative Studio",
+        }),
+      );
+      expect(screen.getByRole("button", { name: /compare/i })).toBeDisabled();
+    });
+  });
 });

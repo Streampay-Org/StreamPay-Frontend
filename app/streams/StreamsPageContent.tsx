@@ -11,8 +11,12 @@
  */
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { StreamRow, type StreamRowData } from "../components/StreamRow";
+import {
+  CompareStreamsModal,
+  type CompareStream,
+} from "../components/CompareStreamsModal";
 import { Skeleton } from "../components/Skeleton";
 import { PageError } from "../components/PageError";
 import { EmptyState } from "../components/EmptyState";
@@ -29,6 +33,53 @@ import { sortStreams } from "./sortStreams";
 import { useRovingGrid } from "./useRovingGrid";
 
 const SORT_STORAGE_KEY = "streampay-streams-sort";
+
+function extractAssetUnit(rate: string): string {
+  const match = rate.match(/[0-9.,]+\s+([A-Za-z0-9]+)/);
+  return match ? match[1] : "";
+}
+
+export function toCompareStream(stream: StreamRowData): CompareStream {
+  const unit = extractAssetUnit(stream.rate);
+  const unitSuffix = unit ? ` ${unit}` : "";
+
+  let balance = "—";
+  if (
+    typeof stream.totalAmount === "number" &&
+    typeof stream.accruedAmount === "number"
+  ) {
+    const remaining = Math.max(0, stream.totalAmount - stream.accruedAmount);
+    balance = `${remaining.toLocaleString()}${unitSuffix} remaining`;
+  } else if (typeof stream.accruedAmount === "number") {
+    balance = `${stream.accruedAmount.toLocaleString()}${unitSuffix} accrued`;
+  } else if (typeof stream.totalAmount === "number") {
+    balance = `${stream.totalAmount.toLocaleString()}${unitSuffix} total`;
+  }
+
+  let runway = stream.schedule || "—";
+  if (stream.endsAt) {
+    const endMs = new Date(stream.endsAt).getTime();
+    if (!Number.isNaN(endMs)) {
+      const diffMs = endMs - Date.now();
+      if (diffMs <= 0) {
+        runway = "Ended";
+      } else {
+        const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+        runway = `${days} day${days === 1 ? "" : "s"} remaining`;
+      }
+    }
+  }
+
+  return {
+    id: stream.id,
+    recipient: stream.recipient,
+    rate: stream.rate,
+    runway,
+    balance,
+    status: stream.status,
+    createdAt: stream.startedAt ?? "",
+  };
+}
 
 export type StreamsViewState = "loading" | "populated" | "empty" | "error";
 export type DensityMode = "comfortable" | "compact";
@@ -206,6 +257,47 @@ export function StreamsPageContent({
     [filteredStreams, sort],
   );
 
+  /* ── Compare selection state (max 2) ── */
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isCompareOpen, setIsCompareOpen] = useState(false);
+  const compareButtonRef = useRef<HTMLButtonElement>(null);
+
+  const filteredIdsKey = useMemo(
+    () => filteredStreams.map((s) => s.id).join(","),
+    [filteredStreams],
+  );
+
+  // Clear selection whenever the filtered list changes so hidden streams cannot stay selected.
+  useEffect(() => {
+    setSelectedIds([]);
+    setIsCompareOpen(false);
+  }, [filteredIdsKey]);
+
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((item) => item !== id);
+      }
+      if (prev.length >= 2) {
+        return prev;
+      }
+      return [...prev, id];
+    });
+  };
+
+  const selectedStreams = useMemo(
+    () =>
+      selectedIds
+        .map((id) => filteredStreams.find((s) => s.id === id))
+        .filter((s): s is StreamRowData => s !== undefined),
+    [selectedIds, filteredStreams],
+  );
+
+  const handleCloseCompare = () => {
+    setIsCompareOpen(false);
+    compareButtonRef.current?.focus();
+  };
+
   /* ── Derived view state ── */
   const isLoading = state === "loading";
   const isError = state === "error";
@@ -269,7 +361,7 @@ export function StreamsPageContent({
               </p>
             </div>
 
-            {/* Sort dropdown + Density toggle — only shown when the list is populated */}
+            {/* Compare + Sort dropdown + Density toggle — only shown when the list is populated */}
             {showToolbar && (
               <div
                 style={{
@@ -279,6 +371,17 @@ export function StreamsPageContent({
                   flexWrap: "wrap",
                 }}
               >
+                <button
+                  ref={compareButtonRef}
+                  type="button"
+                  className="button button--secondary"
+                  disabled={selectedIds.length !== 2}
+                  onClick={() => setIsCompareOpen(true)}
+                >
+                  {selectedIds.length > 0
+                    ? `Compare (${selectedIds.length}/2)`
+                    : "Compare"}
+                </button>
                 <SortDropdown value={sort} onChange={handleSortChange} />
                 <DensityToggle value={density} onChange={handleDensityChange} />
               </div>
@@ -356,32 +459,76 @@ export function StreamsPageContent({
                 ),
               )}
             </div>
-            {sortedStreams.map((stream, index) => (
-              <div
-                key={stream.id}
-                className="stream-cascade-item"
-                role="presentation"
-                style={
-                  /* Index is passed via a CSS custom property so the
-                     animation-delay calculation stays in CSS-land.     */
-                  { "--cascade-index": index } as React.CSSProperties
-                }
-              >
-                <StreamRow
-                  stream={stream}
-                  density={density === "compact" ? "compact" : "cozy"}
-                  gridMode
-                  rowIndex={index + 2}
-                  gridCellProps={(columnIndex) => ({
-                    ...getCellProps(index, columnIndex),
-                    ref: (element) => registerCell(index, columnIndex, element),
-                  })}
-                />
-              </div>
-            ))}
+            {sortedStreams.map((stream, index) => {
+              const isSelected = selectedIds.includes(stream.id);
+              const isSelectionDisabled = !isSelected && selectedIds.length >= 2;
+              return (
+                <div
+                  key={stream.id}
+                  className="stream-cascade-item"
+                  role="presentation"
+                  style={
+                    /* Index is passed via a CSS custom property so the
+                       animation-delay calculation stays in CSS-land.     */
+                    {
+                      "--cascade-index": index,
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: "0.75rem",
+                    } as React.CSSProperties
+                  }
+                >
+                  <label
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      minWidth: "2.75rem",
+                      minHeight: "2.75rem",
+                      cursor: isSelectionDisabled ? "not-allowed" : "pointer",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      disabled={isSelectionDisabled}
+                      onChange={() => handleToggleSelect(stream.id)}
+                      aria-label={`Select stream for comparison: ${stream.recipient}`}
+                      style={{
+                        width: "1.125rem",
+                        height: "1.125rem",
+                        cursor: isSelectionDisabled ? "not-allowed" : "pointer",
+                      }}
+                    />
+                  </label>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <StreamRow
+                      stream={stream}
+                      density={density === "compact" ? "compact" : "cozy"}
+                      gridMode
+                      rowIndex={index + 2}
+                      gridCellProps={(columnIndex) => ({
+                        ...getCellProps(index, columnIndex),
+                        ref: (element) => registerCell(index, columnIndex, element),
+                      })}
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </section>
         )}
       </section>
+
+      {selectedStreams.length === 2 && (
+        <CompareStreamsModal
+          isOpen={isCompareOpen}
+          onClose={handleCloseCompare}
+          streamA={toCompareStream(selectedStreams[0]!)}
+          streamB={toCompareStream(selectedStreams[1]!)}
+        />
+      )}
     </main>
   );
 }
