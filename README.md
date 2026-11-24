@@ -86,6 +86,7 @@ error envelope. Stellar and Soroban calls go through a client with caching and c
 ## Documentation
 
 - In-app overview: `/docs`
+- [docs/README.md](docs/README.md) - index of every documentation page, grouped by area
 - [docs/reference.md](docs/reference.md) - the full original reference (API versioning, lifecycle, security, webhooks, troubleshooting)
 - [docs/api/orgs.md](docs/api/orgs.md) - organisations, members and roles API
 - [docs/architecture.md](docs/architecture.md), [docs/STATE_MACHINE.md](docs/STATE_MACHINE.md), [docs/api-v2-migration.md](docs/api-v2-migration.md)
