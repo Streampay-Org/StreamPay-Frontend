@@ -253,9 +253,9 @@ export interface paths {
         /**
          * Delete a payment stream (v1, deprecated)
          * @deprecated
-         * @description Permanently deletes a stream. **Deprecated** — use `DELETE /api/v2/streams/{id}` instead.
+         * @description Soft deletes a stream and marks it deletedAt. **Deprecated** — use `DELETE /api/v2/streams/{id}` instead.
          *
-         *     A stream must be in `draft` or `ended` status before it can be deleted. Attempting to delete an `active` or `paused` stream returns 409. Cache is invalidated on success.
+         *     Only streams in `draft`, `cancelled`, or `withdrawn` with a succeeded withdrawal can be deleted. Attempting to delete an `ended` stream returns 409 `FUNDS_PENDING_WITHDRAWAL`. Deleting an `active` or `paused` stream returns 409 `STREAM_INACTIVE_STATE`. Deleting requires the actor to be the senderAddress or an organization owner (returns 403 otherwise). Already-deleted streams return 204 idempotently.
          */
         delete: operations["deleteStream"];
         options?: never;
@@ -525,7 +525,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a payment stream (v2)
-         * @description Permanently deletes a stream. The stream must be in `draft` or `ended` status; attempting to delete an `active` or `paused` stream returns 409.
+         * @description Soft deletes a stream and marks it deletedAt. Only streams in `draft`, `cancelled`, or `withdrawn` with a succeeded withdrawal can be deleted. Attempting to delete an `ended` stream returns 409 `FUNDS_PENDING_WITHDRAWAL`. Deleting an `active` or `paused` stream returns 409 `STREAM_INACTIVE_STATE`. When a verified actor is provided, deletion requires the actor to be the senderAddress or an organization owner (returns 403 otherwise). Already-deleted streams return 204 idempotently.
          */
         delete: operations["deleteStreamV2"];
         options?: never;
@@ -2982,7 +2982,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Stream deleted. No response body. */
+            /** @description Stream deleted or already deleted. No response body. */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -3007,6 +3007,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
+            403: components["responses"]["403"];
             404: components["responses"]["404"];
             409: components["responses"]["409"];
             /** @description Rate limit exceeded. */
@@ -3836,7 +3837,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Stream deleted. No response body. */
+            /** @description Stream deleted or already deleted. No response body. */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -3844,6 +3845,7 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["401"];
+            403: components["responses"]["403"];
             404: components["responses"]["404"];
             409: components["responses"]["409"];
             500: components["responses"]["500"];

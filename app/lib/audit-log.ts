@@ -211,7 +211,9 @@ export class AppendOnlyAuditLogStore implements AuditLogStore {
     const entry = deepFreeze({
       action: input.action,
       actor: cloneValue(input.actor),
+      ...(input.after !== undefined ? { after: input.after ? cloneValue(input.after) : null } : {}),
       afterHash,
+      ...(input.before !== undefined ? { before: input.before ? cloneValue(input.before) : null } : {}),
       beforeHash,
       diffHash,
       entryHash,
