@@ -53,6 +53,7 @@ inventory with comments is in [`.env.example`](.env.example).
 | `ALLOWED_ORIGINS` | yes | Comma-separated CORS allow-list (no `*` in production). |
 | `DATABASE_URL` | no | Postgres connection string. Without it the API uses seeded in-memory data. |
 | `HORIZON_URL` / `SOROBAN_RPC_URL` | no | Stellar endpoints (testnet defaults). |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | no | Configure all three to enable web push; otherwise push endpoints return 503. Generate keys with `npx web-push generate-vapid-keys` and keep the private key secret. |
 | `WEBHOOK_SECRET`, `METRICS_AUTH_TOKEN`, `FEE_BUMP_SECRET_KEY`, ... | no | Feature specific, see `.env.example`. |
 
 ## Scripts
