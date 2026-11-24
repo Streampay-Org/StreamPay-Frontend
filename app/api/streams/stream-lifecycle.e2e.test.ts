@@ -10,6 +10,9 @@ import { POST as startStream } from "@/app/api/streams/[id]/start/route";
 import { POST as pauseStream } from "@/app/api/streams/[id]/pause/route";
 import { POST as settleStream } from "@/app/api/streams/[id]/settle/route";
 import { POST as withdrawStream } from "@/app/api/streams/[id]/withdraw/route";
+// Helper token for withdraw authentication
+import { signToken } from "@/app/lib/auth";
+const recipientToken = signToken(VALID_STELLAR_KEY);
 
 const VALID_STELLAR_KEY =
   "GDSBCG3OKHCMMWS5EBH2X7XOYTJRWXN2YYQPCNS5OFBU4IDO4X7OFSQA";
@@ -329,7 +332,7 @@ describe("stream lifecycle E2E (HTTP black-box)", () => {
 
       mockHorizonFound(txHash);
 
-      const res = await serverFetch(`${server.baseUrl}/api/streams/${id}/withdraw`, { method: "POST" });
+      const res = await serverFetch(`${server.baseUrl}/api/streams/${id}/withdraw`, { method: "POST", headers: { Authorization: `Bearer ${recipientToken}` } });
       expect(res.status).toBe(200);
       const body = await res.json();
 
@@ -347,7 +350,7 @@ describe("stream lifecycle E2E (HTTP black-box)", () => {
 
       mockHorizonPending();
 
-      const res = await serverFetch(`${server.baseUrl}/api/streams/${id}/withdraw`, { method: "POST" });
+      const res = await serverFetch(`${server.baseUrl}/api/streams/${id}/withdraw`, { method: "POST", headers: { Authorization: `Bearer ${recipientToken}` } });
       expect(res.status).toBe(200);
       const body = await res.json();
 
@@ -431,7 +434,7 @@ describe("stream lifecycle E2E (HTTP black-box)", () => {
       // Replace Horizon mock with a pending response — if the route re-runs finality
       // logic it would incorrectly revert the status back to "ended".
       mockHorizonPending();
-      const res = await serverFetch(`${server.baseUrl}/api/streams/${id}/withdraw`, { method: "POST" });
+      const res = await serverFetch(`${server.baseUrl}/api/streams/${id}/withdraw`, { method: "POST", headers: { Authorization: `Bearer ${recipientToken}` } });
       expect(res.status).toBe(200);
       const body = await res.json();
       // why: status must stay "withdrawn" — the route short-circuits on withdrawn

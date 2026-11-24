@@ -1,5 +1,5 @@
 {
-  "QUARANTINE_MAX": 48,
+  "QUARANTINE_MAX": 47,
   "entries": [
     {
       "path": "app/api/notifications/preferences/route.test.ts",
@@ -69,10 +69,7 @@
       "path": "app/api/streams/concurrency.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
-    {
-      "path": "app/api/streams/stream-lifecycle.e2e.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
+
     {
       "path": "app/api/streams/v1-contract.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
