@@ -33,7 +33,7 @@ jest.mock("./components/AppBottomNav", () => ({
   AppBottomNav: () => <div data-testid="app-bottom-nav" />,
 }));
 
-import RootLayout from "./layout";
+import RootLayout, { metadata } from "./layout";
 
 describe("RootLayout", () => {
   // RootLayout's root element is <html>, but Testing Library mounts
@@ -100,5 +100,32 @@ describe("RootLayout", () => {
     );
 
     expect(document.documentElement).toBeInTheDocument();
+  });
+});
+
+describe("RootLayout metadata", () => {
+  it("exports a valid metadataBase URL and title template", () => {
+    expect(metadata.metadataBase).toBeInstanceOf(URL);
+    expect(metadata.title).toEqual({
+      default: "StreamPay - Payment Streaming",
+      template: "%s | StreamPay",
+    });
+    expect(metadata.description).toBe("Real-time payment streaming on Stellar");
+  });
+
+  it("exports OpenGraph and Twitter card metadata", () => {
+    expect(metadata.openGraph).toMatchObject({
+      type: "website",
+      siteName: "StreamPay",
+      title: "StreamPay - Payment Streaming",
+      description: "Real-time payment streaming on Stellar",
+    });
+    expect(metadata.openGraph?.url).toBeTruthy();
+
+    expect(metadata.twitter).toMatchObject({
+      card: "summary",
+      title: "StreamPay - Payment Streaming",
+      description: "Real-time payment streaming on Stellar",
+    });
   });
 });

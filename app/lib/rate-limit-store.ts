@@ -31,6 +31,7 @@ export class InMemoryRateLimitStore implements RateLimitStore {
     this.maxBuckets = options?.maxBuckets ?? 50_000;
     if (process.env.NODE_ENV !== "test" && typeof setInterval !== "undefined") {
       this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
+      this.cleanupInterval.unref?.();
     }
   }
 

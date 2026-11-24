@@ -1295,6 +1295,101 @@
           }
         }
       },
+      "OrgReceiptThemeInput": {
+        "type": "object",
+        "properties": {
+          "accentColor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Three or six hex digits prefixed with #. Defaults to #1f6feb."
+          },
+          "logoUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absolute HTTPS URL on an approved host. Empty or null clears the logo."
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 140,
+            "description": "Plain-text message. The server counts UTF-16 code units."
+          }
+        }
+      },
+      "OrgReceiptThemeResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "links"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "orgId",
+              "theme",
+              "canEdit",
+              "logoAllowedHosts"
+            ],
+            "properties": {
+              "orgId": {
+                "type": "string"
+              },
+              "theme": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "accentColor"
+                    ],
+                    "properties": {
+                      "accentColor": {
+                        "type": "string",
+                        "pattern": "^#(?:[a-f0-9]{3}|[a-f0-9]{6})$"
+                      },
+                      "logoUrl": {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      "message": {
+                        "type": "string",
+                        "maxLength": 140
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "canEdit": {
+                "type": "boolean"
+              },
+              "logoAllowedHosts": {
+                "type": "string",
+                "description": "Comma-separated host patterns for editor validation."
+              }
+            }
+          },
+          "links": {
+            "type": "object",
+            "required": [
+              "self"
+            ],
+            "properties": {
+              "self": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "OrgPolicyResponse": {
         "type": "object",
         "required": [
@@ -1679,6 +1774,15 @@
         "responses": {
           "200": {
             "description": "Paginated list of activity events.",
+            "headers": {
+              "Link": {
+                "description": "RFC 8288 pagination links (rel=\"next\" when more pages exist, rel=\"self\" for the current page).",
+                "schema": {
+                  "type": "string",
+                  "example": "</api/activity?limit=20&cursor=MjAyNi0wNC0yOFQwOTowMDowMFp8ZXZ0LTE%3D>; rel=\"next\", </api/activity?limit=20>; rel=\"self\""
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -1857,7 +1961,6 @@
               "type": "string",
               "pattern": "^G[A-Z2-7]{55}$",
               "example": "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ"
-              "example": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
             }
           }
         ],
@@ -2327,6 +2430,15 @@
         "responses": {
           "200": {
             "description": "Paginated stream list.",
+            "headers": {
+              "Link": {
+                "description": "RFC 8288 pagination links (rel=\"next\" when more pages exist, rel=\"self\" for the current page). Also preserved on 304 Not Modified responses.",
+                "schema": {
+                  "type": "string",
+                  "example": "</api/streams?limit=20&cursor=MjAyNi0wMS0wMVQwMDowMDowMC4wMDBafHN0cmVhbS0x>; rel=\"next\", </api/streams?limit=20>; rel=\"self\""
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -3909,14 +4021,14 @@
       "delete": {
         "operationId": "deleteStream",
         "summary": "Delete a payment stream (v1, deprecated)",
-        "description": "Permanently deletes a stream. **Deprecated** — use `DELETE /api/v2/streams/{id}` instead.\n\nA stream must be in `draft` or `ended` status before it can be deleted. Attempting to delete an `active` or `paused` stream returns 409. Cache is invalidated on success.",
+        "description": "Soft deletes a stream and marks it deletedAt. **Deprecated** \u2014 use `DELETE /api/v2/streams/{id}` instead.\n\nOnly streams in `draft`, `cancelled`, or `withdrawn` with a succeeded withdrawal can be deleted. Attempting to delete an `ended` stream returns 409 `FUNDS_PENDING_WITHDRAWAL`. Deleting an `active` or `paused` stream returns 409 `STREAM_INACTIVE_STATE`. Deleting requires the actor to be the senderAddress or an organization owner (returns 403 otherwise). Already-deleted streams return 204 idempotently.",
         "deprecated": true,
         "tags": [
           "Streams v1"
         ],
         "responses": {
           "204": {
-            "description": "Stream deleted. No response body."
+            "description": "Stream deleted or already deleted. No response body."
           },
           "400": {
             "description": "Missing or empty `x-tenant-id` header.",
@@ -3934,6 +4046,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
           },
           "404": {
             "$ref": "#/components/responses/404"
@@ -5050,6 +5165,15 @@
         "responses": {
           "200": {
             "description": "Paginated stream list.",
+            "headers": {
+              "Link": {
+                "description": "RFC 8288 pagination links (rel=\"next\" when more pages exist, rel=\"self\" for the current page). Also preserved on 304 Not Modified responses.",
+                "schema": {
+                  "type": "string",
+                  "example": "</api/v2/streams?limit=20&cursor=MjAyNi0wMS0wMVQwMDowMDowMC4wMDBafHN0cmVhbS0x>; rel=\"next\", </api/v2/streams?limit=20>; rel=\"self\""
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -5179,7 +5303,6 @@
       "post": {
         "operationId": "createStreamV2",
         "summary": "Create a payment stream (v2)",
-        "description": "Creates a payment stream using the v2 request and response shape. Requires bearer authentication and returns the created stream.",
         "description": "Creates a v2 payment stream for the authenticated sender and returns its initial representation.",
         "tags": [
           "Streams"
@@ -5614,7 +5737,7 @@
       "delete": {
         "operationId": "deleteStreamV2",
         "summary": "Delete a payment stream (v2)",
-        "description": "Permanently deletes a stream. The stream must be in `draft` or `ended` status; attempting to delete an `active` or `paused` stream returns 409.",
+        "description": "Soft deletes a stream and marks it deletedAt. Only streams in `draft`, `cancelled`, or `withdrawn` with a succeeded withdrawal can be deleted. Attempting to delete an `ended` stream returns 409 `FUNDS_PENDING_WITHDRAWAL`. Deleting an `active` or `paused` stream returns 409 `STREAM_INACTIVE_STATE`. When a verified actor is provided, deletion requires the actor to be the senderAddress or an organization owner (returns 403 otherwise). Already-deleted streams return 204 idempotently.",
         "tags": [
           "Streams"
         ],
@@ -5625,10 +5748,13 @@
         ],
         "responses": {
           "204": {
-            "description": "Stream deleted. No response body."
+            "description": "Stream deleted or already deleted. No response body."
           },
           "401": {
             "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
           },
           "404": {
             "$ref": "#/components/responses/404"
@@ -5988,7 +6114,6 @@
                       "allowed_actions": [],
                       "created_at": "2024-01-20T09:00:00.000Z",
                       "settlement": {
-                        "tx_hash": "000000000000",
                         "tx_hash": "a9d2c17e5f43",
                         "settled_at": "2024-01-20T09:05:00.000Z",
                         "amount": "0",
@@ -6082,10 +6207,30 @@
       "post": {
         "operationId": "receiveWebhook",
         "summary": "Receive an incoming webhook event",
-        "description": "Validates and accepts an incoming webhook event payload.",
+        "description": "Verifies the HMAC signature and replay window, deduplicates by event ID, and dispatches the incoming webhook event payload to a registered handler.",
         "security": [],
         "tags": [
           "Webhooks"
+        ],
+        "parameters": [
+          {
+            "name": "x-streampay-signature",
+            "in": "header",
+            "required": true,
+            "description": "HMAC-SHA256 signature header in the format `t=<timestamp>,id=<eventId>,v1=<hex>`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-streampay-timestamp",
+            "in": "header",
+            "required": true,
+            "description": "Unix epoch timestamp in seconds used to compute the signature and enforce the replay window.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -6099,20 +6244,37 @@
                 "properties": {
                   "eventType": {
                     "type": "string",
-                    "enum": ["second", "minute", "hour", "day", "week", "month", "year"],
-                    "description": "Payment interval.",
-                    "example": "month"
-                  },
-                  "token": {
-                    "type": "string",
-                    "description": "Stellar asset code (optional, defaults to XLM).",
-                    "example": "XLM"
-                  },
-                  "orgId": {
-                    "type": "string",
-                    "description": "Optional organization that owns this stream and whose configured quota applies.",
-                    "example": "org-acme"
+                    "description": "Webhook event type name.",
                     "example": "payment.received"
+                  },
+                  "eventId": {
+                    "type": "string",
+                    "description": "Unique event identifier used for signature verification and deduplication.",
+                    "example": "evt_123"
+                  },
+                  "timestamp": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "ISO-8601 event timestamp."
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": "Source system that emitted the event."
+                  },
+                  "data": {
+                    "description": "Arbitrary JSON event payload."
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Optional metadata key-value map."
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Optional forwarded headers."
                   }
                 }
               }
@@ -6121,7 +6283,7 @@
         },
         "responses": {
           "200": {
-            "description": "Webhook event accepted.",
+            "description": "Webhook event handled, or acknowledged as a duplicate.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6133,6 +6295,35 @@
                     "success": {
                       "type": "boolean",
                       "example": true
+                    },
+                    "duplicate": {
+                      "type": "boolean",
+                      "description": "Present and true when the eventId was already processed within the deduplication TTL.",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Webhook event verified and accepted, but no handler is registered for its eventType.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "handled"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "handled": {
+                      "type": "boolean",
+                      "example": false
                     }
                   }
                 }
@@ -6141,6 +6332,16 @@
           },
           "400": {
             "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "description": "Missing/invalid HMAC signature (`INVALID_SIGNATURE`) or timestamp outside replay window (`REPLAY_WINDOW_EXCEEDED`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "413": {
             "$ref": "#/components/responses/413"
@@ -6155,23 +6356,6 @@
               }
             }
           },
-          "422": { "$ref": "#/components/responses/422" },
-          "429": {
-            "description": "Rate limit or configured stream quota exceeded. Retry-After is set for rate limits and monthly-volume quota rejections.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds until the client may retry. Present for rate limits and monthly-volume quota rejections.",
-                "schema": { "type": "integer" }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
-                "example": {
-                  "error": {
-                    "code": "QUOTA_ACTIVE_STREAMS_EXCEEDED",
-                    "message": "The user has 2 active streams; the configured limit is 2.",
-                    "request_id": "req_01HZ9ABCDEF"
           "500": {
             "$ref": "#/components/responses/500"
           }
@@ -6273,7 +6457,6 @@
       "get": {
         "operationId": "listWebhookDeliveries",
         "summary": "List webhook delivery attempts",
-        "description": "Returns paginated webhook delivery attempts, including their status, retry count, and related endpoint.",
         "description": "Lists webhook delivery attempts with pagination for the authenticated caller.",
         "security": [],
         "tags": [
@@ -7329,41 +7512,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": ["recipient", "rate", "schedule"],
-                "properties": {
-                  "recipient": {
-                    "type": "string",
-                    "description": "Stellar public key of the recipient (56-character G… address).",
-                    "example": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG"
-                  },
-                  "rate": {
-                    "type": "string",
-                    "description": "Positive decimal payment amount per schedule interval (max 7 decimal places).",
-                    "example": "120"
-                  },
-                  "schedule": {
-                    "type": "string",
-                    "enum": ["second", "minute", "hour", "day", "week", "month", "year"],
-                    "description": "Payment interval.",
-                    "example": "month"
-                  },
-                  "token": {
-                    "type": "string",
-                    "description": "Stellar asset code (optional, defaults to XLM).",
-                    "example": "XLM"
-                  },
-                  "orgId": {
-                    "type": "string",
-                    "description": "Optional organization that owns this stream and whose configured quota applies.",
-                    "example": "org-acme"
-                  }
-                }
-              },
-              "example": {
-                "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
-                "rate": "120",
-                "schedule": "month"
                 "type": "object"
               }
             }
@@ -7380,31 +7528,6 @@
               }
             }
           },
-          "400": { "$ref": "#/components/responses/400" },
-          "401": { "$ref": "#/components/responses/401" },
-          "422": { "$ref": "#/components/responses/422" },
-          "429": {
-            "description": "Daily creation limit or configured stream quota exceeded. Retry-After indicates when the applicable quota resets.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds until the daily limit resets at UTC midnight or monthly volume quota resets at the next UTC month.",
-                "schema": { "type": "integer" }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
-                "example": {
-                  "error": {
-                    "code": "QUOTA_MONTHLY_VOLUME_EXCEEDED",
-                    "message": "The user has used 1000000000 of 1000000000 monthly XLM stroops.",
-                    "request_id": "req_01HZ9ABCDEF"
-                  }
-                }
-              }
-            }
-          },
-          "500": { "$ref": "#/components/responses/500" }
           "400": {
             "$ref": "#/components/responses/400"
           },
@@ -7860,6 +7983,224 @@
         }
       }
     },
+    "/api/orgs/{orgId}/receipt-theme": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "orgId",
+          "required": true,
+          "description": "Organization identifier",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "in": "header",
+          "name": "Actor-Wallet-Address",
+          "required": false,
+          "description": "Organization member wallet address. Must match the bearer token when both are supplied.",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Read the organization receipt theme",
+        "description": "Any organization member can read the theme.",
+        "operationId": "getOrgReceiptTheme",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+            {
+              "bearerAuth": []
+            }
+          ],
+        "responses": {
+          "200": {
+            "description": "Current theme after the operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgReceiptThemeResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Organization membership or owner access is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace the organization receipt theme",
+        "description": "Only organization owners can replace the theme. Changes are recorded in the audit log.",
+        "operationId": "updateOrgReceiptTheme",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+            {
+              "bearerAuth": []
+            }
+          ],
+        "responses": {
+          "200": {
+            "description": "Current theme after the operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgReceiptThemeResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Organization membership or owner access is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid receipt theme fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message",
+                        "request_id",
+                        "fields"
+                      ],
+                      "properties": {
+                        "code": {
+                          "const": "VALIDATION_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgReceiptThemeInput"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Reset the organization receipt theme",
+        "description": "Only organization owners can reset the theme. The reset restores the default receipt and is recorded in the audit log.",
+        "operationId": "resetOrgReceiptTheme",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+            {
+              "bearerAuth": []
+            }
+          ],
+        "responses": {
+          "200": {
+            "description": "Current theme after the operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgReceiptThemeResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Organization membership or owner access is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/orgs/{orgId}/policy": {
       "get": {
         "summary": "Get organization stream policy",
@@ -7996,7 +8337,6 @@
               }
             }
           },
-          "412": {
           "409": {
             "description": "Optimistic concurrency conflict (If-Match ETag mismatch)",
             "content": {

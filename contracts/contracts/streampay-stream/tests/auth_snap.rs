@@ -393,6 +393,16 @@ fn auth_snap_start_stream() {
 
 #[test]
 #[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_reject_stream() {
+    let data = auth_setup();
+    let (client, draft_id) = make_draft(&data);
+
+    data.env.mock_auths(&[]);
+    client.reject_stream(&draft_id);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_add_withdrawer() {
     let data = auth_setup();
     let (client, id) = auth_with_stream(&data);
@@ -719,6 +729,59 @@ fn auth_snap_cancel_recipient_transfer() {
     client.cancel_recipient_transfer(&id, &data.recipient);
 }
 
+// ── Per-stream pause/resume operators ─────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_set_operator() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let operator = Address::generate(&data.env);
+
+    data.env.mock_auths(&[]);
+    client.set_operator(&id, &operator);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_remove_operator() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let operator = Address::generate(&data.env);
+    client.set_operator(&id, &operator);
+
+    data.env.mock_auths(&[]);
+    client.remove_operator(&id, &operator);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_pause_as() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let operator = Address::generate(&data.env);
+    client.set_operator(&id, &operator);
+    data.env.ledger().set_timestamp(1_600);
+
+    data.env.mock_auths(&[]);
+    client.pause_as(&operator, &id);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_resume_as() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let operator = Address::generate(&data.env);
+    client.set_operator(&id, &operator);
+    data.env.ledger().set_timestamp(1_600);
+    client.pause_as(&operator, &id);
+    data.env.ledger().set_timestamp(1_700);
+
+    data.env.mock_auths(&[]);
+    client.resume_as(&operator, &id);
+}
+
 // ── Split & recurring auth-address, permissionless, and wrong-signer snapshots ─
 
 fn make_split_stream(data: &AuthTestData) -> (ContractClient<'_>, u64) {
@@ -786,35 +849,22 @@ fn assert_single_auth(
 
 // ── Split stream: missing auth for pause/resume ────────────────────────────────
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_pause_split_stream() {
-    let data = auth_setup();
     let (client, id) = make_split_stream(&data);
-    data.env.ledger().set_timestamp(1_600);
 
-    data.env.mock_auths(&[]);
     client.pause_split_stream(&id);
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_resume_split_stream() {
-    let data = auth_setup();
     let (client, id) = make_split_stream(&data);
-    data.env.ledger().set_timestamp(1_600);
     client.pause_split_stream(&id);
-    data.env.ledger().set_timestamp(1_700);
 
-    data.env.mock_auths(&[]);
     client.resume_split_stream(&id);
 }
 
 // ── Split stream: positive auth-address snapshots ──────────────────────────────
 
-#[test]
 fn auth_snap_create_split_stream_records_sender() {
-    let data = auth_setup();
     let client = auth_initialized(&data);
     let second_recipient = Address::generate(&data.env);
 
@@ -831,20 +881,15 @@ fn auth_snap_create_split_stream_records_sender() {
     assert_single_auth(&data.env, &client.address, &data.sender, "create_split_stream");
 }
 
-#[test]
 fn auth_snap_withdraw_split_records_recipient() {
-    let data = auth_setup();
     let (client, id) = make_split_stream(&data);
-    data.env.ledger().set_timestamp(1_600);
 
     client.withdraw_split(&id, &data.recipient, &100i128);
 
     assert_single_auth(&data.env, &client.address, &data.recipient, "withdraw_split");
 }
 
-#[test]
 fn auth_snap_amend_split_stream_records_sender() {
-    let data = auth_setup();
     let (client, id) = make_split_stream(&data);
 
     client.amend_split_stream(&id, &0, &None, &None);
@@ -852,35 +897,25 @@ fn auth_snap_amend_split_stream_records_sender() {
     assert_single_auth(&data.env, &client.address, &data.sender, "amend_split_stream");
 }
 
-#[test]
 fn auth_snap_pause_split_stream_records_sender() {
-    let data = auth_setup();
     let (client, id) = make_split_stream(&data);
-    data.env.ledger().set_timestamp(1_600);
 
     client.pause_split_stream(&id);
 
     assert_single_auth(&data.env, &client.address, &data.sender, "pause_split_stream");
 }
 
-#[test]
 fn auth_snap_resume_split_stream_records_sender() {
-    let data = auth_setup();
     let (client, id) = make_split_stream(&data);
-    data.env.ledger().set_timestamp(1_600);
     client.pause_split_stream(&id);
-    data.env.ledger().set_timestamp(1_700);
 
     client.resume_split_stream(&id);
 
     assert_single_auth(&data.env, &client.address, &data.sender, "resume_split_stream");
 }
 
-#[test]
 fn auth_snap_cancel_split_stream_records_sender() {
-    let data = auth_setup();
     let (client, id) = make_split_stream(&data);
-    data.env.ledger().set_timestamp(1_600);
 
     client.cancel_split_stream(&id);
 
@@ -889,10 +924,7 @@ fn auth_snap_cancel_split_stream_records_sender() {
 
 // ── Split stream: wrong-signer snapshots ───────────────────────────────────────
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_create_split_stream_wrong_signer() {
-    let data = auth_setup();
     let client = auth_initialized(&data);
     let stranger = Address::generate(&data.env);
     let second_recipient = Address::generate(&data.env);
@@ -928,13 +960,9 @@ fn auth_snap_create_split_stream_wrong_signer() {
     );
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_withdraw_split_wrong_signer() {
-    let data = auth_setup();
     let (client, id) = make_split_stream(&data);
     let stranger = Address::generate(&data.env);
-    data.env.ledger().set_timestamp(1_600);
 
     data.env.mock_auths(&[MockAuth {
         address: &stranger,
@@ -948,12 +976,9 @@ fn auth_snap_withdraw_split_wrong_signer() {
     client.withdraw_split(&id, &data.recipient, &100i128);
 }
 
-#[test]
 fn auth_snap_withdraw_split_unlisted_recipient_rejected() {
-    let data = auth_setup();
     let (client, id) = make_split_stream(&data);
     let stranger = Address::generate(&data.env);
-    data.env.ledger().set_timestamp(1_600);
 
     data.env.mock_auths(&[MockAuth {
         address: &stranger,
@@ -968,10 +993,7 @@ fn auth_snap_withdraw_split_unlisted_recipient_rejected() {
     assert_eq!(res, Err(Ok(Error::InvalidState)));
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_amend_split_stream_wrong_signer() {
-    let data = auth_setup();
     let (client, id) = make_split_stream(&data);
     let stranger = Address::generate(&data.env);
 
@@ -993,13 +1015,9 @@ fn auth_snap_amend_split_stream_wrong_signer() {
     client.amend_split_stream(&id, &0, &None, &None);
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_pause_split_stream_wrong_signer() {
-    let data = auth_setup();
     let (client, id) = make_split_stream(&data);
     let stranger = Address::generate(&data.env);
-    data.env.ledger().set_timestamp(1_600);
 
     data.env.mock_auths(&[MockAuth {
         address: &stranger,
@@ -1013,15 +1031,10 @@ fn auth_snap_pause_split_stream_wrong_signer() {
     client.pause_split_stream(&id);
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_resume_split_stream_wrong_signer() {
-    let data = auth_setup();
     let (client, id) = make_split_stream(&data);
     let stranger = Address::generate(&data.env);
-    data.env.ledger().set_timestamp(1_600);
     client.pause_split_stream(&id);
-    data.env.ledger().set_timestamp(1_700);
 
     data.env.mock_auths(&[MockAuth {
         address: &stranger,
@@ -1035,13 +1048,9 @@ fn auth_snap_resume_split_stream_wrong_signer() {
     client.resume_split_stream(&id);
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_cancel_split_stream_wrong_signer() {
-    let data = auth_setup();
     let (client, id) = make_split_stream(&data);
     let stranger = Address::generate(&data.env);
-    data.env.ledger().set_timestamp(1_600);
 
     data.env.mock_auths(&[MockAuth {
         address: &stranger,
@@ -1055,10 +1064,7 @@ fn auth_snap_cancel_split_stream_wrong_signer() {
     client.cancel_split_stream(&id);
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_cancel_split_stream_wrong_signer_after_end() {
-    let data = auth_setup();
     let (client, id) = make_split_stream(&data);
     let stranger = Address::generate(&data.env);
     // Advance past end_time (2_100)
@@ -1078,13 +1084,10 @@ fn auth_snap_cancel_split_stream_wrong_signer_after_end() {
 
 // ── Recurring stream: permissionless & missing auth for pause/resume ───────────
 
-#[test]
 fn auth_snap_process_recurring_stream_is_permissionless() {
-    let data = auth_setup();
     let (client, id) = make_recurring_stream(&data);
     data.env.ledger().set_timestamp(1_100 + 3 * 1_000);
 
-    data.env.mock_auths(&[]);
     let updated = client.process_recurring_stream(&id);
     assert_eq!(updated.cycles_completed, 3);
     assert!(
@@ -1093,33 +1096,23 @@ fn auth_snap_process_recurring_stream_is_permissionless() {
     );
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_pause_recurring_stream() {
-    let data = auth_setup();
     let (client, id) = make_recurring_stream(&data);
 
-    data.env.mock_auths(&[]);
     client.pause_recurring_stream(&id);
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_resume_recurring_stream() {
-    let data = auth_setup();
     let (client, id) = make_recurring_stream(&data);
     client.pause_recurring_stream(&id);
     data.env.ledger().set_timestamp(1_200);
 
-    data.env.mock_auths(&[]);
     client.resume_recurring_stream(&id);
 }
 
 // ── Recurring stream: positive auth-address snapshots ──────────────────────────
 
-#[test]
 fn auth_snap_create_recurring_stream_records_sender() {
-    let data = auth_setup();
     let client = auth_initialized(&data);
 
     client.create_recurring_stream(
@@ -1141,9 +1134,7 @@ fn auth_snap_create_recurring_stream_records_sender() {
     );
 }
 
-#[test]
 fn auth_snap_withdraw_recurring_records_recipient() {
-    let data = auth_setup();
     let (client, id) = make_recurring_stream(&data);
     data.env.ledger().set_timestamp(1_100 + 3 * 1_000);
     client.process_recurring_stream(&id);
@@ -1158,9 +1149,7 @@ fn auth_snap_withdraw_recurring_records_recipient() {
     );
 }
 
-#[test]
 fn auth_snap_pause_recurring_stream_records_sender() {
-    let data = auth_setup();
     let (client, id) = make_recurring_stream(&data);
 
     client.pause_recurring_stream(&id);
@@ -1173,9 +1162,7 @@ fn auth_snap_pause_recurring_stream_records_sender() {
     );
 }
 
-#[test]
 fn auth_snap_resume_recurring_stream_records_sender() {
-    let data = auth_setup();
     let (client, id) = make_recurring_stream(&data);
     client.pause_recurring_stream(&id);
     data.env.ledger().set_timestamp(1_200);
@@ -1190,9 +1177,7 @@ fn auth_snap_resume_recurring_stream_records_sender() {
     );
 }
 
-#[test]
 fn auth_snap_cancel_recurring_stream_records_sender() {
-    let data = auth_setup();
     let (client, id) = make_recurring_stream(&data);
 
     client.cancel_recurring_stream(&id);
@@ -1207,10 +1192,7 @@ fn auth_snap_cancel_recurring_stream_records_sender() {
 
 // ── Recurring stream: wrong-signer snapshots ───────────────────────────────────
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_create_recurring_stream_wrong_signer() {
-    let data = auth_setup();
     let client = auth_initialized(&data);
     let stranger = Address::generate(&data.env);
 
@@ -1245,10 +1227,7 @@ fn auth_snap_create_recurring_stream_wrong_signer() {
     );
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_withdraw_recurring_wrong_signer() {
-    let data = auth_setup();
     let (client, id) = make_recurring_stream(&data);
     let stranger = Address::generate(&data.env);
     data.env.ledger().set_timestamp(1_100 + 3 * 1_000);
@@ -1266,9 +1245,7 @@ fn auth_snap_withdraw_recurring_wrong_signer() {
     client.withdraw_recurring(&id, &data.recipient, &100i128);
 }
 
-#[test]
 fn auth_snap_withdraw_recurring_non_recipient_unauthorized() {
-    let data = auth_setup();
     let (client, id) = make_recurring_stream(&data);
     let stranger = Address::generate(&data.env);
     data.env.ledger().set_timestamp(1_100 + 3 * 1_000);
@@ -1287,10 +1264,7 @@ fn auth_snap_withdraw_recurring_non_recipient_unauthorized() {
     assert_eq!(res, Err(Ok(Error::Unauthorized)));
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_pause_recurring_stream_wrong_signer() {
-    let data = auth_setup();
     let (client, id) = make_recurring_stream(&data);
     let stranger = Address::generate(&data.env);
 
@@ -1306,10 +1280,7 @@ fn auth_snap_pause_recurring_stream_wrong_signer() {
     client.pause_recurring_stream(&id);
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_resume_recurring_stream_wrong_signer() {
-    let data = auth_setup();
     let (client, id) = make_recurring_stream(&data);
     let stranger = Address::generate(&data.env);
     client.pause_recurring_stream(&id);
@@ -1327,10 +1298,7 @@ fn auth_snap_resume_recurring_stream_wrong_signer() {
     client.resume_recurring_stream(&id);
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_cancel_recurring_stream_wrong_signer() {
-    let data = auth_setup();
     let (client, id) = make_recurring_stream(&data);
     let stranger = Address::generate(&data.env);
 
@@ -1346,10 +1314,7 @@ fn auth_snap_cancel_recurring_stream_wrong_signer() {
     client.cancel_recurring_stream(&id);
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_cancel_recurring_stream_wrong_signer_after_end() {
-    let data = auth_setup();
     let (client, id) = make_recurring_stream(&data);
     let stranger = Address::generate(&data.env);
     // Advance past all 10 cycles and process so the stream reaches Ended.
