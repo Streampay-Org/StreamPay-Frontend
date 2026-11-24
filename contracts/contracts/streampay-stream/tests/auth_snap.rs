@@ -27,7 +27,7 @@
 #![allow(clippy::expect_used)]
 
 use soroban_sdk::testutils::{Address as _, Ledger as _};
-use soroban_sdk::{token::StellarAssetClient, Address, Env};
+use soroban_sdk::{token::StellarAssetClient, vec, Address, Env};
 use streampay_stream::{Contract, ContractClient};
 
 // ── Shared test helpers ────────────────────────────────────────────────────────
@@ -205,6 +205,26 @@ fn auth_snap_set_default_fee_bps() {
 
     data.env.mock_auths(&[]);
     client.set_default_fee_bps(&data.admin, &100);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_set_token_fee_bps() {
+    let data = auth_setup();
+    let client = auth_initialized(&data);
+
+    data.env.mock_auths(&[]);
+    client.set_token_fee_bps(&data.admin, &data.token, &100);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_clear_token_fee_bps() {
+    let data = auth_setup();
+    let client = auth_initialized(&data);
+
+    data.env.mock_auths(&[]);
+    client.clear_token_fee_bps(&data.admin, &data.token);
 }
 
 #[test]
@@ -434,6 +454,18 @@ fn auth_snap_withdraw() {
 
 #[test]
 #[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_withdraw_to() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let destination = Address::generate(&data.env);
+    data.env.ledger().set_timestamp(1_600);
+
+    data.env.mock_auths(&[]);
+    client.withdraw_to(&id, &250i128, &destination);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_withdraw_with_max_fee_bps() {
     let data = auth_setup();
     let (client, id) = auth_with_stream(&data);
@@ -526,6 +558,27 @@ fn auth_snap_cancel_split_stream() {
     client.cancel_split_stream(&id);
 }
 
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_amend_split_stream() {
+    let data = auth_setup();
+    let client = auth_initialized(&data);
+    let second_recipient = Address::generate(&data.env);
+    StellarAssetClient::new(&data.env, &data.token).mint(&second_recipient, &0);
+    let id = client.create_split_stream(
+        &data.sender,
+        &data.token,
+        &1_000i128,
+        &1_100u64,
+        &2_100u64,
+        &vec![&data.env, data.recipient.clone(), second_recipient],
+        &vec![&data.env, 1u64, 1u64],
+    );
+
+    data.env.mock_auths(&[]);
+    client.amend_split_stream(&id, &0, &None, &None);
+}
+
 // ── Recurring stream auth snapshots ────────────────────────────────────────────
 
 #[test]
@@ -604,4 +657,41 @@ fn auth_snap_initialize_missing_auth_fails() {
     env.mock_auths(&[]);
     let result = client.try_initialize(&admin);
     assert!(result.is_err());
+}
+
+// ── Two-step recipient transfer ───────────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_propose_recipient_transfer() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let new_recipient = Address::generate(&data.env);
+
+    data.env.mock_auths(&[]);
+    client.propose_recipient_transfer(&id, &new_recipient);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_accept_recipient_transfer() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let new_recipient = Address::generate(&data.env);
+    client.propose_recipient_transfer(&id, &new_recipient);
+
+    data.env.mock_auths(&[]);
+    client.accept_recipient_transfer(&id);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_cancel_recipient_transfer() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let new_recipient = Address::generate(&data.env);
+    client.propose_recipient_transfer(&id, &new_recipient);
+
+    data.env.mock_auths(&[]);
+    client.cancel_recipient_transfer(&id, &data.recipient);
 }

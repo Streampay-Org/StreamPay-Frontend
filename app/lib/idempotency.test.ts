@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import {
   checkIdempotency,
   computeFingerprint,
@@ -7,6 +8,13 @@ import {
   idempotencyToken,
   setIdempotency,
 } from "@/app/lib/db";
+import {
+  idempotencyKeyErrorResponse,
+  validateIdempotencyKey,
+  withIdempotency,
+  type IdempotencyStore,
+} from "@/app/lib/idempotency";
+import { withCorrelationContext } from "@/app/lib/logger";
 
 function createStore() {
   return createInMemoryPersistenceStore().idempotencyStore;
@@ -259,5 +267,136 @@ describe("integration with InMemoryIdempotencyStore", () => {
 
     persistence.idempotencyStore.reset();
     expect(store.size).toBe(0);
+  });
+});
+
+describe("validateIdempotencyKey", () => {
+  it("accepts a 1-character printable ASCII key", () => {
+    expect(validateIdempotencyKey("a")).toEqual({ ok: true, key: "a" });
+  });
+
+  it("accepts a 255-character printable ASCII key", () => {
+    const key = "k".repeat(255);
+    expect(validateIdempotencyKey(key)).toEqual({ ok: true, key });
+  });
+
+  it("rejects a 256-character key with too_long", () => {
+    const key = "k".repeat(256);
+    expect(validateIdempotencyKey(key)).toEqual({ ok: false, reason: "too_long" });
+  });
+
+  it("rejects null and undefined with missing", () => {
+    expect(validateIdempotencyKey(null)).toEqual({ ok: false, reason: "missing" });
+    expect(validateIdempotencyKey(undefined)).toEqual({ ok: false, reason: "missing" });
+  });
+
+  it("rejects an empty string with empty", () => {
+    expect(validateIdempotencyKey("")).toEqual({ ok: false, reason: "empty" });
+  });
+
+  it.each([
+    ["space", "key with space"],
+    ["tab", "key\twith\ttab"],
+    ["newline", "key\nwith\nnewline"],
+    ["carriage return", "key\rwith\rcr"],
+    ["NUL", "key\u0000null"],
+    ["non-ASCII", "key-caf\u00e9"],
+    ["emoji", "key-\uD83D\uDE80"],
+  ])("rejects %s with invalid_chars", (_label, key) => {
+    expect(validateIdempotencyKey(key)).toEqual({ ok: false, reason: "invalid_chars" });
+  });
+});
+
+describe("withIdempotency validation and standard error envelope", () => {
+  function makeMockStore(): IdempotencyStore & { get: jest.Mock; set: jest.Mock } {
+    return {
+      get: jest.fn(async () => null),
+      set: jest.fn(async () => undefined),
+    };
+  }
+
+  it("returns 400 with standard envelope and request_id when header is missing", async () => {
+    const store = makeMockStore();
+    const handler = jest.fn(async () => NextResponse.json({ ok: true }));
+    const req = new Request("http://localhost/api/streams/s1/settle", { method: "POST" });
+
+    const res = await withCorrelationContext({ request_id: "req-missing-1" }, () =>
+      withIdempotency(req, "settle", store, handler, { resourceId: "s1" }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "IDEMPOTENCY_KEY_REQUIRED",
+        message: "Idempotency-Key header is required for mutating operations",
+        request_id: "req-missing-1",
+      },
+    });
+    expect(store.get).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 with standard envelope and request_id when key is too long", async () => {
+    const store = makeMockStore();
+    const handler = jest.fn(async () => NextResponse.json({ ok: true }));
+    const req = new Request("http://localhost/api/streams/s1/settle", {
+      method: "POST",
+      headers: { "Idempotency-Key": "a".repeat(256) },
+    });
+
+    const res = await withCorrelationContext({ request_id: "req-long-1" }, () =>
+      withIdempotency(req, "settle", store, handler, { resourceId: "s1" }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "IDEMPOTENCY_KEY_INVALID",
+        message: "Idempotency-Key must be at most 255 characters",
+        request_id: "req-long-1",
+      },
+    });
+    expect(store.get).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 with standard envelope for invalid characters without hitting store or handler", async () => {
+    const store = makeMockStore();
+    const handler = jest.fn(async () => NextResponse.json({ ok: true }));
+    const req = new Request("http://localhost/api/streams/s1/settle", {
+      method: "POST",
+      headers: { "Idempotency-Key": "bad key" },
+    });
+
+    const res = await withCorrelationContext({ request_id: "req-chars-1" }, () =>
+      withIdempotency(req, "settle", store, handler, { resourceId: "s1" }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "IDEMPOTENCY_KEY_INVALID",
+        message:
+          "Idempotency-Key must contain only printable ASCII characters (0x21-0x7E) with no spaces or control characters",
+        request_id: "req-chars-1",
+      },
+    });
+    expect(store.get).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("formats empty key error via idempotencyKeyErrorResponse", async () => {
+    const res = await withCorrelationContext({ request_id: "req-empty-1" }, async () =>
+      idempotencyKeyErrorResponse("empty"),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "IDEMPOTENCY_KEY_INVALID",
+        message: "Idempotency-Key must not be empty",
+        request_id: "req-empty-1",
+      },
+    });
   });
 });

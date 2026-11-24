@@ -302,3 +302,14 @@ from the main stream-creation screen. The wizard:
 
 The API remains authoritative for address format; the wizard only requires a
 non-empty address before it will submit.
+
+## On-chain contract relationship
+
+This HTTP v2 endpoint fans out a single request into **one standard stream per
+recipient** (capped at 20 legs). Separately, the Soroban smart contract also
+implements a native single-record weighted split stream (`SplitStream`:
+`create_split_stream`, `withdraw_split`, `pause_split_stream`,
+`resume_split_stream`, `cancel_split_stream`) with its own on-chain events and
+fee behaviour. See the
+[StreamPay Stream Smart Contract README](../../contracts/contracts/streampay-stream/README.md#split-streams)
+for the on-chain split and recurring stream entrypoints, events, and fee rules.

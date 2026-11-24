@@ -2,7 +2,10 @@
   "name": "streampay-frontend",
   "version": "0.1.0",
   "private": true,
-  "description": "StreamPay Dashboard — Stellar wallet integration and stream management",
+  "engines": {
+    "node": ">=20 <21"
+  },
+  "description": "StreamPay Dashboard \u00e2\u20ac\u201d Stellar wallet integration and stream management",
   "scripts": {
     "typecheck:core": "tsc -p tsconfig.strict-core.json --noEmit",
     "typecheck": "tsc --noEmit",
@@ -18,6 +21,7 @@
     "test:e2e:pw:install": "playwright install chromium",
     "openapi:generate": "node scripts/generate-openapi-types.mjs",
     "openapi:check": "node scripts/generate-openapi-types.mjs --check",
+    "sdk:build": "tsc -p lib/sdk/tsconfig.build.json",
     "smoke": "node scripts/validate-openapi.mjs && npm run openapi:check && node scripts/run-from-realpath.mjs jest lib/rateLimitIp.test.ts app/api/auth/wallet/route.test.ts --forceExit",
     "smoke:contract": "bash scripts/smoke.sh --contract",
     "smoke:shell": "bash scripts/smoke-contract.sh",
@@ -25,13 +29,16 @@
     "recon:cli": "node scripts/run-from-realpath.mjs ts-node scripts/recon-cli.ts"
   },
   "dependencies": {
+    "@stellar/stellar-sdk": "15.1.0",
     "@types/pg": "^8.20.0",
+    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "next": "^15.0.0",
     "pg": "^8.22.0",
     "prom-client": "^15.1.3",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
+    "server-only": "0.0.1",
     "uuid": "^11.1.0",
     "zod": "^3.25.76"
   },
@@ -67,5 +74,11 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.6.0",
     "uuid": "^10.0.0"
+  },
+  "overrides": {
+    "@stellar/stellar-sdk": {
+      "axios": "1.21.1",
+      "toml": "5.0.1"
+    }
   }
 }

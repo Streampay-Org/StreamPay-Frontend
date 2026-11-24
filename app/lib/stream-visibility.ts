@@ -50,7 +50,11 @@ function parseTenantCookie(cookieHeader: string | null): string | null {
     if (rawName?.trim() === TENANT_COOKIE_NAME) {
       const value = rest.join("=").trim();
       if (value.length > 0) {
-        return decodeURIComponent(value);
+        try {
+          return decodeURIComponent(value);
+        } catch {
+          return null;
+        }
       }
     }
   }

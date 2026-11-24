@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { fetchWithIdempotency } from '../../../lib/apiClient';
@@ -12,6 +12,7 @@ import {
   getWizardDraft,
   saveWizardDraft,
   clearWizardDraft,
+  isWizardDraftEmpty,
 } from '../../state/wizardDraft';
 
 function shortenAddress(address: string): string {
@@ -69,6 +70,12 @@ export default function NewStreamPage() {
    */
   const [draftRestored, setDraftRestored] = useState(false);
 
+  /**
+   * Set while discarding a draft so the autosave effect skips the
+   * state-reset render and never re-persists an empty draft.
+   */
+  const discardedRef = useRef(false);
+
   /* ── Restore draft on mount ─────────────────────────────────────── */
   useEffect(() => {
     const draft = getWizardDraft();
@@ -84,7 +91,13 @@ export default function NewStreamPage() {
   /* ── Persist draft on every field change ────────────────────────── */
   // Wrapped in useCallback so lint is happy; the identity is stable per render
   const persistDraft = useCallback(() => {
-    saveWizardDraft({ recipient, amount, token, gasOnRecipient });
+    if (discardedRef.current) {
+      discardedRef.current = false;
+      return;
+    }
+    const draft = { recipient, amount, token, gasOnRecipient };
+    if (isWizardDraftEmpty(draft)) return;
+    saveWizardDraft(draft);
   }, [recipient, amount, token, gasOnRecipient]);
 
   useEffect(() => {
@@ -93,6 +106,9 @@ export default function NewStreamPage() {
 
   /* ── Discard draft ───────────────────────────────────────────────── */
   const handleDiscardDraft = () => {
+    if (!isWizardDraftEmpty({ recipient, amount, token, gasOnRecipient })) {
+      discardedRef.current = true;
+    }
     clearWizardDraft();
     setRecipient('');
     setAmount('');

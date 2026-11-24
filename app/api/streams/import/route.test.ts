@@ -15,6 +15,7 @@ jest.mock("@/app/lib/logger", () => ({
 import { POST, computeRowKey } from "./route";
 import { getStore, resetDb } from "@/app/lib/db";
 import { _resetAllowlistForTesting, addAllowedToken } from "@/app/lib/token-allowlist";
+import { _resetQuotasForTesting, upsertQuota } from "@/app/lib/quotas";
 import { TimeoutError } from "@/app/lib/with-timeout";
 
 const VALID_RECIPIENT = "GDSBCG3OKHCMMWS5EBH2X7XOYTJRWXN2YYQPCNS5OFBU4IDO4X7OFSQA";
@@ -73,9 +74,31 @@ describe("POST /api/streams/import", () => {
   beforeEach(() => {
     jest.restoreAllMocks();
     resetDb();
+    _resetQuotasForTesting();
     _resetAllowlistForTesting();
     addAllowedToken("XLM");
     addAllowedToken("USDC:GA5ZGCJZD3JTVLFR5O3M6J6DMFJ3Y7QMJ7WJ7VZ3Z5VK5J3Z5J3Z5VK5");
+  });
+
+  it("reports quota-exceeded rows and imports rows while within the org quota", async () => {
+    upsertQuota({ scope: "org", subject: "org-import-quota", maxActiveStreams: 1 });
+    const res = await POST(
+      makeJsonRequest({
+        rows: [
+          { recipient: VALID_RECIPIENT, rate: "100", schedule: "month", orgId: "org-import-quota" },
+          { recipient: VALID_RECIPIENT, rate: "50", schedule: "month", orgId: "org-import-quota" },
+        ],
+      }),
+    );
+
+    expect(res.status).toBe(207);
+    expect(await res.json()).toMatchObject({
+      summary: { total: 2, valid: 2, failed: 1, imported: 1 },
+      results: [
+        { status: "imported" },
+        { status: "error", errors: [{ code: "QUOTA_ACTIVE_STREAMS_EXCEEDED" }] },
+      ],
+    });
   });
 
   // ── CSV Content-Type ────────────────────────────────────────────────────────

@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Security
+- **Pluggable shared wallet challenge store with atomic Redis consume**:
+  Extracted wallet challenge storage from module-level `Map`s in
+  `app/api/auth/wallet/route.ts` into `app/lib/wallet-challenge-store.ts` with
+  `InMemoryWalletChallengeStore` (default when Redis env vars are unset,
+  preserving per-address and global caps) and `RedisWalletChallengeStore`
+  (Upstash REST + Lua scripts for atomic single-use `consume`, `PX` TTL, and
+  per-address 5-live cap). Configure via `WALLET_CHALLENGE_REDIS_URL` /
+  `WALLET_CHALLENGE_REDIS_TOKEN` (falling back to `RATE_LIMIT_REDIS_URL` /
+  `RATE_LIMIT_REDIS_TOKEN`). Redis outages fail closed with HTTP `503`.
 - **Wallet challenges are now unguessable and no longer enumerable** (#1669):
   `GET /api/auth/wallet` issues challenges with `crypto.randomBytes(32)` (a
   CSPRNG) using the shape `streampay-auth:v1:<nonce>|<origin>|<expires_at>`, and

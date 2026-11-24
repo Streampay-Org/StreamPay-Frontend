@@ -1,20 +1,14 @@
 /**
+ * @jest-environment node
+ */
+
+/**
  * Tests for POST /api/v2/streams/batch
  */
 
 import { POST } from "./route";
 import { getStore, resetDb } from "@/app/lib/db";
-
-jest.mock("next/server", () => ({
-  NextResponse: {
-    json: <T>(body: T, init?: { status?: number; headers?: Record<string, string> }) => ({
-      status: init?.status ?? 200,
-      headers: init?.headers ?? {},
-      body,
-      json: async () => body,
-    }),
-  },
-}));
+import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
 
 jest.mock("next/headers", () => ({
   headers: () => ({ get: (name: string) => (name === "x-request-id" ? "test-req-id" : null) }),
@@ -41,6 +35,7 @@ function makeRequest(
 
 describe("POST /api/v2/streams/batch", () => {
   beforeEach(() => {
+    resetRateLimitStore();
     resetDb({
       "stream-1": {
         id: "stream-1",
@@ -67,6 +62,7 @@ describe("POST /api/v2/streams/batch", () => {
 
   afterEach(() => {
     resetDb();
+    resetRateLimitStore();
   });
 
   it("returns 401 when Authorization header is missing", async () => {
@@ -74,16 +70,25 @@ describe("POST /api/v2/streams/batch", () => {
       makeRequest({ auth: null, body: { updates: [] } })
     );
     expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error.code).toBe("UNAUTHORIZED");
+    expect(body.error.message).toBeTruthy();
   });
 
   it("returns 400 when body is not JSON", async () => {
     const res = await POST(makeRequest({ body: "THROW" }));
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.message).toBeTruthy();
   });
 
   it("returns 400 when body is missing 'updates' array", async () => {
     const res = await POST(makeRequest({ body: { somethingElse: [] } }));
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.message).toBeTruthy();
   });
 
   it("returns 400 when updates exceeds 100 items", async () => {
@@ -93,27 +98,32 @@ describe("POST /api/v2/streams/batch", () => {
     }));
     const res = await POST(makeRequest({ body: { updates } }));
     expect(res.status).toBe(400);
-    const body = (res as unknown as { body: { error: { message: string } } }).body;
+    const body = await res.json();
+    expect(body.error.code).toBe("BAD_REQUEST");
     expect(body.error.message).toMatch(/Batch limit exceeded/);
   });
 
   it("returns 200 and empty array for empty updates", async () => {
     const res = await POST(makeRequest({ body: { updates: [] } }));
     expect(res.status).toBe(200);
-    const body = (res as unknown as { body: { streams: unknown[] } }).body;
+    const body = await res.json();
     expect(body.streams).toEqual([]);
   });
 
   it("returns 400 when an update item is missing 'id'", async () => {
     const res = await POST(makeRequest({ body: { updates: [{ data: { status: "active" } }] } }));
     expect(res.status).toBe(400);
-    const body = (res as unknown as { body: { error: { message: string } } }).body;
+    const body = await res.json();
+    expect(body.error.code).toBe("BAD_REQUEST");
     expect(body.error.message).toMatch(/Missing 'id'/);
   });
 
   it("returns 400 when an update item is missing 'data'", async () => {
     const res = await POST(makeRequest({ body: { updates: [{ id: "stream-1" }] } }));
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.message).toMatch(/Missing 'data'/);
   });
 
   it("returns 422 with per-item errors and performs NO updates when validation fails", async () => {
@@ -127,9 +137,10 @@ describe("POST /api/v2/streams/batch", () => {
     }));
     
     expect(res.status).toBe(422);
-    const body = (res as unknown as { body: { error: { code: string; details: any[] } } }).body;
+    const body = await res.json();
     
     expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.message).toBeTruthy();
     expect(body.error.details).toHaveLength(1);
     expect(body.error.details[0].id).toBe("nonexistent-stream");
     expect(body.error.details[0].code).toBe("STREAM_NOT_FOUND");
@@ -151,7 +162,7 @@ describe("POST /api/v2/streams/batch", () => {
     }));
 
     expect(res.status).toBe(200);
-    const body = (res as unknown as { body: { streams: Array<{ id: string; status: string; updated_at: string }> } }).body;
+    const body = (await res.json()) as { streams: Array<{ id: string; status: string; updated_at: string }> };
     
     expect(body.streams).toHaveLength(2);
     

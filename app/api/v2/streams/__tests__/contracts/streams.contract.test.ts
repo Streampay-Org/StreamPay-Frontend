@@ -13,6 +13,7 @@
 
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/v2/streams/route";
+import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
 import { GET as GET_SINGLE } from "@/app/api/v2/streams/[id]/route";
 import { getStore } from "@/app/lib/db";
 import { loadAllFixtures, type PactInteraction } from "./pact-helpers";
@@ -83,6 +84,10 @@ function setupProviderState(providerState: string) {
 
 describe("Pact contract verifier — /api/v2/streams", () => {
   const fixtures = loadAllFixtures();
+
+  afterEach(() => {
+    resetRateLimitStore();
+  });
 
   for (const fixture of fixtures) {
     describe(`${fixture.consumer.name} → ${fixture.provider.name}`, () => {

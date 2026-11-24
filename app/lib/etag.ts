@@ -100,6 +100,44 @@ export function ifNoneMatchMatches(
   );
 }
 
+/**
+ * Decide whether the `If-Match` request header is satisfied by the supplied
+ * entity-tag, per RFC 9110 §13.1.1 using **strong comparison** (§8.8.3.2):
+ *
+ * - `"*"` matches if the resource exists (i.e. any non-empty current tag).
+ * - Otherwise the header is a comma-separated list of entity-tags.
+ * - Strong comparison requires both entity-tags to be strong (not prefixed
+ *   with `W/`) and to match character-for-character including quotes.
+ *   Weak tags (`W/"..."`) never match.
+ * - Malformed entries (unquoted, unbalanced quotes, empty) are ignored.
+ */
+export function ifMatchSatisfied(
+  headerValue: string | null,
+  currentETag: string
+): boolean {
+  if (!headerValue) return false;
+  const trimmed = headerValue.trim();
+  if (trimmed === "") return false;
+
+  const current = currentETag.trim();
+  if (current === "") return false;
+
+  if (trimmed === "*") return true;
+
+  // Strong comparison: a weak current ETag can never match.
+  if (!isStrongEntityTag(current)) return false;
+
+  const candidates = trimmed.split(",").map((c) => c.trim());
+  return candidates.some(
+    (c) => isStrongEntityTag(c) && c === current
+  );
+}
+
+function isStrongEntityTag(tag: string): boolean {
+  if (tag.startsWith("W/") || tag.startsWith("w/")) return false;
+  return tag.length >= 2 && tag.startsWith('"') && tag.endsWith('"');
+}
+
 function stripWeakPrefix(tag: string): string {
   return tag.startsWith("W/") ? tag.slice(2) : tag;
 }

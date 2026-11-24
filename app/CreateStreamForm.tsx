@@ -50,6 +50,9 @@ import { Skeleton } from "../src/components/Skeleton";
 import { LiveRegion } from "../src/components/LiveRegion";
 import { isTextEntry } from "@/lib/keyboard";
 import { shortcutKeys } from "@/lib/shortcuts";
+import { CopyAddress } from "./components/CopyAddress";
+import { useResolvedRecipient } from "./hooks/useResolvedRecipient";
+import { isFederationAddress } from "./utils/federation";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -137,9 +140,38 @@ export function CreateStreamForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [announcement, setAnnouncement] = useState("");
 
+  const resolvedRecipient = useResolvedRecipient(recipient);
+  const isFederationInput = isFederationAddress(recipient.trim());
+  const isResolvingRecipient = resolvedRecipient.status === "loading";
+  const hasRecipientError = resolvedRecipient.status === "error";
+  const isSubmitBlocked =
+    isSubmitting || isResolvingRecipient || hasRecipientError;
+
   // Refs for keyboard-shortcut focus jumps
   const recipientRef = useRef<HTMLInputElement>(null);
   const amountRef = useRef<HTMLInputElement>(null);
+
+  // Announce federation resolution state changes to screen readers
+  useEffect(() => {
+    if (isFederationInput && resolvedRecipient.status === "loading") {
+      setAnnouncement("Resolving federation address…");
+    } else if (
+      isFederationInput &&
+      resolvedRecipient.status === "resolved" &&
+      resolvedRecipient.address
+    ) {
+      setAnnouncement(
+        `Resolved recipient address to ${resolvedRecipient.address}`,
+      );
+    } else if (resolvedRecipient.status === "error" && resolvedRecipient.error) {
+      setAnnouncement(resolvedRecipient.error);
+    }
+  }, [
+    isFederationInput,
+    resolvedRecipient.status,
+    resolvedRecipient.address,
+    resolvedRecipient.error,
+  ]);
 
   // ── Cancel handler ─────────────────────────────────────────────────────────
   // Declared before the keydown listener so the Esc binding can call it.
@@ -194,13 +226,18 @@ export function CreateStreamForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmitting) return;
+    if (isSubmitBlocked) return;
+
+    const effectiveRecipient =
+      resolvedRecipient.status === "resolved" && resolvedRecipient.address
+        ? resolvedRecipient.address
+        : recipient;
 
     setIsSubmitting(true);
     setAnnouncement("Creating stream, please wait…");
 
     try {
-      await onSubmit({ recipient, amount, token });
+      await onSubmit({ recipient: effectiveRecipient, amount, token });
       setAnnouncement("Stream created successfully.");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "An unexpected error occurred.";
@@ -274,15 +311,69 @@ export function CreateStreamForm({
             required
             value={recipient}
             onChange={(e) => setRecipient(e.target.value)}
-            placeholder="GABC…"
+            placeholder="GABC… or alice*example.com"
             autoComplete="off"
             spellCheck={false}
             className="csf-field"
-            aria-describedby="csf-recipient-hint"
+            aria-invalid={hasRecipientError || undefined}
+            aria-describedby={
+              [
+                "csf-recipient-hint",
+                hasRecipientError ? "csf-recipient-error" : null,
+                isFederationInput && resolvedRecipient.status === "resolved"
+                  ? "csf-recipient-resolved"
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" ")
+            }
           />
           <p id="csf-recipient-hint" className="csf-hint">
-            Stellar address of the stream recipient.
+            Stellar address (G…) or federation address (user*domain.com) of the stream recipient.
           </p>
+          {isResolvingRecipient && (
+            <p
+              id="csf-recipient-status"
+              className="csf-hint"
+              role="status"
+              data-testid="csf-recipient-loading"
+            >
+              Resolving federation address…
+            </p>
+          )}
+          {isFederationInput &&
+            resolvedRecipient.status === "resolved" &&
+            resolvedRecipient.address && (
+              <div
+                id="csf-recipient-resolved"
+                className="csf-hint"
+                data-testid="csf-recipient-resolved"
+              >
+                <span>Resolved account: </span>
+                <CopyAddress value={resolvedRecipient.address} />
+              </div>
+            )}
+          {isFederationInput &&
+            resolvedRecipient.status === "resolved" &&
+            resolvedRecipient.memo && (
+              <p
+                className="csf-hint"
+                data-testid="csf-recipient-memo"
+              >
+                Required memo ({resolvedRecipient.memo.type}):{" "}
+                {resolvedRecipient.memo.value}
+              </p>
+            )}
+          {hasRecipientError && resolvedRecipient.error && (
+            <p
+              id="csf-recipient-error"
+              className="csf-error"
+              role="alert"
+              data-testid="csf-recipient-error"
+            >
+              {resolvedRecipient.error}
+            </p>
+          )}
         </div>
 
         {/* ── Amount + Token ─────────────────────────────────────────── */}
@@ -359,7 +450,7 @@ export function CreateStreamForm({
           <button
             type="submit"
             className={`button button--primary csf-field${isSubmitting ? " button--busy" : ""}`}
-            disabled={isSubmitting}
+            disabled={isSubmitBlocked}
             aria-label={isSubmitting ? "Creating stream, please wait" : "Create stream"}
           >
             {isSubmitting ? "Creating…" : "Create Stream"}

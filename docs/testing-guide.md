@@ -27,6 +27,37 @@ npm run test:e2e
 
 # Contract tests
 (cd contracts && cargo test)
+
+# OpenAPI lint and consistency checks
+npx --yes @stoplight/spectral-cli@6 lint openapi.json --ruleset .spectral.yaml
+node scripts/validate-openapi.mjs
+npm run openapi:check
+```
+
+## CI caching
+
+The `build-test` job can cache only `.next/cache` to reuse Next.js incremental
+build data; generated build output is still produced by each run. The proposed
+cache key combines the runner OS, Node 20, the `package-lock.json` hash, and a
+hash of application/source files plus `next.config.ts`:
+
+```text
+nextjs-${{ runner.os }}-node20-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**', 'lib/**', 'src/**', 'next.config.ts') }}
+```
+
+Restore keys fall back first to the lockfile-specific prefix and then to the
+OS prefix.
+
+To force a fresh cache, delete the entry in the repository's GitHub Actions
+caches or bump the `nextjs-` key prefix (and its restore-key prefixes) in the
+workflow.
+
+## OpenAPI lint
+
+Run the pinned Spectral CLI against the repository ruleset:
+
+```bash
+npx --yes @stoplight/spectral-cli@6 lint openapi.json --ruleset .spectral.yaml
 ```
 
 ## Conventions
@@ -70,6 +101,21 @@ npx jest tests/streamsShape.test.ts --updateSnapshot
 
 > Only run `--updateSnapshot` after confirming the change is
 > backwards-compatible with wallet partners still on v1 (sunset: 2026-12-31).
+
+## Event topic catalogue (issue #2042)
+
+`docs/__tests__/event-topics-doc.test.ts` reads `events.rs`, `multi.rs` and
+`recurring.rs`, extracts every `#[contractevent(topics = [...])]` pair, and
+checks it against the tables in `docs/EVENT_TOPICS.md`. It also keeps an
+explicit allowlist for topics emitted with `symbol_short!` in `events.rs`.
+
+Adding a contract event therefore requires a matching row in
+`docs/EVENT_TOPICS.md`. A new `symbol_short!` pair must also be added to
+`SYMBOL_SHORT_ALLOWLIST` in the test.
+
+```bash
+npm test -- docs/__tests__/event-topics-doc.test.ts
+```
 
 ## See also
 
