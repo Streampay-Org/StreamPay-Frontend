@@ -23,10 +23,13 @@ import {
   type SortOption,
 } from "../components/SortDropdown";
 import { TagChips } from "../components/TagChips";
+import { ResetFiltersButton } from "../components/ResetFiltersButton";
 import { safeStorage } from "../lib/safeStorage";
 import { mockStreams } from "./fixtures";
 import { sortStreams } from "./sortStreams";
 import { useRovingGrid } from "./useRovingGrid";
+import { STREAM_STATUSES, isStreamStatus, useStreamsQuery } from "./useStreamsQuery";
+import filterStyles from "./StreamsFilters.module.css";
 
 const SORT_STORAGE_KEY = "streampay-streams-sort";
 
@@ -166,24 +169,40 @@ export function StreamsPageContent({
     }
   };
 
-  /* ── Sort dropdown (persists via safeStorage) ── */
-  const [sort, setSort] = useState<SortOption>(initialSort ?? "newest");
+  /* ── URL-backed filter state (issue #2031) ── */
+  const {
+    tag: selectedTag,
+    status: statusFilter,
+    sort: urlSort,
+    hasSortParam,
+    searchValue,
+    setSearch,
+    setTag,
+    setStatus,
+    setSort: setUrlSort,
+    clearFilters,
+  } = useStreamsQuery();
 
-  /* Sync from safeStorage after hydration (skipped when initialSort is provided) */
+  /* ── Sort dropdown (persists via safeStorage, mirrors to the URL) ── */
+  const [sort, setSort] = useState<SortOption>(initialSort ?? urlSort);
+
+  /* Sync from safeStorage after hydration (skipped when initialSort or a URL
+   * sort is provided — the URL always wins for shared links). */
   useEffect(() => {
-    if (initialSort !== undefined) return;
+    if (initialSort !== undefined || hasSortParam) return;
     const stored = safeStorage.getItem(SORT_STORAGE_KEY);
     if (isSortOption(stored)) {
       setSort(stored);
     }
-  }, [initialSort]);
+  }, [initialSort, hasSortParam]);
 
   const handleSortChange = (next: SortOption) => {
     setSort(next);
     safeStorage.setItem(SORT_STORAGE_KEY, next);
+    setUrlSort(next);
   };
 
-  /* ── Tag filter ── */
+  /* ── Filters ── */
   const allTags = useMemo(
     () =>
       Array.from(
@@ -191,20 +210,45 @@ export function StreamsPageContent({
       ),
     [streams],
   );
-  const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
-  const filteredStreams = useMemo(
-    () =>
-      selectedTag
-        ? streams.filter((s) => s.tags?.includes(selectedTag))
-        : streams,
-    [streams, selectedTag],
-  );
+  /* An unknown `tag` in the URL (e.g. a stale shared link) is ignored rather
+   * than emptying the list — the user sees the unfiltered list instead. */
+  const effectiveTag =
+    selectedTag && allTags.includes(selectedTag) ? selectedTag : null;
+  /* Filter on the local input so results update while the URL write is
+   * still debouncing. */
+  const normalisedQuery = searchValue.trim().toLowerCase();
+
+  const filteredStreams = useMemo(() => {
+    let result = streams;
+
+    if (effectiveTag) {
+      result = result.filter((s) => s.tags?.includes(effectiveTag));
+    }
+    if (statusFilter) {
+      result = result.filter((s) => s.status === statusFilter);
+    }
+    if (normalisedQuery) {
+      result = result.filter((s) =>
+        [s.recipient, s.schedule, s.id, ...(s.tags ?? [])]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalisedQuery),
+      );
+    }
+
+    return result;
+  }, [streams, effectiveTag, statusFilter, normalisedQuery]);
 
   const sortedStreams = useMemo(
     () => sortStreams(filteredStreams, sort),
     [filteredStreams, sort],
   );
+
+  const handleClearFilters = () => {
+    clearFilters();
+    onClearFilters?.();
+  };
 
   /* ── Derived view state ── */
   const isLoading = state === "loading";
@@ -214,6 +258,10 @@ export function StreamsPageContent({
     state === "empty" || (state !== "loading" && state !== "error" && streams.length === 0);
   const isFilteredEmpty = emptyStateVariant === "filtered" && streams.length === 0 && !isEmpty;
   const isPopulated = !isLoading && !isError && !isEmpty;
+
+  const hasActiveFilters = Boolean(effectiveTag || statusFilter || normalisedQuery);
+  const hasNoMatches = isPopulated && hasActiveFilters && filteredStreams.length === 0;
+  const showFilteredEmpty = isFilteredEmpty || hasNoMatches;
 
   const populatedCount = streamListCopy.populatedCount(streams.length);
   const rowIds = sortedStreams.map((stream) => stream.id);
@@ -291,12 +339,56 @@ export function StreamsPageContent({
           )}
         </div>
 
+        {/* Search + status filters — mirrored into the URL */}
+        {isPopulated && (
+          <div className={filterStyles.filters}>
+            <label className={filterStyles.search} htmlFor="streams-search">
+              <span className="sr-only">Search streams</span>
+              <input
+                id="streams-search"
+                type="search"
+                aria-label="Search streams"
+                className={`${filterStyles.control} ${filterStyles.search}`}
+                placeholder="Search recipient, tag, or ID"
+                value={searchValue}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </label>
+
+            <label className={filterStyles.status} htmlFor="streams-status">
+              <span className="sr-only">Filter by status</span>
+              <select
+                id="streams-status"
+                aria-label="Filter by status"
+                className={`${filterStyles.control} ${filterStyles.status}`}
+                value={statusFilter ?? ""}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setStatus(isStreamStatus(value) ? value : null);
+                }}
+              >
+                <option value="">All statuses</option>
+                {STREAM_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <ResetFiltersButton
+              onReset={handleClearFilters}
+              isVisible={hasActiveFilters}
+            />
+          </div>
+        )}
+
         {/* Tag-chip filter bar — only shown when streams carry tags */}
         {isPopulated && allTags.length > 0 && (
           <TagChips
             tags={allTags}
-            selectedTag={selectedTag}
-            onTagClick={setSelectedTag}
+            selectedTag={effectiveTag}
+            onTagClick={setTag}
           />
         )}
 
@@ -309,30 +401,30 @@ export function StreamsPageContent({
             message={errorMessage}
             onRetry={onRetry}
           />
-        ) : isEmpty || isFilteredEmpty ? (
+        ) : isEmpty || showFilteredEmpty ? (
           <EmptyState
             eyebrow={
-              isFilteredEmpty
+              showFilteredEmpty
                 ? streamListCopy.filtered.eyebrow
                 : streamListCopy.empty.eyebrow
             }
             title={
-              isFilteredEmpty
+              showFilteredEmpty
                 ? streamListCopy.filtered.title
                 : streamListCopy.empty.title
             }
             description={
-              isFilteredEmpty
+              showFilteredEmpty
                 ? streamListCopy.filtered.description
                 : streamListCopy.empty.description
             }
             actionLabel={
-              isFilteredEmpty
+              showFilteredEmpty
                 ? streamListCopy.filtered.actionLabel
                 : streamListCopy.empty.actionLabel
             }
-            onAction={isFilteredEmpty ? onClearFilters : onRetryAction}
-            guidanceSteps={isFilteredEmpty ? undefined : [...streamListCopy.empty.guidanceSteps]}
+            onAction={showFilteredEmpty ? handleClearFilters : onRetryAction}
+            guidanceSteps={showFilteredEmpty ? undefined : [...streamListCopy.empty.guidanceSteps]}
           />
         ) : (
           /*
