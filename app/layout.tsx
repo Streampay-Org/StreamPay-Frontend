@@ -9,6 +9,7 @@ import { SiteHeader } from "./components/SiteHeader";
 import { ClientErrorReporter } from "./components/ClientErrorReporter";
 import { ThemeController } from "./components/ThemeController";
 import { getThemeScript } from "./utils/theme-noflash";
+import RootShell from "./components/RootShell";
 
 export const metadata: Metadata = {
   title: "StreamPay - Payment Streaming",
@@ -36,16 +37,7 @@ export default function RootLayout({
         />
       </head>
       <body>
-        <ThemeController />
-        <ClientErrorReporter />
-        <ToastProvider>
-          <SplashScreenWrapper />
-          <CommandPaletteLauncher />
-          <ShortcutsOverlayLauncher />
-          <SiteHeader />
-          {children}
-          <AppBottomNav />
-        </ToastProvider>
+       <RootShell>{children}</RootShell>
       </body>
     </html>
   );

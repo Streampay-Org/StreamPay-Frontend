@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { getEmbedCsp } from "./lib/embed-policy";
 
 /**
  * next.config.ts
@@ -10,20 +11,44 @@ import type { NextConfig } from "next";
  */
 const nextConfig = (): NextConfig => ({
   reactStrictMode: true,
-  output: 'standalone',
-  // CI blocks regressions with typecheck:core (tsconfig.strict-core.json).
-  // scripts/typecheck-report.mjs reports remaining full-project debt.
-  // Remove ignoreBuildErrors once the stream workstream and the full
-  // `npm run typecheck` (including generated Next types) are error-free.
+  output: "standalone",
+
   typescript: {
     ignoreBuildErrors: true,
-    tsconfigPath: 'tsconfig.json',
+    tsconfigPath: "tsconfig.json",
   },
+
   eslint: {
     ignoreDuringBuilds: false,
   },
-  serverExternalPackages: ['pg'],
+
+  serverExternalPackages: ["pg"],
   experimental: {},
+
+async headers() {
+  return [
+    {
+      source: "/embed/:path*",
+      headers: [
+        {
+          key: "Content-Security-Policy",
+          value: `${getEmbedCsp()};`,
+        },
+      ],
+    },
+    {
+      // Apply the deny-framing policy to every route except /embed/*
+      source: "/:path((?!embed/).*)",
+      headers: [
+        {
+          key: "Content-Security-Policy",
+          value: "frame-ancestors 'none';",
+        },
+      ],
+    },
+  ];
+},
+
 });
 
 export default nextConfig;
