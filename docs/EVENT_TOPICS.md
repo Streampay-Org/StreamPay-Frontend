@@ -39,7 +39,7 @@ Events are emitted AFTER successful state mutation and any token transfer. Faile
 | `"stream"` | `"set_max_a"` | Emitted when the per-token maximum stream amount cap is set or cleared (`0` indicates cleared). |
 | `"stream"` | `"set_fee_c"` | Emitted when the fee collector address is updated. |
 | `"stream"` | `"set_dfee"` | Emitted when the global default fee bps is updated. |
-| `"stream"` | `"fee"` | Emitted for every withdrawal that incurs a non-zero fee. |
+| `"stream"` | `"fee"` | Emitted for every single-stream (`withdraw`, `withdraw_to`) or split-stream (`withdraw_split`) withdrawal that incurs a non-zero fee when a fee collector is configured. |
 | `"stream"` | `"swept"` | Emitted when the admin successfully sweeps accumulated protocol fees. |
 | `"stream"` | `"deprecated_entrypoint"` | Emitted when a legacy/deprecated contract entrypoint is invoked. |
 

@@ -4,15 +4,19 @@
 
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
-import { Timestamp } from "./Timestamp";
+import { setClockSkew, Timestamp } from "./Timestamp";
 
 describe("Timestamp", () => {
   beforeEach(() => {
     jest.useFakeTimers();
+    setClockSkew(0);
     jest.setSystemTime(new Date("2026-06-27T12:00:00.000Z"));
   });
 
   afterEach(() => {
+    act(() => {
+      setClockSkew(0);
+    });
     jest.useRealTimers();
   });
 
@@ -115,5 +119,42 @@ describe("Timestamp", () => {
 
     // Timer was cancelled; no tooltip should appear.
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  it("uses one interval for many Timestamp instances", () => {
+    const setIntervalSpy = jest.spyOn(window, "setInterval");
+    const view = render(
+      React.createElement(
+        React.Fragment,
+        null,
+        ...Array.from({ length: 100 }, (_, index) =>
+          React.createElement(Timestamp, {
+            iso: "2026-06-27T12:00:00.000Z",
+            key: index,
+          })
+        )
+      )
+    );
+
+    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+
+    view.unmount();
+    setIntervalSpy.mockRestore();
+  });
+
+  it("updates relative labels every minute and refreshes on clock-skew changes", () => {
+    render(React.createElement(Timestamp, { iso: "2026-06-27T11:58:00.000Z" }));
+
+    expect(screen.getByText("2 minutes ago")).toBeInTheDocument();
+
+    act(() => {
+      jest.advanceTimersByTime(60_000);
+    });
+    expect(screen.getByText("3 minutes ago")).toBeInTheDocument();
+
+    act(() => {
+      setClockSkew(-60_000);
+    });
+    expect(screen.getByText("2 minutes ago")).toBeInTheDocument();
   });
 });

@@ -226,6 +226,17 @@ pub struct SplitStreamResumed {
     pub timestamp: u64,
 }
 
+#[contractevent(topics = ["stream", "split_am"], data_format = "vec")]
+pub struct SplitAmended {
+    pub stream_id: u64,
+    pub sender: Address,
+    pub total_amount: i128,
+    pub total_weight: u64,
+    pub recipient_count: u32,
+    pub end_time: u64,
+    pub timestamp: u64,
+}
+
 fn emit_created(
     env: &Env,
     stream_id: u64,
@@ -287,6 +298,19 @@ fn emit_resumed(env: &Env, stream_id: u64, sender: &Address, end_time: u64, time
         stream_id,
         sender: sender.clone(),
         end_time,
+        timestamp,
+    }
+    .publish(env);
+}
+
+fn emit_amended(env: &Env, stream: &SplitStream, timestamp: u64) {
+    SplitAmended {
+        stream_id: stream.id,
+        sender: stream.sender.clone(),
+        total_amount: stream.total_amount,
+        total_weight: stream.total_weight,
+        recipient_count: stream.recipients.len(),
+        end_time: stream.end_time,
         timestamp,
     }
     .publish(env);
@@ -472,16 +496,148 @@ pub fn withdraw_split(
         stream.status = StreamStatus::Settled;
     }
 
-    token::Client::new(&env, &stream.token).transfer(
-        &env.current_contract_address(),
-        &recipient,
-        &amount,
-    );
+    // ── Fee split ──────────────────────────────────────────────────────────
+    // Compute fee and net amount using floor-per-withdrawal rounding:
+    //   fee = floor(amount * stream.fee_bps / 10_000)
+    //   net = amount - fee
+    // Bookkeeping (released_amount / total_released / Settled) stays on the
+    // gross `amount` so settlement and escrow drainage invariants are preserved.
+    // If no fee collector is configured, the full `amount` is forwarded to the
+    // recipient so no funds are stranded in the contract.
+    let fee_result = fees::apply_fee(amount, stream.fee_bps)?;
+    let maybe_collector = fees::get_fee_collector(&env);
+    let contract = env.current_contract_address();
+    let tkn = token::Client::new(&env, &stream.token);
+
+    if fee_result.net_amount > 0 {
+        tkn.transfer(&contract, &recipient, &fee_result.net_amount);
+    }
+
+    if fee_result.fee_amount > 0 {
+        if let Some(collector) = maybe_collector {
+            tkn.transfer(&contract, &collector, &fee_result.fee_amount);
+            fees::accrue_fees(&env, stream_id, fee_result.fee_amount)?;
+            events::fee_charged(
+                &env,
+                stream_id,
+                fee_result.fee_amount,
+                stream.fee_bps,
+                &collector,
+                now,
+            );
+        } else {
+            // No collector configured: forward fee to recipient as well so
+            // no funds are stranded in the contract.
+            tkn.transfer(&contract, &recipient, &fee_result.fee_amount);
+        }
+    }
 
     set_split(&env, stream_id, &stream);
     emit_withdrawn(&env, stream_id, &recipient, amount, now);
 
     Ok(amount)
+}
+
+/// Cancels a split stream, paying each recipient their vested-but-unreleased
+/// share and refunding the remaining unvested balance to the sender.
+///
+/// Consistent with single-stream [`crate::Contract::cancel_stream`],
+/// cancellation payouts do **not** charge the protocol fee.
+pub fn amend_split_stream(
+    env: Env,
+    stream_id: u64,
+    top_up: i128,
+    new_weights: Option<Vec<u64>>,
+    new_end_time: Option<u64>,
+) -> Result<SplitStream, Error> {
+    require_not_paused(&env)?;
+
+    if top_up < 0 {
+        return Err(Error::InvalidAmount);
+    }
+
+    let mut stream = get_existing_split(&env, stream_id)?;
+    stream.sender.require_auth();
+
+    if stream.status != StreamStatus::Active && stream.status != StreamStatus::Paused {
+        return Err(Error::InvalidState);
+    }
+
+    let new_total_amount = stream
+        .total_amount
+        .checked_add(top_up)
+        .ok_or(Error::Overflow)?;
+    if stream.total_released > new_total_amount {
+        return Err(Error::InvalidAmount);
+    }
+    stream.total_amount = new_total_amount;
+
+    if let Some(weights) = new_weights {
+        if weights.len() != stream.recipients.len() {
+            return Err(Error::InvalidAmount);
+        }
+
+        let mut total_weight = 0u64;
+        let mut i = 0u32;
+        while i < weights.len() {
+            let weight = weights.get(i).ok_or(Error::InvalidAmount)?;
+            if weight == 0 {
+                return Err(Error::InvalidAmount);
+            }
+            total_weight = total_weight.checked_add(weight).ok_or(Error::Overflow)?;
+
+            let mut allocation = stream.recipients.get(i).ok_or(Error::InvalidAmount)?;
+            allocation.weight = weight;
+            stream.recipients.set(i, allocation);
+            i = i.saturating_add(1);
+        }
+        stream.total_weight = total_weight;
+    }
+
+    let now = env.ledger().timestamp();
+    if let Some(end_time) = new_end_time {
+        if end_time <= now || end_time <= stream.start_time {
+            return Err(Error::InvalidTimeRange);
+        }
+        stream.end_time = end_time;
+        stream.duration = end_time
+            .checked_sub(stream.start_time)
+            .and_then(|duration| duration.checked_sub(stream.total_paused_duration))
+            .filter(|duration| *duration > 0)
+            .ok_or(Error::InvalidTimeRange)?;
+    }
+
+    stream
+        .total_amount
+        .checked_mul(i128::from(stream.duration))
+        .ok_or(Error::Overflow)?;
+    if stream.total_released > stream.total_amount {
+        return Err(Error::InvalidAmount);
+    }
+
+    let mut i = 0u32;
+    while i < stream.recipients.len() {
+        let allocation = stream.recipients.get(i).ok_or(Error::InvalidAmount)?;
+        let vested = recipient_vested(&stream, now, allocation.weight)?;
+        if allocation.released_amount > vested {
+            return Err(Error::InvalidAmount);
+        }
+        i = i.saturating_add(1);
+    }
+
+    if top_up > 0 {
+        token::Client::new(&env, &stream.token).transfer(
+            &stream.sender,
+            &env.current_contract_address(),
+            &top_up,
+        );
+    }
+
+    stream.last_update = now;
+    set_split(&env, stream_id, &stream);
+    emit_amended(&env, &stream, now);
+
+    Ok(stream)
 }
 
 pub fn cancel_split_stream(env: Env, stream_id: u64) -> Result<SplitStream, Error> {

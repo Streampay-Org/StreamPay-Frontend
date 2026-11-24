@@ -2,6 +2,13 @@
 
 import {
   buildAllowedOriginSet,
+  DEFAULT_CORS_MAX_AGE_SECONDS,
+  isOriginAllowed,
+  normalizeOrigin,
+  parseAllowedOrigins,
+  resolveCorsMaxAge,
+  WILDCARD_ORIGIN,
+} from './cors';
   buildCorsDecision,
   isNullOrigin,
   isOriginAllowed,
@@ -25,6 +32,28 @@ function makeRequest(origin: string | null, requestOrigin = 'https://app.example
 }
 
 describe('CORS helpers', () => {
+  describe('resolveCorsMaxAge', () => {
+    it('returns valid configured values', () => {
+      expect(resolveCorsMaxAge('120')).toBe(120);
+      expect(resolveCorsMaxAge('  7200  ')).toBe(7200);
+    });
+
+    it('accepts zero to disable caching', () => {
+      expect(resolveCorsMaxAge('0')).toBe(0);
+    });
+
+    it('falls back for missing or invalid values', () => {
+      expect(resolveCorsMaxAge(undefined)).toBe(DEFAULT_CORS_MAX_AGE_SECONDS);
+      expect(resolveCorsMaxAge('')).toBe(DEFAULT_CORS_MAX_AGE_SECONDS);
+      expect(resolveCorsMaxAge('   ')).toBe(DEFAULT_CORS_MAX_AGE_SECONDS);
+      expect(resolveCorsMaxAge('-1')).toBe(DEFAULT_CORS_MAX_AGE_SECONDS);
+      expect(resolveCorsMaxAge('not-a-number')).toBe(DEFAULT_CORS_MAX_AGE_SECONDS);
+      expect(resolveCorsMaxAge('86401')).toBe(DEFAULT_CORS_MAX_AGE_SECONDS);
+      expect(resolveCorsMaxAge('1.5')).toBe(DEFAULT_CORS_MAX_AGE_SECONDS);
+      expect(resolveCorsMaxAge('999999999999999999999999999999')).toBe(DEFAULT_CORS_MAX_AGE_SECONDS);
+    });
+  });
+
   describe('parseAllowedOrigins', () => {
     it('returns an empty list for unset values', () => {
       expect(parseAllowedOrigins(undefined)).toEqual([]);

@@ -1,5 +1,5 @@
 {
-  "QUARANTINE_MAX": 47,
+  "QUARANTINE_MAX": 46,
   "entries": [
     {
       "path": "app/api/notifications/preferences/route.test.ts",
@@ -15,14 +15,6 @@
     },
     {
       "path": "app/api/audit/export/route.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "app/api/exports/exports.accessLog.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "app/api/exports/exports.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
@@ -50,10 +42,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "app/api/reconciliation/route.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/api/streams/__tests__/rateLimiterConsistency.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
@@ -71,23 +59,11 @@
     },
 
     {
-      "path": "app/api/streams/v1-contract.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "app/api/v2/streams/batch/route.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/api/v2/streams/multi/route.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
       "path": "app/api/v2/streams/route.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "app/api/v2/streams/v2-streams-quota.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
@@ -103,14 +79,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "app/components/EmptyState.test.tsx",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "app/components/ReceiptShareCard.test.tsx",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/dashboard/IndexerStatus.test.tsx",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
@@ -120,10 +88,6 @@
     },
     {
       "path": "app/ReceiptCard.test.tsx",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "app/streams/new/components/StepIndicator.test.tsx",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
@@ -139,15 +103,7 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "app/streams/new/wizardDraft.test.tsx",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/streams/page.test.tsx",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "app/streams/streams-cascade.test.tsx",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
@@ -156,10 +112,6 @@
     },
     {
       "path": "app/StreamTypeChip.test.tsx",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "lib/sorobanRetryQueue.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
@@ -175,12 +127,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "tests/integration/exports.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
-      "path": "tests/streamsShape.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
     }
   ]
 }
