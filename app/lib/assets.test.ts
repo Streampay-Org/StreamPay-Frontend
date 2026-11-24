@@ -1,4 +1,9 @@
-import { parseAssetString, verifyTrustline, NATIVE_ASSET } from './assets';
+import {
+  parseAssetString,
+  verifyTrustline,
+  NATIVE_ASSET,
+  VERIFY_TRUSTLINE_TIMEOUT_MS,
+} from './assets';
 
 describe('Asset Engine', () => {
   describe('parseAssetString', () => {
@@ -94,6 +99,151 @@ describe('Asset Engine', () => {
       const result = await verifyTrustline(mockPublicKey, customAsset);
       expect(result.exists).toBe(false);
       expect(result.error).toContain('does not exist');
+    });
+
+    it('handles non-2xx Horizon responses', async () => {
+      (fetch as jest.Mock).mockResolvedValue({
+        status: 503,
+        ok: false,
+      });
+
+      const result = await verifyTrustline(mockPublicKey, customAsset);
+      expect(result).toEqual({
+        exists: false,
+        error: 'Horizon error: 503',
+      });
+    });
+
+    it('handles network errors', async () => {
+      (fetch as jest.Mock).mockRejectedValue(new Error('Failed to fetch'));
+
+      const result = await verifyTrustline(mockPublicKey, customAsset);
+      expect(result).toEqual({
+        exists: false,
+        error: 'Network error: Failed to fetch',
+      });
+    });
+
+    it('percent-encodes account id in the Horizon request URL', async () => {
+      const specialKey = 'GABC/123?foo=bar#baz';
+      (fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            balances: [{ asset_code: 'USDC', asset_issuer: 'GA5Z..' }],
+          }),
+      });
+
+      const result = await verifyTrustline(
+        specialKey,
+        customAsset,
+        'https://horizon-testnet.stellar.org'
+      );
+
+      expect(result.exists).toBe(true);
+      expect(fetch).toHaveBeenCalledWith(
+        `https://horizon-testnet.stellar.org/accounts/${encodeURIComponent(specialKey)}`,
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
+    });
+
+    it('skips liquidity_pool_shares balances without throwing or false positives', async () => {
+      (fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            balances: [
+              { asset_type: 'native', balance: '100.0000000' },
+              {
+                asset_type: 'liquidity_pool_shares',
+                liquidity_pool_id: 'abc123',
+                balance: '50.0000000',
+              },
+            ],
+          }),
+      });
+
+      const result = await verifyTrustline(mockPublicKey, customAsset);
+      expect(result).toEqual({
+        exists: false,
+        error: 'Missing trustline for USDC.',
+      });
+    });
+
+    it('finds a valid trustline when liquidity_pool_shares balances are also present', async () => {
+      (fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            balances: [
+              {
+                asset_type: 'liquidity_pool_shares',
+                liquidity_pool_id: 'abc123',
+                balance: '50.0000000',
+              },
+              {
+                asset_type: 'credit_alphanum4',
+                asset_code: 'USDC',
+                asset_issuer: 'GA5Z..',
+              },
+            ],
+          }),
+      });
+
+      const result = await verifyTrustline(mockPublicKey, customAsset);
+      expect(result).toEqual({ exists: true });
+    });
+
+    it('handles missing or non-array balances without throwing', async () => {
+      (fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({}),
+      });
+
+      const result = await verifyTrustline(mockPublicKey, customAsset);
+      expect(result).toEqual({
+        exists: false,
+        error: 'Missing trustline for USDC.',
+      });
+    });
+
+    it('returns a distinct timeout error when Horizon hangs', async () => {
+      jest.useFakeTimers();
+      try {
+        (fetch as jest.Mock).mockImplementation(
+          (_url: string, init?: RequestInit) =>
+            new Promise((_resolve, reject) => {
+              init?.signal?.addEventListener('abort', () => {
+                const abortErr = new Error('The operation was aborted.');
+                abortErr.name = 'AbortError';
+                reject(abortErr);
+              });
+            })
+        );
+
+        const promise = verifyTrustline(mockPublicKey, customAsset);
+        jest.advanceTimersByTime(VERIFY_TRUSTLINE_TIMEOUT_MS);
+
+        const result = await promise;
+        expect(result).toEqual({
+          exists: false,
+          error: `Horizon request timed out after ${VERIFY_TRUSTLINE_TIMEOUT_MS}ms.`,
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('returns an abort error when fetch rejects with AbortError', async () => {
+      const abortErr = new Error('Aborted');
+      abortErr.name = 'AbortError';
+      (fetch as jest.Mock).mockRejectedValue(abortErr);
+
+      const result = await verifyTrustline(mockPublicKey, customAsset);
+      expect(result).toEqual({
+        exists: false,
+        error: 'Horizon request was aborted.',
+      });
     });
   });
 });
