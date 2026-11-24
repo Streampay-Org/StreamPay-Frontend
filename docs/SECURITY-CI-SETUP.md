@@ -38,6 +38,54 @@ a check ran and whether a failure blocks a merge.
   critical-step level, run the workflow once, and then add its check name to the
   `main` ruleset.
 
+## Workflow Least-Privilege Permissions & Concurrency
+
+The workflows below (`ci.yml`, `smoke.yml`, and `clippy.yml`) currently rely on default `GITHUB_TOKEN` permissions and do not define `concurrency` groups. None of their jobs require write access to GitHub resources.
+
+Apply the following top-level `permissions` and `concurrency` blocks immediately after the `on:` block in each file. Using `cancel-in-progress: ${{ github.event_name == 'pull_request' }}` cancels superseded PR runs on force-pushes while allowing pushes to `main` (and manual `workflow_dispatch` runs) to complete.
+
+### `.github/workflows/ci.yml`
+Insert after `on:` (before `env:`):
+
+```yaml
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+```
+
+- **Why:** `typecheck`, `build-test`, and `lint` only check out the repo, cache build artifacts, build, test, and lint. No write scopes are needed.
+
+### `.github/workflows/smoke.yml`
+Insert after `on:` (before `env:`):
+
+```yaml
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+```
+
+- **Why:** `contract-smoke` only checks out code, installs tooling, caches Cargo artifacts, and runs testnet smoke tests. No GitHub write scopes are needed, and `workflow_dispatch` / `main` runs are not cancelled mid-flight.
+
+### `.github/workflows/clippy.yml`
+Insert after `on:` (before `jobs:`):
+
+```yaml
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+```
+
+- **Why:** `clippy` only checks out code, caches Cargo artifacts, and runs `cargo clippy`. No GitHub write scopes are needed.
+
 ## Branch Protection Configuration
 
 To enforce security gates, configure branch protection rules for `main`:
