@@ -64,4 +64,32 @@ describe("SplashScreen render", () => {
     });
     expect(screen.queryByRole("status", { name: /loading streampay/i })).toBeNull();
   });
+
+  it("registers preference for reduced motion and shows static splash", () => {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: jest.fn().mockImplementation(query => ({
+        matches: query === '(prefers-reduced-motion: reduce)',
+        media: query,
+        onchange: null,
+        addListener: jest.fn(),
+        removeListener: jest.fn(),
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+        dispatchEvent: jest.fn(),
+      })),
+    });
+    
+    const { container } = render(<SplashScreen />);
+    
+    expect(window.matchMedia).toHaveBeenCalledWith('(prefers-reduced-motion: reduce)');
+    
+    // Ensure animated elements are excluded
+    expect(container.querySelector('.splash-orb')).toBeNull();
+    expect(container.querySelector('.splash-logo-glow')).toBeNull();
+    expect(container.querySelector('.splash-loader')).toBeNull();
+    
+    // Core content should still be present
+    expect(screen.getByAltText(/streampay logo/i)).toBeInTheDocument();
+  });
 });

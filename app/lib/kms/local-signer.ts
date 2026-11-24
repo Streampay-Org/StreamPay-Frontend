@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { KmsSigner, SignOptions } from './types';
 
 /**

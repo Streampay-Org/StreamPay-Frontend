@@ -31,3 +31,8 @@ Desktop.ini
 *.tsbuildinfo
 
 litellm_config.yaml
+.vercel
+.lighthouseci/
+
+# Partner SDK build output
+lib/sdk/dist/

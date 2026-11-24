@@ -1,8 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useMemo, useState } from "react";
 import { CopyAddress } from "./CopyAddress";
 import { Timestamp } from "./Timestamp";
+import { VirtualListItem } from "./VirtualListItem";
+import { getConfig } from "../lib/config";
+import type { StellarNetwork } from "../lib/config/stellar";
+import { explorerTxUrl } from "../lib/explorer";
 
 /**
  * Contract event types emitted by the StreamPay Soroban contract over a
@@ -14,6 +18,7 @@ export type ContractEventType =
   | "started"
   | "paused"
   | "resumed"
+  | "stopped"
   | "withdrawn"
   | "settled"
   | "cancelled";
@@ -33,10 +38,10 @@ export type ContractEvent = {
   summary: string;
   /** ISO-8601 UTC timestamp the event was emitted. */
   timestamp: string;
-  /** Soroban transaction hash that emitted the event. */
-  txHash: string;
-  /** Ledger sequence number the event was included in. */
-  ledger: number;
+  /** Soroban transaction hash that emitted the event (optional until indexer is wired). */
+  txHash?: string;
+  /** Ledger sequence number the event was included in (optional until indexer is wired). */
+  ledger?: number;
   /** Optional value label for fund-moving events (e.g. "120 XLM"). */
   amount?: string;
 };
@@ -54,6 +59,7 @@ const EVENT_META: Record<
   started: { label: "Started", status: "success" },
   resumed: { label: "Resumed", status: "success" },
   paused: { label: "Paused", status: "warning" },
+  stopped: { label: "Stopped", status: "warning" },
   cancelled: { label: "Cancelled", status: "warning" },
   withdrawn: { label: "Withdrawn", status: "info" },
   settled: { label: "Settled", status: "info" },
@@ -65,6 +71,7 @@ const TYPE_ORDER: ContractEventType[] = [
   "started",
   "paused",
   "resumed",
+  "stopped",
   "withdrawn",
   "settled",
   "cancelled",
@@ -74,6 +81,17 @@ type FilterValue = "all" | ContractEventType;
 
 interface EventTimelineProps {
   events: ContractEvent[];
+  /** If true, a "Load more" button is shown below the list. */
+  hasMore?: boolean;
+  /** Called when the user clicks "Load more". */
+  onLoadMore?: () => void;
+  /** When true, the "Load more" button shows a loading indicator. */
+  loadingMore?: boolean;
+  /**
+   * Stellar network used to build explorer links.
+   * Defaults to the network from the app config (same approach as NetworkBadge).
+   */
+  network?: StellarNetwork;
 }
 
 /**
@@ -89,12 +107,44 @@ interface EventTimelineProps {
  * - Result count changes are announced via `role="status"` / `aria-live`.
  * - Each event exposes a descriptive `aria-label` summarising type + time.
  */
-export function EventTimeline({ events }: EventTimelineProps) {
+export function EventTimeline({ events, hasMore, onLoadMore, loadingMore, network: networkOverride }: EventTimelineProps) {
   const [activeFilter, setActiveFilter] = useState<FilterValue>("all");
 
-  // Newest first; defensive copy so we never mutate the caller's array.
+  // Resolve network once: prefer the explicit prop, fall back to app config.
+  const network = useMemo<StellarNetwork | null>(() => {
+    if (networkOverride) return networkOverride;
+    try {
+      return getConfig().network.name as StellarNetwork;
+    } catch {
+      return null;
+    }
+  }, [networkOverride]);
+
+  // Track list length so we can move focus to the first newly-appended item
+  // after "Load more" (WCAG 2.1 AA — keyboard users must not lose context).
+  const prevLengthRef = useRef(events.length);
+  const firstNewItemRef = useRef<HTMLLIElement>(null);
+
+  useEffect(() => {
+    if (events.length > prevLengthRef.current && firstNewItemRef.current) {
+      firstNewItemRef.current.focus();
+    }
+    prevLengthRef.current = events.length;
+  }, [events.length]);
+
+  // Newest first. When ledger is available use it as primary key (canonical for
+  // on-chain events). Fall back to timestamp string, then id tie-break.
   const sortedEvents = useMemo(
-    () => [...events].sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
+    () =>
+      [...events].sort((a, b) => {
+        if (a.ledger !== undefined && b.ledger !== undefined && a.ledger !== b.ledger) {
+          return b.ledger - a.ledger;
+        }
+        if (a.timestamp !== b.timestamp) {
+          return b.timestamp.localeCompare(a.timestamp);
+        }
+        return a.id.localeCompare(b.id);
+      }),
     [events],
   );
 
@@ -160,57 +210,127 @@ export function EventTimeline({ events }: EventTimelineProps) {
       </p>
 
       {visibleEvents.length === 0 ? (
-        <p className="event-panel__empty">
-          No contract events match this filter yet.
-        </p>
+        sortedEvents.length === 0 ? (
+          /* Empty state — no events at all yet */
+          <p className="event-panel__empty" data-testid="events-empty-state">
+            No events yet.
+          </p>
+        ) : (
+          /* Filter empty state — events exist but none match the filter */
+          <p className="event-panel__empty">
+            No contract events match this filter yet.
+          </p>
+        )
       ) : (
-        <ul className="activity-timeline">
-          {visibleEvents.map((event) => {
-            const meta = EVENT_META[event.type];
-            return (
-              <li
-                key={event.id}
-                className="activity-item"
-                aria-label={`${meta.label} event`}
-              >
-                <div className="activity-marker">
-                  <div className={`activity-dot activity-dot--${meta.status}`} />
-                  <div className="activity-line" />
-                </div>
-                <div className="activity-content">
-                  <div className="activity-card event-card">
-                    <div className="activity-info">
-                      <div className="event-card__row">
-                        <span className="event-type-tag">{meta.label}</span>
-                        {event.amount && (
-                          <span className="event-amount">{event.amount}</span>
+        <>
+          <ul className="activity-timeline">
+            {visibleEvents.map((event, index) => {
+              const meta = EVENT_META[event.type];
+              // The first item that's new after "Load more" gets focused.
+              const isFirstNew = index === prevLengthRef.current;
+              return (
+                <VirtualListItem
+                  key={event.id}
+                  className="activity-item"
+                  aria-label={`${meta.label} event`}
+                  defaultHeight={120}
+                  ref={isFirstNew ? firstNewItemRef : undefined}
+                  tabIndex={isFirstNew ? -1 : undefined}
+                >
+                  <div className="activity-marker">
+                    <div className={`activity-dot activity-dot--${meta.status}`} />
+                    <div className="activity-line" />
+                  </div>
+                  <div className="activity-content">
+                    <div className="activity-card event-card">
+                      <div className="activity-info">
+                        <div className="event-card__row">
+                          <span className="event-type-tag">{meta.label}</span>
+                          {event.amount && (
+                            <span className="event-amount">{event.amount}</span>
+                          )}
+                        </div>
+                        <span className="activity-title">{event.summary}</span>
+                        <Timestamp className="activity-time" iso={event.timestamp} />
+                        {(event.txHash || event.ledger !== undefined) && (
+                          <dl className="event-meta">
+                            {event.txHash && (
+                              <div className="event-meta__item">
+                                <dt>Tx</dt>
+                                <dd>
+                                  {(() => {
+                                    const url = network ? explorerTxUrl(network, event.txHash) : null;
+                                    return url ? (
+                                      <span className="event-meta__tx">
+                                        <a
+                                          href={url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          aria-label="View transaction on explorer"
+                                          className="event-meta__explorer-link"
+                                        >
+                                          <CopyAddress value={event.txHash} truncateChars={6} />
+                                          {/* External-link affordance icon */}
+                                          <svg
+                                            aria-hidden="true"
+                                            focusable="false"
+                                            className="event-meta__external-icon"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            width="12"
+                                            height="12"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                          >
+                                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                            <polyline points="15 3 21 3 21 9" />
+                                            <line x1="10" y1="14" x2="21" y2="3" />
+                                          </svg>
+                                        </a>
+                                      </span>
+                                    ) : (
+                                      <CopyAddress value={event.txHash} truncateChars={6} />
+                                    );
+                                  })()}
+                                </dd>
+                              </div>
+                            )}
+                            {event.ledger !== undefined && (
+                              <div className="event-meta__item">
+                                <dt>Ledger</dt>
+                                <dd>
+                                  <code className="receipt-mono">
+                                    {event.ledger.toLocaleString("en-US")}
+                                  </code>
+                                </dd>
+                              </div>
+                            )}
+                          </dl>
                         )}
                       </div>
-                      <span className="activity-title">{event.summary}</span>
-                      <Timestamp className="activity-time" iso={event.timestamp} />
-                      <dl className="event-meta">
-                        <div className="event-meta__item">
-                          <dt>Tx</dt>
-                          <dd>
-                            <CopyAddress value={event.txHash} truncateChars={6} />
-                          </dd>
-                        </div>
-                        <div className="event-meta__item">
-                          <dt>Ledger</dt>
-                          <dd>
-                            <code className="receipt-mono">
-                              {event.ledger.toLocaleString("en-US")}
-                            </code>
-                          </dd>
-                        </div>
-                      </dl>
                     </div>
-                  </div>
                 </div>
-              </li>
+              </VirtualListItem>
             );
           })}
-        </ul>
+          </ul>
+          {hasMore && onLoadMore && (
+            <div className="event-panel__load-more">
+              <button
+                type="button"
+                className="event-load-more-btn"
+                onClick={onLoadMore}
+                disabled={loadingMore}
+                aria-busy={loadingMore}
+              >
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </section>
   );

@@ -2,8 +2,27 @@ import { NextResponse } from "next/server";
 import { getStore } from "@/app/lib/db";
 import { getCorrelationContext } from "@/app/lib/logger";
 import { toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
+import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
+import { getLimitForRoute } from "@/app/lib/rate-limit-config";
+import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
+import { ProjectionError, toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
+import { inferStreamChangeAction, publishStreamChange } from "@/app/lib/stream-publish";
+import type { Stream } from "@/app/types/openapi";
 
 type Context = { params: Promise<{ id: string }> };
+
+async function enforceRateLimit(request: Request, method: "GET" | "DELETE") {
+  const url = new URL(request.url);
+  const limitType = getLimitForRoute(method, url.pathname);
+  const identity = getClientIdentity(request);
+  const result = await checkRateLimit(identity, limitType);
+  if (!result.allowed) {
+    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
+    return rateLimitResponse(result.retryAfter!);
+  }
+  recordRequest(url.pathname);
+  return null;
+}
 
 function errorResponse(code: string, message: string, status: number) {
   const requestId = getCorrelationContext()?.request_id ?? `req-${crypto.randomUUID()}`;
@@ -12,6 +31,9 @@ function errorResponse(code: string, message: string, status: number) {
 
 /** GET /api/v2/streams/:id — single stream in v2 shape. */
 export async function GET(request: Request, { params }: Context) {
+  const rateLimited = await enforceRateLimit(request, "GET");
+  if (rateLimited) return rateLimited;
+
   const { streamRepository } = getStore();
   const { id } = await params;
   const stream = streamRepository.streams.get(id);
@@ -39,8 +61,18 @@ export async function GET(request: Request, { params }: Context) {
     }
   }
 
+  let streamV2;
+  try {
+    streamV2 = toV2Stream(dbStreamToV1(stream));
+  } catch (err) {
+    if (err instanceof ProjectionError) {
+      return errorResponse("PROJECTION_ERROR", err.message, 500);
+    }
+    throw err;
+  }
   const response = NextResponse.json({
-    data: toV2Stream(dbStreamToV1(stream)),
+    ...streamV2,
+    data: streamV2,
     links: { self: `/api/v2/streams/${id}` },
   });
 
@@ -51,7 +83,10 @@ export async function GET(request: Request, { params }: Context) {
 }
 
 /** DELETE /api/v2/streams/:id */
-export async function DELETE(_request: Request, { params }: Context) {
+export async function DELETE(request: Request, { params }: Context) {
+  const rateLimited = await enforceRateLimit(request, "DELETE");
+  if (rateLimited) return rateLimited;
+
   const { streamRepository } = getStore();
   const { id } = await params;
   const stream = streamRepository.streams.get(id);
@@ -67,4 +102,70 @@ export async function DELETE(_request: Request, { params }: Context) {
   }
   streamRepository.streams.delete(id);
   return new NextResponse(null, { status: 204 });
+}
+
+/** PATCH /api/v2/streams/:id */
+export async function PATCH(request: Request, context: { params: Promise<{ id: string }> | { id: string } }) {
+  const { streamRepository } = getStore();
+  const params = await context.params;
+  const id = params.id;
+  const stream = streamRepository.streams.get(id);
+  if (!stream) {
+    return errorResponse("NOT_FOUND", `Stream '${id}' not found`, 404);
+  }
+
+  let body: unknown;
+  try {
+    const text = await request.text();
+    if (!text || !text.trim()) {
+      body = {};
+    } else {
+      body = JSON.parse(text);
+    }
+  } catch {
+    return errorResponse("INVALID_REQUEST", "Request body must be valid JSON", 400);
+  }
+
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return errorResponse("INVALID_REQUEST", "Request body must be a JSON object", 400);
+  }
+
+  const { validatePatchStreamBody } = await import("@/app/lib/stream-validation");
+  const errors = validatePatchStreamBody(body);
+  if (errors.length > 0) {
+    const hasUnrecognized = errors.some((e) => e.code === "UNRECOGNIZED_KEYS");
+    const status = hasUnrecognized ? 400 : 422;
+    return NextResponse.json(
+      {
+        error: {
+          code: "VALIDATION_ERROR",
+          message: errors[0].message,
+          details: errors,
+        },
+      },
+      { status },
+    );
+  }
+
+  const patchData = body as Record<string, unknown>;
+  const updated = {
+    ...stream,
+    ...patchData,
+    updatedAt: new Date().toISOString(),
+  };
+  streamRepository.streams.set(id, updated as any);
+
+  publishStreamChange({
+    action: inferStreamChangeAction(stream, updated as Stream),
+    actor: request.headers.get("Actor-Wallet-Address") ?? undefined,
+    after: updated as Stream,
+    before: stream,
+    correlationId: getCorrelationContext()?.correlation_id,
+  });
+
+  const streamV2 = toV2Stream(dbStreamToV1(updated as any));
+  return NextResponse.json({
+    ...streamV2,
+    data: streamV2,
+  });
 }

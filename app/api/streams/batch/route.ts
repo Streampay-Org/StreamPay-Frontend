@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { idempotencyKeyErrorResponse, validateIdempotencyKey } from "@/app/lib/idempotency";
 import {
   checkIdempotency,
   computeFingerprint,
   getStore,
   idempotencyToken,
   setIdempotency,
+  newStreamId,
 } from "@/app/lib/db";
 import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
@@ -12,8 +14,17 @@ import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { checkTokenAllowed, checkTokenAllowedForOrg, normaliseToken } from "@/app/lib/token-allowlist";
-import { validateCreateStreamBody } from "@/app/lib/stream-validation";
+import { parseCreateStreamBody } from "@/app/lib/stream-validation";
 import { orgDb } from "@/app/lib/org-db";
+import { checkCreationQuota } from "@/app/lib/quota-enforcement";
+import {
+  creationQuotaResponse,
+  quotaUserId,
+  rateToStroops,
+  withStreamCreationQuotaLock,
+} from "@/app/lib/stream-create-core";
+import { recordCreationQuotaRejection } from "@/app/lib/org-quota-metrics";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
 
 const MAX_BATCH_SIZE = 20;
 
@@ -116,7 +127,15 @@ export async function POST(request: NextRequest) {
     return errorResponse(ErrorCode.UNAUTHORIZED, "Bearer token required.", 401);
   }
 
-  const idempotencyKey = getHeader(request, "Idempotency-Key");
+  const rawIdempotencyKey = getHeader(request, "Idempotency-Key");
+  let idempotencyKey: string | null = null;
+  if (rawIdempotencyKey !== null) {
+    const keyValidation = validateIdempotencyKey(rawIdempotencyKey);
+    if (!keyValidation.ok) {
+      return idempotencyKeyErrorResponse(keyValidation.reason);
+    }
+    idempotencyKey = keyValidation.key;
+  }
   const idempotencyTokenValue = idempotencyKey
     ? idempotencyToken("streams.batch.create", idempotencyKey)
     : null;
@@ -177,21 +196,21 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    const fieldErrors = validateCreateStreamBody(item);
-    for (const err of fieldErrors) {
-      validationErrors.push({
-        index: i,
-        field: err.field,
-        code: err.code,
-        message: err.message,
-      });
-    }
-
-    if (fieldErrors.length > 0) {
+    const parseResult = parseCreateStreamBody(item);
+    if (!parseResult.success) {
+      for (const err of parseResult.errors) {
+        validationErrors.push({
+          index: i,
+          field: err.field,
+          code: err.code,
+          message: err.message,
+        });
+      }
       continue;
     }
 
-    const { rate, recipient, schedule, token: rawToken, orgId } = item as Record<string, string>;
+    const { rate, recipient, schedule, token: rawToken } = parseResult.data;
+    const orgId = typeof (item as Record<string, unknown>).orgId === "string" ? ((item as Record<string, unknown>).orgId as string) : undefined;
 
     const tokenStr = rawToken?.trim() || "XLM";
     let normalisedToken: string;
@@ -245,11 +264,46 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const userId = quotaUserId(identity);
+  return withStreamCreationQuotaLock(async () => {
+    if (idempotencyTokenValue) {
+      const cached = checkIdempotency(
+        idempotencyStore,
+        idempotencyTokenValue,
+        fingerprint,
+      );
+      if (cached) {
+        if (!cached.ok) {
+          return NextResponse.json(
+            {
+              error: {
+                code: "IDEMPOTENCY_CONFLICT",
+                message: "Idempotency key has been used with a different request.",
+              },
+            },
+            { status: 409 },
+          );
+        }
+        return NextResponse.json(cached.body, { status: cached.status });
+      }
+    }
   const now = new Date().toISOString();
   const createdStreams = [];
+  const authenticatedActor = tryAuthenticateRequest(request);
+  const senderAddress = authenticatedActor?.walletAddress ?? null;
 
   for (const input of validItems) {
-    const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
+    const id = newStreamId();
+    const ownership: "individual" | "org" | "unclaimed" = input.orgId
+      ? "org"
+      : authenticatedActor
+        ? "individual"
+        : "unclaimed";
+
+    if (input.orgId) {
+      orgDb.streamOwnership.set(id, input.orgId);
+    }
+
     const newStream = {
       createdAt: now,
       id,
@@ -260,22 +314,67 @@ export async function POST(request: NextRequest) {
       status: "draft" as const,
       updatedAt: now,
       token: input.token,
+      senderAddress,
+      ownership,
     };
 
     streamRepository.streams.set(id, newStream);
     createdStreams.push(newStream);
   }
 
-  const payload = { data: createdStreams, links: { self: "/api/v1/streams/batch" } };
+    const now = new Date().toISOString();
+    const createdStreams = [];
+    const persistedIds: string[] = [];
 
-  if (idempotencyTokenValue) {
-    setIdempotency(idempotencyStore, idempotencyTokenValue, fingerprint, 201, payload);
-  }
+    for (const input of validItems) {
+      const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
+      const newStream = {
+        createdAt: now,
+        id,
+        nextAction: "start" as const,
+        rate: input.rate,
+        recipient: input.recipient,
+        schedule: input.schedule,
+        status: "draft" as const,
+        updatedAt: now,
+        token: input.token,
+      };
+      const quota = checkCreationQuota({
+        userId,
+        orgId: input.orgId,
+        amountStroops: rateToStroops(input.rate, input.token),
+        now: new Date(now),
+      });
 
-  logger.info("Batch streams created", {
-    count: createdStreams.length,
-    request_id: getCorrelationContext()?.request_id,
+      if (!quota.allowed) {
+        for (const persistedId of persistedIds) {
+          streamRepository.streams.delete(persistedId);
+          orgDb.streamOwnership.delete(persistedId);
+        }
+        recordCreationQuotaRejection(quota.scope, quota.subject, quota.code);
+        return creationQuotaResponse(quota);
+      }
+
+      streamRepository.streams.set(id, {
+        ...newStream,
+        ...(userId ? { senderAddress: userId } : {}),
+      });
+      if (input.orgId) orgDb.streamOwnership.set(id, input.orgId);
+      persistedIds.push(id);
+      createdStreams.push(newStream);
+    }
+
+    const payload = { data: createdStreams, links: { self: "/api/v1/streams/batch" } };
+
+    if (idempotencyTokenValue) {
+      setIdempotency(idempotencyStore, idempotencyTokenValue, fingerprint, 201, payload);
+    }
+
+    logger.info("Batch streams created", {
+      count: createdStreams.length,
+      request_id: getCorrelationContext()?.request_id,
+    });
+
+    return NextResponse.json(payload, { status: 201 });
   });
-
-  return NextResponse.json(payload, { status: 201 });
 }

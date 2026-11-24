@@ -15,6 +15,9 @@
  * - Design-token + dark-mode consistent styles (var(--*) throughout)
  * - All interactive elements have associated labels (htmlFor / aria-label)
  * - Navigation via next/link (no window.location.href)
+ * - Submits to `POST /api/v2/streams/multi` (see
+ *   `docs/api/multi-recipient-stream.md`); server-side validation errors are
+ *   surfaced in the review step's alert region
  */
 
 import React, { useState, useId } from "react";
@@ -22,11 +25,50 @@ import Link from "next/link";
 import { RecipientList, type Recipient } from "./components/RecipientList";
 import { TotalsBar } from "./components/TotalsBar";
 import { StepIndicator, type Step } from "./components/StepIndicator";
+import {
+  allocationSumsToTarget,
+  buildMultiRecipientPayload,
+} from "@/app/lib/multi-recipient";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-/** Maximum recipients allowed per fan-out stream. */
-export const MAX_RECIPIENTS = 20;
+/**
+ * Maximum recipients allowed per fan-out stream.
+ *
+ * Re-exported from the shared contract module so the wizard, the API route
+ * and the documentation all quote the same number.
+ */
+export { MAX_RECIPIENTS } from "@/app/lib/multi-recipient";
+
+/** Endpoint the wizard submits the fan-out to. @see docs/api/multi-recipient-stream.md */
+export const MULTI_STREAM_ENDPOINT = "/api/v2/streams/multi";
+
+/** Name of the double-submit CSRF cookie/header pair enforced by `middleware.ts`. */
+const CSRF_COOKIE_NAME = "csrf-token";
+/** Production uses the `__Host-` prefixed cookie name. */
+const CSRF_HOST_COOKIE_NAME = "__Host-csrf-token";
+const CSRF_HEADER_NAME = "x-csrf-token";
+
+/**
+ * Read the CSRF token minted by the middleware's CSRF cookie.
+ *
+ * Every state-changing `/api/*` request is rejected with 403
+ * `CSRF_TOKEN_INVALID` unless the same value is echoed in the
+ * `x-csrf-token` header, so the wizard must forward it.
+ */
+function readCsrfToken(): string | null {
+  if (typeof document === "undefined") return null;
+
+  for (const cookieName of [CSRF_HOST_COOKIE_NAME, CSRF_COOKIE_NAME]) {
+    const match = document.cookie.match(
+      new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`),
+    );
+    const value = match?.[1];
+    if (value) return value;
+  }
+
+  return null;
+}
 
 /** Wizard steps shown in the StepIndicator. */
 const STEPS: Step[] = [
@@ -90,8 +132,12 @@ export default function MultiRecipientStreamPage() {
 
   // ── Derived state ──────────────────────────────────────────────────────────
 
-  const totalAllocated = recipients.reduce((sum, r) => sum + r.percentage, 0);
-  const allocationValid = Math.abs(totalAllocated - 100) < 0.001;
+  // Shares the tolerance and the 100% target with the API so the wizard never
+  // enables "Next: Review" for an allocation the server would reject.
+  const allocationValid = allocationSumsToTarget(recipients.map((r) => r.percentage));
+  // The wizard only requires a non-empty address; the API is authoritative
+  // for the Stellar-key / email format and its rejection is surfaced on the
+  // review step.
   const hasRecipients   = recipients.every((r) => r.address.trim().length > 0);
 
   const detailsValid =
@@ -137,11 +183,43 @@ export default function MultiRecipientStreamPage() {
     setSubmitError(null);
 
     try {
-      // TODO: replace with real API call to POST /api/v2/streams/multi
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 75));
+      const payload = buildMultiRecipientPayload({
+        name: streamName,
+        token,
+        totalAmount,
+        startTime,
+        endTime,
+        recipients,
+      });
+
+      const csrfToken = readCsrfToken();
+
+      const response = await fetch(MULTI_STREAM_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(csrfToken ? { [CSRF_HEADER_NAME]: csrfToken } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorBody = (await response
+          .json()
+          .catch(() => null)) as { error?: { message?: string } } | null;
+        throw new Error(
+          errorBody?.error?.message ??
+            `The stream could not be created (HTTP ${response.status}).`,
+        );
+      }
+
       setSuccess(true);
-    } catch {
-      setSubmitError("Failed to create stream. Please try again.");
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error && error.message
+          ? error.message
+          : "Failed to create stream. Please try again.",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -190,6 +268,7 @@ export default function MultiRecipientStreamPage() {
       {/* Step progress indicator */}
       <div
         style={{
+          width: "100%",
           maxWidth: "800px",
           margin: "0 auto",
           padding: "1.5rem 1.5rem 0",
@@ -200,7 +279,7 @@ export default function MultiRecipientStreamPage() {
 
       {/* Form body */}
       <section
-        style={{ maxWidth: "800px", margin: "0 auto", padding: "2rem 1.5rem 8rem" }}
+        style={{ width: "100%", maxWidth: "800px", margin: "0 auto", padding: "2rem 1.5rem 4rem" }}
         aria-label="Stream creation form"
       >
         <form onSubmit={handleSubmit} noValidate>
@@ -239,7 +318,7 @@ export default function MultiRecipientStreamPage() {
                   autoComplete="off"
                   value={streamName}
                   onChange={(e) => setStreamName(e.target.value)}
-                  placeholder="e.g. GrantFox Q3 Distribution"
+                  placeholder="e.g. Q3 Contributor Distribution"
                   aria-required="true"
                   style={fieldStyle}
                 />
@@ -470,6 +549,7 @@ export default function MultiRecipientStreamPage() {
                 role="region"
                 aria-label="Recipient allocation breakdown"
                 style={{ overflowX: "auto" }}
+                tabIndex={0}
               >
                 <table
                   style={{
@@ -566,7 +646,7 @@ export default function MultiRecipientStreamPage() {
                   aria-live="assertive"
                   style={{
                     padding: "0.75rem 1rem",
-                    background: "var(--error-bg, rgba(220,38,38,0.08))",
+                    background: "var(--system-error-bg)",
                     border: "1px solid var(--error)",
                     borderRadius: "var(--radius-md)",
                     color: "var(--error)",

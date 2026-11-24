@@ -1,4 +1,5 @@
 import { Explainer } from "../components/Explainer";
+import { OnboardingChecklist } from "./OnboardingChecklist";
 
 export default function OnboardingPage() {
   return (
@@ -8,10 +9,12 @@ export default function OnboardingPage() {
           <p className="page-hero__eyebrow">New to StreamPay</p>
           <h1 className="page-hero__title">How streaming works</h1>
           <p className="page-hero__description">
-            Learn the setup, flow, and payout checkpoints before you launch your first GrantFox stream.
+            Learn the setup, flow, and payout checkpoints before you launch your first StreamPay stream.
           </p>
         </div>
       </header>
+
+      <OnboardingChecklist />
 
       <Explainer />
     </main>

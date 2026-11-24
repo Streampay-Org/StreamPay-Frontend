@@ -5,7 +5,12 @@
 
 import { NextResponse } from "next/server";
 import { orgDb } from "@/app/lib/org-db";
+import { withRouteTimeout } from "@/src/middleware/timeout";
 import { OrgRecord, OrgMember, DEFAULT_STREAM_POLICY } from "@/app/lib/org-types";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
+import { orgCreateStore, withIdempotency } from "@/app/lib/idempotency";
+
+const orgCreateLocks = new Map<string, Promise<void>>();
 
 function errorResponse(code: string, message: string, status: number) {
   return NextResponse.json(
@@ -14,7 +19,7 @@ function errorResponse(code: string, message: string, status: number) {
   );
 }
 
-export async function GET() {
+async function handleOrgsGet(_request: Request) {
   const orgs = Array.from(orgDb.orgs.values()).map((org) => ({
     id: org.id,
     name: org.name,
@@ -30,10 +35,14 @@ export async function GET() {
   });
 }
 
-export async function POST(request: Request) {
+export async function GET(request: Request) {
+  return withRouteTimeout(request, () => handleOrgsGet(request));
+}
+
+async function handleOrgsPost(request: Request) {
   let body: unknown;
   try {
-    body = await request.json();
+    body = await request.clone().json();
   } catch {
     return errorResponse("INVALID_REQUEST", "Request body must be valid JSON.", 400);
   }
@@ -54,6 +63,7 @@ export async function POST(request: Request) {
     return errorResponse("VALIDATION_ERROR", "Field 'ownerWalletAddress' is required.", 422);
   }
 
+  const createOrg = async () => {
   const id = `org-${crypto.randomUUID().slice(0, 8)}`;
   const now = new Date().toISOString();
 
@@ -78,4 +88,34 @@ export async function POST(request: Request) {
     { data: newOrg, links: { self: `/api/orgs/${id}` } },
     { status: 201 },
   );
+  };
+
+  const idempotencyKey = request.headers.get("Idempotency-Key");
+  if (idempotencyKey === null) return createOrg();
+
+  // Prefer the verified identity for isolation; unauthenticated callers are
+  // scoped to the requested owner wallet so separate owners cannot replay.
+  const actor = tryAuthenticateRequest(request);
+  const actorId = actor?.actorId ?? ownerWalletAddress.trim();
+  // Serialize same actor/key attempts in-process so lookup + create + persist
+  // behaves atomically for concurrent client retries.
+  const lockKey = `${actorId}\u0000${idempotencyKey}`;
+  const previous = orgCreateLocks.get(lockKey) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  orgCreateLocks.set(lockKey, current);
+  await previous;
+  try {
+    return await withIdempotency(request, "orgs.create", orgCreateStore, createOrg, {
+      resourceId: "orgs",
+      actorId,
+    });
+  } finally {
+    release();
+    if (orgCreateLocks.get(lockKey) === current) orgCreateLocks.delete(lockKey);
+  }
+}
+
+export async function POST(request: Request) {
+  return withRouteTimeout(request, () => handleOrgsPost(request));
 }

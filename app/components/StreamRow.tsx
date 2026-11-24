@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import type { StreamStatus } from "@/app/types/openapi";
 import { StatusBadge } from "./StatusBadge";
 import { StreamProgress } from "./StreamProgress";
@@ -12,6 +12,15 @@ import { isStreamPayError } from "../lib/errors/mapper";
 import { formatErrorForDisplay } from "../lib/errors/handler";
 import type { StreamPayError } from "../lib/errors/types";
 import { LiveRegion } from "../../src/components/LiveRegion";
+import { KbdHint } from "../../src/components/KbdHint";
+import { colorFromId } from "../utils/colorFromId";
+import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
+import { Skeleton } from "./Skeleton";
+import { RowActionsMenu } from "./RowActionsMenu";
+import type { RovingGridCellProps } from "../streams/useRovingGrid";
+
+const SWIPE_CANCEL_THRESHOLD = 80;
+const SWIPE_CANCEL_MAX = 160;
 
 export type StreamRowData = {
   id: string;
@@ -35,19 +44,133 @@ export type StreamRowData = {
 type StreamRowProps = {
   stream: StreamRowData;
   density?: "cozy" | "compact";
+  /** Adds row/cell semantics when the row is rendered inside the streams grid. */
+  gridMode?: boolean;
+  /** One-based row index used by the parent ARIA grid. */
+  rowIndex?: number;
+  gridCellProps?: (columnIndex: number) => RovingGridCellProps;
+  /**
+   * When true, renders a themed skeleton placeholder matching the StreamRow
+   * layout — shimmer blocks for identity, meta, progress bar, and action
+   * button — while stream data is loading.
+   * The wrapper carries `aria-busy="true"` and skeleton children are
+   * `aria-hidden="true"` for screen readers.
+   */
+  loading?: boolean;
 };
 
-export function StreamRow({ stream, density = "cozy" }: StreamRowProps) {
+/**
+ * StreamRow renders a single payment stream card with status, progress,
+ * recipient info, action controls, swipe-to-cancel, and a color-blind-safe
+ * pattern overlay.
+ *
+ * Data attributes exposed for e2e / CSS hooks:
+ *   - `data-status` — stream lifecycle status (active, draft, paused, etc.)
+ *   - `data-reduced-motion` — "true" when the user prefers reduced motion
+ *     (Issue #1038); used to gate swipe transitions and animation fallbacks.
+ */
+
+export function StreamRow({
+  stream,
+  density = "cozy",
+  loading = false,
+  gridMode = false,
+  rowIndex,
+  gridCellProps,
+}: StreamRowProps) {
+  // ── Loading skeleton (early return before any hooks) ───────────────────────
+  if (loading) {
+    const compact = density === "compact";
+    return (
+      <article
+        className={`stream-row stream-row--skeleton ${compact ? "stream-row--compact" : ""}`.trim()}
+        aria-busy="true"
+        aria-label="Stream row is loading"
+      >
+        {/* Color stripe placeholder */}
+        <div className="stream-row__color-stripe" aria-hidden="true">
+          <Skeleton width="4px" height="100%" />
+        </div>
+
+        {/* Primary section — identity + badge */}
+        <div className="stream-row__primary">
+          <div className="stream-row__identity">
+            {/* Recipient avatar skeleton */}
+            <Skeleton
+              width="40px"
+              height="40px"
+              circle
+              aria-hidden="true"
+            />
+            <div style={{ display: "grid", gap: "0.35rem", flex: 1 }}>
+              {/* Recipient name */}
+              <Skeleton variant="title" width="65%" />
+              {/* Schedule */}
+              <Skeleton variant="text" width="40%" />
+            </div>
+          </div>
+          {/* Status badge skeleton */}
+          <Skeleton variant="badge" width="5.5rem" height="2rem" />
+        </div>
+
+        {/* Meta section — Rate + Status + Burn-down */}
+        <div className="stream-row__meta" aria-hidden="true">
+          <div>
+            <dt>Rate</dt>
+            <dd><Skeleton variant="value" width="65%" /></dd>
+          </div>
+          <div>
+            <dt>Status</dt>
+            <dd><Skeleton variant="badge" width="50%" height="1.25rem" /></dd>
+          </div>
+          <div>
+            <dt>Burn-down</dt>
+            <dd><Skeleton variant="value" width="55%" /></dd>
+          </div>
+        </div>
+
+        {/* Stream progress skeleton */}
+        <div aria-hidden="true" style={{ display: "grid", gap: "0.5rem" }}>
+          <Skeleton width="100%" height="10px" />
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "baseline",
+            }}
+          >
+            <Skeleton variant="label" width="4rem" />
+            <Skeleton variant="text" width="3rem" />
+          </div>
+        </div>
+
+        {/* Action button skeleton */}
+        <div className="stream-row__action-wrap">
+          <Skeleton variant="button" width="7.5rem" height="2.75rem" />
+        </div>
+      </article>
+    );
+  }
+
+  const prefersReducedMotion = usePrefersReducedMotion();
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<StreamPayError | null>(null);
   const [isIncidentMode] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  // Local notification state for polite screen reader announcements (#219)
   const [srAnnouncement, setSrAnnouncement] = useState("");
-  const [isFocused, setIsFocused] = useState(false);
+  const [swipeOffset, setSwipeOffset] = useState(0);
 
-  // Ref hook to preserve active keyboard focus target parameters across button re-renders
   const actionButtonRef = useRef<HTMLButtonElement>(null);
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+  const isSwiping = useRef(false);
+  const hasTriggered = useRef(false);
+
+  const canSwipeCancel =
+    stream.nextAction.toLowerCase() === "cancel" &&
+    stream.status !== "cancelled" &&
+    stream.status !== "ended" &&
+    stream.status !== "withdrawn";
 
   const handleDismissError = () => {
     setError(null);
@@ -59,7 +182,7 @@ export function StreamRow({ stream, density = "cozy" }: StreamRowProps) {
     await handleAction();
   };
 
-  const handleAction = async () => {
+  const handleAction = async (actionOverride?: string) => {
     if (isIncidentMode) {
       setErrorMsg(
         "On-chain operations are temporarily paused during incident mode.",
@@ -69,10 +192,10 @@ export function StreamRow({ stream, density = "cozy" }: StreamRowProps) {
 
     setIsProcessing(true);
     setError(null);
-    setSrAnnouncement(""); // Reset prior announcements
+    setSrAnnouncement("");
 
     try {
-      const actionRoute = stream.nextAction.toLowerCase();
+      const actionRoute = (actionOverride ?? stream.nextAction).toLowerCase();
 
       await fetchWithIdempotency(`/api/streams/${stream.id}/${actionRoute}`, {
         method: "POST",
@@ -84,11 +207,9 @@ export function StreamRow({ stream, density = "cozy" }: StreamRowProps) {
         }),
       });
 
-      // Clear layout alerts and assign semantic live region announcement string values
-      const successMessage = `${stream.nextAction} operation completed successfully for ${stream.recipient}.`;
+      const successMessage = `${actionOverride ?? stream.nextAction} operation completed successfully for ${stream.recipient}.`;
       setSrAnnouncement(successMessage);
 
-      // Preserve active interactive element focus ring natively within the DOM tree
       setTimeout(() => {
         actionButtonRef.current?.focus();
       }, 0);
@@ -111,28 +232,116 @@ export function StreamRow({ stream, density = "cozy" }: StreamRowProps) {
     }
   };
 
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      if (!canSwipeCancel) return;
+      touchStartX.current = e.touches[0].clientX;
+      touchStartY.current = e.touches[0].clientY;
+      isSwiping.current = false;
+      hasTriggered.current = false;
+    },
+    [canSwipeCancel],
+  );
+
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      if (!canSwipeCancel || hasTriggered.current) return;
+      const dx = e.touches[0].clientX - touchStartX.current;
+      const dy = e.touches[0].clientY - touchStartY.current;
+
+      if (!isSwiping.current) {
+        if (Math.abs(dy) > Math.abs(dx)) return;
+        if (dx >= 0) return;
+        isSwiping.current = true;
+      }
+
+      const offset = Math.min(0, Math.max(-SWIPE_CANCEL_MAX, dx));
+      setSwipeOffset(offset);
+    },
+    [canSwipeCancel],
+  );
+
+  const handleTouchEnd = useCallback(() => {
+    if (!canSwipeCancel || hasTriggered.current) {
+      setSwipeOffset(0);
+      return;
+    }
+    isSwiping.current = false;
+
+    if (swipeOffset < -SWIPE_CANCEL_THRESHOLD) {
+      hasTriggered.current = true;
+      setSwipeOffset(-SWIPE_CANCEL_MAX);
+      handleAction();
+    } else {
+      setSwipeOffset(0);
+    }
+  }, [canSwipeCancel, swipeOffset]);
+
+  const swipeStyle =
+    canSwipeCancel && swipeOffset !== 0
+      ? {
+          transform: `translateX(${swipeOffset}px)`,
+          transition: prefersReducedMotion ? "none" : undefined,
+        }
+      : undefined;
+
   return (
     <article
+      role={gridMode ? "row" : undefined}
+      aria-rowindex={gridMode ? rowIndex : undefined}
       className={[
         "stream-row",
         `stream-row--${stream.status}`,
         density === "compact" ? "stream-row--compact" : "",
+        canSwipeCancel && swipeOffset < 0 ? "stream-row--swiping" : "",
       ]
         .filter(Boolean)
         .join(" ")}
       data-status={stream.status}
+      data-reduced-motion={prefersReducedMotion ? "true" : "false"}
       aria-labelledby={`${stream.id}-recipient`}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      style={swipeStyle}
     >
-      {/* Decorative color-blind safe pattern overlay. Purely visual so it
-          is hidden from assistive technology — state is already conveyed via
-          the StatusBadge (glyph + label) and the StreamProgress (label +
-          percentage). */}
+      {canSwipeCancel && (
+        <div
+          className="stream-row__cancel-reveal"
+          aria-hidden="true"
+          data-swipe-active={swipeOffset < -SWIPE_CANCEL_THRESHOLD}
+          data-reduced-motion={prefersReducedMotion ? "true" : "false"}
+        >
+          <span
+            className="stream-row__cancel-label"
+            style={{
+              transition: prefersReducedMotion ? "none" : undefined,
+            }}
+          >
+            Cancel
+          </span>
+        </div>
+      )}
+
       <div className="stream-row__pattern" aria-hidden="true" />
 
-      {/* Dynamic polite status messenger announcement node layer for assistive tech */}
-      <LiveRegion message={srAnnouncement} />
+      <div
+        className="stream-row__color-stripe"
+        aria-hidden="true"
+        style={{ backgroundColor: colorFromId(stream.id) }}
+      />
 
-      <div className="stream-row__primary">
+      <div role={gridMode ? "presentation" : undefined}>
+        <LiveRegion message={srAnnouncement} />
+      </div>
+
+      <div
+        className="stream-row__primary"
+        {...(gridCellProps?.(0) ?? {})}
+        role={gridMode ? "gridcell" : undefined}
+        aria-colindex={gridMode ? 1 : undefined}
+        data-grid-cell={gridMode ? "identity" : undefined}
+      >
         <div className="stream-row__identity">
           <RecipientAvatar recipient={stream.recipient} />
           <div>
@@ -145,7 +354,13 @@ export function StreamRow({ stream, density = "cozy" }: StreamRowProps) {
         <StatusBadge status={stream.status} />
       </div>
 
-      <div className="stream-row__meta">
+      <div
+        className="stream-row__meta"
+        {...(gridCellProps?.(1) ?? {})}
+        role={gridMode ? "gridcell" : undefined}
+        aria-colindex={gridMode ? 2 : undefined}
+        data-grid-cell={gridMode ? "meta" : undefined}
+      >
         <div>
           <dt>Rate</dt>
           <dd
@@ -160,8 +375,6 @@ export function StreamRow({ stream, density = "cozy" }: StreamRowProps) {
           <dt>Status</dt>
           <dd>{stream.status}</dd>
         </div>
-        {/* Compact burn-down sparkline — only meaningful when we have on-chain
-            amounts and the stream is in a flowing/active-ish state. */}
         {typeof stream.totalAmount === "number" &&
           typeof stream.accruedAmount === "number" &&
           stream.totalAmount > 0 &&
@@ -180,32 +393,41 @@ export function StreamRow({ stream, density = "cozy" }: StreamRowProps) {
           )}
       </div>
 
-      {/* Burn-down progress bar — only rendered for non-draft streams */}
-      {stream.status !== "draft" && (
-        <StreamProgress
-          status={stream.status}
-          accruedAmount={stream.accruedAmount}
-          totalAmount={stream.totalAmount}
-          startedAt={stream.startedAt}
-          endsAt={stream.endsAt}
-          className="stream-row__progress"
-        />
-      )}
+      <div
+        {...(gridCellProps?.(2) ?? {})}
+        role={gridMode ? "gridcell" : undefined}
+        aria-colindex={gridMode ? 3 : undefined}
+        data-grid-cell={gridMode ? "progress" : undefined}
+      >
+        {stream.status !== "draft" ? (
+          <StreamProgress
+            status={stream.status}
+            accruedAmount={stream.accruedAmount}
+            totalAmount={stream.totalAmount}
+            startedAt={stream.startedAt}
+            endsAt={stream.endsAt}
+            className="stream-row__progress"
+            withinGrid={gridMode}
+          />
+        ) : (
+          <span className="sr-only">Progress is not applicable to draft streams.</span>
+        )}
+      </div>
 
-      <div className="stream-row__action-wrap">
+      <div
+        className="stream-row__action-wrap"
+        {...(gridCellProps?.(3) ?? {})}
+        role={gridMode ? "gridcell" : undefined}
+        aria-colindex={gridMode ? 4 : undefined}
+        data-grid-cell={gridMode ? "actions" : undefined}
+      >
         <button
           ref={actionButtonRef}
           className={`button button--secondary stream-row__action ${isProcessing ? "button--busy" : ""}`}
           type="button"
           onClick={handleAction}
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
-          style={
-            isFocused
-              ? { outline: "2px solid var(--accent)", outlineOffset: "2px" }
-              : undefined
-          }
           disabled={isProcessing || isIncidentMode}
+          tabIndex={gridMode ? -1 : undefined}
           aria-busy={isProcessing}
           aria-live="assertive"
         >
@@ -218,6 +440,21 @@ export function StreamRow({ stream, density = "cozy" }: StreamRowProps) {
             <span>{stream.nextAction}</span>
           )}
         </button>
+        <KbdHint keys={["Enter"]} label={stream.nextAction} aria-hidden />
+        {gridMode && (
+          <RowActionsMenu
+            primaryLabel={stream.nextAction}
+            onPrimaryAction={() => void handleAction()}
+            onCancel={() => void handleAction("cancel")}
+            cancelDisabled={
+              isProcessing ||
+              stream.status === "cancelled" ||
+              stream.status === "ended" ||
+              stream.status === "withdrawn"
+            }
+            disabled={isProcessing || isIncidentMode}
+          />
+        )}
         {errorMsg && (
           <p className="detail-incident-warning" role="alert">
             {errorMsg}

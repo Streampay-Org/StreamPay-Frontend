@@ -3,6 +3,61 @@
 `lib/sdk` exports a small TypeScript client for partners that need REST helpers
 and live stream updates without importing Next.js route internals.
 
+## Package
+
+`lib/sdk` is buildable and versioned as the `@streampay/sdk` package (currently
+`0.1.0`). Release history and the semantic-versioning policy live in
+[`lib/sdk/CHANGELOG.md`](../lib/sdk/CHANGELOG.md).
+
+### Build
+
+```sh
+npm run sdk:build
+```
+
+This compiles the SDK to ESM JavaScript plus `.d.ts` declarations in
+`lib/sdk/dist` (git-ignored, never committed). The `exports` map resolves:
+
+- `@streampay/sdk` → `dist/index.js` and `dist/index.d.ts`
+- `@streampay/sdk/types` → `dist/types.js` and `dist/types.d.ts`
+
+`lib/sdk/consumer-smoke.test.ts` builds the package into a temporary directory
+and verifies that both entries resolve for a consumer at runtime and at the
+type level.
+
+### Install and import
+
+Once the package is published to the registry:
+
+```sh
+npm install @streampay/sdk
+```
+
+```ts
+import { createStreamPayClient } from "@streampay/sdk";
+import { SdkErrorCode } from "@streampay/sdk/types";
+```
+
+Inside this repository, keep using the relative import shown below; it points
+at the same entry points.
+
+## OpenAPI Contract
+
+The canonical, hand-edited API specification is [`openapi.json`](../openapi.json).
+`app/types/openapi.generated.ts` is generated from that file, and
+`app/types/openapi.ts` re-exports those API types alongside the app's domain
+types. Do not edit the generated file or maintain a second OpenAPI spec.
+
+After editing `openapi.json`, regenerate the TypeScript declarations with:
+
+```sh
+npm run openapi:generate
+```
+
+Check generated files for drift with `npm run openapi:check`. `npm run smoke`
+performs this check before its other smoke checks and fails if the declarations
+are stale.
+
 ## Create a Client
 
 ```ts
@@ -24,6 +79,23 @@ Every REST request sends:
 API error envelopes are raised as `StreamPaySdkError` with `code`, `status`,
 `requestId`, and optional `details`.
 
+### Diagnostics privacy
+
+`details` is intended for diagnostics, so it is **redacted before it leaves the
+SDK**. Error responses commonly echo the submitted request body, which can
+contain credentials (tokens, secrets, signing keys, signatures, seeds,
+mnemonics, …). The SDK applies a deterministic, least-privilege redaction
+(`lib/sdk/redact.ts`) to any body captured into `StreamPaySdkError.details`:
+
+- Sensitive field names (`token`, `secret`, `password`, `privateKey`,
+  `api_key`, `signature`, `seed`, …) are replaced with `[REDACTED]`.
+- Stellar secret seeds (`S…`) and PEM private-key blocks are redacted even
+  under non-sensitive field names.
+- Non-sensitive fields (recipient addresses, rates, error messages, field
+  errors) are preserved so failures remain diagnosable.
+- Redaction is pure and total: it never throws, never mutates the error
+  payload, and is deterministic for identical input.
+
 ## REST Helpers
 
 ```ts
@@ -38,6 +110,20 @@ const created = await client.createStream(
 await client.deleteStream("stream-ended");
 const activity = await client.listActivity({ streamId: "stream-ada" });
 ```
+
+`listStreams()` follows the v2 response shape and returns `streams`, `meta`,
+and `links`. During the migration window, reading `page.data` still returns the
+same array at runtime and logs a deprecation warning once; the deprecated
+getter is intentionally absent from the TypeScript type. Update callers to use
+`page.streams`. `createStream()` returns the created stream directly, while
+`getStream()` returns the `data` stream from the single-stream response.
+
+Set `onDiagnostic` in the client options to receive SDK diagnostics instead of
+the default `console.warn` output.
+
+`StreamStatus` includes `draft`, `active`, `paused`, `ended`, `withdrawn`, and
+`cancelled`. Other server-provided status strings are preserved so newer API
+statuses remain usable before the SDK is updated.
 
 ## SSE Updates
 

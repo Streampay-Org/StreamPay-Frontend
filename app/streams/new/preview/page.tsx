@@ -15,7 +15,18 @@ import { StreamPreview, type StreamPreviewData } from "../../../components/Strea
  * Query params: `recipient`, `rate`, `schedule`, `duration`, `token`, `gas`.
  */
 
-function parsePreviewData(params: URLSearchParams): StreamPreviewData {
+/** Example shown when the page is opened directly, without wizard parameters. */
+const EXAMPLE_PREVIEW: StreamPreviewData = {
+  recipient: "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZK7G",
+  rate: "120",
+  schedule: "month",
+  durationIntervals: 3,
+  token: "XLM",
+  gasOnRecipient: false,
+};
+
+function parsePreviewData(params: URLSearchParams): StreamPreviewData | null {
+  if (!params.get("recipient") && !params.get("rate")) return null;
   const durationRaw = Number(params.get("duration"));
   return {
     recipient: params.get("recipient") ?? "",
@@ -29,19 +40,29 @@ function parsePreviewData(params: URLSearchParams): StreamPreviewData {
 
 function PreviewContent() {
   const searchParams = useSearchParams();
-  const data = parsePreviewData(new URLSearchParams(searchParams.toString()));
+  const parsed = parsePreviewData(new URLSearchParams(searchParams.toString()));
+  const isExample = parsed === null;
+  const data = parsed ?? EXAMPLE_PREVIEW;
 
   return (
     <main className="page-shell" aria-labelledby="preview-page-title">
       <header className="page-hero">
-        <p className="page-hero__eyebrow">Create stream</p>
-        <h1 id="preview-page-title" className="page-hero__title">
-          Preview &amp; confirm
-        </h1>
-        <p className="page-hero__description">
-          Double-check the details below. Nothing is sent on-chain until you confirm.
-        </p>
+        <div>
+          <p className="page-hero__eyebrow">Create stream</p>
+          <h1 id="preview-page-title" className="page-hero__title">
+            Preview &amp; confirm
+          </h1>
+          <p className="page-hero__description">
+            Double-check the details below. Nothing is sent on-chain until you confirm.
+          </p>
+        </div>
       </header>
+
+      {isExample && (
+        <p className="preview-example-note" role="note">
+          Showing an example stream. <Link href="/streams/new">Fill in the create form</Link> to preview your own.
+        </p>
+      )}
 
       <StreamPreview data={data} />
 

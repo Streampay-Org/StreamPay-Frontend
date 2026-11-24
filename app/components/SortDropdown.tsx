@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 
 export type SortOption = "newest" | "oldest" | "recipient-asc" | "recipient-desc" | "rate-asc" | "rate-desc";
 
@@ -12,6 +11,13 @@ const SORT_LABELS: Record<SortOption, string> = {
   "rate-asc": "Rate low–high",
   "rate-desc": "Rate high–low",
 };
+
+export function isSortOption(value: unknown): value is SortOption {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(SORT_LABELS, value)
+  );
+}
 
 type SortDropdownProps = {
   value: SortOption;

@@ -1,3 +1,5 @@
+import { isValidStellarPublicKey } from "../lib/stellar-address";
+
 const RECENT_RECIPIENTS_KEY = "streampay_recent_recipients";
 const MAX_RECENT = 6;
 
@@ -6,11 +8,27 @@ export interface RecentRecipient {
   addedAt: number;
 }
 
+function isValidRecentRecipient(entry: unknown): entry is RecentRecipient {
+  if (typeof entry !== "object" || entry === null) return false;
+  const candidate = entry as Record<string, unknown>;
+  return (
+    typeof candidate.address === "string" &&
+    isValidStellarPublicKey(candidate.address) &&
+    typeof candidate.addedAt === "number" &&
+    Number.isFinite(candidate.addedAt)
+  );
+}
+
 export function getRecentRecipients(): RecentRecipient[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(RECENT_RECIPIENTS_KEY);
-    return raw ? (JSON.parse(raw) as RecentRecipient[]) : [];
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(isValidRecentRecipient)
+      .map(({ address, addedAt }) => ({ address, addedAt }));
   } catch {
     return [];
   }
@@ -18,12 +36,12 @@ export function getRecentRecipients(): RecentRecipient[] {
 
 /**
  * Prepends `address` to the recent-recipients list, deduplicating and capping
- * at MAX_RECENT entries. No-ops for empty/whitespace-only addresses.
+ * at MAX_RECENT entries. No-ops for empty or invalid Stellar public keys.
  */
 export function addRecentRecipient(address: string): void {
   if (typeof window === "undefined") return;
   const trimmed = address.trim();
-  if (!trimmed) return;
+  if (!trimmed || !isValidStellarPublicKey(trimmed)) return;
 
   const deduped = getRecentRecipients().filter((r) => r.address !== trimmed);
   const updated: RecentRecipient[] = [
@@ -31,10 +49,18 @@ export function addRecentRecipient(address: string): void {
     ...deduped,
   ].slice(0, MAX_RECENT);
 
-  localStorage.setItem(RECENT_RECIPIENTS_KEY, JSON.stringify(updated));
+  try {
+    localStorage.setItem(RECENT_RECIPIENTS_KEY, JSON.stringify(updated));
+  } catch {
+    // Ignore storage failures (e.g. private browsing or quota exceeded).
+  }
 }
 
 export function clearRecentRecipients(): void {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(RECENT_RECIPIENTS_KEY);
+  try {
+    localStorage.removeItem(RECENT_RECIPIENTS_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
 }

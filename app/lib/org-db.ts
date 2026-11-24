@@ -87,9 +87,30 @@ const seedOrgs: OrgRecord[] = [
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 
+/**
+ * Deep-enough copy of a seed org so tests that mutate members, policy arrays or
+ * the token allowlist cannot leak into the module-level seed data.
+ */
+function cloneSeedOrg(org: OrgRecord): OrgRecord {
+  return {
+    ...org,
+    members: org.members.map((member) => ({ ...member })),
+    policy: {
+      ...org.policy,
+      canStart: [...org.policy.canStart],
+      canPause: [...org.policy.canPause],
+      canResume: [...org.policy.canResume],
+      canSettle: [...org.policy.canSettle],
+      canStop: [...org.policy.canStop],
+      canWithdraw: [...org.policy.canWithdraw],
+    },
+    tokenAllowlist: org.tokenAllowlist ? [...org.tokenAllowlist] : undefined,
+  };
+}
+
 export const orgDb = {
   /** Keyed by org id */
-  orgs: new Map<string, OrgRecord>(seedOrgs.map((o) => [o.id, o])),
+  orgs: new Map<string, OrgRecord>(seedOrgs.map((o) => [o.id, cloneSeedOrg(o)])),
 
   /**
    * Maps streamId → orgId.
@@ -144,7 +165,24 @@ export function getActiveApprovalsForStream(streamId: string): PendingApproval[]
 export function _resetOrgDbForTesting(): void {
   orgDb.orgs.clear();
   for (const org of seedOrgs) {
-    orgDb.orgs.set(org.id, { ...org, tokenAllowlist: org.tokenAllowlist ? [...org.tokenAllowlist] : undefined });
+    orgDb.orgs.set(org.id, {
+      ...org,
+      members: org.members.map((m) => ({ ...m })),
+      policy: {
+        ...org.policy,
+        canStart: [...org.policy.canStart],
+        canPause: [...org.policy.canPause],
+        canResume: [...org.policy.canResume],
+        canSettle: [...org.policy.canSettle],
+        canStop: [...org.policy.canStop],
+        canWithdraw: [...org.policy.canWithdraw],
+      },
+      tokenAllowlist: org.tokenAllowlist ? [...org.tokenAllowlist] : undefined,
+    });
+    orgDb.orgs.set(org.id, cloneSeedOrg(org));
+      members: org.members.map((member) => ({ ...member })),
+      },
+    });
   }
   orgDb.streamOwnership.clear();
   orgDb.streamOwnership.set("stream-ada", "org-acme");

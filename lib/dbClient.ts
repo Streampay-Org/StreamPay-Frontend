@@ -77,7 +77,10 @@ export const dbClient = {
    * Fetch a page of streams from the database for a specific tenant, optionally with filters.
    */
   async getStreams(
-    ...args: [string | number, number?, number?, Record<string, unknown>?]
+    ...args:
+      | [limit?: number, offset?: number]
+      | [tenantId: string, limit: number, offset?: number, filters?: Record<string, unknown>]
+      | [tenantId: string, limit: number, filters: Record<string, unknown>]
   ): Promise<DbStream[]> {
     let tenantId = "default";
     let limit = 100;
@@ -104,10 +107,10 @@ export const dbClient = {
     // Apply filters (simulating parameterized query behavior)
     if (Object.keys(filters).length > 0) {
       streamsList = streamsList.filter((stream) => {
+        const fields: Record<string, unknown> = { ...stream };
         for (const [key, value] of Object.entries(filters)) {
           if (value === undefined || value === null) continue;
-          // @ts-ignore - safe since we're mocking
-          if (stream[key] !== value) {
+          if (fields[key] !== value) {
             return false;
           }
         }
@@ -150,7 +153,9 @@ export const dbClient = {
       [status, timestamp] = args as [string, number];
     }
 
-    console.log(`[DB] Updated last run status to ${status}`);
+    console.log(
+      `[DB] Updated last run status for tenant ${tenantId} to ${status} at ${new Date(timestamp).toISOString()}`,
+    );
   },
 };
 

@@ -1,0 +1,12 @@
+/**
+ * src/styles/focus.css
+ *
+ * Re-export of the canonical focus-visible layer from app/styles/focus.css.
+ * The PRD for #1046 references this path; this file exists so that any
+ * import from `src/styles/focus.css` resolves without error and stays in
+ * sync with the single source of truth under app/styles/.
+ *
+ * @see app/styles/focus.css  — canonical implementation
+ * @see docs/createstreamform-focus-visible.md  — documentation
+ */
+@import "../../app/styles/focus.css";

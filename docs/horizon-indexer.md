@@ -36,3 +36,39 @@ The indexer strictly persists cursors and deduplication keys.
 The indexer implements structured logging and stall checks:
 - **Stall Alerts:** Emits an alert if the cursor is not updated within the defined `stallThresholdMs` (e.g., 5-10 minutes), helping catch silent failures or RPC unreachability.
 - **Structured Error Logs:** Errors are logged with a JSON payload including a `correlation_id` and `stream_id` to trace transaction states efficiently.
+
+## Status State Machine (deterministic stale-state transitions)
+
+The indexer status is derived through a **pure, deterministic state machine**
+(`lib/indexerStatus.ts`), never from randomness. Given the same telemetry it
+always produces the same status, so normal operation and adverse conditions are
+reviewable and cannot silently mask a degraded indexer.
+
+States: `loading`, `syncing`, `synced`, `stalled`, `stopped`, `error`, `retrying`.
+
+Transition priority (highest wins):
+1. `breakerOpen` → `stopped` (permission / operator circuit breaker)
+2. `!running` → `stopped`
+3. fatal failure → `error`
+4. recoverable failure → `retrying`
+5. cursor age exceeds `stallThresholdMs` → `stalled` (the explicit stale-state transition)
+6. cursor never advanced → `loading`
+7. lag ≤ tolerance → `synced`, else `syncing`
+
+Key invariants:
+- `deriveIndexerStatus` and `isStale` are pure — all time comes from the caller,
+  making transitions reproducible in tests.
+- A stale cursor (`isStale(...) === true`) **must** report `stalled` and can never
+  silently report `synced`/`syncing`.
+- `isStale` uses a strictly-greater-than comparison, so `age === threshold` is
+  still fresh; a non-positive threshold disables staleness detection.
+- Failure disposition (`error`/`retrying`) is cleared on the next successful
+  cursor advance, so the status recovers deterministically.
+
+Surfacing:
+- `GET /api/indexer/status` returns the derived `status` plus an explicit `stale`
+  flag and a human-readable `message` (safe to surface to operators — never leaks
+  secrets or raw request data).
+- `HorizonIndexer.readStatus()` exposes the same derivation for the ingestion
+  worker, so monitoring and the SSE endpoint agree on the current state.
+

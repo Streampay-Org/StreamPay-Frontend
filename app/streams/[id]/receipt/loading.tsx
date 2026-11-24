@@ -7,11 +7,13 @@
  * shift when the real document swaps in.
  */
 
+import { Skeleton } from "../../../components/Skeleton";
+
 function SkeletonField() {
   return (
-    <div style={{ display: "grid", gap: "0.35rem" }}>
-      <div className="skeleton skeleton--label" />
-      <div className="skeleton skeleton--value" />
+    <div className="receipt-loading__field">
+      <Skeleton variant="label" width="5rem" />
+      <Skeleton variant="value" width="12rem" />
     </div>
   );
 }
@@ -22,55 +24,45 @@ export default function ReceiptLoading() {
       {/* Toolbar skeleton */}
       <div className="receipt-toolbar no-print">
         <div className="receipt-note-builder__actions">
-          <div className="skeleton skeleton--button" />
-          <div
-            className="skeleton skeleton--button"
-            style={{ width: "5rem" }}
-          />
+          <Skeleton variant="button" />
+          <Skeleton variant="button" width="5rem" />
         </div>
       </div>
 
       {/* Note-builder skeleton */}
-      <div className="receipt-note-builder no-print" style={{ display: "grid", gap: "0.5rem" }}>
-        <div className="skeleton skeleton--label" />
-        <div
-          className="skeleton"
-          style={{ borderRadius: "0.5rem", height: "6rem" }}
-        />
+      <div className="receipt-note-builder receipt-loading__note-builder no-print">
+        <Skeleton variant="label" width="6rem" />
+        <Skeleton className="receipt-loading__textarea" height="6rem" />
       </div>
 
       {/* Receipt document skeleton */}
-      <article
-        aria-hidden="true"
-        className="receipt-doc"
-        style={{ display: "grid", gap: "1.5rem" }}
-      >
+      <article aria-hidden="true" className="receipt-doc receipt-loading__doc">
         {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ display: "grid", gap: "0.5rem" }}>
-            <div className="skeleton skeleton--title" style={{ width: "7rem" }} />
-            <div className="skeleton skeleton--text" style={{ width: "12rem" }} />
+        <div className="receipt-loading__header">
+          <div className="receipt-loading__brand">
+            <Skeleton variant="title" width="7rem" />
+            <Skeleton variant="text" width="12rem" />
           </div>
-          <div className="skeleton skeleton--badge" />
+          <Skeleton variant="badge" />
         </div>
 
         <div className="receipt-divider" />
 
         {/* Stream identity */}
-        <div style={{ display: "grid", gap: "0.75rem" }}>
-          <div className="skeleton skeleton--title" style={{ width: "9rem" }} />
-          <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
-            <div className="skeleton skeleton--value" style={{ width: "11rem" }} />
-            <div className="skeleton skeleton--badge" style={{ width: "4.5rem" }} />
+        <div className="receipt-loading__section">
+          <Skeleton variant="title" width="9rem" />
+          <div className="receipt-loading__identity-row">
+            <Skeleton variant="value" width="11rem" />
+            <Skeleton variant="badge" width="4.5rem" />
           </div>
         </div>
 
         <div className="receipt-divider" />
 
         {/* Recipient section */}
-        <div style={{ display: "grid", gap: "1rem" }}>
-          <div className="skeleton skeleton--title" style={{ width: "6rem" }} />
-          <div style={{ display: "grid", gap: "0.75rem" }}>
+        <div className="receipt-loading__section">
+          <Skeleton variant="title" width="6rem" />
+          <div className="receipt-loading__field-stack">
             <SkeletonField />
             <SkeletonField />
           </div>
@@ -79,9 +71,9 @@ export default function ReceiptLoading() {
         <div className="receipt-divider" />
 
         {/* Payment details section */}
-        <div style={{ display: "grid", gap: "1rem" }}>
-          <div className="skeleton skeleton--title" style={{ width: "9rem" }} />
-          <div style={{ display: "grid", gap: "0.75rem" }}>
+        <div className="receipt-loading__section">
+          <Skeleton variant="title" width="9rem" />
+          <div className="receipt-loading__field-stack">
             <SkeletonField />
             <SkeletonField />
             <SkeletonField />

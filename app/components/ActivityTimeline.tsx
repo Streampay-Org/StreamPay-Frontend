@@ -3,6 +3,7 @@
 import Link from "next/link";
 import React from "react";
 import { Timestamp } from "./Timestamp";
+import { VirtualListItem } from "./VirtualListItem";
 
 export type ActivityEvent = {
   id: string;
@@ -22,15 +23,42 @@ interface ActivityTimelineProps {
   groups: ActivityGroup[];
 }
 
+// Normalize ledger timestamps to UTC ISO to avoid timezone/clock-skew issues.
+const INVALID_TIMESTAMP_FALLBACK = "";
+
+function normalizeTimestamp(timestamp: string): string {
+  if (typeof timestamp !== "string" || timestamp.trim() === "") {
+    return INVALID_TIMESTAMP_FALLBACK;
+  }
+  const trimmed = timestamp.trim();
+  const parsed = /^\d+$/.test(trimmed) ? new Date(Number(trimmed)) : new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    console.warn(`[ActivityTimeline] Invalid timestamp: "${timestamp}"`);
+    return INVALID_TIMESTAMP_FALLBACK;
+  }
+  return parsed.toISOString();
+}
+
+function normalizeActivityGroups(groups: ActivityGroup[]): ActivityGroup[] {
+  return groups.map((group) => ({
+    ...group,
+    events: group.events.map((event) => ({
+      ...event,
+      timestamp: normalizeTimestamp(event.timestamp),
+    })),
+  }));
+}
+
 export const ActivityTimeline = ({ groups }: ActivityTimelineProps) => {
+  const normalizedGroups = React.useMemo(() => normalizeActivityGroups(groups), [groups]);
   return (
     <div className="activity-feed-wrap">
-      {groups.map((group) => (
+      {normalizedGroups.map((group) => (
         <section key={group.date} className="activity-group">
           <h3 className="activity-group-title">{group.date}</h3>
           <ul className="activity-timeline">
             {group.events.map((event) => (
-              <li key={event.id} className="activity-item">
+              <VirtualListItem key={event.id} className="activity-item" defaultHeight={100}>
                 <div className="activity-marker">
                   <div className={`activity-dot activity-dot--${event.status}`} />
                   <div className="activity-line" />
@@ -39,7 +67,11 @@ export const ActivityTimeline = ({ groups }: ActivityTimelineProps) => {
                   <div className="activity-card">
                     <div className="activity-info">
                       <span className="activity-title">{event.title}</span>
-                      <Timestamp className="activity-time" iso={event.timestamp} />
+                      {event.timestamp ? (
+                        <Timestamp className="activity-time" iso={event.timestamp} />
+                      ) : (
+                        <span className="activity-time" title="Invalid timestamp">—</span>
+                      )}
                     </div>
                     {event.link && (
                       <Link href={event.link} className="button button--secondary" style={{ minHeight: "2rem", padding: "0.4rem 0.8rem", fontSize: "0.8125rem" }}>
@@ -48,7 +80,7 @@ export const ActivityTimeline = ({ groups }: ActivityTimelineProps) => {
                     )}
                   </div>
                 </div>
-              </li>
+              </VirtualListItem>
             ))}
           </ul>
         </section>
