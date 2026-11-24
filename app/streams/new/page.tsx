@@ -214,6 +214,13 @@ export default function NewStreamPage() {
     );
   }
 
+  const trimmedAmount = amount.trim();
+  const numericAmount = Number(trimmedAmount);
+  const hasValidAmount =
+    trimmedAmount.length > 0 &&
+    Number.isFinite(numericAmount) &&
+    numericAmount > 0;
+
   return (
     <main className="page-shell">
       <section className="page-hero">
@@ -382,6 +389,15 @@ export default function NewStreamPage() {
         reducedMotion={prefersReducedMotion}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {hasValidAmount && (
+            <PayoutSummary
+              campaignName="Single-recipient stream"
+              totalAmount={trimmedAmount}
+              tokenSymbol={token}
+              recipientCount={1}
+            />
+          )}
+
           <p style={{ color: 'var(--muted-light)', fontSize: 'var(--text-sm, 0.875rem)', margin: 0 }}>
             Double-check the payment stream details below before finalizing.
           </p>
