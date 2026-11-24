@@ -40,6 +40,14 @@ export function parseAssetString(assetStr: string): StellarAsset {
   throw new Error(`Invalid asset format: ${assetStr}. Expected XLM or CODE:ISSUER`);
 }
 
+export const VERIFY_TRUSTLINE_TIMEOUT_MS = 5000;
+
+interface HorizonBalance {
+  asset_type?: string;
+  asset_code?: string;
+  asset_issuer?: string;
+}
+
 /**
  * Fetches account balances from Horizon and checks for a specific trustline.
  * Horizon URL is now sourced from centralized config to prevent hardcoded URLs.
@@ -47,7 +55,8 @@ export function parseAssetString(assetStr: string): StellarAsset {
 export async function verifyTrustline(
   publicKey: string,
   asset: StellarAsset,
-  horizonUrl?: string
+  horizonUrl?: string,
+  timeoutMs: number = VERIFY_TRUSTLINE_TIMEOUT_MS
 ): Promise<{ exists: boolean; error?: string }> {
   if (asset.isNative) return { exists: true };
 
@@ -55,9 +64,20 @@ export async function verifyTrustline(
   const config = getConfig();
   const effectiveHorizonUrl = horizonUrl || config.network.horizonUrl;
 
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
   try {
-    const response = await fetch(`${effectiveHorizonUrl}/accounts/${publicKey}`);
-    
+    const encodedPublicKey = encodeURIComponent(publicKey);
+    const response = await fetch(
+      `${effectiveHorizonUrl}/accounts/${encodedPublicKey}`,
+      { signal: controller.signal }
+    );
+
     if (response.status === 404) {
       return { exists: false, error: 'Recipient account does not exist on-chain.' };
     }
@@ -67,17 +87,35 @@ export async function verifyTrustline(
     }
 
     const data = await response.json();
-    const hasTrustline = data.balances.some(
-      (b: any) => b.asset_code === asset.code && b.asset_issuer === asset.issuer
-    );
+    const balances: unknown[] = Array.isArray(data?.balances) ? data.balances : [];
+    const hasTrustline = balances.some((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      const b = entry as HorizonBalance;
+      if (b.asset_type === 'liquidity_pool_shares' || !b.asset_code) {
+        return false;
+      }
+      return b.asset_code === asset.code && b.asset_issuer === asset.issuer;
+    });
 
     if (!hasTrustline) {
       return { exists: false, error: `Missing trustline for ${asset.code}.` };
     }
 
     return { exists: true };
-  } catch (err: any) {
-    return { exists: false, error: `Network error: ${err.message}` };
+  } catch (err: unknown) {
+    if (timedOut) {
+      return {
+        exists: false,
+        error: `Horizon request timed out after ${timeoutMs}ms.`,
+      };
+    }
+    if (err instanceof Error && err.name === 'AbortError') {
+      return { exists: false, error: 'Horizon request was aborted.' };
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return { exists: false, error: `Network error: ${message}` };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

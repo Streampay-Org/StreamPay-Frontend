@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { getStore } from "@/app/lib/db";
 import { getCorrelationContext } from "@/app/lib/logger";
-import { toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { ProjectionError, toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
+import { deleteStream } from "@/app/lib/stream-delete";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { inferStreamChangeAction, publishStreamChange } from "@/app/lib/stream-publish";
 import type { Stream } from "@/app/types/openapi";
 
@@ -37,7 +38,7 @@ export async function GET(request: Request, { params }: Context) {
   const { streamRepository } = getStore();
   const { id } = await params;
   const stream = streamRepository.streams.get(id);
-  if (!stream) {
+  if (!stream || (stream as any).deletedAt) {
     return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
   }
 
@@ -87,20 +88,22 @@ export async function DELETE(request: Request, { params }: Context) {
   const rateLimited = await enforceRateLimit(request, "DELETE");
   if (rateLimited) return rateLimited;
 
-  const { streamRepository } = getStore();
   const { id } = await params;
-  const stream = streamRepository.streams.get(id);
-  if (!stream) {
-    return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
+  const authActor = tryAuthenticateRequest(request);
+  const actorWalletHeader =
+    request.headers.get("Actor-Wallet-Address") ||
+    request.headers.get("actor-wallet-address") ||
+    request.headers.get("x-streampay-actor-id") ||
+    null;
+
+  const actor = authActor || (actorWalletHeader ? { walletAddress: actorWalletHeader } : null);
+  const tenant = request.headers.get("x-tenant-id")?.trim() || null;
+
+  const result = await deleteStream(id, actor, tenant, request);
+  if (!result.success) {
+    return errorResponse(result.code, result.message, result.status);
   }
-  if (stream.status === "active" || stream.status === "paused") {
-    return errorResponse(
-      "STREAM_INACTIVE_STATE",
-      "Cannot delete an active or paused stream. Stop it first.",
-      409,
-    );
-  }
-  streamRepository.streams.delete(id);
+
   return new NextResponse(null, { status: 204 });
 }
 

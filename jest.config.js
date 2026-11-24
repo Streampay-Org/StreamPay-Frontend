@@ -13,6 +13,7 @@ const config = {
   testPathIgnorePatterns: [
     "/node_modules/",
     "/.next/",
+    "<rootDir>/tests/e2e/",
     "<rootDir>/app/api/notifications/preferences/route.test.ts",
     "<rootDir>/app/streams/new/recurring.test.tsx",
     "<rootDir>/__tests__/a11y.test.tsx",
@@ -27,7 +28,6 @@ const config = {
     "<rootDir>/app/api/streams/__tests__/rateLimiterConsistency.test.ts",
     "<rootDir>/app/api/streams/\\[id\\]/start/route.test.ts",
     "<rootDir>/app/api/streams/\\[id\\]/webhooks/test/route.test.ts",
-    "<rootDir>/app/api/streams/concurrency.test.ts",
     "<rootDir>/app/api/streams/stream-lifecycle.e2e.test.ts",
     "<rootDir>/app/api/v2/streams/multi/route.test.ts",
     "<rootDir>/app/api/v2/streams/route.test.ts",
@@ -69,6 +69,9 @@ module.exports = async () => {
     "^\\./app/(.*)$": "<rootDir>/app/$1",
     "^next/navigation$": "<rootDir>/__mocks__/next/navigation.js",
     "^next/router$": "<rootDir>/__mocks__/next/router.js",
+    // NodeNext-style relative specifiers (`./redact.js`) resolve to the
+    // TypeScript sources during tests, mirroring the SDK build output.
+    "^(\\.{1,2}/.*)\\.js$": "$1",
   };
   return resolvedConfig;
 };

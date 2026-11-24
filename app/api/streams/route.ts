@@ -33,6 +33,7 @@ import {
   isAfterCursor,
   type StreamCursor,
 } from "@/app/lib/stream-cursor";
+import { buildLinkHeader, buildUrlWithParams } from "@/app/lib/link-header";
 import {
   extractCorrelationContext,
   getCorrelationContext,
@@ -208,7 +209,7 @@ async function handleStreamsGet(request: Request) {
       : Array.from(streamRepository.streams.values());
 
     const sortedStreams = tenantCandidates
-      .filter(isVisible)
+      .filter((stream: any) => !stream.deletedAt && isVisible(stream))
       .sort((left, right) => {
         const timeCompare = left.createdAt.localeCompare(right.createdAt);
         return timeCompare !== 0 ? timeCompare : left.id.localeCompare(right.id);
@@ -264,19 +265,32 @@ async function handleStreamsGet(request: Request) {
         ? encodeStreamCursor(rawPage[rawPage.length - 1])
         : null;
 
+    const linkParams = { limit, status: streamStatus, cursor };
+    const selfLink = buildUrlWithParams("/api/v1/streams", linkParams);
+    const linkHeader = buildLinkHeader({
+      baseUrl: "/api/streams",
+      params: linkParams,
+      next: nextCursor,
+      self: true,
+    });
+
     const payload = {
       data: paginatedStreams,
-      links: { self: `/api/v1/streams?limit=${limit}` },
+      links: { self: selfLink },
       meta: { hasNext, nextCursor, total },
     };
     const etag = createStrongEtag(payload);
+    const cacheHeaders: Record<string, string> = {
+      ...createCacheHeaders(etag),
+      ...(linkHeader ? { Link: linkHeader } : {}),
+    };
 
     if (isIfNoneMatchMatch(etag, getHeader(request, "if-none-match"))) {
       status = 304;
       return withRateLimitHeaders(
         new NextResponse(null, {
           status,
-          headers: createCacheHeaders(etag),
+          headers: cacheHeaders,
         }),
         rateLimitResult.headers,
       );
@@ -288,7 +302,7 @@ async function handleStreamsGet(request: Request) {
     });
 
     const response = NextResponse.json(payload);
-    for (const [name, value] of Object.entries(createCacheHeaders(etag))) {
+    for (const [name, value] of Object.entries(cacheHeaders)) {
       response.headers.set(name, value);
     }
     status = 200;

@@ -16,6 +16,10 @@ shape is documented in the [README](../README.md#error-envelope).
 | `CSRF_TOKEN_INVALID`   | 403  | no        | CSRF token validation failed or tokens mismatched. |
 | `NOT_FOUND`            | 404  | no        | Resource does not exist (or not visible to you). |
 | `ORG_NOT_FOUND`        | 404  | no        | Organization id does not exist. |
+| `MEMBER_NOT_FOUND`     | 404  | no        | Organisation member wallet address is not in the org. |
+| `LAST_OWNER`           | 409  | no        | Cannot remove or demote the only remaining org owner. |
+| `ORG_HAS_STREAMS`      | 409  | no        | Org still owns streams and cannot be deleted. |
+| `ORG_HAS_PENDING_APPROVALS` | 409 | no      | Org has active approvals and cannot be deleted. |
 | `REQUEST_TIMEOUT`      | 408  | yes       | Upstream did not respond in time. |
 | `CONFLICT`             | 409  | no        | Idempotency-key replay with a different body. |
 | `UNPROCESSABLE_ENTITY` | 422  | no        | Semantic validation failed (e.g. negative amount). |
