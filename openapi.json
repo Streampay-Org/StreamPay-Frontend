@@ -1774,6 +1774,15 @@
         "responses": {
           "200": {
             "description": "Paginated list of activity events.",
+            "headers": {
+              "Link": {
+                "description": "RFC 8288 pagination links (rel=\"next\" when more pages exist, rel=\"self\" for the current page).",
+                "schema": {
+                  "type": "string",
+                  "example": "</api/activity?limit=20&cursor=MjAyNi0wNC0yOFQwOTowMDowMFp8ZXZ0LTE%3D>; rel=\"next\", </api/activity?limit=20>; rel=\"self\""
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -2421,6 +2430,15 @@
         "responses": {
           "200": {
             "description": "Paginated stream list.",
+            "headers": {
+              "Link": {
+                "description": "RFC 8288 pagination links (rel=\"next\" when more pages exist, rel=\"self\" for the current page). Also preserved on 304 Not Modified responses.",
+                "schema": {
+                  "type": "string",
+                  "example": "</api/streams?limit=20&cursor=MjAyNi0wMS0wMVQwMDowMDowMC4wMDBafHN0cmVhbS0x>; rel=\"next\", </api/streams?limit=20>; rel=\"self\""
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -5147,6 +5165,15 @@
         "responses": {
           "200": {
             "description": "Paginated stream list.",
+            "headers": {
+              "Link": {
+                "description": "RFC 8288 pagination links (rel=\"next\" when more pages exist, rel=\"self\" for the current page). Also preserved on 304 Not Modified responses.",
+                "schema": {
+                  "type": "string",
+                  "example": "</api/v2/streams?limit=20&cursor=MjAyNi0wMS0wMVQwMDowMDowMC4wMDBafHN0cmVhbS0x>; rel=\"next\", </api/v2/streams?limit=20>; rel=\"self\""
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {

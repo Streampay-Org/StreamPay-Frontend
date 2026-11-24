@@ -39,6 +39,7 @@ import {
   isAfterCursor,
   type StreamCursor,
 } from "@/app/lib/stream-cursor";
+import { buildLinkHeader, buildUrlWithParams } from "@/app/lib/link-header";
 import type { Stream } from "@/app/types/openapi";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
@@ -190,22 +191,35 @@ async function handleV2StreamsGet(request: Request) {
     throw err;
   }
 
+  const linkParams = { limit, status: statusFilter, cursor };
+  const selfLink = buildUrlWithParams("/api/v2/streams", linkParams);
+  const linkHeader = buildLinkHeader({
+    baseUrl: "/api/v2/streams",
+    params: linkParams,
+    next: nextCursor,
+    self: true,
+  });
+
   const payload = {
     streams: projected,
     meta: { hasNext, nextCursor, total },
-    links: { self: `/api/v2/streams?limit=${limit}` },
+    links: { self: selfLink },
   };
   const etag = createStrongEtag(payload);
+  const cacheHeaders: Record<string, string> = {
+    ...createCacheHeaders(etag),
+    ...(linkHeader ? { Link: linkHeader } : {}),
+  };
 
   if (isIfNoneMatchMatch(etag, request.headers?.get?.("if-none-match") ?? null)) {
     return new NextResponse(null, {
       status: 304,
-      headers: createCacheHeaders(etag),
+      headers: cacheHeaders,
     });
   }
 
   const response = NextResponse.json(payload);
-  for (const [name, value] of Object.entries(createCacheHeaders(etag))) {
+  for (const [name, value] of Object.entries(cacheHeaders)) {
     response.headers.set(name, value);
   }
   return response;
