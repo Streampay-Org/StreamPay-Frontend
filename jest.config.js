@@ -13,6 +13,7 @@ const config = {
   testPathIgnorePatterns: [
     "/node_modules/",
     "/.next/",
+    "<rootDir>/tests/e2e/",
     "<rootDir>/app/api/notifications/preferences/route.test.ts",
     "<rootDir>/app/streams/new/recurring.test.tsx",
     "<rootDir>/__tests__/a11y.test.tsx",
