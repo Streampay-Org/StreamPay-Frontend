@@ -6,6 +6,12 @@ This document outlines the steps to take when the nightly reconciliation job det
 
 Use `GET /api/reconciliation/health` to verify that the reconciliation dependencies needed by the service are available. The endpoint returns `200 OK` when both the database and on-chain dependencies are ready and `503 Service Unavailable` when either dependency reports degraded readiness. The payload includes per-dependency status and timestamps for easier monitoring and alerting.
 
+## Worker health and shutdown
+
+The `worker-runner` image writes `/tmp/worker-heartbeat` when it starts and after each stream is processed. Set `WORKER_HEARTBEAT_FILE` to change this path. Its Docker health check runs every 30 seconds and marks the worker unhealthy when the heartbeat is missing or older than five minutes; it allows a 60-second start period and three retries.
+
+On the first `SIGTERM` or `SIGINT`, the worker stops before starting another stream and exits cleanly after the current reconciliation step. A reconciliation failure still exits non-zero. A second signal forces immediate termination (`SIGTERM`: 143, `SIGINT`: 130), which may interrupt the active step. If using a read-only root filesystem, provide writable storage for the configured heartbeat path (by default, mount a writable `/tmp`).
+
 ## Per-stream diff endpoint
 
 `GET /api/internal/reconciliation/diff/:id` lets you inspect the DB-vs-on-chain diff for a single stream without triggering a full reconciliation run. Use it to quickly triage alerts from the nightly job.
