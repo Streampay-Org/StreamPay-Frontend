@@ -1,11 +1,11 @@
 import { HorizonIndexer } from '../lib/indexer';
 
-async function runBackfill() {
+export async function runBackfill(): Promise<number> {
   const targetLedger = parseInt(process.env.TARGET_LEDGER || '0', 10);
   
   if (!targetLedger || targetLedger <= 0) {
     console.error('Error: TARGET_LEDGER environment variable is required and must be > 0.');
-    process.exit(1);
+    return 1;
   }
 
   console.log(`Initializing indexer backfill for target ledger: ${targetLedger}`);
@@ -22,13 +22,15 @@ async function runBackfill() {
     // Here we pass an empty array to simulate the call signature for this job template
     await indexer.backfill(targetLedger, []);
     console.log('Backfill completed successfully.');
-    process.exit(0);
+    return 0;
   } catch (err) {
     console.error('Backfill job failed:', err);
-    process.exit(1);
+    return 1;
   }
 }
 
 if (require.main === module) {
-  runBackfill();
+  runBackfill().then((code) => {
+    process.exit(code);
+  });
 }
