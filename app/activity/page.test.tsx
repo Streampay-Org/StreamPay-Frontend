@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { axe } from "jest-axe";
 import ActivityPage from "./page";
 import { setDisplayTimeZone } from "../lib/timezone";
@@ -269,7 +269,15 @@ describe("ActivityPage", () => {
     errorRender.unmount();
   });
 
-  it("regroups the feed when the display time zone changes without a reload", async () => {
+  // ── Date range filtering ──────────────────────────────────────────────────
+  it("renders the date range picker", () => {
+    render(<ActivityPage />);
+
+    expect(screen.getByLabelText("Start date")).toBeInTheDocument();
+    expect(screen.getByLabelText("End date")).toBeInTheDocument();
+  });
+
+  it("requests the selected range and announces the filtered count", async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -277,6 +285,104 @@ describe("ActivityPage", () => {
           {
             id: "ev1",
             type: "stream_created",
+            description: "Event 1",
+            timestamp: "2026-01-05T10:00:00Z",
+          },
+          {
+            id: "ev2",
+            type: "stream_created",
+            description: "Event 2",
+            timestamp: "2026-01-20T10:00:00Z",
+          },
+        ],
+      }),
+    });
+
+    render(<ActivityPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("activity-timeline")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText("Start date"), {
+      target: { value: "2026-01-01" },
+    });
+    fireEvent.change(screen.getByLabelText("End date"), {
+      target: { value: "2026-01-31" },
+    });
+
+    await waitFor(() => {
+      const calls = (global.fetch as jest.Mock).mock.calls;
+      expect(calls[calls.length - 1][0]).toBe(
+        "/api/activity?limit=50&from=2026-01-01&to=2026-01-31",
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Loaded 2 events");
+    });
+  });
+
+  it("refetches with only the date bounds that are set", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [] }),
+    });
+
+    render(<ActivityPage />);
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("End date"), {
+      target: { value: "2026-01-31" },
+    });
+
+    await waitFor(() => {
+      const calls = (global.fetch as jest.Mock).mock.calls;
+      expect(calls[calls.length - 1][0]).toBe(
+        "/api/activity?limit=50&to=2026-01-31",
+      );
+    });
+  });
+
+  it("shows the range-aware empty state when no events match", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [
+            {
+              id: "ev1",
+              type: "stream_created",
+              description: "Event 1",
+              timestamp: "2026-01-05T10:00:00Z",
+            },
+          ],
+        }),
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [] }),
+      });
+
+    render(<ActivityPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("activity-timeline")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText("Start date"), {
+      target: { value: "2026-02-01" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("No activity in this range")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("activity-live-region")).toHaveTextContent(
+      "No activity to display.",
+    );
+  });
+
+  it("regroups the feed when the display time zone changes without a reload", async () => {
+          {
             description: "Late event",
             timestamp: "2020-01-01T20:00:00.000Z",
           },
@@ -284,10 +390,7 @@ describe("ActivityPage", () => {
       }),
     });
 
-    render(<ActivityPage />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("activity-timeline")).toBeInTheDocument();
     });
     expect(screen.getByText("Jan 1, 2020")).toBeInTheDocument();
 

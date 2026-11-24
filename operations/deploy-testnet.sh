@@ -96,6 +96,12 @@ if [[ -f "$CONTRACT_ID_FILE" && "$FORCE_DEPLOY" != "true" ]]; then
   EXISTING_ID=$(cat "$CONTRACT_ID_FILE")
   log "Contract $CONTRACT_NAME already deployed at $EXISTING_ID"
   log "Set FORCE_DEPLOY=true to re-deploy"
+  log "Verifying existing deployment against $WASM_FILE..."
+  VERIFY_ARGS=(--contract-id "$EXISTING_ID" --wasm-file "$WASM_FILE" --network "$NETWORK")
+  if [[ -n "${STELLAR_HORIZON_URL:-}" ]]; then
+    VERIFY_ARGS+=(--rpc-url "$STELLAR_HORIZON_URL")
+  fi
+  bash "$SCRIPT_DIR/verify-deploy.sh" "${VERIFY_ARGS[@]}"
   echo ""
   echo "Contract ID: $EXISTING_ID"
   exit 0
@@ -132,6 +138,14 @@ fi
 mkdir -p "$CONTRACT_IDS_DIR"
 echo "$CONTRACT_ID" > "$CONTRACT_ID_FILE"
 log "Contract ID saved to $CONTRACT_ID_FILE"
+
+# ── Post-deploy verification ────────────────────────────────────────────────────
+log "Verifying deployed wasm hash against $WASM_FILE..."
+VERIFY_ARGS=(--contract-id "$CONTRACT_ID" --wasm-file "$WASM_FILE" --network "$NETWORK")
+if [[ -n "${STELLAR_HORIZON_URL:-}" ]]; then
+  VERIFY_ARGS+=(--rpc-url "$STELLAR_HORIZON_URL")
+fi
+bash "$SCRIPT_DIR/verify-deploy.sh" "${VERIFY_ARGS[@]}"
 
 # ── Output summary ──────────────────────────────────────────────────────────────
 echo ""

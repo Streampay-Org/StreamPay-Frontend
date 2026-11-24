@@ -1,5 +1,33 @@
 # Security CI Deployment Checklist
 
+## Contract Deployment Verification
+
+`operations/deploy-testnet.sh` now runs `operations/verify-deploy.sh` after a
+successful deploy, and also when it reuses an existing contract id. The run
+fails if the deployed wasm hash does not match the locally built wasm.
+
+```bash
+# Run manually after a deploy
+bash operations/verify-deploy.sh \
+  --contract-id C... \
+  --wasm-file contracts/target/wasm32v1-none/release/streampay-stream.wasm \
+  --network testnet
+
+# Print the local hash without contacting the network
+bash operations/verify-deploy.sh --wasm-file <path> --dry-run
+
+# Skip verification entirely (offline or emergency use)
+VERIFY_SKIP=true bash operations/deploy-testnet.sh
+```
+
+The script computes the local hash with `sha256sum` (Linux) or
+`shasum -a 256` (macOS). It reads the on-chain hash with
+`stellar contract info hash --id <CONTRACT_ID> --network <NETWORK>` (verified
+against the stellar-cli `contract info hash` subcommand) and falls back to
+`stellar contract fetch --id <CONTRACT_ID> --network <NETWORK> -o <tmp>`
+followed by a local sha256 when that subcommand is unavailable. Hashes are
+compared case-insensitively.
+
 ## Pre-Deployment Verification
 
 ### ✅ Workflow Files

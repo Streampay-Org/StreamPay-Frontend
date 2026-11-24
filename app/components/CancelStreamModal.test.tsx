@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, waitFor } from "@testing-library/react";
 const { screen } = require("@testing-library/react") as any;
 import { CancelStreamModal } from "./CancelStreamModal";
 import type { CancelInput } from "../lib/cancel-stream";
@@ -269,5 +269,113 @@ describe("CancelStreamModal", () => {
     );
 
     expect(screen.getByRole("dialog", { name: /cancel stream/i })).toBeInTheDocument();
+  });
+
+  it("displays server-provided numbers when GET /cancel/preview succeeds", async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          action: "cancel",
+          allowed: true,
+          currentStatus: "active",
+          nextStatus: "cancelled",
+          token: "XLM",
+          totalAmount: (100n * ONE_TOKEN).toString(),
+          releasedAmount: "0",
+          vestedAmount: (55n * ONE_TOKEN).toString(),
+          recipientPayout: (55n * ONE_TOKEN).toString(),
+          senderRefund: (45n * ONE_TOKEN).toString(),
+          escrowDrained: (100n * ONE_TOKEN).toString(),
+          asOf: "2026-01-01T12:00:00.000Z",
+        },
+      }),
+    }) as unknown as typeof fetch;
+
+    try {
+      render(
+        <CancelStreamModal
+          isOpen
+          onClose={jest.fn()}
+          onConfirm={jest.fn()}
+          stream={streamFrom(split, "active")}
+          tokenLabel="XLM"
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("recipient-payout")).toHaveTextContent("55 XLM");
+        expect(screen.getByTestId("sender-refund")).toHaveTextContent("45 XLM");
+      });
+      expect(global.fetch).toHaveBeenCalledWith(
+        "/api/streams/stream-preview/cancel/preview",
+        expect.objectContaining({ method: "GET" }),
+      );
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it("falls back to local computation when offline (fetch fails)", async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockRejectedValue(new Error("Network error")) as unknown as typeof fetch;
+
+    try {
+      render(
+        <CancelStreamModal
+          isOpen
+          onClose={jest.fn()}
+          onConfirm={jest.fn()}
+          stream={streamFrom(split, "active")}
+          tokenLabel="XLM"
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("cancel-preview-error")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("recipient-payout")).toHaveTextContent("40 XLM");
+      expect(screen.getByTestId("sender-refund")).toHaveTextContent("60 XLM");
+      expect(screen.getByRole("button", { name: /confirm cancellation/i })).not.toBeDisabled();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it("blocks confirmation when server preview returns 409", async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: {
+          code: "ILLEGAL_TRANSITION",
+          message: "Stream is already cancelled on server.",
+        },
+      }),
+    }) as unknown as typeof fetch;
+
+    try {
+      render(
+        <CancelStreamModal
+          isOpen
+          onClose={jest.fn()}
+          onConfirm={jest.fn()}
+          stream={streamFrom(split, "active")}
+          tokenLabel="XLM"
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("cancel-blocked")).toHaveTextContent(
+          "Stream is already cancelled on server.",
+        );
+      });
+      expect(screen.getByRole("button", { name: /confirm cancellation/i })).toBeDisabled();
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 });

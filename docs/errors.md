@@ -117,6 +117,8 @@ All API errors follow a standardized envelope:
 | `INVALID_REQUEST` | 400 | Invalid Request | The request format is invalid. Please check your input. | ❌ |
 | `MISSING_REQUIRED_FIELD` | 422 | Missing Required Field | Please fill in all required fields. | ❌ |
 | `INVALID_FIELD_VALUE` | 422 | Invalid Field Value | One or more fields contain invalid values. Please check your input. | ❌ |
+| `IDEMPOTENCY_KEY_REQUIRED` | 400 | Idempotency Key Required | `Idempotency-Key` header is required for mutating operations. | ❌ |
+| `IDEMPOTENCY_KEY_INVALID` | 400 | Idempotency Key Invalid | `Idempotency-Key` must be 1–255 printable ASCII characters (`0x21`–`0x7E`) with no spaces or control characters. | ❌ |
 
 ### Idempotency Errors
 

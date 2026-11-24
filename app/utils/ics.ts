@@ -29,14 +29,73 @@ export interface VestingEvent {
 
 /**
  * Escapes special characters in ICS text fields according to RFC 5545.
- * Characters that need escaping: \ , ; : and newlines
+ * Characters that need escaping: \ , ; and newlines. Carriage returns are
+ * normalised so a raw CR never reaches the file: CRLF collapses to a single
+ * escaped newline and a lone CR becomes an escaped newline.
  */
 export function escapeIcsText(text: string): string {
   return text
+    .replace(/\r\n|\r/g, '\n')
     .replace(/\\/g, '\\\\')
     .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')
     .replace(/\n/g, '\\n');
+}
+
+/**
+ * Counts the number of UTF-8 octets a string occupies.
+ */
+function utf8ByteLength(text: string): number {
+  let bytes = 0;
+  for (const char of text) {
+    const codePoint = char.codePointAt(0) ?? 0;
+    if (codePoint <= 0x7f) {
+      bytes += 1;
+    } else if (codePoint <= 0x7ff) {
+      bytes += 2;
+    } else if (codePoint <= 0xffff) {
+      bytes += 3;
+    } else {
+      bytes += 4;
+    }
+  }
+  return bytes;
+}
+
+/**
+ * Folds a logical content line to at most 75 octets per physical line, as
+ * required by RFC 5545 section 3.1. Continuation lines start with a single
+ * space, which counts towards their own 75 octet limit, so their payload is
+ * capped at 74 octets. Multi-byte characters are never split.
+ */
+export function foldIcsLine(line: string): string {
+  if (utf8ByteLength(line) <= 75) {
+    return line;
+  }
+
+  const segments: string[] = [];
+  let current = '';
+  let currentBytes = 0;
+  let limit = 75;
+
+  for (const char of line) {
+    const charBytes = utf8ByteLength(char);
+    if (currentBytes + charBytes > limit) {
+      segments.push(current);
+      current = char;
+      currentBytes = charBytes;
+      limit = 74;
+    } else {
+      current += char;
+      currentBytes += charBytes;
+    }
+  }
+
+  if (current) {
+    segments.push(current);
+  }
+
+  return segments.join('\r\n ');
 }
 
 /**
@@ -57,9 +116,9 @@ export function generateEventUid(streamId: string, timestamp: Date): string {
 }
 
 /**
- * Converts a vesting event to ICS VEVENT format.
+ * Converts a vesting event to the logical lines of an ICS VEVENT block.
  */
-function eventToIcs(event: VestingEvent): string {
+function eventToIcs(event: VestingEvent): string[] {
   const lines = [
     'BEGIN:VEVENT',
     `UID:${event.uid}`,
@@ -75,7 +134,7 @@ function eventToIcs(event: VestingEvent): string {
   }
 
   lines.push('END:VEVENT');
-  return lines.join('\r\n');
+  return lines;
 }
 
 /**
@@ -168,11 +227,11 @@ export function generateIcsFile(
   ];
 
   events.forEach(event => {
-    lines.push(eventToIcs(event));
+    lines.push(...eventToIcs(event));
   });
 
   lines.push('END:VCALENDAR');
-  return lines.join('\r\n');
+  return lines.map(foldIcsLine).join('\r\n');
 }
 
 /**

@@ -21,13 +21,34 @@ export const WILDCARD_ORIGIN = '*';
 export const DEFAULT_CORS_METHODS = 'GET,POST,PUT,PATCH,DELETE,OPTIONS';
 export const DEFAULT_CORS_HEADERS = 'authorization, content-type, x-requested-with, x-api-key, x-streampay-actor-id, x-streampay-actor-role';
 export const DEFAULT_CORS_MAX_AGE_SECONDS = 600;
+export const MAX_CORS_MAX_AGE_SECONDS = 86400;
+
+export function resolveCorsMaxAge(raw: string | undefined): number {
+  if (raw === undefined) {
+    return DEFAULT_CORS_MAX_AGE_SECONDS;
+  }
+
+  const trimmed = raw.trim();
+  if (!/^-?\d+$/.test(trimmed)) {
+    return DEFAULT_CORS_MAX_AGE_SECONDS;
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > MAX_CORS_MAX_AGE_SECONDS) {
+    return DEFAULT_CORS_MAX_AGE_SECONDS;
+  }
+
+  return parsed;
+}
 
 /**
  * Response headers browser clients are allowed to read on a cross-origin
  * response. `x-request-id` is required for incident correlation,
- * `retry-after` for rate-limit back-off and `etag` for conditional reads.
+ * `retry-after` and `x-ratelimit-*` for rate-limit pacing/back-off and `etag`
+ * for conditional reads.
  */
-export const DEFAULT_CORS_EXPOSE_HEADERS = 'x-request-id, retry-after, etag';
+export const DEFAULT_CORS_EXPOSE_HEADERS =
+  'x-request-id, retry-after, etag, x-ratelimit-limit, x-ratelimit-remaining, x-ratelimit-reset';
 
 /**
  * The literal `Origin: null` header value. Browsers send it for sandboxed

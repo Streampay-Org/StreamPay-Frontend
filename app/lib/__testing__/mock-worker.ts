@@ -1,14 +1,14 @@
-import { Job, MockQueue } from './queue';
-import { withCorrelationContext, withJobContext, withRetryContext, logger } from './logger';
+import { Job, InMemoryQueue } from '../queue';
+import { withCorrelationContext, withJobContext, withRetryContext, logger } from '../logger';
 
 /**
  * Mock worker that processes jobs with correlation context restoration
  */
 export class MockWorker {
-  private queue: MockQueue;
+  private queue: InMemoryQueue;
   private processor: (job: Job) => Promise<void>;
 
-  constructor(queue: MockQueue, processor: (job: Job) => Promise<void>) {
+  constructor(queue: InMemoryQueue, processor: (job: Job) => Promise<void>) {
     this.queue = queue;
     this.processor = processor;
   }
@@ -89,7 +89,7 @@ export class MockWorker {
     const jobs = this.queue.getAllJobs();
     
     logger.info('Worker starting batch processing', {
-      queue_name: this.queue['queueName'],
+      queue_name: this.queue.getStats().queueName,
       job_count: jobs.length,
     });
 
@@ -106,7 +106,7 @@ export class MockWorker {
     }
 
     logger.info('Worker batch processing completed', {
-      queue_name: this.queue['queueName'],
+      queue_name: this.queue.getStats().queueName,
       job_count: jobs.length,
     });
   }

@@ -58,3 +58,26 @@ fn err_discriminants_from_19_to_22_are_stable() {
     assert_eq!(Error::AdminCooldown as u32, 21);
     assert_eq!(Error::CooloffActive as u32, 22);
 }
+
+#[test]
+fn err_discriminant_23_is_stable() {
+    assert_eq!(Error::AmountTooLarge as u32, 23);
+}
+
+#[test]
+fn err_discriminant_26_is_stable() {
+    assert_eq!(Error::NoPendingTransfer as u32, 26);
+}
+
+#[test]
+fn err_discriminants_24_to_25_are_stable() {
+    assert_eq!(Error::NotDormant as u32, 24);
+    assert_eq!(Error::DormancyDisabled as u32, 25);
+}
+
+fn err_discriminant_24_is_stable() {
+    assert_eq!(Error::NoPendingTransfer as u32, 24);
+}
+
+    assert_eq!(Error::InvalidSchedule as u32, 24);
+}

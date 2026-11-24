@@ -10,6 +10,7 @@ import {
 } from "../components/ActivityTimeline";
 import type { StateTriadState } from "../components/StateTriad";
 import { LiveRegion } from "../components/LiveRegion";
+import { DateRangePicker } from "../components/DateRangePicker";
 import {
   DEFAULT_TIME_ZONE,
   getDisplayTimeZone,
@@ -17,6 +18,11 @@ import {
 } from "../lib/timezone";
 
 type ActivityPageState = "loading" | "populated" | "empty" | "error";
+
+interface DateRange {
+  startDate: string;
+  endDate: string;
+}
 
 type RawActivityEvent = {
   id: string;
@@ -111,6 +117,10 @@ export default function ActivityPage() {
   const [activityEvents, setActivityEvents] = useState<RawActivityEvent[]>([]);
   const [timeZone, setTimeZone] = useState<string>(DEFAULT_TIME_ZONE);
   const [loadKey, setLoadKey] = useState(0);
+  const [dateRange, setDateRange] = useState<DateRange>({
+    startDate: "",
+    endDate: "",
+  });
 
   useEffect(() => {
     setTimeZone(getDisplayTimeZone());
@@ -126,13 +136,21 @@ export default function ActivityPage() {
     setLoadKey((k) => k + 1);
   }, []);
 
+  const handleDateRangeChange = useCallback((range: DateRange) => {
+    setDateRange(range);
+  }, []);
+
   useEffect(() => {
     let mounted = true;
     setPageState("loading");
 
     async function fetchActivity() {
       try {
-        const res = await fetch("/api/activity?limit=50", {
+        const params = new URLSearchParams({ limit: "50" });
+        if (dateRange.startDate) params.set("from", dateRange.startDate);
+        if (dateRange.endDate) params.set("to", dateRange.endDate);
+
+        const res = await fetch(`/api/activity?${params.toString()}`, {
           headers: {
             "x-tenant-id": "default-tenant", // Assuming a tenant or passing whatever is available
           }
@@ -157,7 +175,9 @@ export default function ActivityPage() {
     void fetchActivity();
 
     return () => { mounted = false; };
-  }, [loadKey]);
+  }, [loadKey, dateRange.startDate, dateRange.endDate]);
+
+  const hasDateRange = Boolean(dateRange.startDate || dateRange.endDate);
 
   // Map to StateTriad state
   const getTriadState = (): StateTriadState => {
@@ -225,6 +245,15 @@ export default function ActivityPage() {
           </div>
         </div>
 
+        <div className="activity-filters flex flex-col gap-2">
+          <DateRangePicker
+            startDate={dateRange.startDate}
+            endDate={dateRange.endDate}
+            onChange={handleDateRangeChange}
+            label="Filter by date"
+          />
+        </div>
+
         <StateTriad
           state={getTriadState()}
           loading={{
@@ -232,9 +261,12 @@ export default function ActivityPage() {
           }}
           empty={{
             eyebrow: "Activity",
-            title: "Activity will appear here",
-            description:
-              "Any payment stream updates, payments, or wallet events will show up once activity begins. Stay connected to monitor your flow.",
+            title: hasDateRange
+              ? "No activity in this range"
+              : "Activity will appear here",
+            description: hasDateRange
+              ? "No events matched the selected dates. Try widening the range to see more activity."
+              : "Any payment stream updates, payments, or wallet events will show up once activity begins. Stay connected to monitor your flow.",
             actionLabel: "View Streams",
             onAction: () => {
               window.location.href = "/streams";

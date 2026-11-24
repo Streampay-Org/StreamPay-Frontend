@@ -13,6 +13,22 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import "@testing-library/jest-dom";
 import { CreateStreamForm } from "./CreateStreamForm";
 import { shortcutKeys } from "@/lib/shortcuts";
+import {
+  FederationError,
+  resolveFederationAddress,
+} from "./utils/federation";
+
+jest.mock("./utils/federation", () => {
+  const actual = jest.requireActual("./utils/federation");
+  return {
+    ...actual,
+    resolveFederationAddress: jest.fn(),
+  };
+});
+
+const mockedResolveFederation = resolveFederationAddress as jest.MockedFunction<
+  typeof resolveFederationAddress
+>;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -573,5 +589,142 @@ describe("CreateStreamForm — registry-backed shortcuts (issue #1649)", () => {
     fireEvent.keyDown(document, { key: "Escape", metaKey: true });
 
     expect(onCancel).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Federation address resolution
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("CreateStreamForm — federation address resolution", () => {
+  const RESOLVED_G =
+    "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZLPXE";
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    mockedResolveFederation.mockReset();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("mentions federation addresses in the recipient hint", () => {
+    render(<CreateStreamForm onSubmit={resolvedSubmit()} />);
+    const hint = document.querySelector("#csf-recipient-hint");
+    expect(hint).toHaveTextContent(/federation address/i);
+  });
+
+  it("does not call federation for a plain valid Stellar G address", () => {
+    render(<CreateStreamForm onSubmit={resolvedSubmit()} />);
+
+    fireEvent.change(screen.getByLabelText(/recipient address/i), {
+      target: { value: RESOLVED_G },
+    });
+
+    act(() => {
+      jest.advanceTimersByTime(500);
+    });
+
+    expect(mockedResolveFederation).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("csf-recipient-loading")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("csf-recipient-resolved")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create stream/i })).toBeEnabled();
+  });
+
+  it("resolves alice*example.com, shows loading & CopyAddress, and submits the resolved G address", async () => {
+    const onSubmit = resolvedSubmit();
+    mockedResolveFederation.mockResolvedValueOnce({
+      stellar_address: "alice*example.com",
+      account_id: RESOLVED_G,
+    });
+
+    render(<CreateStreamForm onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByLabelText(/recipient address/i), {
+      target: { value: "alice*example.com" },
+    });
+    fireEvent.change(screen.getByLabelText(/amount/i), {
+      target: { value: "42" },
+    });
+
+    // While resolving, loading indicator is shown and submit is disabled
+    expect(screen.getByTestId("csf-recipient-loading")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create stream/i })).toBeDisabled();
+
+    await act(async () => {
+      jest.advanceTimersByTime(350);
+      await Promise.resolve();
+    });
+
+    expect(mockedResolveFederation).toHaveBeenCalledWith("alice*example.com");
+    expect(screen.queryByTestId("csf-recipient-loading")).not.toBeInTheDocument();
+    expect(screen.getByTestId("csf-recipient-resolved")).toHaveTextContent(
+      /GAHJJJ\.\.\.KZLPXE/,
+    );
+    expect(screen.getByRole("button", { name: /create stream/i })).toBeEnabled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /create stream/i }));
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      recipient: RESOLVED_G,
+      amount: "42",
+      token: "XLM",
+    });
+  });
+
+  it("shows an accessible error and disables submit when federation resolution fails", async () => {
+    mockedResolveFederation.mockRejectedValueOnce(
+      new FederationError(
+        'Federation address "missing*example.com" was not found',
+        "NOT_FOUND",
+      ),
+    );
+
+    render(<CreateStreamForm onSubmit={resolvedSubmit()} />);
+
+    const recipientInput = screen.getByLabelText(/recipient address/i);
+    fireEvent.change(recipientInput, {
+      target: { value: "missing*example.com" },
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(350);
+      await Promise.resolve();
+    });
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/not found/i);
+    expect(recipientInput).toHaveAttribute("aria-invalid", "true");
+    expect(recipientInput.getAttribute("aria-describedby")).toContain(
+      "csf-recipient-error",
+    );
+    expect(screen.getByRole("button", { name: /create stream/i })).toBeDisabled();
+  });
+
+  it("surfaces a required memo when returned by the federation server", async () => {
+    mockedResolveFederation.mockResolvedValueOnce({
+      stellar_address: "exchange*example.com",
+      account_id: RESOLVED_G,
+      memo_type: "id",
+      memo: "987654",
+    });
+
+    render(<CreateStreamForm onSubmit={resolvedSubmit()} />);
+
+    fireEvent.change(screen.getByLabelText(/recipient address/i), {
+      target: { value: "exchange*example.com" },
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(350);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId("csf-recipient-memo")).toHaveTextContent(
+      /Required memo \(id\): 987654/,
+    );
   });
 });

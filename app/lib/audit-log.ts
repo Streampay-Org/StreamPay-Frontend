@@ -13,7 +13,19 @@ import type {
   AuditCheckpoint,
 } from "@/app/types/audit";
 import type { DeepArchiveEntry, DeepArchiveResult } from "@/app/types/audit";
-export type { DeepArchiveEntry, DeepArchiveResult, AuditCheckpoint };
+import type {
+  AuditLogStore,
+  AuditLogStoreMode,
+  AuditPaginatedResult,
+} from "@/app/lib/audit-log-store";
+export type {
+  DeepArchiveEntry,
+  DeepArchiveResult,
+  AuditCheckpoint,
+  AuditLogStore,
+  AuditLogStoreMode,
+  AuditPaginatedResult,
+};
 
 export const AUDIT_LOG_RETENTION_DAYS = 30;
 
@@ -63,9 +75,41 @@ function getAuditChainKey(): string {
   return TEST_AUDIT_CHAIN_KEY;
 }
 
-function hashValue(value: unknown): string {
+export function hashAuditValue(value: unknown): string {
   const key = getAuditChainKey();
   return createHmac("sha256", key).update(JSON.stringify(sortKeys(value))).digest("hex");
+}
+
+export interface ComputeEntryHashInput {
+  action: string;
+  actor: AuditActor;
+  afterHash: string | null;
+  beforeHash: string | null;
+  diffHash: string | null;
+  metadata?: Record<string, AuditMetadataValue> | null;
+  prevHash: string | null;
+  requestId: string;
+  target: AuditEntry["target"];
+  timestamp: string;
+}
+
+export function computeEntryHash(input: ComputeEntryHashInput): string {
+  return hashAuditValue({
+    action: input.action,
+    actor: input.actor,
+    afterHash: input.afterHash,
+    beforeHash: input.beforeHash,
+    diffHash: input.diffHash,
+    metadata: input.metadata ?? null,
+    prevHash: input.prevHash,
+    requestId: input.requestId,
+    target: input.target,
+    timestamp: input.timestamp,
+  });
+}
+
+function hashValue(value: unknown): string {
+  return hashAuditValue(value);
 }
 
 function cloneValue<T>(value: T): T {
@@ -89,13 +133,17 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-function addRetention(timestamp: string): string {
+export function addAuditRetention(timestamp: string): string {
   const retentionDate = new Date(timestamp);
   retentionDate.setUTCDate(retentionDate.getUTCDate() + AUDIT_LOG_RETENTION_DAYS);
   return retentionDate.toISOString();
 }
 
-function redactTargetAccount(account: string | undefined): string | null {
+function addRetention(timestamp: string): string {
+  return addAuditRetention(timestamp);
+}
+
+export function redactTargetAccount(account: string | undefined): string | null {
   if (!account) {
     return null;
   }
@@ -105,7 +153,29 @@ function redactTargetAccount(account: string | undefined): string | null {
   return `${account.slice(0, 4)}***${account.slice(-4)}`;
 }
 
-export class AppendOnlyAuditLogStore {
+export function toAuditExportRow(entry: AuditEntry): AuditExportRow {
+  return {
+    action: entry.action,
+    actorId: entry.actor.id,
+    actorRole: entry.actor.role,
+    afterHash: entry.afterHash,
+    beforeHash: entry.beforeHash,
+    diffHash: entry.diffHash,
+    entryHash: entry.entryHash,
+    id: entry.id,
+    metadata: entry.metadata,
+    prevHash: entry.prevHash,
+    redactedTargetAccount: redactTargetAccount(entry.target.account),
+    redactionPolicy: "mask-target-account",
+    requestId: entry.requestId,
+    retentionUntil: entry.retentionUntil,
+    targetId: entry.target.id,
+    targetType: entry.target.type,
+    timestamp: entry.timestamp,
+  };
+}
+
+export class AppendOnlyAuditLogStore implements AuditLogStore {
   private readonly entries: AuditEntry[] = [];
   private readonly archivedEntries: AuditEntry[] = [];
   private readonly deepArchivedEntries: DeepArchiveEntry[] = [];
@@ -125,7 +195,7 @@ export class AppendOnlyAuditLogStore {
           })
         : null);
     const prevHash = lastEntry?.entryHash ?? null;
-    const entryHash = hashValue({
+    const entryHash = computeEntryHash({
       action: input.action,
       actor: input.actor,
       afterHash,
@@ -333,7 +403,7 @@ export class AppendOnlyAuditLogStore {
     let previousHash: string | null = chain[0].prevHash;
 
     for (const entry of chain) {
-      const recalculatedHash = hashValue({
+      const recalculatedHash = computeEntryHash({
         action: entry.action,
         actor: entry.actor,
         afterHash: entry.afterHash,
@@ -360,11 +430,11 @@ export class AppendOnlyAuditLogStore {
     return true;
   }
 
-  updateEntry(_id: string, _changes: Partial<AuditEntry>) {
+  updateEntry(_id: string, _changes: Partial<AuditEntry>): never {
     throw new Error("AUDIT_LOG_APPEND_ONLY");
   }
 
-  deleteEntry(_id: string) {
+  deleteEntry(_id: string): never {
     throw new Error("AUDIT_LOG_APPEND_ONLY");
   }
 
@@ -535,25 +605,7 @@ export class AppendOnlyAuditLogStore {
   }
 
   private toExportRow(entry: AuditEntry): AuditExportRow {
-    return {
-      action: entry.action,
-      actorId: entry.actor.id,
-      actorRole: entry.actor.role,
-      afterHash: entry.afterHash,
-      beforeHash: entry.beforeHash,
-      diffHash: entry.diffHash,
-      entryHash: entry.entryHash,
-      id: entry.id,
-      metadata: entry.metadata,
-      prevHash: entry.prevHash,
-      redactedTargetAccount: redactTargetAccount(entry.target.account),
-      redactionPolicy: "mask-target-account",
-      requestId: entry.requestId,
-      retentionUntil: entry.retentionUntil,
-      targetId: entry.target.id,
-      targetType: entry.target.type,
-      timestamp: entry.timestamp,
-    };
+    return toAuditExportRow(entry);
   }
 
 }

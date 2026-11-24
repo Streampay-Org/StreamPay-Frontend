@@ -29,6 +29,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { idempotencyKeyErrorResponse, validateIdempotencyKey } from "@/app/lib/idempotency";
 import {
   checkIdempotency,
   computeFingerprint,
@@ -156,7 +157,15 @@ async function handleMultiRecipientPost(request: Request) {
   }
 
   // ── 3. Idempotency ─────────────────────────────────────────────────────────
-  const idempotencyKey = request.headers.get("Idempotency-Key");
+  const rawIdempotencyKey = request.headers.get("Idempotency-Key");
+  let idempotencyKey: string | null = null;
+  if (rawIdempotencyKey !== null) {
+    const keyValidation = validateIdempotencyKey(rawIdempotencyKey);
+    if (!keyValidation.ok) {
+      return idempotencyKeyErrorResponse(keyValidation.reason);
+    }
+    idempotencyKey = keyValidation.key;
+  }
   const cacheToken = idempotencyKey
     ? idempotencyToken(IDEMPOTENCY_SCOPE, idempotencyKey)
     : null;

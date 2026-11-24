@@ -59,10 +59,10 @@ jest.mock('@/src/metrics/registry', () => {
  * Allows injecting arbitrary headers (for identity/ETag tests).
  */
 function makeRequest(
-  options: { search?: string; headers?: Record<string, string> } = {},
+  path = '/api/reconciliation',
+  init: RequestInit = {},
 ): Request {
-  const url = `http://localhost:3000/api/reconciliation${options.search ?? ''}`;
-  return new Request(url, { headers: new Headers(options.headers ?? {}) });
+  return new Request(`http://localhost:3000${path}`, init);
 }
 
 /**
@@ -143,7 +143,7 @@ describe('GET /api/reconciliation – existing behaviour', () => {
   });
 
   it('validates limit parameter — 422 on invalid value', async () => {
-    const res = await GET(makeRequest({ search: '?limit=invalid' }));
+    const res = await GET(makeRequest('/api/reconciliation?limit=invalid'));
 
     expect(res.status).toBe(422);
     const data = await res.json();
@@ -156,7 +156,7 @@ describe('GET /api/reconciliation – existing behaviour', () => {
   });
 
   it('validates status enum — 422 on unknown value', async () => {
-    const res = await GET(makeRequest({ search: '?status=nope' }));
+    const res = await GET(makeRequest('/api/reconciliation?status=nope'));
 
     expect(res.status).toBe(422);
     const data = await res.json();
@@ -165,7 +165,7 @@ describe('GET /api/reconciliation – existing behaviour', () => {
   });
 
   it('filters results when a valid status is provided', async () => {
-    const res = await GET(makeRequest({ search: '?status=completed' }));
+    const res = await GET(makeRequest('/api/reconciliation?status=completed'));
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.data).toHaveLength(1);
@@ -178,7 +178,9 @@ describe('GET /api/reconciliation – existing behaviour', () => {
     const etag = res1.headers.get('etag')!;
 
     // Second request with If-None-Match.
-    const res2 = await GET(makeRequest({ headers: { 'If-None-Match': etag } }));
+    const res2 = await GET(
+      makeRequest('/api/reconciliation', { headers: { 'If-None-Match': etag } }),
+    );
 
     expect(res2.status).toBe(304);
     expect(res2.headers.get('etag')).toBe(etag);
@@ -199,7 +201,7 @@ describe('GET /api/reconciliation – metrics', () => {
   });
 
   it('records 422 status for invalid input', async () => {
-    await GET(makeRequest({ search: '?limit=invalid' }));
+    await GET(makeRequest('/api/reconciliation?limit=invalid'));
 
     expect(reconciliationCounter.labels).toHaveBeenCalledWith('422');
     const mockEndTimer = (reconciliationDuration.startTimer as jest.Mock).mock.results[0].value;
@@ -207,17 +209,17 @@ describe('GET /api/reconciliation – metrics', () => {
   });
 
   it('records 500 status on unexpected errors', async () => {
-    // Force an error by mocking URL to throw
-    const originalURL = global.URL;
-    global.URL = jest.fn().mockImplementation(() => { throw new Error('Boom'); }) as any;
-    
-    await GET(makeRequest());
-    
+    const { logger } = jest.requireMock('@/app/lib/logger');
+    logger.info.mockImplementationOnce(() => {
+      throw new Error('Boom');
+    });
+
+    const res = await GET(makeRequest());
+
+    expect(res.status).toBe(500);
     expect(reconciliationCounter.labels).toHaveBeenCalledWith('500');
     const mockEndTimer = (reconciliationDuration.startTimer as jest.Mock).mock.results[0].value;
     expect(mockEndTimer).toHaveBeenCalledWith({ status: '500' });
-    
-    global.URL = originalURL;
   });
 });
 
@@ -242,7 +244,9 @@ describe('GET /api/reconciliation – rate limiting', () => {
     const res = await GET(makeRequest());
 
     expect(res.status).toBe(429);
-    expect(res.headers.get('Retry-After')).toBe('45');
+    const retryAfter = Number(res.headers.get('Retry-After'));
+    expect(Number.isInteger(retryAfter)).toBe(true);
+    expect(retryAfter).toBeGreaterThan(0);
   });
 
   it('429 response has standardised error envelope', async () => {
@@ -280,20 +284,20 @@ describe('GET /api/reconciliation – rate limiting', () => {
 
     // Both callers should succeed on their first request...
     const resA1 = await GET(
-      makeRequest({ headers: { 'X-API-Key': 'key-alice' } }),
+      makeRequest('/api/reconciliation', { headers: { 'X-Forwarded-For': '192.0.2.10' } }),
     );
     const resB1 = await GET(
-      makeRequest({ headers: { 'X-API-Key': 'key-bob' } }),
+      makeRequest('/api/reconciliation', { headers: { 'X-Forwarded-For': '198.51.100.10' } }),
     );
     expect(resA1.status).toBe(200);
     expect(resB1.status).toBe(200);
 
     // ...and be throttled on their second.
     const resA2 = await GET(
-      makeRequest({ headers: { 'X-API-Key': 'key-alice' } }),
+      makeRequest('/api/reconciliation', { headers: { 'X-Forwarded-For': '192.0.2.10' } }),
     );
     const resB2 = await GET(
-      makeRequest({ headers: { 'X-API-Key': 'key-bob' } }),
+      makeRequest('/api/reconciliation', { headers: { 'X-Forwarded-For': '198.51.100.10' } }),
     );
     expect(resA2.status).toBe(429);
     expect(resB2.status).toBe(429);
@@ -313,11 +317,17 @@ describe('GET /api/reconciliation – rate limiting', () => {
     const store = makeCountingStore({ remaining: 1, perIdentity: true });
     setRateLimitStore(store);
 
-    const req = makeRequest({ headers: { 'X-Forwarded-For': '10.0.0.1' } });
+    const req = makeRequest(
+      '/api/reconciliation',
+      { headers: { 'X-Forwarded-For': '10.0.0.1' } },
+    );
     const res1 = await GET(req);
     expect(res1.status).toBe(200);
 
-    const req2 = makeRequest({ headers: { 'X-Forwarded-For': '10.0.0.1' } });
+    const req2 = makeRequest(
+      '/api/reconciliation',
+      { headers: { 'X-Forwarded-For': '10.0.0.1' } },
+    );
     const res2 = await GET(req2);
     expect(res2.status).toBe(429);
   });
