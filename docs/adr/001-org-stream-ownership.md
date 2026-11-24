@@ -95,11 +95,23 @@ New endpoints:
 ```
 POST   /api/orgs                              → Create org
 GET    /api/orgs/:orgId                       → Get org (members, policy)
+PATCH  /api/orgs/:orgId                       → Rename org (owner-only)
+DELETE /api/orgs/:orgId                       → Delete an empty org (owner-only)
 POST   /api/orgs/:orgId/members               → Add member
+PATCH  /api/orgs/:orgId/members               → Change member role (owner-only)
+DELETE /api/orgs/:orgId/members               → Remove member (owner-only)
 GET    /api/streams/:id/approvals             → List pending approvals for a stream
 POST   /api/streams/:id/approvals             → Initiate an approval (settle/stop)
 POST   /api/streams/:id/approvals/:approvalId/approve  → Cast an approval vote
 ```
+
+Org mutations require the `Actor-Wallet-Address` header to name an `owner`
+member. Member role changes and removals are rejected with `409 LAST_OWNER`
+when they would leave the org without an owner. An org cannot be deleted while
+`streamOwnership` still references it (`409 ORG_HAS_STREAMS`) or while it has
+active pending approvals (`409 ORG_HAS_PENDING_APPROVALS`). Every successful
+mutation appends an audit entry with `metadata.orgId`, so it appears under
+`GET /api/orgs/:orgId/audit`.
 
 Existing stream action routes (`/start`, `/pause`, `/stop`, `/settle`, `/withdraw`, `/batch/start`, `/batch/stop`) enforce mandatory org RBAC via `enforceStreamRbac`:
 - If the stream is org-owned, a verified actor identity is required and checked against the org policy before state transitions or business logic.

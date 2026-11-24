@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo } from "react";
+import { createPortal } from "react-dom";
 import { Modal } from "./Modal";
 import { getSortedProviders, setMRUWalletId, type WalletProvider } from "../state/walletPrefs";
 
@@ -68,7 +69,9 @@ export function WalletModal({ isOpen, onClose, onSelect }: WalletModalProps) {
     onClose();
   };
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <Modal isOpen={isOpen} onClose={onClose} title="Connect Wallet">
       <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "1rem" }}>
         {providers.map((provider) => {
@@ -172,6 +175,7 @@ export function WalletModal({ isOpen, onClose, onSelect }: WalletModalProps) {
           wallet compatibility docs
         </a>
       </div>
-    </Modal>
+    </Modal>,
+    document.body,
   );
 }
