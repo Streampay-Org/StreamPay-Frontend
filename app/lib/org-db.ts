@@ -181,6 +181,9 @@ export function _resetOrgDbForTesting(): void {
   orgDb.orgs.clear();
   for (const org of seedOrgs) {
     orgDb.orgs.set(org.id, cloneSeedOrg(org));
+      members: org.members.map((member) => ({ ...member })),
+      },
+    });
   }
   orgDb.streamOwnership.clear();
   orgDb.streamOwnership.set("stream-ada", "org-acme");

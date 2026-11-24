@@ -54,6 +54,14 @@ and must never be reused — see the module rustdoc for details.
   pause-aware effective-time computation for milestones, `amend_stream` rejects
   milestone streams with `Error::InvalidState`, and `migrate` advances storage
   to version `3` to backfill `curve: ReleaseCurve::Linear` on legacy v2 records.
+- **Recipient reject of draft streams.** `reject_stream(stream_id)` lets a
+  stream's recipient decline a `Draft` stream created for them. It requires
+  recipient authorisation, honours the contract-wide pause flag, and returns
+  `InvalidState` for any stream that is not a draft (including a second reject).
+  The full escrow is refunded to the sender, the stream becomes `Cancelled`, the
+  sender's stream count is decremented as in `cancel_stream`, and a
+  `("stream", "rejected")` event (`stream_id`, `recipient`, `returned_amount`,
+  `timestamp`) is emitted after the transfer.
 - **Split stream pause/resume.** `pause_split_stream` and
   `resume_split_stream` let a split stream's sender freeze and restart
   accrual for every recipient. Pausing records `pause_time`; resuming adds the

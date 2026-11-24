@@ -2,6 +2,10 @@ node_modules/
 .next/
 out/
 coverage/
+playwright-report/
+test-results/
+playwright/.cache/
+ms-playwright/
 .env
 .env.local
 .env.*.local
@@ -33,3 +37,6 @@ Desktop.ini
 litellm_config.yaml
 .vercel
 .lighthouseci/
+
+# Partner SDK build output
+lib/sdk/dist/
