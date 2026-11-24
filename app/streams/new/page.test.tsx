@@ -7,6 +7,25 @@ import { render, fireEvent } from "@testing-library/react";
 const { screen, waitFor, within } = require("@testing-library/react") as any;
 import NewStreamPage from "./page";
 
+const mockFetch = jest.fn();
+const createdStreamResponse = {
+  ok: true,
+  status: 201,
+  headers: new Headers({ "content-type": "application/json" }),
+  json: async () => ({ data: { id: "stream-created" } }),
+} as Response;
+
+beforeEach(() => {
+  window.fetch = mockFetch as typeof fetch;
+  document.cookie = 'csrf-token=wizard-csrf-token; Path=/';
+  mockFetch.mockResolvedValue(createdStreamResponse);
+});
+
+afterEach(() => {
+  mockFetch.mockReset();
+  document.cookie = 'csrf-token=; Max-Age=0; Path=/';
+});
+
 // Mock recentRecipients module
 jest.mock("../../state/recentRecipients", () => ({
   addRecentRecipient: jest.fn(),
@@ -199,6 +218,7 @@ describe("NewStreamPage - Color-Blind Safe Patterns", () => {
 
   it("applies cb-pattern--draft class to submit button during submission", async () => {
     window.matchMedia = createMockMedia(false) as any;
+    mockFetch.mockImplementation(() => new Promise(() => {}));
     render(<NewStreamPage />);
 
     const recipientInput = screen.getByLabelText(/recipient address/i);
@@ -241,6 +261,7 @@ describe("NewStreamPage - Color-Blind Safe Patterns", () => {
 
   it("applies cb-pattern--draft to BottomSheet confirm button during submission", async () => {
     window.matchMedia = createMockMedia(true) as any;
+    mockFetch.mockImplementation(() => new Promise(() => {}));
     render(<NewStreamPage />);
 
     const recipientInput = screen.getByLabelText(/recipient address/i);

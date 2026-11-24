@@ -12,6 +12,7 @@
 "use client";
 
 import { useMemo, useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { StreamRow, type StreamRowData } from "../components/StreamRow";
 import {
   CompareStreamsModal,
@@ -112,6 +113,7 @@ const streamListCopy = {
   populatedCount: (n: number) => `${n} active record${n === 1 ? "" : "s"}`,
   primaryCta: "Create Stream",
   exportCta: "Export History",
+  importCta: "Import CSV",
 } as const;
 
 type StreamsPageContentProps = {
@@ -335,6 +337,9 @@ export function StreamsPageContent({
             alignItems: "center",
           }}
         >
+          <Link className="button button--secondary" href="/streams/import">
+            {streamListCopy.importCta}
+          </Link>
           <button className="button button--secondary" type="button">
             {streamListCopy.exportCta}
           </button>

@@ -1,5 +1,5 @@
-import { StreamsPageContent } from "./StreamsPageContent";
+import { StreamsDashboard } from "./StreamsDashboard";
 
 export default function StreamsPage() {
-  return <StreamsPageContent />;
+  return <StreamsDashboard />;
 }

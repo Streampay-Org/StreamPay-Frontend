@@ -77,6 +77,7 @@ export class InMemoryOrgQuotaStore implements OrgQuotaStore {
     // Clean up stale entries every hour so long-running processes don't leak.
     if (typeof setInterval !== "undefined") {
       this.cleanupInterval = setInterval(() => this.cleanup(), 60 * 60 * 1_000);
+      this.cleanupInterval.unref?.();
     }
   }
 

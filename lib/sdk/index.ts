@@ -1,7 +1,7 @@
-import { redactDiagnosticBody } from "./redact";
-import { SdkErrorCode } from "./types";
+import { redactDiagnosticBody } from "./redact.js";
+import { SdkErrorCode } from "./types.js";
 
-export { SdkErrorCode } from "./types";
+export { SdkErrorCode } from "./types.js";
 export type StreamStatus =
   | "draft"
   | "active"
