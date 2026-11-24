@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { WalletConnection } from "./WalletConnection";
 import { useEffect, useState } from "react";
 import {
   ADMIN_CREDENTIAL_CHANGED_EVENT,
@@ -12,6 +13,7 @@ import {
 const LINKS = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/streams", label: "Streams" },
+  { href: "/approvals", label: "Approvals" },
   { href: "/activity", label: "Activity" },
   { href: "/contacts", label: "Contacts" },
   { href: "/templates", label: "Templates" },
@@ -90,6 +92,7 @@ export function SiteHeader() {
         <Link href="/streams/new" className="button button--primary site-header__cta">
           New stream
         </Link>
+        <WalletConnection />
       </div>
     </header>
   );

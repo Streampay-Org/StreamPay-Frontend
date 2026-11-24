@@ -496,6 +496,17 @@ export function StreamDetailClient({
                 {isProcessing ? "Processing..." : nextAction}
               </button>
 
+              {(current.status === "active" || current.status === "paused") && (
+                <button
+                  className="button button--secondary detail-action-btn"
+                  type="button"
+                  onClick={() => void beginAction("settle")}
+                  disabled={isProcessing || mutationsDisabled}
+                >
+                  Settle Stream
+                </button>
+              )}
+
               <Link
                 href={`/streams/${current.id}/receipt`}
                 className="button button--secondary detail-action-btn"
