@@ -8,6 +8,7 @@ import { WalletConnection } from "./WalletConnection";
 const LINKS = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/streams", label: "Streams" },
+  { href: "/approvals", label: "Approvals" },
   { href: "/activity", label: "Activity" },
   { href: "/contacts", label: "Contacts" },
   { href: "/templates", label: "Templates" },
