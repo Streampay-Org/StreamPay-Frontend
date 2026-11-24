@@ -62,10 +62,6 @@
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },
     {
-      "path": "app/api/v2/streams/batch/route.test.ts",
-      "reason": "Pre-existing failure on main; quarantined until fixed"
-    },
-    {
       "path": "app/api/v2/streams/multi/route.test.ts",
       "reason": "Pre-existing failure on main; quarantined until fixed"
     },

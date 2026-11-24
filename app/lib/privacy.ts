@@ -81,7 +81,7 @@ function redactValue(data: any, seen: WeakSet<object>): any {
 /**
  * Retention period: 7 years in milliseconds.
  */
-const RETENTION_PERIOD_MS = 7 * 365 * 24 * 60 * 60 * 1000;
+export const RETENTION_PERIOD_MS = 7 * 365 * 24 * 60 * 60 * 1000;
 
 /**
  * Mask an email address for non-admin roles.
@@ -110,11 +110,22 @@ export function scrubStreamPII(stream: Stream, role: 'admin' | 'user' = 'user'):
 
 /**
  * Check if a record is past its retention period.
+ *
+ * `now` is injectable so jobs and tests can pin the clock. Unparsable dates are
+ * never considered past retention: purging on a bad timestamp would destroy
+ * data that may still be inside the window.
  */
-export function isPastRetention(createdAt: string): boolean {
-  const createdDate = new Date(createdAt).getTime();
-  const now = Date.now();
-  return now - createdDate > RETENTION_PERIOD_MS;
+export function isPastRetention(
+  createdAt: string,
+  now: number | Date = Date.now()
+): boolean {
+  const createdMs = Date.parse(createdAt);
+  if (!Number.isFinite(createdMs)) return false;
+
+  const nowMs = now instanceof Date ? now.getTime() : now;
+  if (!Number.isFinite(nowMs)) return false;
+
+  return nowMs - createdMs > RETENTION_PERIOD_MS;
 }
 
 /**

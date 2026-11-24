@@ -355,8 +355,15 @@ The following endpoints support multi-tenant organization management:
 - `GET /api/orgs/[orgId]/members`: List organization members (Member-only). Supports keyset pagination via `limit` (default `20`, min `1`, max `100`) and `cursor` (opaque base64 keyset cursor ordered by `addedAt`, then `walletAddress`). Returns `meta: { total, hasNext, nextCursor }`.
 
 Invalid `limit` values return `422 VALIDATION_ERROR`; malformed `cursor` values return `422 INVALID_CURSOR`.
+- `PATCH /api/orgs/[orgId]/members`: Change a member's role (Owner-only; rejects demoting the last owner).
+- `DELETE /api/orgs/[orgId]/members`: Remove a member, by body or `?walletAddress=` (Owner-only; rejects removing the last owner).
+- `PATCH /api/orgs/[orgId]`: Rename an organization (Owner-only).
+- `DELETE /api/orgs/[orgId]`: Delete an organization with no owned streams or pending approvals (Owner-only).
 
-These endpoints require a valid JWT token obtained via `POST /api/auth/wallet` in the `Authorization: Bearer <token>` header.
+In the MVP, org mutations authorise via the `Actor-Wallet-Address` header
+naming an `owner` member. Production deployments should gate these endpoints
+behind a valid JWT token obtained via `POST /api/auth/wallet` in the
+`Authorization: Bearer <token>` header.
 
 ## Documentation index
 

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { withIdempotency, settleStore } from "@/app/lib/idempotency";
-import { getCorrelationContext } from "@/app/lib/logger";
+import { getCorrelationContext, logger } from "@/app/lib/logger";
+import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
+import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+import { getStellarSettlementClient } from "@/app/lib/stellar";
+import { streamsRateLimit } from "@/src/middleware/rateLimit";
 import { enforceStreamRbac, resolveActorAddress } from "@/app/lib/org-policy";
 import { settleStreamById } from "@/app/lib/settle-stream";
 
@@ -42,6 +46,14 @@ export async function POST(
 )
 {
   const { id } = await params;
+
+  // Rate limit guard — applied before auth/RBAC so throttled callers cannot
+  // probe stream ownership by burning through the write bucket. Matches pause.
+  const rateCheck = await streamsRateLimit(request, "POST", `/api/streams/${id}/settle`);
+  if (!rateCheck.allowed) {
+    return rateCheck.response;
+  }
+
   let actorAddress: string | null = null;
   try {
     actorAddress = resolveActorAddress(request);

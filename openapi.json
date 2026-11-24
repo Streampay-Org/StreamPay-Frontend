@@ -1596,7 +1596,7 @@
       "get": {
         "operationId": "listActivity",
         "summary": "List activity events",
-        "description": "Returns a paginated, cursor-based list of activity events for the authenticated caller. Only events for streams the caller sends or receives, plus the caller's own wallet events, are returned. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId and event type.",
+        "description": "Returns a paginated, cursor-based list of activity events for the authenticated caller. Only events for streams the caller sends or receives, plus the caller's own wallet events, are returned. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId, event type, and an inclusive from/to date range.",
         "tags": [
           "Activity"
         ],
@@ -1639,6 +1639,40 @@
             "description": "Filter events by a known type (e.g. stream.created, wallet.connected).",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Inclusive lower bound for event timestamps. Accepts an ISO date (YYYY-MM-DD, treated as 00:00:00 UTC) or an ISO datetime.",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              ]
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Inclusive upper bound for event timestamps. Accepts an ISO date (YYYY-MM-DD, treated as 23:59:59.999 UTC) or an ISO datetime.",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              ]
             }
           }
         ],
@@ -1688,7 +1722,7 @@
             }
           },
           "422": {
-            "description": "Unprocessable entity — invalid limit (INVALID_LIMIT), type, streamId, or cursor.",
+            "description": "Unprocessable entity — invalid limit (INVALID_LIMIT), type, streamId, cursor, or date range (INVALID_DATE_RANGE).",
             "content": {
               "application/json": {
                 "schema": {
@@ -6048,10 +6082,30 @@
       "post": {
         "operationId": "receiveWebhook",
         "summary": "Receive an incoming webhook event",
-        "description": "Validates and accepts an incoming webhook event payload.",
+        "description": "Verifies the HMAC signature and replay window, deduplicates by event ID, and dispatches the incoming webhook event payload to a registered handler.",
         "security": [],
         "tags": [
           "Webhooks"
+        ],
+        "parameters": [
+          {
+            "name": "x-streampay-signature",
+            "in": "header",
+            "required": true,
+            "description": "HMAC-SHA256 signature header in the format `t=<timestamp>,id=<eventId>,v1=<hex>`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-streampay-timestamp",
+            "in": "header",
+            "required": true,
+            "description": "Unix epoch timestamp in seconds used to compute the signature and enforce the replay window.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -6065,20 +6119,37 @@
                 "properties": {
                   "eventType": {
                     "type": "string",
-                    "enum": ["second", "minute", "hour", "day", "week", "month", "year"],
-                    "description": "Payment interval.",
-                    "example": "month"
-                  },
-                  "token": {
-                    "type": "string",
-                    "description": "Stellar asset code (optional, defaults to XLM).",
-                    "example": "XLM"
-                  },
-                  "orgId": {
-                    "type": "string",
-                    "description": "Optional organization that owns this stream and whose configured quota applies.",
-                    "example": "org-acme"
+                    "description": "Webhook event type name.",
                     "example": "payment.received"
+                  },
+                  "eventId": {
+                    "type": "string",
+                    "description": "Unique event identifier used for signature verification and deduplication.",
+                    "example": "evt_123"
+                  },
+                  "timestamp": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "ISO-8601 event timestamp."
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": "Source system that emitted the event."
+                  },
+                  "data": {
+                    "description": "Arbitrary JSON event payload."
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Optional metadata key-value map."
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Optional forwarded headers."
                   }
                 }
               }
@@ -6087,7 +6158,7 @@
         },
         "responses": {
           "200": {
-            "description": "Webhook event accepted.",
+            "description": "Webhook event handled, or acknowledged as a duplicate.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6099,6 +6170,35 @@
                     "success": {
                       "type": "boolean",
                       "example": true
+                    },
+                    "duplicate": {
+                      "type": "boolean",
+                      "description": "Present and true when the eventId was already processed within the deduplication TTL.",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Webhook event verified and accepted, but no handler is registered for its eventType.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "handled"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "handled": {
+                      "type": "boolean",
+                      "example": false
                     }
                   }
                 }
@@ -6107,6 +6207,16 @@
           },
           "400": {
             "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "description": "Missing/invalid HMAC signature (`INVALID_SIGNATURE`) or timestamp outside replay window (`REPLAY_WINDOW_EXCEEDED`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "413": {
             "$ref": "#/components/responses/413"
@@ -6121,23 +6231,6 @@
               }
             }
           },
-          "422": { "$ref": "#/components/responses/422" },
-          "429": {
-            "description": "Rate limit or configured stream quota exceeded. Retry-After is set for rate limits and monthly-volume quota rejections.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds until the client may retry. Present for rate limits and monthly-volume quota rejections.",
-                "schema": { "type": "integer" }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
-                "example": {
-                  "error": {
-                    "code": "QUOTA_ACTIVE_STREAMS_EXCEEDED",
-                    "message": "The user has 2 active streams; the configured limit is 2.",
-                    "request_id": "req_01HZ9ABCDEF"
           "500": {
             "$ref": "#/components/responses/500"
           }
@@ -6148,8 +6241,7 @@
       "post": {
         "operationId": "receiveDlqWebhook",
         "summary": "Receive a dead-letter-queue webhook event",
-        "description": "Accepts failed webhook events for reprocessing. No authentication required (secured at the network/gateway level).",
-        "security": [],
+        "description": "Accepts failed webhook events for reprocessing. Requires internal-service HMAC auth or an admin JWT. Structured `{ endpoint, event }` payloads are validated and enqueued idempotently into the outbox (202); legacy unstructured objects receive a 200 acknowledgement.",
         "tags": [
           "Webhooks"
         ],
@@ -6159,7 +6251,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "Arbitrary webhook event payload.",
+                "description": "Structured `{ endpoint, event }` payload for outbox reprocessing, or a legacy generic JSON object.",
                 "example": {
                   "event": "payment.failed",
                   "id": "evt_001"
@@ -6170,7 +6262,7 @@
         },
         "responses": {
           "200": {
-            "description": "Event accepted.",
+            "description": "Legacy unstructured event accepted.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6188,8 +6280,47 @@
               }
             }
           },
+          "202": {
+            "description": "Structured event enqueued (or deduplicated) in the outbox.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "received",
+                    "enqueued",
+                    "outboxId",
+                    "duplicate"
+                  ],
+                  "properties": {
+                    "received": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "enqueued": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "outboxId": {
+                      "type": "string"
+                    },
+                    "duplicate": {
+                      "type": "boolean",
+                      "example": false
+                    }
+                  }
+                }
+              }
+            }
+          },
           "400": {
             "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "422": {
+            "description": "Malformed structured payload or disallowed endpoint URL."
           },
           "500": {
             "$ref": "#/components/responses/500"
