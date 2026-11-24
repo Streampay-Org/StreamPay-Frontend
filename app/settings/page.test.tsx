@@ -221,17 +221,79 @@ describe('SettingsPage notifications guard', () => {
   });
 });
 
-describe('SettingsPage Privacy tab', () => {
+describe('SettingsPage display time zone', () => {
+  const STORAGE_KEY = 'streampay.display-time-zone';
+
   beforeEach(() => {
-    mockedFetchWithIdempotency.mockReset();
+    window.localStorage.clear();
   });
 
   afterEach(() => {
+    jest.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  it('renders the time zone control with UTC selected by default', () => {
+    render(<SettingsPageContent />);
+
+    const select = screen.getByLabelText('Display time zone');
+
+    expect(select).toHaveValue('UTC');
+    expect(screen.getByText(/^Preview:/)).toBeInTheDocument();
+  });
+
+  it('persists the selection and updates the live preview', () => {
+    render(<SettingsPageContent />);
+
+    const select = screen.getByLabelText('Display time zone');
+    const previewBefore = screen.getByText(/^Preview:/).textContent;
+
+    fireEvent.change(select, { target: { value: 'America/New_York' } });
+
+    expect(select).toHaveValue('America/New_York');
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe('America/New_York');
+
+    const previewAfter = screen.getByText(/^Preview:/).textContent;
+    expect(previewAfter).toContain('Preview:');
+    expect(previewAfter).not.toBe(previewBefore);
+  });
+
+  it('restores a stored preference on mount', () => {
+    window.localStorage.setItem(STORAGE_KEY, 'Asia/Kolkata');
+
+    render(<SettingsPageContent />);
+
+    expect(screen.getByLabelText('Display time zone')).toHaveValue(
+      'Asia/Kolkata'
+    );
+  });
+
+  it('warns when storage blocks persistence', () => {
+    jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+
+    render(<SettingsPageContent />);
+
+    fireEvent.change(screen.getByLabelText('Display time zone'), {
+      target: { value: 'Asia/Tokyo' },
+    });
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /blocked local storage/i
+    );
+  });
+});
+
+
+describe('SettingsPage Privacy tab', () => {
+    mockedFetchWithIdempotency.mockReset();
+  });
+
     finishDialogClose();
   });
 
   it('shows the Privacy tab with deletion and retention policy details', () => {
-    render(<SettingsPageContent />);
 
     const privacyTab = screen.getByRole('tab', { name: 'Privacy' });
     expect(privacyTab).toBeInTheDocument();
@@ -310,7 +372,6 @@ describe('SettingsPage Privacy tab', () => {
   });
 
   it('guards unsaved notification changes when switching to the Privacy tab', () => {
-    render(<SettingsPageContent />);
 
     openNotificationsTab();
     editNotificationPreference();

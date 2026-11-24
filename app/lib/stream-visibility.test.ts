@@ -479,3 +479,63 @@ describe("stream-visibility", () => {
     });
   });
 });
+import { resolveRequestActor, visibleTo } from "@/app/lib/stream-visibility";
+
+};
+
+}
+
+    }),
+}
+
+  });
+
+    }
+
+    }
+  });
+
+      {
+      },
+    );
+
+    }
+  });
+
+    );
+
+  });
+
+        }),
+      );
+
+      });
+    },
+  );
+
+      ),
+
+        }),
+      ),
+
+        }),
+      ),
+  });
+
+
+        }),
+      ),
+  });
+
+
+
+    });
+
+  });
+
+
+      );
+
+    }
+  });
+});
