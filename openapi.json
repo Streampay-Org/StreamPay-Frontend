@@ -1857,7 +1857,6 @@
               "type": "string",
               "pattern": "^G[A-Z2-7]{55}$",
               "example": "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ"
-              "example": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
             }
           }
         ],
@@ -4194,6 +4193,132 @@
         }
       }
     },
+    "/api/streams/{id}/receipt/pdf": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "x-tenant-id",
+          "in": "header",
+          "required": false,
+          "description": "Tenant context used when checking stream visibility. Defaults to the caller's default tenant.",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getStreamReceiptPdf",
+        "summary": "Download a stream receipt as PDF",
+        "description": "Returns a deterministic PDF receipt for an authenticated stream participant. Use anonymous=true to mask addresses and remove PII. Theme parameters are validated and unsafe values fall back to defaults.",
+        "tags": [
+          "Streams"
+        ],
+        "parameters": [
+          {
+            "name": "anonymous",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Mask party addresses and omit PII from the receipt."
+          },
+          {
+            "name": "logoUrl",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "Optional HTTPS logo URL. Only allowlisted hosts are accepted."
+          },
+          {
+            "name": "accentColor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
+            },
+            "description": "Optional 3- or 6-digit hexadecimal accent color."
+          },
+          {
+            "name": "message",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 140
+            },
+            "description": "Optional short receipt message."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Receipt PDF.",
+            "headers": {
+              "ETag": {
+                "description": "Strong validator for this PDF representation.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Private cache policy for the receipt.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "Download filename.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The cached PDF representation is still current.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
     "/api/streams/{id}/stop": {
       "parameters": [
         {
@@ -6112,7 +6237,6 @@
                     "type": "string",
                     "description": "Optional organization that owns this stream and whose configured quota applies.",
                     "example": "org-acme"
-                    "example": "payment.received"
                   }
                 }
               }
@@ -6145,16 +6269,6 @@
           "413": {
             "$ref": "#/components/responses/413"
           },
-          "429": {
-            "description": "Too many requests — rate limit exceeded.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "422": { "$ref": "#/components/responses/422" },
           "429": {
             "description": "Rate limit or configured stream quota exceeded. Retry-After is set for rate limits and monthly-volume quota rejections.",
@@ -6172,6 +6286,11 @@
                     "code": "QUOTA_ACTIVE_STREAMS_EXCEEDED",
                     "message": "The user has 2 active streams; the configured limit is 2.",
                     "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
           "500": {
             "$ref": "#/components/responses/500"
           }
@@ -7364,7 +7483,6 @@
                 "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
                 "rate": "120",
                 "schedule": "month"
-                "type": "object"
               }
             }
           }
@@ -7405,15 +7523,6 @@
             }
           },
           "500": { "$ref": "#/components/responses/500" }
-          "400": {
-            "$ref": "#/components/responses/400"
-          },
-          "401": {
-            "$ref": "#/components/responses/401"
-          },
-          "422": {
-            "$ref": "#/components/responses/422"
-          }
         }
       }
     },
@@ -8069,4 +8178,5 @@
       "description": "Non-production debugging utilities"
     }
   ]
+}
 }
