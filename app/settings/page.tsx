@@ -48,7 +48,9 @@ export function SettingsPageContent({
   const [isSavingFromDialog, setIsSavingFromDialog] = useState(false);
   const [restoreFocusTarget, setRestoreFocusTarget] =
     useState<HTMLElement | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
+  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
   const notificationSettingsRef = useRef<NotificationSettingsHandle>(null);
   const pendingConfirmationRef = useRef<
     ((allowed: boolean) => void) | null
@@ -162,6 +164,53 @@ export function SettingsPageContent({
         </section>
       ),
     },
+    {
+      id: 'privacy',
+      label: 'Privacy',
+      content: (
+        <section className="settings-group">
+          <div className="settings-group__header">
+            <h2 className="settings-group__title">Privacy</h2>
+            <p className="settings-group__description">
+              Manage your personal data and submit a Data Subject Request (DSR)
+              for account deletion.
+            </p>
+          </div>
+          <div className="settings-group__content" style={{ marginTop: '1rem' }}>
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              <div>
+                <h3>What is deleted</h3>
+                <p>
+                  All personally identifiable information (PII) — including your
+                  user record (wallet address, email, display name) and stream
+                  PII (email, label, memo, partner ID) — is permanently scrubbed
+                  within 30 days.
+                </p>
+              </div>
+              <div>
+                <h3>What is retained</h3>
+                <p>
+                  De-identified aggregate stream records (Stream IDs, amounts,
+                  status, timestamps) are retained for 7 years to satisfy legal
+                  and audit requirements. On-chain transaction data is immutable
+                  and cannot be removed.
+                </p>
+              </div>
+              <div style={{ marginTop: '0.5rem' }}>
+                <button
+                  ref={deleteTriggerRef}
+                  type="button"
+                  className="button button--danger"
+                  onClick={() => setIsDeleteDialogOpen(true)}
+                >
+                  Request account deletion
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      ),
+    },
   ];
 
   return (
@@ -242,6 +291,13 @@ export function SettingsPageContent({
           </button>
         </div>
       </Modal>
+
+      <DeleteAccountDialog
+        isOpen={isDeleteDialogOpen}
+        onClose={() => setIsDeleteDialogOpen(false)}
+        restoreFocusTarget={deleteTriggerRef}
+        getAuthToken={getAuthToken}
+      />
     </main>
   );
 }
