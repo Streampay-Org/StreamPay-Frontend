@@ -2,6 +2,9 @@ import { createHash } from "crypto";
 import type { ActivityEvent, ExportJob, Stream, User } from "@/app/types/openapi";
 import type { ActivityTimelineStore } from "@/app/lib/repositories/activity-timeline";
 import type { StreamHistoryStore } from "@/app/lib/repositories/stream-history";
+import type { ContactsStore } from "@/app/lib/db";
+import type { ActivityTimelineStore } from "@/app/lib/repositories/activity-timeline";
+import type { StreamHistoryStore } from "@/app/lib/repositories/stream-history";
 import { createInMemoryPersistenceStore } from "@/app/lib/repositories/in-memory";
 import {
   createPostgresPersistenceStore,
@@ -71,8 +74,22 @@ export interface ExportRepository {
   reset(): void;
 }
 
+export interface ContactsStore {
+  /** Get all contacts (including tombstones) for a wallet address. */
+  getForWallet(walletAddress: string): SyncedContact[];
+  /** Replace all contacts for a wallet address. */
+  setForWallet(walletAddress: string, contacts: SyncedContact[]): void;
+  /** Get a single contact by id for a wallet address. */
+  getById(walletAddress: string, id: string): SyncedContact | undefined;
+  /** Upsert a single contact for a wallet address. */
+  upsert(walletAddress: string, contact: SyncedContact): void;
+  /** Delete (tombstone) a single contact for a wallet address. */
+  delete(walletAddress: string, id: string): boolean;
+}
+
 export interface PersistenceStore {
   readonly activityTimeline: ActivityTimelineStore;
+  readonly contactsStore: ContactsStore;
   readonly exportRepository: ExportRepository;
   readonly idempotencyStore: IdempotencyStore;
   readonly kind: "memory" | "postgres";

@@ -1,6 +1,7 @@
 import { makeDemoDateShifter } from "@/app/lib/demo-dates";
 import type {
   AppendOnlyStore,
+  ContactsStore,
   ExportAuditRecord,
   ExportRepository,
   IdempotencyStore,
@@ -8,6 +9,7 @@ import type {
   PersistenceStore,
   StreamRepository,
 } from "@/app/lib/db";
+import type { SyncedContact } from "@/app/contacts/sync";
 import type { ActivityEvent, ExportJob, Stream, User } from "@/app/types/openapi";
 import { createActivityTimelineStore, activityEventToTimelineEntry } from "@/app/lib/repositories/activity-timeline";
 import { createStreamHistoryStore } from "@/app/lib/repositories/stream-history";
@@ -573,11 +575,60 @@ function resetKeyValueStore<K, V>(
   }
 }
 
+// ---------------------------------------------------------------------------
+// In-memory contacts store (per-wallet address book sync)
+// ---------------------------------------------------------------------------
+
+class InMemoryContactsStore implements ContactsStore {
+  private store = new Map<string, Map<string, SyncedContact>>();
+
+  private getWalletMap(walletAddress: string): Map<string, SyncedContact> {
+    let m = this.store.get(walletAddress);
+    if (!m) {
+      m = new Map();
+      this.store.set(walletAddress, m);
+    }
+    return m;
+  }
+
+  getForWallet(walletAddress: string): SyncedContact[] {
+    const m = this.store.get(walletAddress);
+    if (!m) return [];
+    return Array.from(m.values());
+  }
+
+  setForWallet(walletAddress: string, contacts: SyncedContact[]): void {
+    const m = new Map<string, SyncedContact>();
+    for (const c of contacts) {
+      m.set(c.id, c);
+    }
+    this.store.set(walletAddress, m);
+  }
+
+  getById(walletAddress: string, id: string): SyncedContact | undefined {
+    return this.getWalletMap(walletAddress).get(id);
+  }
+
+  upsert(walletAddress: string, contact: SyncedContact): void {
+    this.getWalletMap(walletAddress).set(contact.id, contact);
+  }
+
+  delete(walletAddress: string, id: string): boolean {
+    const m = this.getWalletMap(walletAddress);
+    const existing = m.get(id);
+    if (!existing) return false;
+    // Tombstone: set deletedAt
+    m.set(id, { ...existing, deletedAt: new Date().toISOString() });
+    return true;
+  }
+}
+
 export function createInMemoryPersistenceStore(seedTimeline?: boolean): PersistenceStore {
   const timeline = createActivityTimelineStore();
   const store: PersistenceStore = {
     kind: "memory",
     activityTimeline: timeline,
+    contactsStore: new InMemoryContactsStore(),
     streamHistory: createStreamHistoryStore(),
     streamRepository: new InMemoryStreamRepository(),
     idempotencyStore: new InMemoryIdempotencyStore(),
