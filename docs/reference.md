@@ -350,8 +350,11 @@ See `app/lib/api-version.ts` for the `toV2Stream()` conversion and `openapi.json
 
 The following endpoints support multi-tenant organization management:
 
+- `GET /api/orgs`: List organizations (omits member wallet addresses). Supports keyset pagination via `limit` (default `20`, min `1`, max `100`) and `cursor` (opaque base64 keyset cursor ordered by `createdAt`, then `id`). Returns `meta: { total, hasNext, nextCursor }`.
 - `POST /api/orgs/[orgId]/members`: Add a member to an organization (Owner-only).
-- `GET /api/orgs/[orgId]/members`: List organization members (Member-only).
+- `GET /api/orgs/[orgId]/members`: List organization members (Member-only). Supports keyset pagination via `limit` (default `20`, min `1`, max `100`) and `cursor` (opaque base64 keyset cursor ordered by `addedAt`, then `walletAddress`). Returns `meta: { total, hasNext, nextCursor }`.
+
+Invalid `limit` values return `422 VALIDATION_ERROR`; malformed `cursor` values return `422 INVALID_CURSOR`.
 - `PATCH /api/orgs/[orgId]/members`: Change a member's role (Owner-only; rejects demoting the last owner).
 - `DELETE /api/orgs/[orgId]/members`: Remove a member, by body or `?walletAddress=` (Owner-only; rejects removing the last owner).
 - `PATCH /api/orgs/[orgId]`: Rename an organization (Owner-only).

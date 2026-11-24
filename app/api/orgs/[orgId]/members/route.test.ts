@@ -68,7 +68,152 @@ describe("Org Members API", () => {
       const body = await res.json();
       expect(body.data.length).toBeGreaterThan(0);
       expect(body.meta.total).toBe(body.data.length);
+      expect(body.meta.hasNext).toBe(false);
+      expect(body.meta.nextCursor).toBeNull();
       expect(body.links.self).toBe(`/api/orgs/${EXISTING_ORG_ID}/members`);
+    });
+
+    describe("pagination", () => {
+      beforeEach(() => {
+        _resetOrgDbForTesting();
+      });
+
+      afterEach(() => {
+        _resetOrgDbForTesting();
+      });
+
+      it("walks all members with limit=1 in stable (addedAt, walletAddress) order", async () => {
+        const org = orgDb.orgs.get(EXISTING_ORG_ID)!;
+        org.members = [
+          {
+            walletAddress: "GMB27MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW2",
+            role: "viewer",
+            addedAt: "2026-04-01T00:00:00Z",
+          },
+          {
+            walletAddress: "GMB17MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW1",
+            role: "owner",
+            addedAt: "2026-04-01T00:00:00Z",
+          },
+          {
+            walletAddress: "GMB37MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW3",
+            role: "pauser",
+            addedAt: "2026-04-02T00:00:00Z",
+          },
+          {
+            walletAddress: "GMB47MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW4",
+            role: "settler",
+            addedAt: "2026-04-03T00:00:00Z",
+          },
+        ];
+
+        const collected: string[] = [];
+        let cursor: string | null = null;
+
+        do {
+          const url = cursor
+            ? `http://localhost/api/orgs/${EXISTING_ORG_ID}/members?limit=1&cursor=${encodeURIComponent(cursor)}`
+            : `http://localhost/api/orgs/${EXISTING_ORG_ID}/members?limit=1`;
+          const res = await GET(new NextRequest(url), {
+            params: Promise.resolve({ orgId: EXISTING_ORG_ID }),
+          });
+          expect(res.status).toBe(200);
+          const body = await res.json();
+
+          expect(body.meta.total).toBe(4);
+          expect(body.data).toHaveLength(1);
+          collected.push(body.data[0].walletAddress);
+          cursor = body.meta.nextCursor;
+          expect(body.meta.hasNext).toBe(cursor !== null);
+        } while (cursor !== null);
+
+        expect(collected).toEqual([
+          "GMB17MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW1",
+          "GMB27MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW2",
+          "GMB37MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW3",
+          "GMB47MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW4",
+        ]);
+      });
+
+      it("returns hasNext=false and nextCursor=null when total equals limit", async () => {
+        const org = orgDb.orgs.get(EXISTING_ORG_ID)!;
+        const req = new NextRequest(
+          `http://localhost/api/orgs/${EXISTING_ORG_ID}/members?limit=${org.members.length}`,
+        );
+        const res = await GET(req, {
+          params: Promise.resolve({ orgId: EXISTING_ORG_ID }),
+        });
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data).toHaveLength(org.members.length);
+        expect(body.meta).toEqual({
+          total: org.members.length,
+          hasNext: false,
+          nextCursor: null,
+        });
+      });
+
+      it("resumes cleanly when the member referenced by the cursor is removed", async () => {
+        const org = orgDb.orgs.get(EXISTING_ORG_ID)!;
+        org.members = [...org.members];
+
+        const first = await GET(
+          new NextRequest(
+            `http://localhost/api/orgs/${EXISTING_ORG_ID}/members?limit=2`,
+          ),
+          { params: Promise.resolve({ orgId: EXISTING_ORG_ID }) },
+        );
+        expect(first.status).toBe(200);
+        const firstBody = await first.json();
+        expect(firstBody.data).toHaveLength(2);
+        expect(firstBody.meta.hasNext).toBe(true);
+
+        const removedWallet = firstBody.data[1].walletAddress;
+        org.members = org.members.filter((m) => m.walletAddress !== removedWallet);
+
+        const second = await GET(
+          new NextRequest(
+            `http://localhost/api/orgs/${EXISTING_ORG_ID}/members?limit=2&cursor=${encodeURIComponent(firstBody.meta.nextCursor)}`,
+          ),
+          { params: Promise.resolve({ orgId: EXISTING_ORG_ID }) },
+        );
+        expect(second.status).toBe(200);
+        const secondBody = await second.json();
+        expect(secondBody.data).toHaveLength(2);
+        expect(secondBody.data.map((m: { walletAddress: string }) => m.walletAddress)).not.toContain(
+          removedWallet,
+        );
+        expect(secondBody.meta.hasNext).toBe(false);
+        expect(secondBody.meta.nextCursor).toBeNull();
+      });
+
+      it.each(["0", "-1", "101", "abc", "1.5"])(
+        "returns 422 VALIDATION_ERROR for invalid limit=%s",
+        async (limit) => {
+          const req = new NextRequest(
+            `http://localhost/api/orgs/${EXISTING_ORG_ID}/members?limit=${limit}`,
+          );
+          const res = await GET(req, {
+            params: Promise.resolve({ orgId: EXISTING_ORG_ID }),
+          });
+          expect(res.status).toBe(422);
+          const body = await res.json();
+          expect(body.error.code).toBe("VALIDATION_ERROR");
+        },
+      );
+
+      it("returns 422 INVALID_CURSOR for malformed cursor", async () => {
+        const req = new NextRequest(
+          `http://localhost/api/orgs/${EXISTING_ORG_ID}/members?cursor=not-a-valid-cursor`,
+        );
+        const res = await GET(req, {
+          params: Promise.resolve({ orgId: EXISTING_ORG_ID }),
+        });
+        expect(res.status).toBe(422);
+        const body = await res.json();
+        expect(body.error.code).toBe("INVALID_CURSOR");
+      });
     });
   });
 
