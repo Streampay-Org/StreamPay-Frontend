@@ -4,6 +4,11 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { WalletConnection } from "./WalletConnection";
+import { useEffect, useState } from "react";
+import {
+  ADMIN_CREDENTIAL_CHANGED_EVENT,
+  readAdminCredential,
+} from "../ops/reconciliation/admin-credential";
 
 const LINKS = [
   { href: "/dashboard", label: "Dashboard" },
@@ -20,6 +25,18 @@ const LINKS = [
 /** Top navigation shown on every page (hidden on small screens, where the bottom nav is used). */
 export function SiteHeader() {
   const pathname = usePathname() ?? "/";
+  const [showOps, setShowOps] = useState(false);
+
+  useEffect(() => {
+    const sync = () => setShowOps(readAdminCredential().length > 0);
+    sync();
+    window.addEventListener(ADMIN_CREDENTIAL_CHANGED_EVENT, sync);
+    return () => window.removeEventListener(ADMIN_CREDENTIAL_CHANGED_EVENT, sync);
+  }, []);
+
+  const links = showOps
+    ? [...LINKS, { href: "/ops/reconciliation", label: "Ops" }]
+    : LINKS;
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
