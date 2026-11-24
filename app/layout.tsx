@@ -9,6 +9,7 @@ import { SiteHeader } from "./components/SiteHeader";
 import { ClientErrorReporter } from "./components/ClientErrorReporter";
 import { ThemeController } from "./components/ThemeController";
 import { getThemeScript } from "./utils/theme-noflash";
+import RootShell from "./components/RootShell";
 import { getSiteUrl, getSiteUrlObject } from "./lib/site-url";
 
 const siteUrl = getSiteUrl();
@@ -63,16 +64,7 @@ export default function RootLayout({
         />
       </head>
       <body>
-        <ThemeController />
-        <ClientErrorReporter />
-        <ToastProvider>
-          <SplashScreenWrapper />
-          <CommandPaletteLauncher />
-          <ShortcutsOverlayLauncher />
-          <SiteHeader />
-          {children}
-          <AppBottomNav />
-        </ToastProvider>
+       <RootShell>{children}</RootShell>
       </body>
     </html>
   );

@@ -9,6 +9,41 @@ import {
 
 // Request ID header for correlation
 const REQUEST_ID_HEADER = 'x-request-id';
+const CSRF_HEADER_NAME = 'x-csrf-token';
+const CSRF_COOKIE_NAMES = ['__Host-csrf-token', 'csrf-token'] as const;
+
+export function getCsrfTokenFromCookie(): string | null {
+  if (typeof document === 'undefined') return null;
+
+  for (const cookieName of CSRF_COOKIE_NAMES) {
+    const match = document.cookie.match(
+      new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`),
+    );
+    if (match?.[1]) return match[1];
+  }
+
+  return null;
+}
+
+async function ensureCsrfToken(): Promise<string | null> {
+  const existingToken = getCsrfTokenFromCookie();
+  if (existingToken || typeof window === 'undefined') return existingToken;
+
+  const response = await fetch('/api/csrf', {
+    method: 'GET',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(`Unable to initialize CSRF protection (HTTP ${response.status}).`);
+  }
+
+  const token = getCsrfTokenFromCookie();
+  if (!token) {
+    throw new Error('The server did not set a CSRF token cookie.');
+  }
+  return token;
+}
 
 /**
  * Options for API client requests
@@ -238,6 +273,11 @@ export async function fetchWithIdempotency<T = unknown>(
   
   // Setup headers
   const headers = new Headers(options.headers || {});
+
+  if (isMutatingRequest && !headers.has(CSRF_HEADER_NAME)) {
+    const csrfToken = await ensureCsrfToken();
+    if (csrfToken) headers.set(CSRF_HEADER_NAME, csrfToken);
+  }
   
   // Add idempotency key for mutating requests
   if (isMutatingRequest && !headers.has('Idempotency-Key')) {

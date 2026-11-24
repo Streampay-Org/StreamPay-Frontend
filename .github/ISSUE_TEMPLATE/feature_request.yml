@@ -1,0 +1,58 @@
+name: Feature Request
+description: Propose a new feature or enhancement. Please review CONTRIBUTING.md before filing.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement! Please review [CONTRIBUTING.md](https://github.com/Streampay-Org/StreamPay-Frontend/blob/main/CONTRIBUTING.md) for our project conventions and workflow.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem or limitation does this feature address?
+      placeholder: Describe the user or developer pain point.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the solution or behavior you would like to see.
+      placeholder: Outline how the feature should work.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Describe any alternative solutions or workarounds you have considered.
+      placeholder: Any other approaches or trade-offs?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the codebase does this request affect?
+      options:
+        - frontend
+        - API route
+        - contracts
+        - CI
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Define concrete, testable criteria for when this feature is complete.
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+    validations:
+      required: true
