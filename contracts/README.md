@@ -25,16 +25,24 @@ The contract exposes stable `#[contracterror]` codes from
 escrows one `total_amount` and releases it proportionally by recipient weight:
 
 - `create_split_stream(sender, token, total_amount, start_time, end_time, recipients, weights)`
-  funds the escrow and returns the new split stream id.
+  funds the escrow, snapshots the global default protocol fee (`default_fee_bps`)
+  into `SplitStream.fee_bps`, and returns the new split stream id.
 - `withdraw_split(stream_id, recipient, amount)` pays a recipient their vested,
-  not-yet-withdrawn share.
+  not-yet-withdrawn share. Protocol fees are computed per withdrawal using
+  floor rounding (`fee = floor(amount * fee_bps / 10_000)`, `net = amount - fee`),
+  transferring `net` to the recipient and `fee` to the configured fee collector
+  (or forwarding `fee` to the recipient if no collector is configured), accruing
+  the fee balance for `get_accumulated_fees` / `sweep_fees`, and emitting the
+  `("stream", "fee")` event when `fee > 0` and a collector is set. Vesting and
+  settlement bookkeeping stay on the gross `amount`.
 - `pause_split_stream(stream_id)` freezes accrual for every recipient at the
   pause timestamp. Only the sender may call it, and the stream must be `Active`.
 - `resume_split_stream(stream_id)` restarts accrual and extends `end_time` by
   the paused span so the unstreamed time is preserved. Only the sender may call
   it, and the stream must be `Paused`.
 - `cancel_split_stream(stream_id)` pays each recipient their frozen or accrued
-  share and returns the remainder to the sender.
+  share and returns the remainder to the sender. Consistent with single-stream
+  `cancel_stream`, cancellation payouts do not charge the protocol fee.
 
 Both pause and resume are blocked by the contract-wide pause flag and emit
 `split_pa` / `split_re` events.

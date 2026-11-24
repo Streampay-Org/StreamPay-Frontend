@@ -352,8 +352,15 @@ The following endpoints support multi-tenant organization management:
 
 - `POST /api/orgs/[orgId]/members`: Add a member to an organization (Owner-only).
 - `GET /api/orgs/[orgId]/members`: List organization members (Member-only).
+- `PATCH /api/orgs/[orgId]/members`: Change a member's role (Owner-only; rejects demoting the last owner).
+- `DELETE /api/orgs/[orgId]/members`: Remove a member, by body or `?walletAddress=` (Owner-only; rejects removing the last owner).
+- `PATCH /api/orgs/[orgId]`: Rename an organization (Owner-only).
+- `DELETE /api/orgs/[orgId]`: Delete an organization with no owned streams or pending approvals (Owner-only).
 
-These endpoints require a valid JWT token obtained via `POST /api/auth/wallet` in the `Authorization: Bearer <token>` header.
+In the MVP, org mutations authorise via the `Actor-Wallet-Address` header
+naming an `owner` member. Production deployments should gate these endpoints
+behind a valid JWT token obtained via `POST /api/auth/wallet` in the
+`Authorization: Bearer <token>` header.
 
 ## Documentation index
 
@@ -376,6 +383,7 @@ Quick links to the long-form docs under [docs/](docs/):
 - [StreamTypeChip focus accessibility](docs/streamtypechip-focus-accessibility.md)
 - [Help & FAQ page](/help) — in-app support page at `app/help/page.tsx`
 - [Exports access logs](docs/api/exports-access-logs.md) — structured per-request access logs for `/api/exports`
+- [Notification preferences API](docs/api/notifications-preferences.md) — `GET`/`PUT /api/notifications/preferences`, including `ETag` / `If-Match` concurrency
 [SECURITY.md](SECURITY.md) in the repository root.
 
 ## Troubleshooting

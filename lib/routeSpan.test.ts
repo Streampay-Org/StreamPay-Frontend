@@ -10,6 +10,8 @@ jest.mock('@/app/lib/internal-service-auth', () => ({
 
 import { verifyInternalServiceRequest } from '@/app/lib/internal-service-auth';
 import { logger } from '@/app/lib/logger';
+import { httpRequestDuration, registry } from '@/src/metrics/registry';
+import { logAccessEvent } from '@/src/middleware/accessLog';
 import { withRouteSpan } from './routeSpan';
 import { tracer, type SpanRecord } from './otel';
 
@@ -196,5 +198,77 @@ describe('withRouteSpan', () => {
     expect(verifyMock).toHaveBeenCalledTimes(1);
     expect(records[0].traceId).not.toBe(TRACE_ID);
     expect(records[0].parentSpanId).toBeUndefined();
+  });
+
+  describe('http_request_duration_seconds observation', () => {
+    beforeEach(() => {
+      httpRequestDuration.reset();
+    });
+
+    it('adds exactly one observation with method, normalized route, and status_class', async () => {
+      await withRouteSpan('/api/streams/[id]', async () => new Response('ok', { status: 200 }))(
+        request('/api/streams/abc123'),
+      );
+
+      const metrics = await registry.metrics();
+      expect(metrics).toContain(
+        'http_request_duration_seconds_count{method="GET",route="/api/streams/:id",status_class="2xx"} 1',
+      );
+    });
+
+    it('records thrown handler errors as 5xx', async () => {
+      await expect(
+        withRouteSpan('/api/activity', async () => {
+          throw new Error('boom');
+        })(request('/api/activity')),
+      ).rejects.toThrow('boom');
+
+      const metrics = await registry.metrics();
+      expect(metrics).toContain(
+        'http_request_duration_seconds_count{method="GET",route="/api/activity",status_class="5xx"} 1',
+      );
+    });
+
+    it('handles 304 responses and HEAD/OPTIONS methods', async () => {
+      await withRouteSpan('/api/streams', async () => new Response(null, { status: 304 }))(
+        new Request('https://api.example.com/api/streams', { method: 'GET' }),
+      );
+      await withRouteSpan('/api/healthz', async () => new Response(null, { status: 200 }))(
+        new Request('https://api.example.com/api/healthz', { method: 'HEAD' }),
+      );
+      await withRouteSpan('/api/exports', async () => new Response(null, { status: 204 }))(
+        new Request('https://api.example.com/api/exports', { method: 'OPTIONS' }),
+      );
+
+      const metrics = await registry.metrics();
+      expect(metrics).toContain(
+        'http_request_duration_seconds_count{method="GET",route="/api/streams",status_class="3xx"} 1',
+      );
+      expect(metrics).toContain(
+        'http_request_duration_seconds_count{method="HEAD",route="/api/healthz",status_class="2xx"} 1',
+      );
+      expect(metrics).toContain(
+        'http_request_duration_seconds_count{method="OPTIONS",route="/api/exports",status_class="2xx"} 1',
+      );
+    });
+
+    it('does not double-count when logAccessEvent is called inside withRouteSpan', async () => {
+      jest.spyOn(console, 'log').mockImplementation(() => {});
+
+      await withRouteSpan('/api/exports', async () => {
+        logAccessEvent({
+          method: 'POST',
+          path: '/api/exports',
+          status: 201,
+          durationMs: 25,
+        });
+        return new Response('created', { status: 201 });
+      })(new Request('https://api.example.com/api/exports', { method: 'POST' }));
+
+      const metrics = await registry.metrics();
+      expect(metrics).toContain(
+        'http_request_duration_seconds_count{method="POST",route="/api/exports",status_class="2xx"} 1',
+      );
+    });
   });
 });

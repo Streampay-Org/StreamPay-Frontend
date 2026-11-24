@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import { GET, POST, PUT, PATCH, DELETE, OPTIONS } from "./route";
 import { getJwtSecret } from "@/app/lib/auth";
 import { auditLogStore, resetAuditLogStore } from "@/app/lib/audit-log";
+import { getRateLimitStore, InMemoryRateLimitStore, resetRateLimitStore } from "@/app/lib/rate-limit-store";
 
 function signAccessToken(
   role: string,
@@ -33,6 +34,7 @@ function makeRequest(
 
 describe("GET /api/audit/export", () => {
   beforeEach(() => {
+    resetRateLimitStore();
     resetAuditLogStore();
     auditLogStore.append({
       action: "stream.settle",
@@ -62,6 +64,12 @@ describe("GET /api/audit/export", () => {
       timestamp: "2026-04-28T14:00:00.000Z",
       metadata: { orgId: "org-grantfox" },
     });
+  });
+
+  afterEach(() => {
+    const store = getRateLimitStore();
+    if (store instanceof InMemoryRateLimitStore) store.destroy();
+    resetRateLimitStore();
   });
 
   it("returns 401 when no token is provided", async () => {
@@ -169,6 +177,21 @@ describe("GET /api/audit/export", () => {
     const text = await response.text();
     const lines = text.trim().split("\n");
     expect(lines).toHaveLength(1);
+  });
+
+  it("returns 429 with Retry-After after the export bucket is exhausted", async () => {
+    const request = makeRequest("/api/audit/export", "admin", "admin-rate-limit");
+
+    for (let index = 0; index < 5; index += 1) {
+      expect((await GET(request)).status).toBe(200);
+    }
+
+    const limited = await GET(request);
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("Retry-After")).toBeTruthy();
+    expect(await limited.json()).toMatchObject({
+      error: { code: "rate_limit_exceeded", request_id: expect.any(String) },
+    });
   });
 
   it("accepts the maximum limit of 250", async () => {

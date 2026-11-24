@@ -44,11 +44,17 @@ describe("StepIndicator", () => {
     expect(screen.queryByText("Review and confirm")).not.toBeInTheDocument();
   });
 
-  it("renders description elements for all steps in DOM", () => {
+  it("renders a description element only for the current step and preserves accessible names for other steps", () => {
     render(<StepIndicator steps={defaultSteps} currentStep={0} />);
 
     const descs = document.querySelectorAll(".step-indicator__desc");
-    expect(descs).toHaveLength(3);
+    expect(descs).toHaveLength(1);
+    expect(descs[0]).toHaveTextContent("Configure stream details");
+
+    const steps = screen.getAllByRole("listitem");
+    expect(steps[0]).not.toHaveAttribute("aria-label");
+    expect(steps[1]).toHaveAttribute("aria-label", "Recipients: Add recipients and splits");
+    expect(steps[2]).toHaveAttribute("aria-label", "Review: Review and confirm");
   });
 
   it("sets aria-current='step' on the current step", () => {

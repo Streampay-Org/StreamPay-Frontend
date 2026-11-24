@@ -57,6 +57,7 @@ FROM node:20-alpine AS worker-runner
 WORKDIR /app
 
 ENV NODE_ENV production
+ENV WORKER_HEARTBEAT_FILE=/tmp/worker-heartbeat
 
 # Hardening: Run as non-root
 RUN addgroup --system --gid 1001 nodejs
@@ -72,6 +73,10 @@ COPY scripts/reconcile-streams.ts ./scripts/reconcile-streams.ts
 COPY scripts/reconciliation/ ./scripts/reconciliation/
 
 USER streampay
+
+# Check that the worker has made progress within the last five minutes.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD node -e "const fs = require('node:fs'); const file = process.env.WORKER_HEARTBEAT_FILE || '/tmp/worker-heartbeat'; try { process.exit(Date.now() - fs.statSync(file).mtimeMs <= 300000 ? 0 : 1); } catch { process.exit(1); }"
 
 # Worker command — behaviour unchanged
 CMD ["node", "scripts/run-from-realpath.mjs", "ts-node", "scripts/reconcile-streams.ts"]

@@ -11,13 +11,20 @@ Linear payment streams on Stellar/Soroban.
 | `set_paused` | Yes | `admin` | Sets the global emergency pause flag. |
 | `set_admin` | Yes | `admin` | Transfers the admin role to a new address. |
 | `set_token_allowed` | Yes | `admin` | Allows or blocks a token for future stream creation. |
-| `create_stream` | Yes | `sender` | Creates a stream and escrows funds from the sender. |
+| `create_stream` | Yes | `sender` | Creates a stream and escrows funds from the sender (no cliff; `cliff_time = 0`). |
+| `create_stream_with_cliff` | Yes | `sender` | Creates a stream with an optional `cliff_time` (`0` = no cliff, or `start_time <= cliff_time <= end_time`); vested amount is `0` before the cliff and jumps to linear accrual at/after the cliff. |
+| `create_stream` | Yes | `sender` | Creates a linear stream and escrows funds from the sender. |
+| `create_stream_with_milestones` | Yes | `sender` | Creates a stream with a stepped milestone release schedule (`ReleaseCurve::Milestones`) and escrows funds from the sender. |
 | `start_stream` | Yes | `stream.sender` | Activates a draft stream, anchoring its time bounds. |
 | `pause` | Yes | `stream.sender` | Freezes accrual for an active stream. |
 | `resume` | Yes | `stream.sender` | Resumes a paused stream, extending the end time. |
 | `cancel_stream` | Yes | `stream.sender` | Ends a stream early, refunding unvested funds to sender. |
 | `withdraw` | Yes | `stream.recipient` | Withdraws vested funds to the recipient. |
 | `withdraw_to` | Yes | `stream.recipient` | Withdraws vested funds to a custom destination address (recipient-only auth, destination trustline checked). |
+| `propose_recipient_transfer` | Yes | `stream.recipient` | Proposes transferring the stream's recipient role to a new address (step 1 of two-step transfer). |
+| `accept_recipient_transfer` | Yes | `pending_recipient` | Accepts a pending recipient transfer, updating `stream.recipient` and clearing the previous withdrawer allowlist (step 2). |
+| `cancel_recipient_transfer` | Yes | `stream.recipient` or `stream.sender` | Cancels a pending recipient transfer proposal before acceptance. |
+| `get_pending_recipient` | No | None | Returns the pending recipient transfer target for a stream, if any. |
 | `settle` | Yes | `stream.recipient` | Ends a stream and releases all remaining funds to recipient. |
 | `get_stream` | No | None | Returns the stream record. |
 | `withdrawable` | No | None | Returns the currently withdrawable amount. |
@@ -33,11 +40,29 @@ Linear payment streams on Stellar/Soroban.
 | `list_streams_sender_status` | No | None | Returns a paginated page of streams filtered by sender and status (compound). |
 | `list_split_streams_by_recipient` | No | None | Returns a paginated page of split streams containing the given recipient address. |
 | `list_recurring_by_sender` | No | None | Returns a paginated page of recurring streams filtered by sender address. |
+| `create_split_stream` | Yes | `sender` | Creates a weighted multi-recipient split stream and escrows `total_amount` from `sender`. |
+| `withdraw_split` | Yes | `recipient` | Withdraws vested funds for a specific allocated recipient from a split stream. |
+| `pause_split_stream` | Yes | `stream.sender` | Freezes accrual for an active split stream across all recipients. |
+| `resume_split_stream` | Yes | `stream.sender` | Resumes a paused split stream, extending `end_time` by the paused span. |
+| `cancel_split_stream` | Yes | `stream.sender` | Cancels a split stream, paying vested-but-unreleased shares to recipients and refunding the remainder to `sender`. |
+| `get_split_stream` | No | None | Returns the `SplitStream` record (including recipients, weights, and cumulative releases). |
+| `split_withdrawable` | No | None | Returns the currently withdrawable amount for a specific recipient in a split stream. |
+| `split_stream_balance` | No | None | Returns the total vested amount for a split stream at the current ledger timestamp. |
+| `create_recurring_stream` | Yes | `sender` | Creates a periodic recurring stream and escrows `amount_per_cycle * total_cycles` from `sender`. |
+| `process_recurring_stream` | Yes | None (permissionless) | Advances `cycles_completed` based on elapsed time; transitions to `Ended` when all cycles complete. |
+| `withdraw_recurring` | Yes | `recipient` | Withdraws vested funds from a recurring stream to `stream.recipient`. |
+| `pause_recurring_stream` | Yes | `stream.sender` | Freezes cycle accrual for an active recurring stream. |
+| `resume_recurring_stream` | Yes | `stream.sender` | Resumes a paused recurring stream, excluding the pause span from vesting. |
+| `cancel_recurring_stream` | Yes | `stream.sender` | Cancels a recurring stream, returning unvested escrow to `sender` and topping up vested-but-unwithdrawn funds to `recipient`. |
+| `get_recurring_stream` | No | None | Returns the `RecurringStream` record. |
+| `recurring_withdrawable` | No | None | Returns the currently withdrawable amount (`vested - withdrawn_amount`) for a recurring stream. |
+| `recurring_vested` | No | None | Returns the total vested amount across all completed cycles for a recurring stream. |
 | `set_cooloff_duration` | Yes | `admin` | Sets the per-user cooloff duration (in seconds) between stream creations. |
 | `get_cooloff_duration` | No | None | Returns the current per-user cooloff duration in seconds. |
 | `get_cooloff_until` | No | None | Returns the timestamp until which a sender is blocked by cooloff. |
-| `pause_recurring_stream` | Yes | `stream.sender` | Freezes cycle accrual for an active recurring stream. |
-| `resume_recurring_stream` | Yes | `stream.sender` | Resumes a paused recurring stream, excluding the pause span from vesting. |
+| `set_dormancy_grace` | Yes | `admin` | Sets the global dormant-stream grace period in seconds (`0` = disabled). |
+| `get_dormancy_grace` | No | None | Returns the current dormant-stream grace period in seconds (`0` = disabled). |
+| `sweep_dormant_stream` | Yes | `stream.sender` | Reclaims unclaimed vested funds from a dormant stream back to the sender and marks it `Settled`. |
 | `set_fee_collector` | Yes | `admin` | Sets the address that receives protocol fees. |
 | `set_default_fee_bps` | Yes | `admin` | Sets the global default protocol fee in basis points. |
 | `get_default_fee_bps` | No | None | Returns the global default protocol fee. |
@@ -45,6 +70,15 @@ Linear payment streams on Stellar/Soroban.
 | `clear_token_fee_bps` | Yes | `admin` | Removes a per-token protocol fee override. |
 | `get_token_fee_bps` | No | None | Returns the per-token override, or `null` when unset. |
 | `get_stream_fee_bps` | No | None | Returns the effective fee for a stream after precedence resolution. |
+
+## Milestone release schedules
+
+In addition to continuous linear vesting (`ReleaseCurve::Linear`, created via `create_stream`), streams can be created with discrete stepped release schedules (`ReleaseCurve::Milestones(Vec<Milestone>)`) via `create_stream_with_milestones`:
+
+- Each `Milestone { time, cumulative_bps }` unlocks `floor(total_amount * cumulative_bps / 10_000)` once the stream's effective timestamp reaches `time`.
+- Schedules must contain `1..=MAX_MILESTONES` (`32`) entries, strictly increasing timestamps within `[start_time, end_time]`, non-decreasing `cumulative_bps`, and end at exactly `10_000`; invalid schedules are rejected with `Error::InvalidSchedule` (`24`).
+- Pausing freezes effective time identically to linear streams so no additional milestones unlock while paused.
+- `amend_stream` is restricted to linear streams and returns `Error::InvalidState` on milestone streams.
 
 ## Protocol fees
 
@@ -63,6 +97,68 @@ follows the token override and then the global default. A per-token override of
 
 If no fee collector is configured, no fee is charged and the full withdrawn
 amount goes to the recipient.
+
+### Fee behaviour by stream type
+
+| Stream path | Fee behaviour | Implementation |
+| :--- | :--- | :--- |
+| **Standard streams** | Resolves effective fee via `fees::resolve_stream_fee_bps` (per-stream `fee_bps` → per-token override → global default) and deducts it with `fees::apply_fee` when `fees::get_fee_collector` is set. | `Contract::withdraw`, `Contract::withdraw_to`, `execute_withdraw` (`src/lib.rs`) |
+| **Recurring streams** | Applies `fees::apply_fee(amount, stream.fee_bps)` directly using the stream's own `fee_bps` stored at `recurring::create` (does **not** fall back to token overrides or global defaults). Transfers `fee_amount` to the collector when `fees::get_fee_collector` is `Some`, otherwise pays the full `amount` to `recipient`. No fee is deducted on `recurring::cancel`. | `recurring::withdraw` (`src/recurring.rs`) |
+| **Split streams** | **No protocol fees are charged.** `multi::withdraw_split` transfers the full `amount` directly to the recipient without calling `fees::apply_fee`, and `SplitStream` carries no `fee_bps` field. | `multi::withdraw_split` (`src/multi.rs`) |
+
+## Split streams
+
+A split stream (`SplitStream` in `src/multi.rs`) escrows a single `total_amount`
+on-chain and streams it linearly across multiple recipients according to
+integer weights.
+
+- **Recipients & weights:** `create_split_stream` requires at least 2 recipients,
+  `recipients.len() == weights.len()`, every `weight > 0`, no recipient equal to
+  `sender`, and a valid token trustline for each recipient. `total_weight` is the
+  checked sum of all recipient weights.
+- **Per-recipient vesting:** Total stream vesting (`split_vested_amount`) accrues
+  linearly over `duration = end_time - start_time` (excluding
+  `total_paused_duration`, and frozen at `pause_time` while `Paused`). Each
+  recipient's vested share (`recipient_vested`) is computed with integer division
+  as `total_vested * weight / total_weight`, and their withdrawable balance is
+  `max(0, recipient_vested - alloc.released_amount)`.
+- **Settle condition:** In `multi::withdraw_split`, the stream transitions to
+  `StreamStatus::Settled` once `stream.total_released == stream.total_amount`.
+- **Pause, resume, and cancel:** Only `stream.sender` may call
+  `pause_split_stream`, `resume_split_stream` (which extends `end_time` by the
+  paused span), or `cancel_split_stream`. Cancellation pays each recipient their
+  vested-but-unreleased share and refunds the remaining escrow (unvested funds
+  plus any integer-division rounding remainder) to `sender`.
+
+> **Note:** For the HTTP v2 multi-recipient fan-out API (which creates one
+> standard stream per recipient rather than a single on-chain `SplitStream`),
+> see [`docs/api/multi-recipient-stream.md`](../../../docs/api/multi-recipient-stream.md).
+
+## Recurring streams
+
+A recurring stream (`RecurringStream` in `src/recurring.rs`) lets a sender
+pre-fund a periodic schedule of `total_cycles` fixed payments of
+`amount_per_cycle` every `cycle_duration` seconds.
+
+- **Escrow & cycles:** `create_recurring_stream` escrows
+  `amount_per_cycle * total_cycles` up front in `Active` status. Completed
+  cycles (`vested_cycles`) advance discretely as
+  `min(elapsed / cycle_duration, total_cycles)`, where `elapsed` excludes
+  `total_paused_duration` and freezes at `paused_at` while `Paused`.
+- **Permissionless processing:** `process_recurring_stream` (`recurring::process`)
+  requires **no authorization** — any keeper may call it on an `Active` or
+  `Paused` stream to advance `cycles_completed` and transition the stream to
+  `Ended` once `cycles_completed >= total_cycles`.
+- **Withdrawals, pause, and resume:** `withdraw_recurring` requires
+  `stream.recipient` authorization and transfers vested-minus-withdrawn funds
+  (applying `stream.fee_bps` as described above). `pause_recurring_stream` and
+  `resume_recurring_stream` require `stream.sender` authorization; already-vested
+  cycles remain processable and withdrawable while paused.
+- **Cancellation refund:** `cancel_recurring_stream` (`recurring::cancel`)
+  requires `stream.sender` authorization. Unvested escrow
+  (`min(total_escrow - vested, remaining_in_contract)`) is refunded to `sender`,
+  and any remaining vested-but-unwithdrawn balance (`recipient_top_up`) is
+  transferred to `recipient`.
 
 ## Paginated Stream Enumeration
 
@@ -127,6 +223,17 @@ data     = vec-encoded payload fields
 | `amended`   | `amend_stream`        | `stream_id`, `amended_by`, `new_rate_per_second`, `new_end_time`, `timestamp` |
 | `upgraded`  | `upgrade`             | `new_wasm_hash` (topics: `"StreamPay"/"upgraded"`) |
 | `cooloff_duration_set` | `set_cooloff_duration` | `admin`, `duration`, `timestamp` (topics: `"stream"/"cooloff"`) |
+| `split_cr` (`SplitStreamCreated`) | `create_split_stream` | `stream_id`, `sender`, `token`, `total_amount`, `timestamp` (topics: `"stream"/"split_cr"`) |
+| `split_wd` (`SplitStreamWithdrawn`) | `withdraw_split` | `stream_id`, `recipient`, `amount`, `timestamp` (topics: `"stream"/"split_wd"`) |
+| `split_ca` (`SplitStreamCancelled`) | `cancel_split_stream` | `stream_id`, `cancelled_by`, `returned_amount`, `released_amount`, `timestamp` (topics: `"stream"/"split_ca"`) |
+| `split_pa` (`SplitStreamPaused`) | `pause_split_stream` | `stream_id`, `sender`, `paused_at`, `timestamp` (topics: `"stream"/"split_pa"`) |
+| `split_re` (`SplitStreamResumed`) | `resume_split_stream` | `stream_id`, `sender`, `end_time`, `timestamp` (topics: `"stream"/"split_re"`) |
+| `created` (`RecurringCreated`) | `create_recurring_stream` | `stream_id`, `sender`, `recipient`, `token`, `amount_per_cycle`, `total_cycles`, `cycle_duration`, `fee_bps`, `timestamp` (topics: `"recurring"/"created"`) |
+| `processed` (`RecurringProcessed`) | `process_recurring_stream` | `stream_id`, `cycles_completed`, `timestamp` (topics: `"recurring"/"processed"`) |
+| `withdrawn` (`RecurringWithdrawn`) | `withdraw_recurring` | `stream_id`, `recipient`, `amount`, `timestamp` (topics: `"recurring"/"withdrawn"`) |
+| `cancelled` (`RecurringCancelled`) | `cancel_recurring_stream` | `stream_id`, `cancelled_by`, `returned_amount`, `withdrawn_amount`, `timestamp` (topics: `"recurring"/"cancelled"`) |
+| `paused` (`RecurringPaused`) | `pause_recurring_stream` | `stream_id`, `sender`, `timestamp` (topics: `"recurring"/"paused"`) |
+| `resumed` (`RecurringResumed`) | `resume_recurring_stream` | `stream_id`, `sender`, `timestamp` (topics: `"recurring"/"resumed"`) |
 
 When a `withdraw` fully drains the stream it emits two events in order:
 `withdrawn` then `settled`.

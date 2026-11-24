@@ -19,6 +19,7 @@
     "test:e2e:coverage": "node scripts/run-from-realpath.mjs jest --runInBand --testPathPattern=stream-lifecycle.e2e --coverage --collectCoverageFrom='app/api/streams/**/*.ts' --forceExit",
     "openapi:generate": "node scripts/generate-openapi-types.mjs",
     "openapi:check": "node scripts/generate-openapi-types.mjs --check",
+    "sdk:build": "tsc -p lib/sdk/tsconfig.build.json",
     "smoke": "node scripts/validate-openapi.mjs && npm run openapi:check && node scripts/run-from-realpath.mjs jest lib/rateLimitIp.test.ts app/api/auth/wallet/route.test.ts --forceExit",
     "smoke:contract": "bash scripts/smoke.sh --contract",
     "smoke:shell": "bash scripts/smoke-contract.sh",

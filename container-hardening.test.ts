@@ -1,4 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import * as fs from 'fs';
+import { tmpdir } from 'node:os';
 import * as path from 'path';
 
 describe('Container Hardening Verification', () => {
@@ -18,6 +20,40 @@ describe('Container Hardening Verification', () => {
   test('Dockerfile should have healthcheck', () => {
     expect(dockerfileContent).toContain('HEALTHCHECK');
     expect(dockerfileContent).toContain('/api/readyz');
+  });
+
+  test('worker runner should have a heartbeat healthcheck', () => {
+    const workerStage = dockerfileContent.split(/^FROM node:20-alpine AS worker-runner\s*$/m)[1] ?? '';
+
+    expect(workerStage).toMatch(/HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3/);
+    expect(workerStage).toContain('WORKER_HEARTBEAT_FILE');
+    expect(workerStage).toContain('300000');
+  });
+
+  test('worker heartbeat healthcheck rejects a stale heartbeat', () => {
+    const workerStage = dockerfileContent.split(/^FROM node:20-alpine AS worker-runner\s*$/m)[1] ?? '';
+    const healthcheckScript = workerStage.match(/CMD node -e "([^"]+)"/)?.[1];
+    if (!healthcheckScript) {
+      throw new Error('Worker healthcheck command is missing');
+    }
+
+    const temporaryDirectory = fs.mkdtempSync(path.join(tmpdir(), 'worker-healthcheck-'));
+    const heartbeatFile = path.join(temporaryDirectory, 'heartbeat');
+
+    try {
+      fs.writeFileSync(heartbeatFile, '');
+      execFileSync(process.execPath, ['-e', healthcheckScript], {
+        env: { ...process.env, WORKER_HEARTBEAT_FILE: heartbeatFile },
+      });
+
+      const staleTime = new Date(Date.now() - 300001);
+      fs.utimesSync(heartbeatFile, staleTime, staleTime);
+      expect(() => execFileSync(process.execPath, ['-e', healthcheckScript], {
+        env: { ...process.env, WORKER_HEARTBEAT_FILE: heartbeatFile },
+      })).toThrow();
+    } finally {
+      fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
   });
 
   test('Next.js should be configured for standalone output', () => {

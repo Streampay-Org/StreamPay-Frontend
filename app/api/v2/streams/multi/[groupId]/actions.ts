@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { idempotencyKeyErrorResponse, validateIdempotencyKey } from "@/app/lib/idempotency";
 import {
   checkIdempotency,
   computeFingerprint,
@@ -49,7 +50,15 @@ export async function handleGroupAction(
 
   const { idempotencyStore, streamRepository } = getStore();
   const requestPath = `/api/v2/streams/multi/${groupId}/${action}`;
-  const key = request.headers.get("Idempotency-Key");
+  const rawKey = request.headers.get("Idempotency-Key");
+  let key: string | null = null;
+  if (rawKey !== null) {
+    const keyValidation = validateIdempotencyKey(rawKey);
+    if (!keyValidation.ok) {
+      return idempotencyKeyErrorResponse(keyValidation.reason);
+    }
+    key = keyValidation.key;
+  }
   const token = key ? idempotencyToken(`v2.multi.${groupId}.${action}`, key) : null;
   const fingerprint = computeFingerprint("POST", requestPath, null);
 
