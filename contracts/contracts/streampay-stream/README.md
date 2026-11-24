@@ -24,6 +24,7 @@ Linear payment streams on Stellar/Soroban.
 | `pause_as` | Yes | `stream.sender` or operator | Pauses an active stream on behalf of the sender or an authorized operator. |
 | `resume_as` | Yes | `stream.sender` or operator | Resumes a paused stream on behalf of the sender or an authorized operator. |
 | `cancel_stream` | Yes | `stream.sender` | Ends a stream early, refunding unvested funds to sender. |
+| `reject_stream` | Yes | `stream.recipient` | Lets the recipient decline a `Draft` stream: refunds the full escrow to the sender and marks it `Cancelled`. |
 | `withdraw` | Yes | `stream.recipient` | Withdraws vested funds to the recipient. |
 | `withdraw_to` | Yes | `stream.recipient` | Withdraws vested funds to a custom destination address (recipient-only auth, destination trustline checked). |
 | `propose_recipient_transfer` | Yes | `stream.recipient` | Proposes transferring the stream's recipient role to a new address (step 1 of two-step transfer). |
@@ -225,6 +226,7 @@ data     = vec-encoded payload fields
 | `withdrawn_to` | `withdraw_to`      | `stream_id`, `recipient`, `destination`, `amount`, `timestamp` |
 | `settled`   | `withdraw` / `withdraw_to` (full) or `settle` | `stream_id`, `recipient`, `total_amount`, `timestamp` |
 | `cancelled` | `cancel_stream`       | `stream_id`, `cancelled_by`, `returned_amount`, `released_amount`, `timestamp` |
+| `rejected`  | `reject_stream`       | `stream_id`, `recipient`, `returned_amount`, `timestamp` |
 | `amended`   | `amend_stream`        | `stream_id`, `amended_by`, `new_rate_per_second`, `new_end_time`, `timestamp` |
 | `upgraded`  | `upgrade`             | `new_wasm_hash` (topics: `"StreamPay"/"upgraded"`) |
 | `cooloff_duration_set` | `set_cooloff_duration` | `admin`, `duration`, `timestamp` (topics: `"stream"/"cooloff"`) |

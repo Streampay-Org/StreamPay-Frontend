@@ -112,6 +112,19 @@ pub struct StreamCancelled {
     pub timestamp: u64,
 }
 
+/// Emitted when a recipient rejects a draft stream (topic: `"stream"`,
+/// sub-topic: `"rejected"`).
+///
+/// Contains the stream ID, the recipient who rejected it, the full escrow
+/// amount returned to the sender, and the ledger timestamp.
+#[contractevent(topics = ["stream", "rejected"], data_format = "vec")]
+pub struct StreamRejected {
+    pub stream_id: u64,
+    pub recipient: Address,
+    pub returned_amount: i128,
+    pub timestamp: u64,
+}
+
 /// Emitted when a stream is amended (topic: `"stream"`, sub-topic: `"amended"`).
 ///
 /// Contains the stream ID, who amended it, the new rate per second, the new
@@ -306,6 +319,23 @@ pub fn cancelled(
         cancelled_by: cancelled_by.clone(),
         returned_amount,
         released_amount,
+        timestamp,
+    }
+    .publish(env);
+}
+
+/// Publishes a [`StreamRejected`] event.
+pub fn rejected(
+    env: &Env,
+    stream_id: u64,
+    recipient: &Address,
+    returned_amount: i128,
+    timestamp: u64,
+) {
+    StreamRejected {
+        stream_id,
+        recipient: recipient.clone(),
+        returned_amount,
         timestamp,
     }
     .publish(env);
