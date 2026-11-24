@@ -1,0 +1,205 @@
+.card {
+  background-color: var(--panel);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  width: 100%;
+  max-width: 400px;
+  font-family: var(--font-sans, system-ui, sans-serif);
+  box-shadow: var(--shadow-soft);
+  margin: 0 auto;
+}
+
+@media (max-width: 480px) {
+  .card {
+    padding: 16px;
+    max-width: 100%;
+  }
+}
+
+/* ── Reduced motion fallback ───────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .card *,
+  .card *::before,
+  .card *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.cardReducedMotion .copyBtn {
+  transition: none;
+}
+
+/* ──────────────────────────────────────────────────────────────────────── */
+
+.header {
+  margin-bottom: 16px;
+}
+
+.brand {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+@media (max-width: 480px) {
+  .brand {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+}
+
+.brandWordmark {
+  font-weight: 600;
+  font-size: 1.125rem;
+}
+
+.brandTagline {
+  margin-left: 8px;
+  color: var(--muted);
+}
+
+.networkBadge {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.networkMainnet {
+  background-color: var(--system-success-bg);
+  color: var(--system-success-text);
+  border: 1px solid var(--system-success-border);
+}
+
+.networkTestnet {
+  background-color: var(--system-warning-bg);
+  color: var(--system-warning-text);
+  border: 1px solid var(--system-warning-border);
+}
+
+.amountSection {
+  text-align: center;
+  margin: 24px 0;
+}
+
+.amount {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--foreground);
+  word-break: break-all;
+}
+
+.assetCode {
+  font-size: 1.25rem;
+  color: var(--muted);
+}
+
+.divider {
+  border-top: 1px dashed var(--border);
+  margin: 16px 0;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  font-size: 0.875rem;
+}
+
+.kvRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+@media (max-width: 480px) {
+  .kvRow {
+    flex-direction: column;
+    gap: 4px;
+  }
+}
+
+.kvLabel {
+  color: var(--muted);
+}
+
+.kvValue {
+  font-family: monospace;
+  color: var(--foreground);
+  word-break: break-all;
+}
+
+@media (max-width: 480px) {
+  .kvValue {
+    text-align: left;
+  }
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+@media (max-width: 480px) {
+  .footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 480px) {
+  .actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+.maskLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.maskInput {
+  accent-color: var(--accent);
+}
+
+.copyBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.copyBtnDefault {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.copyBtnCopied {
+  background: var(--system-success-bg);
+  color: var(--system-success-text);
+  border: 1px solid var(--system-success-border);
+}

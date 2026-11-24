@@ -1,6 +1,6 @@
 /** @jest-environment node */
 
-describe('CORS middleware', () => {
+describe('CSRF middleware', () => {
   let middleware: any;
 
   beforeEach(async () => {
@@ -22,6 +22,63 @@ describe('CORS middleware', () => {
     delete (process.env as any).ALLOWED_ORIGINS;
   });
 
+  it('blocks state-changing requests without a matching CSRF token pair', async () => {
+    const request = new Request('https://api.example.com/api/streams', {
+      method: 'POST',
+      headers: {
+        origin: 'https://allowed.example.com',
+        'x-csrf-token': 'csrf-token',
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).toBe(403);
+    const body = await response.json();
+    expect(body.error.code).toMatch(/FORBIDDEN|CSRF_TOKEN_INVALID/);
+    expect(body.error.message).toContain('CSRF token');
+  });
+
+  it('allows state-changing requests when the cookie and header tokens match', async () => {
+    const request = new Request('https://api.example.com/api/streams', {
+      method: 'POST',
+      headers: {
+        origin: 'https://allowed.example.com',
+        'x-csrf-token': 'shared-token',
+        cookie: 'csrf-token=shared-token',
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('access-control-allow-origin')).toBe('https://allowed.example.com');
+  });
+});
+
+describe('CORS middleware', () => {
+  let middleware: any;
+
+  beforeEach(async () => {
+    jest.resetModules();
+
+    (process.env as any).STELLAR_NETWORK = 'testnet';
+    (process.env as any).JWT_SECRET = 'test-secret-at-least-32-characters-long';
+    (process.env as any).NODE_ENV = 'production';
+    (process.env as any).ALLOWED_ORIGINS = 'https://allowed.example.com';
+
+    const imported = await import('./middleware');
+    middleware = imported.middleware;
+  });
+
+  afterEach(() => {
+    delete (process.env as any).STELLAR_NETWORK;
+    delete (process.env as any).JWT_SECRET;
+    delete (process.env as any).NODE_ENV;
+    delete (process.env as any).ALLOWED_ORIGINS;
+    delete (process.env as any).CORS_MAX_AGE_SECONDS;
+  });
+
   it('adds CORS headers for allowed origins on normal requests', async () => {
     const request = new Request('https://api.example.com/api/health', {
       method: 'GET',
@@ -32,6 +89,7 @@ describe('CORS middleware', () => {
 
     expect(response.headers.get('access-control-allow-origin')).toBe('https://allowed.example.com');
     expect(response.headers.get('vary')).toBe('Origin');
+    expect(response.headers.get('access-control-max-age')).toBeNull();
   });
 
   it('rejects disallowed origin with 403 and error envelope', async () => {
@@ -69,6 +127,44 @@ describe('CORS middleware', () => {
     expect(response.headers.get('access-control-allow-origin')).toBe('https://allowed.example.com');
     expect(response.headers.get('access-control-allow-methods')).toContain('GET');
     expect(response.headers.get('access-control-allow-headers')).toContain('authorization');
+    expect(response.headers.get('access-control-max-age')).toBe('600');
+  });
+
+  it('uses the configured max-age on preflight responses', async () => {
+    jest.resetModules();
+    (process.env as any).CORS_MAX_AGE_SECONDS = '120';
+    const imported = await import('./middleware');
+
+    const request = new Request('https://api.example.com/api/health', {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://allowed.example.com',
+        'access-control-request-method': 'POST',
+      },
+    });
+
+    const response = await imported.middleware(request as any);
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get('access-control-max-age')).toBe('120');
+  });
+
+  it('falls back to the default max-age for invalid configuration', async () => {
+    jest.resetModules();
+    (process.env as any).CORS_MAX_AGE_SECONDS = 'invalid';
+    const imported = await import('./middleware');
+
+    const request = new Request('https://api.example.com/api/health', {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://allowed.example.com',
+        'access-control-request-method': 'POST',
+      },
+    });
+
+    const response = await imported.middleware(request as any);
+
+    expect(response.status).toBe(204);
     expect(response.headers.get('access-control-max-age')).toBe('600');
   });
 
@@ -364,15 +460,14 @@ describe('request size cap middleware', () => {
   // Path scoping
   // ---------------------------------------------------------------------------
 
-  it('applies the default size cap to paths outside /api/v2/streams', async () => {
-    // /api/v1/streams is subject to the default 256 KB cap.
+  it('applies default middleware size cap to paths outside /api/v2/streams', async () => {
     const request = makeRequest('/api/v1/streams', 'POST', DEFAULT_CAP + 1);
     const response = await middleware(request as any);
 
     expect(response.status).toBe(413);
   });
 
-  it('applies the default size cap to other v2 routes (e.g. /api/v2/other)', async () => {
+  it('applies default middleware size cap to other v2 routes (e.g. /api/v2/other)', async () => {
     const request = makeRequest('/api/v2/other', 'POST', DEFAULT_CAP + 1);
     const response = await middleware(request as any);
 
@@ -566,12 +661,10 @@ describe('request size cap middleware', () => {
   });
 
   it('does not apply webhook limit to paths similar to webhooks but not exact', async () => {
-    // /api/webhook (singular) should not get 1 MB limit
-    // Falls through to default 256 KB limit
+    // /api/webhook (singular) is not a webhook route and falls under the 256 KB default cap.
     const request = makeRequest('/api/webhook', 'POST', 512 * 1024);
     const response = await middleware(request as any);
 
-    // Should be 413 because /api/webhook exceeds the default 256 KB limit
     expect(response.status).toBe(413);
   });
 });
@@ -645,3 +738,293 @@ describe('request fingerprint middleware', () => {
     expect(response.headers.get('x-request-fingerprint')).toMatch(/^[a-f0-9]{64}$/);
   });
 });
+
+// =============================================================================
+// CSRF protection middleware
+// =============================================================================
+
+describe('CSRF protection middleware', () => {
+  let middleware: any;
+
+  beforeEach(async () => {
+    jest.resetModules();
+
+    (process.env as any).STELLAR_NETWORK = 'testnet';
+    (process.env as any).JWT_SECRET = 'test-secret-at-least-32-characters-long';
+    (process.env as any).NODE_ENV = 'production';
+    (process.env as any).ALLOWED_ORIGINS = 'https://allowed.example.com';
+
+    const imported = await import('./middleware');
+    middleware = imported.middleware;
+  });
+
+  afterEach(() => {
+    delete (process.env as any).STELLAR_NETWORK;
+    delete (process.env as any).JWT_SECRET;
+    delete (process.env as any).NODE_ENV;
+    delete (process.env as any).ALLOWED_ORIGINS;
+  });
+
+  it('sets a csrf-token cookie on safe GET requests if missing', async () => {
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'GET',
+    });
+
+    const response = await middleware(request as any);
+
+    // It should not be blocked
+    expect(response.status).not.toBe(403);
+    
+    // It should set the Set-Cookie header with a valid 64-character hex token
+    const setCookie = response.headers.get('set-cookie');
+    expect(setCookie).toBeTruthy();
+    expect(setCookie).toContain('csrf-token=');
+    const tokenMatch = setCookie.match(/csrf-token=([a-f0-9]{64})/);
+    expect(tokenMatch).toBeTruthy();
+  });
+
+  it('does not overwrite the csrf-token cookie on GET requests if a valid one is already present', async () => {
+    const validToken = 'a'.repeat(64);
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'GET',
+      headers: {
+        cookie: `csrf-token=${validToken}`,
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).not.toBe(403);
+    const setCookie = response.headers.get('set-cookie');
+    // It should not set a new csrf-token cookie
+    if (setCookie) {
+      expect(setCookie).not.toContain('csrf-token=');
+    }
+  });
+
+  it('overwrites the csrf-token cookie on GET requests if the existing cookie is invalid', async () => {
+    const invalidToken = 'invalid-token-short';
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'GET',
+      headers: {
+        cookie: `csrf-token=${invalidToken}`,
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).not.toBe(403);
+    const setCookie = response.headers.get('set-cookie');
+    expect(setCookie).toBeTruthy();
+    expect(setCookie).toContain('csrf-token=');
+    const tokenMatch = setCookie.match(/csrf-token=([a-f0-9]{64})/);
+    expect(tokenMatch).toBeTruthy();
+  });
+
+  it('rejects state-changing requests (POST) if csrf-token cookie and x-csrf-token header are missing', async () => {
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'POST',
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).toBe(403);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      error: {
+        code: 'CSRF_TOKEN_INVALID',
+        message: 'CSRF token validation failed.',
+        request_id: expect.any(String),
+      },
+    });
+  });
+
+  it('rejects state-changing requests (POST) if cookie is present but header is missing', async () => {
+    const validToken = 'a'.repeat(64);
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'POST',
+      headers: {
+        cookie: `csrf-token=${validToken}`,
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).toBe(403);
+  });
+
+  it('rejects state-changing requests (POST) if header is present but cookie is missing', async () => {
+    const validToken = 'a'.repeat(64);
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'POST',
+      headers: {
+        'x-csrf-token': validToken,
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).toBe(403);
+  });
+
+  it('rejects state-changing requests (POST) if cookie and header are present but mismatched', async () => {
+    const token1 = 'a'.repeat(64);
+    const token2 = 'b'.repeat(64);
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'POST',
+      headers: {
+        cookie: `csrf-token=${token1}`,
+        'x-csrf-token': token2,
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).toBe(403);
+  });
+
+  it('allows state-changing requests (POST) if cookie and header are present and match', async () => {
+    const token = 'a'.repeat(64);
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'POST',
+      headers: {
+        cookie: `csrf-token=${token}`,
+        'x-csrf-token': token,
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).not.toBe(403);
+  });
+
+  it('exempts webhook paths from CSRF checks', async () => {
+    const request = new Request('https://api.example.com/api/webhooks/rotate', {
+      method: 'POST',
+    });
+
+    const response = await middleware(request as any);
+
+    // Should not be 403 CSRF rejected
+    expect(response.status).not.toBe(403);
+  });
+});
+
+describe('Request body size cap middleware', () => {
+  let middleware: any;
+
+  beforeEach(async () => {
+    jest.resetModules();
+
+    (process.env as any).STELLAR_NETWORK = 'testnet';
+    (process.env as any).JWT_SECRET = 'test-secret-at-least-32-characters-long';
+    (process.env as any).NODE_ENV = 'production';
+    (process.env as any).ALLOWED_ORIGINS = 'https://allowed.example.com';
+
+    const imported = await import('./middleware');
+    middleware = imported.middleware;
+  });
+
+  afterEach(() => {
+    delete (process.env as any).STELLAR_NETWORK;
+    delete (process.env as any).JWT_SECRET;
+    delete (process.env as any).NODE_ENV;
+    delete (process.env as any).ALLOWED_ORIGINS;
+    delete (process.env as any).MAX_STREAM_BODY_BYTES;
+    delete (process.env as any).MAX_WEBHOOK_BODY_BYTES;
+  });
+
+  it('rejects POST requests to default API routes exceeding 256KB default limit with 413', async () => {
+    const bodySize = 300 * 1024; // 300 KB (> 256 KB)
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'POST',
+      headers: {
+        'content-length': bodySize.toString(),
+        'x-request-id': 'req_body_size_test',
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).toBe(413);
+    const body = await response.json();
+    expect(body.error.code).toBe('REQUEST_TOO_LARGE');
+    expect(body.error.message).toContain('262144-byte limit');
+    expect(body.error.request_id).toBe('req_body_size_test');
+  });
+
+  it('allows POST requests to default API routes within 256KB default limit', async () => {
+    const bodySize = 100 * 1024; // 100 KB
+    const token = 'a'.repeat(64);
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'POST',
+      headers: {
+        'content-length': bodySize.toString(),
+        cookie: `csrf-token=${token}`,
+        'x-csrf-token': token,
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).not.toBe(413);
+  });
+
+  it('allows POST requests to webhook routes up to 1MB', async () => {
+    const bodySize = 512 * 1024; // 512 KB (> 256 KB default, but <= 1 MB webhook limit)
+    const request = new Request('https://api.example.com/api/webhooks/rotate', {
+      method: 'POST',
+      headers: {
+        'content-length': bodySize.toString(),
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).not.toBe(413);
+  });
+
+  it('rejects POST requests to webhook routes exceeding 1MB with 413', async () => {
+    const bodySize = 2 * 1024 * 1024; // 2 MB (> 1 MB)
+    const request = new Request('https://api.example.com/api/webhooks/rotate', {
+      method: 'POST',
+      headers: {
+        'content-length': bodySize.toString(),
+        'x-request-id': 'req_webhook_large',
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).toBe(413);
+    const body = await response.json();
+    expect(body.error.code).toBe('REQUEST_TOO_LARGE');
+    expect(body.error.message).toContain('1048576-byte limit');
+    expect(body.error.request_id).toBe('req_webhook_large');
+  });
+
+  it('allows requests without content-length header', async () => {
+    const request = new Request('https://api.example.com/api/webhooks/rotate', {
+      method: 'POST',
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).not.toBe(413);
+  });
+
+  it('allows GET requests even if content-length header is present', async () => {
+    const request = new Request('https://api.example.com/api/v2/streams', {
+      method: 'GET',
+      headers: {
+        'content-length': '10000000',
+      },
+    });
+
+    const response = await middleware(request as any);
+
+    expect(response.status).not.toBe(413);
+  });
+});
+
+

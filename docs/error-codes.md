@@ -11,8 +11,15 @@ shape is documented in the [README](../README.md#error-envelope).
 | `BAD_REQUEST`          | 400  | no        | Input failed schema validation. |
 | `UNAUTHORIZED`         | 401  | no        | Missing or invalid bearer token. |
 | `FORBIDDEN`            | 403  | no        | Authenticated but lacks permission. |
+| `ACTOR_REQUIRED`       | 403  | no        | Org stream lifecycle action requires a verified actor identity. |
+| `ACTOR_MISMATCH`       | 403  | no        | JWT actor identity does not match Actor-Wallet-Address header. |
+| `CSRF_TOKEN_INVALID`   | 403  | no        | CSRF token validation failed or tokens mismatched. |
 | `NOT_FOUND`            | 404  | no        | Resource does not exist (or not visible to you). |
 | `ORG_NOT_FOUND`        | 404  | no        | Organization id does not exist. |
+| `MEMBER_NOT_FOUND`     | 404  | no        | Organisation member wallet address is not in the org. |
+| `LAST_OWNER`           | 409  | no        | Cannot remove or demote the only remaining org owner. |
+| `ORG_HAS_STREAMS`      | 409  | no        | Org still owns streams and cannot be deleted. |
+| `ORG_HAS_PENDING_APPROVALS` | 409 | no      | Org has active approvals and cannot be deleted. |
 | `REQUEST_TIMEOUT`      | 408  | yes       | Upstream did not respond in time. |
 | `CONFLICT`             | 409  | no        | Idempotency-key replay with a different body. |
 | `UNPROCESSABLE_ENTITY` | 422  | no        | Semantic validation failed (e.g. negative amount). |
@@ -20,6 +27,7 @@ shape is documented in the [README](../README.md#error-envelope).
 | `INTERNAL_ERROR`       | 500  | yes       | Unhandled server error; check `request_id` in logs. |
 | `SERVICE_UNAVAILABLE`  | 503  | yes       | Circuit breaker open or maintenance mode. |
 | `GATEWAY_TIMEOUT`      | 504  | yes       | Horizon or Soroban RPC timed out. |
+| `RECONCILIATION_TIMEOUT` | 504 | yes      | Internal reconciliation exceeded its per-request deadline (`RECONCILIATION_TIMEOUT_MS`). |
 | `UNKNOWN_ERROR`        | -    | no        | Fallback when no other mapping matched. |
 
 ## Contract error to API code mapping

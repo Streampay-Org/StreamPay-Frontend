@@ -1,4 +1,6 @@
 import { createCache, streamCache, flushStreamCache } from "./cache";
+import { validateConfig, resetConfigCache } from "./config";
+import { bootstrapApplication, resetBootstrap } from "./config/bootstrap";
 
 describe("TenantScopedCache", () => {
   const originalEnv = process.env.STREAMPAY_CACHE_DISABLED;
@@ -107,8 +109,18 @@ describe("TenantScopedCache", () => {
   });
 
   it("flushStreamCache() empties the process-wide streamCache", () => {
-    streamCache.set("tenant-x", "id-x", { id: "id-x" }, "testnet");
-    expect(streamCache.get("tenant-x", "id-x", "testnet")).toEqual({ id: "id-x" });
+    const stream = {
+      id: "id-x",
+      recipient: "GABCD1234",
+      rate: "100 XLM / month",
+      schedule: "Pays every 30 days",
+      status: "active" as const,
+      createdAt: "2026-04-01T00:00:00Z",
+      updatedAt: "2026-04-01T00:00:00Z",
+      token: "XLM",
+    };
+    streamCache.set("tenant-x", "id-x", stream, "testnet");
+    expect(streamCache.get("tenant-x", "id-x", "testnet")).toEqual(stream);
 
     flushStreamCache();
 
@@ -121,5 +133,75 @@ describe("TenantScopedCache", () => {
     // Empty-string network normalises to "default" segment
     expect(cache.get("tenant-1", "id-1", "")).toBe("legacy-value");
     expect(cache.get("tenant-1", "id-1")).toBe("legacy-value");
+  });
+});
+
+describe("streamCache network-change wiring", () => {
+  const originalEnv = {
+    STREAMPAY_CACHE_DISABLED: process.env.STREAMPAY_CACHE_DISABLED,
+    STELLAR_NETWORK: process.env.STELLAR_NETWORK,
+    JWT_SECRET: process.env.JWT_SECRET,
+    ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS,
+  };
+
+  const sampleStream = {
+    id: "id-net",
+    recipient: "GABCD1234",
+    rate: "100 XLM / month",
+    schedule: "Pays every 30 days",
+    status: "active" as const,
+    createdAt: "2026-04-01T00:00:00Z",
+    updatedAt: "2026-04-01T00:00:00Z",
+    token: "XLM",
+  };
+
+  beforeEach(() => {
+    process.env.STREAMPAY_CACHE_DISABLED = "false";
+    process.env.STELLAR_NETWORK = "testnet";
+    process.env.JWT_SECRET = "test-secret-at-least-32-characters-long";
+    process.env.ALLOWED_ORIGINS = "http://localhost:3000";
+    resetBootstrap();
+  });
+
+  afterAll(() => {
+    resetBootstrap();
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  });
+
+  it("flushes streamCache when STELLAR_NETWORK changes across reset/bootstrap", () => {
+    bootstrapApplication();
+    streamCache.set("tenant-1", "id-net", sampleStream, "testnet");
+    expect(streamCache.get("tenant-1", "id-net", "testnet")).toEqual(sampleStream);
+
+    process.env.STELLAR_NETWORK = "mainnet";
+    resetBootstrap();
+    bootstrapApplication();
+
+    expect(streamCache.get("tenant-1", "id-net", "testnet")).toBeNull();
+  });
+
+  it("keeps streamCache entries when STELLAR_NETWORK is unchanged on re-bootstrap", () => {
+    bootstrapApplication();
+    streamCache.set("tenant-1", "id-net", sampleStream, "testnet");
+
+    bootstrapApplication();
+    validateConfig();
+
+    expect(streamCache.get("tenant-1", "id-net", "testnet")).toEqual(sampleStream);
+  });
+
+  it("always flushes streamCache on explicit resetConfigCache()", () => {
+    validateConfig();
+    streamCache.set("tenant-1", "id-net", sampleStream, "testnet");
+
+    resetConfigCache();
+
+    expect(streamCache.get("tenant-1", "id-net", "testnet")).toBeNull();
   });
 });

@@ -24,7 +24,7 @@ const mockAuthFailureResponse = NextResponse.json(
   { status: 401 },
 );
 
-const mockDeliveryWorker = webhookDeliveryWorker as {
+const mockDeliveryWorker = webhookDeliveryWorker as unknown as {
   reissueDelivery: jest.Mock;
 };
 

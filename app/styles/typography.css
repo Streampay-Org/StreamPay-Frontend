@@ -1,0 +1,9 @@
+/**
+ * StreamPay Typography System - tabular-nums formatting
+ * GrantFox campaign (Stellar Wave) typography utilities.
+ * Applies tabular numbers for equal glyph widths across numeric displays.
+ */
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}

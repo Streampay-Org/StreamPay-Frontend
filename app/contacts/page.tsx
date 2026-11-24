@@ -1,37 +1,55 @@
 "use client";
 
-import React, { useCallback, useEffect, useId, useState } from "react";
-import { CopyAddress } from "../components/CopyAddress";
-import { EmptyState } from "../components/EmptyState";
+import React, { useEffect, useId, useMemo, useState } from "react";
 import { Modal } from "../components/Modal";
+import { ResetFiltersButton } from "../components/ResetFiltersButton";
 import { useToast } from "../hooks/useToast";
+import { safeStorage } from "../lib/safeStorage";
+import { filterContacts, sortContacts, type ContactSortKey } from "./filter";
 import {
-  FederationError,
-  isFederationAddress,
-  resolveFederationAddress,
-} from "../utils/federation";
+  buildExportCsv,
+  buildExportJson,
+  classifyImport,
+  type ClassifyResult,
+} from "./importExport";
+import { ContactForm, type FormSubmitResult } from "./ContactForm";
+import { ContactList } from "./ContactList";
+import { ImportPreview, type ConflictChoice } from "./ImportPreview";
+import type { Contact } from "./types";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export interface Contact {
-  id: string;
-  label: string;
-  /** Resolved Stellar account ID (G…) */
-  address: string;
-  /** Original federation address when the user entered one (user*domain.com) */
-  federationAddress?: string;
-  memo?: string;
-  createdAt: string;
-}
+export type { Contact, RequiredMemo, ContactPaymentTarget } from "./types";
+export { getContactPaymentTarget } from "./types";
 
 // ─── localStorage persistence ─────────────────────────────────────────────────
 
 const CONTACTS_KEY = "streampay_contacts";
+const CONTACT_SORT_KEY = "streampay-contacts-sort";
+
+const SORT_OPTIONS: { value: ContactSortKey; label: string }[] = [
+  { value: "label-asc", label: "Label A-Z" },
+  { value: "label-desc", label: "Label Z-A" },
+  { value: "recent", label: "Newest" },
+  { value: "oldest", label: "Oldest" },
+];
+
+function isContactSortKey(value: string | null): value is ContactSortKey {
+  return SORT_OPTIONS.some((option) => option.value === value);
+}
+
+// Sample address book shown on a visitor's first visit so the demo is populated.
+// Once the visitor saves, edits or deletes a contact their own list is persisted.
+// Not applied under Jest so the empty-state behaviour stays testable.
+const DEMO_CONTACTS: Contact[] = [
+  { id: "demo-ada", label: "Ada Creative Studio", address: "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZLPXE", memo: "Design retainer, paid monthly", createdAt: "2026-04-01T09:00:00.000Z" },
+  { id: "demo-kemi", label: "Kemi Onboarding Support", address: "GBVZZ5QKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2GQI", memo: "Weekly onboarding help", createdAt: "2026-04-10T11:00:00.000Z" },
+  { id: "demo-yusuf", label: "Yusuf QA Partnership", address: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGYWDEAVQBMJ7WGNB55IVJV", federationAddress: "yusuf*qa.example.com", createdAt: "2026-04-15T08:00:00.000Z" },
+];
 
 function loadContacts(): Contact[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(CONTACTS_KEY);
+    if (raw === null && process.env.NODE_ENV !== "test") return DEMO_CONTACTS;
     return raw ? (JSON.parse(raw) as Contact[]) : [];
   } catch {
     return [];
@@ -43,417 +61,16 @@ function persistContacts(contacts: Contact[]): void {
   localStorage.setItem(CONTACTS_KEY, JSON.stringify(contacts));
 }
 
-// ─── Validation ───────────────────────────────────────────────────────────────
+// ─── Import / export constants ────────────────────────────────────────────────
 
-// Stellar ED25519 public key: G + 55 base-32 chars (A–Z, 2–7)
-const STELLAR_ACCOUNT_RE = /^G[A-Z2-7]{55}$/;
-
-function isValidStellarAddress(value: string): boolean {
-  return STELLAR_ACCOUNT_RE.test(value);
-}
-
-// ─── ContactForm ──────────────────────────────────────────────────────────────
-
-interface FormValues {
-  label: string;
-  address: string;
-  memo: string;
-}
-
-interface FormSubmitResult extends FormValues {
-  resolvedAddress: string;
-  federationAddress?: string;
-}
-
-interface ContactFormProps {
-  initial?: FormValues;
-  onSubmit: (result: FormSubmitResult) => void;
-  onCancel: () => void;
-  submitLabel: string;
-}
-
-function ContactForm({
-  initial,
-  onSubmit,
-  onCancel,
-  submitLabel,
-}: ContactFormProps) {
-  const [label, setLabel] = useState(initial?.label ?? "");
-  const [address, setAddress] = useState(initial?.address ?? "");
-  const [memo, setMemo] = useState(initial?.memo ?? "");
-
-  const [resolving, setResolving] = useState(false);
-  const [resolvedAddress, setResolvedAddress] = useState("");
-  const [federationAddress, setFederationAddress] = useState<
-    string | undefined
-  >();
-  const [resolveError, setResolveError] = useState("");
-  const [errors, setErrors] = useState<Partial<Record<"label" | "address" | "memo", string>>>(
-    {},
-  );
-
-  const labelId = useId();
-  const addressId = useId();
-  const memoId = useId();
-
-  const handleAddressBlur = useCallback(async () => {
-    const trimmed = address.trim();
-    if (!trimmed) return;
-
-    setResolveError("");
-
-    if (isFederationAddress(trimmed)) {
-      setResolving(true);
-      try {
-        const record = await resolveFederationAddress(trimmed);
-        setResolvedAddress(record.account_id);
-        setFederationAddress(trimmed);
-        setErrors((prev) => ({ ...prev, address: undefined }));
-      } catch (err) {
-        const msg =
-          err instanceof FederationError
-            ? err.message
-            : "Failed to resolve federation address";
-        setResolveError(msg);
-        setResolvedAddress("");
-        setFederationAddress(undefined);
-      } finally {
-        setResolving(false);
-      }
-    } else if (isValidStellarAddress(trimmed)) {
-      setResolvedAddress(trimmed);
-      setFederationAddress(undefined);
-    } else {
-      setResolvedAddress("");
-      setFederationAddress(undefined);
-    }
-  }, [address]);
-
-  const validate = (): boolean => {
-    const next: typeof errors = {};
-
-    if (!label.trim()) {
-      next.label = "Label is required";
-    } else if (label.trim().length > 64) {
-      next.label = "Label must be 64 characters or fewer";
-    }
-
-    const trimmed = address.trim();
-    if (!trimmed) {
-      next.address = "Address is required";
-    } else if (
-      !isFederationAddress(trimmed) &&
-      !isValidStellarAddress(trimmed)
-    ) {
-      next.address =
-        "Enter a valid Stellar address (G…) or federation address (user*domain.com)";
-    } else if (isFederationAddress(trimmed) && !resolvedAddress) {
-      next.address =
-        resolveError || "Resolve the federation address before saving";
-    }
-
-    if (memo.length > 256) {
-      next.memo = "Note must be 256 characters or fewer";
-    }
-
-    setErrors(next);
-    return Object.keys(next).length === 0;
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validate()) return;
-    onSubmit({
-      label: label.trim(),
-      address: address.trim(),
-      memo: memo.trim(),
-      resolvedAddress: resolvedAddress || address.trim(),
-      federationAddress,
-    });
-  };
-
-  const fieldStyle: React.CSSProperties = {
-    width: "100%",
-    padding: "0.75rem 1rem",
-    background: "var(--panel)",
-    border: "1px solid var(--border)",
-    borderRadius: "0.5rem",
-    color: "var(--foreground)",
-    fontSize: "1rem",
-    outline: "none",
-  };
-
-  const fieldErrorStyle: React.CSSProperties = {
-    ...fieldStyle,
-    borderColor: "var(--system-error-border)",
-  };
-
-  const labelStyle: React.CSSProperties = {
-    display: "block",
-    fontSize: "0.75rem",
-    fontWeight: 700,
-    letterSpacing: "0.08em",
-    textTransform: "uppercase",
-    color: "var(--muted-foreground)",
-    marginBottom: "0.5rem",
-  };
-
-  const errorMsgStyle: React.CSSProperties = {
-    color: "var(--system-error-text)",
-    fontSize: "0.8rem",
-    marginTop: "0.375rem",
-  };
-
-  return (
-    <form onSubmit={handleSubmit} noValidate>
-      <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-
-        {/* Label */}
-        <div>
-          <label htmlFor={labelId} style={labelStyle}>
-            Label
-          </label>
-          <input
-            id={labelId}
-            type="text"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="e.g. Alice Design Studio"
-            maxLength={65}
-            aria-required="true"
-            aria-invalid={!!errors.label}
-            aria-describedby={errors.label ? `${labelId}-err` : undefined}
-            style={errors.label ? fieldErrorStyle : fieldStyle}
-          />
-          {errors.label && (
-            <p id={`${labelId}-err`} role="alert" style={errorMsgStyle}>
-              {errors.label}
-            </p>
-          )}
-        </div>
-
-        {/* Address */}
-        <div>
-          <label htmlFor={addressId} style={labelStyle}>
-            Stellar address or federation address
-          </label>
-          <div style={{ position: "relative" }}>
-            <input
-              id={addressId}
-              type="text"
-              value={address}
-              onChange={(e) => {
-                setAddress(e.target.value);
-                setResolvedAddress("");
-                setFederationAddress(undefined);
-                setResolveError("");
-              }}
-              onBlur={handleAddressBlur}
-              placeholder="GABC… or user*domain.com"
-              aria-required="true"
-              aria-invalid={!!(errors.address || resolveError)}
-              aria-describedby={
-                [
-                  errors.address || resolveError ? `${addressId}-err` : "",
-                  resolvedAddress ? `${addressId}-resolved` : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ") || undefined
-              }
-              style={{
-                ...(errors.address || resolveError
-                  ? fieldErrorStyle
-                  : fieldStyle),
-                paddingRight: resolving ? "3rem" : "1rem",
-                fontFamily: "monospace",
-              }}
-            />
-            {resolving && (
-              <span
-                aria-label="Resolving federation address…"
-                style={{
-                  position: "absolute",
-                  right: "0.75rem",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  color: "var(--muted)",
-                  fontSize: "0.875rem",
-                  pointerEvents: "none",
-                }}
-              >
-                ⟳
-              </span>
-            )}
-          </div>
-
-          {resolvedAddress && isFederationAddress(address.trim()) && (
-            <p
-              id={`${addressId}-resolved`}
-              style={{
-                fontSize: "0.8rem",
-                color: "var(--system-success-text)",
-                marginTop: "0.375rem",
-                fontFamily: "monospace",
-                wordBreak: "break-all",
-              }}
-            >
-              Resolved: {resolvedAddress}
-            </p>
-          )}
-
-          {(errors.address || resolveError) && (
-            <p id={`${addressId}-err`} role="alert" style={errorMsgStyle}>
-              {errors.address || resolveError}
-            </p>
-          )}
-        </div>
-
-        {/* Memo */}
-        <div>
-          <label htmlFor={memoId} style={labelStyle}>
-            Note{" "}
-            <span style={{ fontWeight: 400, textTransform: "none" }}>
-              (optional)
-            </span>
-          </label>
-          <input
-            id={memoId}
-            type="text"
-            value={memo}
-            onChange={(e) => setMemo(e.target.value)}
-            placeholder="e.g. Design retainer for Q3"
-            maxLength={257}
-            aria-invalid={!!errors.memo}
-            aria-describedby={errors.memo ? `${memoId}-err` : undefined}
-            style={errors.memo ? fieldErrorStyle : fieldStyle}
-          />
-          {errors.memo && (
-            <p id={`${memoId}-err`} role="alert" style={errorMsgStyle}>
-              {errors.memo}
-            </p>
-          )}
-        </div>
-
-        {/* Actions */}
-        <div
-          style={{
-            display: "flex",
-            gap: "0.75rem",
-            justifyContent: "flex-end",
-            paddingTop: "0.5rem",
-          }}
-        >
-          <button
-            type="button"
-            className="button button--secondary"
-            onClick={onCancel}
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="button button--primary"
-            disabled={resolving}
-          >
-            {resolving ? "Resolving…" : submitLabel}
-          </button>
-        </div>
-      </div>
-    </form>
-  );
-}
-
-// ─── ContactRow ───────────────────────────────────────────────────────────────
-
-interface ContactRowProps {
-  contact: Contact;
-  onEdit: (contact: Contact) => void;
-  onDelete: (id: string) => void;
-}
-
-function ContactRow({ contact, onEdit, onDelete }: ContactRowProps) {
-  return (
-    <article
-      className="activity-card"
-      style={{
-        display: "grid",
-        gridTemplateColumns: "1fr auto",
-        gap: "1rem",
-        alignItems: "center",
-      }}
-      aria-label={`Contact: ${contact.label}`}
-    >
-      <div style={{ minWidth: 0 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "baseline",
-            gap: "0.5rem",
-            flexWrap: "wrap",
-          }}
-        >
-          <strong style={{ fontSize: "1rem", fontWeight: 700 }}>
-            {contact.label}
-          </strong>
-          {contact.federationAddress && (
-            <span
-              style={{
-                fontSize: "0.75rem",
-                color: "var(--muted)",
-                fontFamily: "monospace",
-              }}
-            >
-              {contact.federationAddress}
-            </span>
-          )}
-        </div>
-
-        <div style={{ marginTop: "0.25rem" }}>
-          <CopyAddress value={contact.address} truncateChars={8} />
-        </div>
-
-        {contact.memo && (
-          <p
-            style={{
-              fontSize: "0.85rem",
-              color: "var(--muted-foreground)",
-              marginTop: "0.25rem",
-            }}
-          >
-            {contact.memo}
-          </p>
-        )}
-      </div>
-
-      <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0 }}>
-        <button
-          type="button"
-          className="button button--secondary"
-          onClick={() => onEdit(contact)}
-          aria-label={`Edit contact ${contact.label}`}
-          style={{ padding: "0.375rem 0.875rem", fontSize: "0.875rem" }}
-        >
-          Edit
-        </button>
-        <button
-          type="button"
-          className="button button--danger"
-          onClick={() => onDelete(contact.id)}
-          aria-label={`Delete contact ${contact.label}`}
-          style={{ padding: "0.375rem 0.875rem", fontSize: "0.875rem" }}
-        >
-          Delete
-        </button>
-      </div>
-    </article>
-  );
-}
+const MAX_IMPORT_BYTES = 1024 * 1024;
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ContactsPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<ContactSortKey>("recent");
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Contact | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -462,21 +79,43 @@ export default function ContactsPage() {
 
   useEffect(() => {
     setContacts(loadContacts());
+    const storedSort = safeStorage.getItem(CONTACT_SORT_KEY);
+    if (isContactSortKey(storedSort)) setSort(storedSort);
   }, []);
 
-  const filtered = contacts.filter((c) => {
-    const q = search.toLowerCase();
-    return (
-      c.label.toLowerCase().includes(q) ||
-      c.address.toLowerCase().includes(q) ||
-      (c.federationAddress?.toLowerCase().includes(q) ?? false) ||
-      (c.memo?.toLowerCase().includes(q) ?? false)
-    );
-  });
+  const filtered = useMemo(
+    () =>
+      sortContacts(filterContacts(contacts, search), sort),
+    [contacts, search, sort],
+  );
+
+  const handleSortChange = (next: ContactSortKey) => {
+    setSort(next);
+    safeStorage.setItem(CONTACT_SORT_KEY, next);
+  };
+
+  const resetFilters = () => {
+    setSearch("");
+    handleSortChange("recent");
+  };
 
   const applyUpdate = (next: Contact[]) => {
+    const previous = contacts;
     setContacts(next);
-    persistContacts(next);
+    try {
+      persistContacts(next);
+    } catch (err) {
+      setContacts(previous);
+      const isQuota =
+        err instanceof DOMException &&
+        (err.name === "QuotaExceededError" ||
+          err.name === "NS_ERROR_DOM_QUOTA_REACHED");
+      toast.error(
+        isQuota
+          ? "Storage is full. Your change was not saved."
+          : "Could not save contacts. Your change was not saved.",
+      );
+    }
   };
 
   const handleAdd = ({
@@ -484,6 +123,7 @@ export default function ContactsPage() {
     memo,
     resolvedAddress,
     federationAddress,
+    requiredMemo,
   }: FormSubmitResult) => {
     const contact: Contact = {
       id: crypto.randomUUID(),
@@ -491,6 +131,7 @@ export default function ContactsPage() {
       address: resolvedAddress,
       federationAddress,
       memo: memo || undefined,
+      requiredMemo,
       createdAt: new Date().toISOString(),
     };
     applyUpdate([...contacts, contact]);
@@ -503,6 +144,7 @@ export default function ContactsPage() {
     memo,
     resolvedAddress,
     federationAddress,
+    requiredMemo,
   }: FormSubmitResult) => {
     if (!editTarget) return;
     applyUpdate(
@@ -514,6 +156,7 @@ export default function ContactsPage() {
               address: resolvedAddress,
               federationAddress,
               memo: memo || undefined,
+              requiredMemo,
             }
           : c,
       ),
@@ -593,6 +236,54 @@ export default function ContactsPage() {
             />
           </div>
 
+          <div>
+            <label
+              htmlFor="contacts-sort"
+              style={{
+                display: "block",
+                fontSize: "0.75rem",
+                color: "var(--muted)",
+                marginBottom: "0.25rem",
+              }}
+            >
+              Sort contacts
+            </label>
+            <select
+              id="contacts-sort"
+              aria-label="Sort contacts"
+              value={sort}
+              onChange={(event) =>
+                handleSortChange(event.target.value as ContactSortKey)
+              }
+              style={{
+                padding: "0.625rem 2rem 0.625rem 0.75rem",
+                background: "var(--panel)",
+                border: "1px solid var(--border)",
+                borderRadius: "0.5rem",
+                color: "var(--foreground)",
+              }}
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <ResetFiltersButton
+            onReset={resetFilters}
+            isVisible={search.trim() !== "" || sort !== "recent"}
+          />
+
+          <ExportMenu contacts={contacts} />
+          <ImportButton
+            contacts={contacts}
+            onApply={applyUpdate}
+            onError={(msg) => toast.error(msg)}
+            onSuccess={(msg) => toast.success(msg)}
+          />
+
           <button
             type="button"
             className="button button--primary"
@@ -602,63 +293,14 @@ export default function ContactsPage() {
           </button>
         </div>
 
-        {/* Count */}
-        {contacts.length > 0 && (
-          <p
-            aria-live="polite"
-            style={{
-              fontSize: "0.8rem",
-              color: "var(--muted)",
-              marginBottom: "1rem",
-            }}
-          >
-            {filtered.length === contacts.length
-              ? `${contacts.length} contact${contacts.length !== 1 ? "s" : ""}`
-              : `${filtered.length} of ${contacts.length} contacts`}
-          </p>
-        )}
-
-        {/* List */}
-        {contacts.length === 0 ? (
-          <EmptyState
-            eyebrow="Contacts"
-            title="No contacts yet"
-            description="Add a Stellar address with a label so you can find it quickly when setting up a payment stream."
-            actionLabel="Add your first contact"
-          />
-        ) : filtered.length === 0 ? (
-          <p
-            role="status"
-            style={{
-              color: "var(--muted-foreground)",
-              textAlign: "center",
-              padding: "3rem 0",
-            }}
-          >
-            No contacts match <strong>{search}</strong>
-          </p>
-        ) : (
-          <section aria-label="Contact list">
-            <ul
-              style={{
-                listStyle: "none",
-                display: "flex",
-                flexDirection: "column",
-                gap: "0.75rem",
-              }}
-            >
-              {filtered.map((contact) => (
-                <li key={contact.id}>
-                  <ContactRow
-                    contact={contact}
-                    onEdit={setEditTarget}
-                    onDelete={setDeleteId}
-                  />
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
+        <ContactList
+          contacts={contacts}
+          filtered={filtered}
+          search={search}
+          onAdd={() => setAddOpen(true)}
+          onEdit={setEditTarget}
+          onDelete={setDeleteId}
+        />
       </div>
 
       {/* Add modal */}
@@ -682,6 +324,7 @@ export default function ContactsPage() {
               label: editTarget.label,
               address: editTarget.federationAddress ?? editTarget.address,
               memo: editTarget.memo ?? "",
+              requiredMemo: editTarget.requiredMemo,
             }}
             onSubmit={handleEdit}
             onCancel={() => setEditTarget(null)}
@@ -720,5 +363,222 @@ export default function ContactsPage() {
         </div>
       </Modal>
     </main>
+  );
+}
+
+// ─── ExportMenu ───────────────────────────────────────────────────────────────
+
+function downloadFile(filename: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function ExportMenu({ contacts }: { contacts: Contact[] }) {
+  const [open, setOpen] = useState(false);
+  const menuId = useId();
+  const disabled = contacts.length === 0;
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        type="button"
+        className="button button--secondary"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={menuId}
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+      >
+        Export
+      </button>
+      {open && (
+        <div
+          id={menuId}
+          role="menu"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 0.25rem)",
+            right: 0,
+            background: "var(--panel)",
+            border: "1px solid var(--border)",
+            borderRadius: "0.5rem",
+            padding: "0.25rem",
+            zIndex: 20,
+            minWidth: "10rem",
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="button button--secondary"
+            style={{ width: "100%", justifyContent: "flex-start" }}
+            onClick={() => {
+              downloadFile(
+                "contacts.json",
+                buildExportJson(contacts),
+                "application/json",
+              );
+              setOpen(false);
+            }}
+          >
+            Export JSON
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="button button--secondary"
+            style={{ width: "100%", justifyContent: "flex-start" }}
+            onClick={() => {
+              downloadFile(
+                "contacts.csv",
+                buildExportCsv(contacts),
+                "text/csv",
+              );
+              setOpen(false);
+            }}
+          >
+            Export CSV
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ImportButton ─────────────────────────────────────────────────────────────
+
+interface ImportButtonProps {
+  contacts: Contact[];
+  onApply: (next: Contact[]) => void;
+  onError: (msg: string) => void;
+  onSuccess: (msg: string) => void;
+}
+
+function ImportButton({
+  contacts,
+  onApply,
+  onError,
+  onSuccess,
+}: ImportButtonProps) {
+  const inputId = useId();
+  const [preview, setPreview] = useState<ClassifyResult | null>(null);
+  const [conflictChoices, setConflictChoices] = useState<
+    Record<number, ConflictChoice>
+  >({});
+
+  const handleFile = async (file: File) => {
+    if (file.size > MAX_IMPORT_BYTES) {
+      onError("File is larger than 1 MB");
+      return;
+    }
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      onError("Could not read file");
+      return;
+    }
+    const result = classifyImport(text, file.name, contacts);
+    if (result.error) {
+      onError(result.error);
+      return;
+    }
+    if (result.rows.length === 0) {
+      onError("File contains no rows");
+      return;
+    }
+    const choices: Record<number, ConflictChoice> = {};
+    result.rows.forEach((r, i) => {
+      if (r.status === "conflict") choices[i] = "skip";
+    });
+    setConflictChoices(choices);
+    setPreview(result);
+  };
+
+  const commit = () => {
+    if (!preview) return;
+    const next = [...contacts];
+    preview.rows.forEach((row, i) => {
+      if (row.status === "invalid" || row.status === "duplicate") return;
+      if (row.status === "conflict") {
+        const choice = conflictChoices[i] ?? "skip";
+        if (choice === "skip") return;
+        if (choice === "overwrite") {
+          const idx = next.findIndex((c) => c.id === row.existingId);
+          if (idx >= 0) {
+            next[idx] = {
+              ...next[idx],
+              label: row.label,
+              memo: row.note || undefined,
+            };
+          }
+          return;
+        }
+      }
+      next.push({
+        id: crypto.randomUUID(),
+        label: row.label,
+        address: row.address,
+        federationAddress: row.federation || undefined,
+        memo: row.note || undefined,
+        createdAt: row.createdAt,
+      });
+    });
+    onApply(next);
+    const added = preview.rows.filter(
+      (r) => r.status === "new",
+    ).length;
+    setPreview(null);
+    onSuccess(`Imported ${added} contact${added !== 1 ? "s" : ""}`);
+  };
+
+  return (
+    <>
+      <label
+        htmlFor={inputId}
+        className="button button--secondary"
+        style={{ cursor: "pointer" }}
+      >
+        Import
+      </label>
+      <input
+        id={inputId}
+        type="file"
+        accept=".json,.csv,application/json,text/csv"
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          padding: 0,
+          margin: -1,
+          overflow: "hidden",
+          clip: "rect(0,0,0,0)",
+          whiteSpace: "nowrap",
+          border: 0,
+        }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) void handleFile(file);
+        }}
+      />
+
+      <ImportPreview
+        preview={preview}
+        conflictChoices={conflictChoices}
+        onConflictChoiceChange={(index, choice) =>
+          setConflictChoices((prev) => ({ ...prev, [index]: choice }))
+        }
+        onCancel={() => setPreview(null)}
+        onConfirm={commit}
+      />
+    </>
   );
 }

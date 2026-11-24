@@ -1,108 +1,80 @@
 import { NextResponse } from "next/server";
-import { db, withLock } from "@/app/lib/db";
 import { withIdempotency, settleStore } from "@/app/lib/idempotency";
-import { getCorrelationContext, logger } from "@/app/lib/logger";
-import { checkStreamOrgPolicy } from "@/app/lib/org-policy";
-import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
-import { getStellarSettlementClient } from "@/app/lib/stellar";
+import { getCorrelationContext } from "@/app/lib/logger";
+import { enforceStreamRbac, resolveActorAddress } from "@/app/lib/org-policy";
+import { settleStreamById } from "@/app/lib/settle-stream";
 
 type Context = { params: Promise<{ id: string }> };
 
-function createErrorResponse(code: string, message: string, status: number) {
+function createErrorResponse(code: string, message: string, status: number, legacyCode?: string) {
   const context = getCorrelationContext();
-  return NextResponse.json({ error: { code, message, request_id: context?.request_id } }, { status });
+  return NextResponse.json(
+    { error: { code, ...(legacyCode ? { legacy_code: legacyCode } : {}), message, request_id: context?.request_id } },
+    { status },
+  );
 }
 
-function errorResponse(code: string, message: string, status: number) {
-  return createErrorResponse(code, message, status);
+function errorResponse(code: string, message: string, status: number, legacyCode?: string) {
+  return createErrorResponse(code, message, status, legacyCode);
 }
 
 function getHeader(request: Request, name: string): string | null {
   return request.headers?.get?.(name) ?? null;
 }
 
+/**
+ * POST /api/streams/:id/settle
+ *
+ * Settles an active or paused stream.
+ *
+ * Actor resolution order:
+ * 1. Verified JWT `sub` claim (Bearer token).
+ * 2. `Actor-Wallet-Address` header (fallback only when STREAMPAY_ALLOW_ACTOR_HEADER=true).
+ * If both are present and differ, returns 403 ACTOR_MISMATCH.
+ *
+ * RBAC ordering:
+ * Runs after 404 stream existence check and before state transition validation
+ * and chain call, inside the stream lock.
+ */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
-) {
+)
+{
   const { id } = await params;
+  let actorAddress: string | null = null;
+  try {
+    actorAddress = resolveActorAddress(request);
+  } catch {
+    actorAddress = getHeader(request, "Actor-Wallet-Address");
+  }
   // IDEMPOTENCY: Settle is non-idempotent by nature — this wrapper ensures retries return the original response without re-executing the settlement
   return withIdempotency(request, "settle", settleStore, async () => {
-    return withLock(id, async () => {
-      const stream = db.streams.get(id);
-      if (!stream) {
-        return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
-      }
-
-      const actorAddress = getHeader(request, "Actor-Wallet-Address");
-      const policyResult = actorAddress
-        ? checkStreamOrgPolicy(id, actorAddress, "settle")
-        : null;
-      if (policyResult) {
-        if (!policyResult.allowed) {
-          return errorResponse(policyResult.code, policyResult.message, policyResult.httpStatus);
-        }
-        if (policyResult.requiresApproval) {
-          return errorResponse(
-            "APPROVAL_REQUIRED",
-            "This action requires multi-sig approval. Please initiate an approval request.",
-            409
-          );
-        }
-      }
-
-      if (stream.status !== "active" && stream.status !== "paused") {
-        return errorResponse("INVALID_STREAM_STATE", "Only active or paused streams can be settled", 409);
-      }
-
-      const before = structuredClone(stream);
-      const txHash = `fake-tx-${crypto.randomUUID().slice(0, 8)}`;
-      const now = new Date().toISOString();
-      const updatedStream = {
-        ...stream,
-        nextAction: "withdraw" as const,
-        settlementTxHash: txHash,
-        status: "ended" as const,
-        updatedAt: now,
-        withdrawal: {
-          attempts: 0,
-          lastCheckedAt: now,
-          requestedAt: now,
-          settlementTxHash: txHash,
-          state: "pending" as const,
-        },
-      };
-      db.streams.set(id, updatedStream);
-
-      try {
-        const settlement = await getStellarSettlementClient().settleStream({ streamId: id });
-
-        db.streams.set(id, updatedStream);
-
-        recordPrivilegedStreamAuditEvent({
-          action: "stream.settle",
-          after: updatedStream as any,
-          before: before as any,
-          metadata: {
-            settlementTxHash: settlement.txHash,
-          },
-          request,
-          streamId: id,
-          targetAccount: updatedStream.recipient,
-        });
-
-        const payload = { data: { ...updatedStream, settlement } };
-
-        logger.info("Stream settled successfully", {
-          streamId: id,
-          action: "settle",
-          status: "success",
-        });
-
-        return NextResponse.json(payload);
-      } catch {
-        return errorResponse("SETTLEMENT_FAILED", "Failed to settle stream on Stellar/Soroban", 502);
-      }
+    const outcome = await settleStreamById({
+      streamId: id,
+      request,
+      actorAddress,
+      // RBAC: evaluated inside the lock, immediately after 404 and before state guard or chain call.
+      beforeTransition: () => enforceStreamRbac(request, id, "settle"),
     });
-  });
+
+    if (!outcome.ok) {
+      switch (outcome.reason) {
+        case "not_found":
+          return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
+        case "guard_rejected":
+          return outcome.guardResult as NextResponse;
+        case "invalid_state":
+          return errorResponse(outcome.code, outcome.error, 409, outcome.legacyCode);
+        case "settlement_failed":
+          return errorResponse("SETTLEMENT_FAILED", "Failed to settle stream on Stellar/Soroban", 502);
+      }
+    }
+
+    if (outcome.idempotent) {
+      return NextResponse.json({ data: outcome.stream });
+    }
+
+    return NextResponse.json({ data: { ...outcome.stream, settlement: outcome.settlement } });
+  }, { resourceId: id, actorId: actorAddress ?? undefined });
 }

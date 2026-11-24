@@ -2,94 +2,404 @@
  * @jest-environment jsdom
  */
 
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { axe } from "jest-axe";
 import ActivityPage from "./page";
+import { setDisplayTimeZone } from "../lib/timezone";
 
-// Fake timers let us control setTimeout without actually waiting.
-beforeEach(() => {
-  jest.useFakeTimers();
-});
-
-afterEach(() => {
-  jest.runOnlyPendingTimers();
-  jest.useRealTimers();
-});
+// Mock the ActivityTimeline component
+jest.mock("../components/ActivityTimeline", () => ({
+  ActivityTimeline: ({ groups }: { groups: any[] }) => (
+    <div data-testid="activity-timeline">
+      {groups.map((group, i) => (
+        <div key={i} data-testid="activity-group">
+          <h3>{group.date}</h3>
+          {group.events.map((event: any) => (
+            <div key={event.id} data-testid="activity-event">
+              {event.title}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  ),
+  ActivityTimelineSkeleton: () => (
+    <div data-testid="activity-skeleton">
+      <div>Loading skeleton...</div>
+    </div>
+  ),
+}));
 
 describe("ActivityPage", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    jest.useFakeTimers();
+    global.fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          data: [
+            {
+              id: "1",
+              type: "stream_created",
+              description: "New stream created for Project Alpha",
+              timestamp: new Date().toISOString(),
+              streamId: "alpha",
+              isDeleted: false,
+            },
+            {
+              id: "2",
+              type: "stream_created",
+              description: "Deleted stream activity",
+              timestamp: new Date().toISOString(),
+              streamId: "beta",
+              isDeleted: true,
+            }
+          ]
+        })
+      })
+    ) as jest.Mock;
+  });
+
+  afterEach(() => {
+    act(() => {
+      jest.runOnlyPendingTimers();
+    });
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
   it("shows the loading skeleton while data is fetching", () => {
     render(<ActivityPage />);
-
-    // Skeleton is aria-hidden so we find it by the sr-only live region text.
-    expect(screen.getByText(/loading activity feed/i)).toBeInTheDocument();
+    expect(screen.getByTestId("activity-skeleton")).toBeInTheDocument();
+    
+    const feedSection = screen.getByLabelText("Activity feed");
+    expect(feedSection).toHaveAttribute("aria-busy", "true");
   });
 
   it("renders the page heading and description", () => {
     render(<ActivityPage />);
-
-    expect(
-      screen.getByRole("heading", { name: /track every event/i }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/every transaction, status update/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Activity")).toBeInTheDocument();
+    expect(screen.getByText("Track every event.")).toBeInTheDocument();
   });
 
-  it("renders the activity feed heading", () => {
+  it("transitions to the populated state after load", async () => {
     render(<ActivityPage />);
-
-    expect(
-      screen.getByRole("heading", { name: /activity feed/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("transitions to the populated state after the simulated load", async () => {
-    render(<ActivityPage />);
-
-    await act(async () => {
-      jest.advanceTimersByTime(2000);
+    expect(screen.getByTestId("activity-skeleton")).toBeInTheDocument();
+    
+    await waitFor(() => {
+      expect(screen.getByTestId("activity-timeline")).toBeInTheDocument();
     });
-
-    expect(
-      screen.getByText(/new stream created for project alpha/i),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/wallet connected/i)).toBeInTheDocument();
-    expect(screen.getByText(/design retainer stream settled/i)).toBeInTheDocument();
-  });
-
-  it("shows timeline date groups once populated", async () => {
-    render(<ActivityPage />);
-
-    await act(async () => {
-      jest.advanceTimersByTime(2000);
-    });
-
+    
     expect(screen.getByText("Today")).toBeInTheDocument();
-    expect(screen.getByText("Yesterday")).toBeInTheDocument();
   });
 
-  it("uses aria-busy=true on the feed section while loading", () => {
+  it("uses aria-busy=true while loading", () => {
     render(<ActivityPage />);
-
-    const section = screen.getByRole("region", { name: /activity feed/i });
-    expect(section).toHaveAttribute("aria-busy", "true");
+    const feedSection = screen.getByLabelText("Activity feed");
+    expect(feedSection).toHaveAttribute("aria-busy", "true");
   });
 
   it("clears aria-busy once data is loaded", async () => {
     render(<ActivityPage />);
+    
+    await waitFor(() => {
+      const feedSection = screen.getByLabelText("Activity feed");
+      expect(feedSection).toHaveAttribute("aria-busy", "false");
+    });
+  });
 
-    await act(async () => {
-      jest.advanceTimersByTime(2000);
+  // ── Scenario 1: Activity loads 3 groups ────────────────────────────────────
+  it("announces 'Loaded N events' in exactly one live region and no container has aria-live", async () => {
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const twoDaysAgo = new Date(today);
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            id: "ev1",
+            type: "stream_created",
+            description: "Event today",
+            timestamp: today.toISOString(),
+          },
+          {
+            id: "ev2",
+            type: "wallet_connected",
+            description: "Event yesterday",
+            timestamp: yesterday.toISOString(),
+          },
+          {
+            id: "ev3",
+            type: "funds_withdrawn",
+            description: "Event 2 days ago",
+            timestamp: twoDaysAgo.toISOString(),
+          },
+        ],
+      }),
     });
 
-    const section = screen.getByRole("region", { name: /activity feed/i });
-    expect(section).toHaveAttribute("aria-busy", "false");
+    const { container } = render(<ActivityPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("activity-timeline")).toBeInTheDocument();
+    });
+
+    // Exactly one live region announcing success with count
+    const statusRegions = screen.getAllByRole("status");
+    expect(statusRegions).toHaveLength(1);
+    expect(statusRegions[0]).toHaveTextContent("Loaded 3 events");
+    expect(statusRegions[0]).toHaveAttribute("aria-live", "polite");
+
+    // No content container has aria-live
+    const liveSections = container.querySelectorAll("section[aria-live]");
+    expect(liveSections).toHaveLength(0);
+    const liveContainers = container.querySelectorAll("[aria-live]:not(.sr-only)");
+    expect(liveContainers).toHaveLength(0);
   });
 
-  it("cleans up the timeout on unmount during loading", () => {
-    const clearTimeoutSpy = jest.spyOn(global, "clearTimeout");
-    const { unmount } = render(<ActivityPage />);
-    unmount();
-    expect(clearTimeoutSpy).toHaveBeenCalled();
-    clearTimeoutSpy.mockRestore();
+  // ── Scenario 2: Activity fetch fails ───────────────────────────────────────
+  it("announces error message in an assertive live region when fetch fails", async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error("Unable to connect to server"));
+
+    render(<ActivityPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("activity-live-region")).toHaveTextContent("Unable to connect to server");
+    });
+
+    const alertRegion = screen.getByTestId("activity-live-region");
+    expect(alertRegion).toHaveAttribute("aria-live", "assertive");
+    expect(alertRegion).toHaveTextContent("Unable to connect to server");
   });
+
+  // ── Scenario 6: The DOM has only one role='status' per page ───────────────
+  it("has only one role=status in the DOM in both loading and populated states", async () => {
+    // 1. Loading state
+    global.fetch = jest.fn(() => new Promise(() => {}));
+    const { unmount } = render(<ActivityPage />);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading activity…");
+    unmount();
+
+    // 2. Populated state
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            id: "ev1",
+            type: "stream_created",
+            description: "Event 1",
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      }),
+    });
+    render(<ActivityPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("activity-timeline")).toBeInTheDocument();
+    });
+
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent("Loaded 1 event");
+  });
+
+  // ── Scenario 7: axe on both pages in each state ───────────────────────────
+  it("has no serious or critical axe violations in loading, populated, empty, and error states", async () => {
+    // State 1: Loading
+    global.fetch = jest.fn(() => new Promise(() => {}));
+    const { container, unmount } = render(<ActivityPage />);
+    jest.useRealTimers();
+    expect(await axe(container)).toHaveNoViolations();
+    jest.useFakeTimers();
+    unmount();
+
+    // State 2: Populated
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            id: "ev1",
+            type: "stream_created",
+            description: "Event 1",
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      }),
+    });
+    const populatedRender = render(<ActivityPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("activity-timeline")).toBeInTheDocument();
+    });
+    jest.useRealTimers();
+    expect(await axe(populatedRender.container)).toHaveNoViolations();
+    jest.useFakeTimers();
+    populatedRender.unmount();
+
+    // State 3: Empty
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [] }),
+    });
+    const emptyRender = render(<ActivityPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Activity will appear here")).toBeInTheDocument();
+    });
+    jest.useRealTimers();
+    expect(await axe(emptyRender.container)).toHaveNoViolations();
+    jest.useFakeTimers();
+    emptyRender.unmount();
+
+    // State 4: Error
+    global.fetch = jest.fn().mockRejectedValue(new Error("Connection error"));
+    const errorRender = render(<ActivityPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Couldn't load your activity")).toBeInTheDocument();
+    });
+    jest.useRealTimers();
+    expect(await axe(errorRender.container)).toHaveNoViolations();
+    jest.useFakeTimers();
+    errorRender.unmount();
+  });
+
+  // ── Date range filtering ──────────────────────────────────────────────────
+  it("renders the date range picker", () => {
+    render(<ActivityPage />);
+
+    expect(screen.getByLabelText("Start date")).toBeInTheDocument();
+    expect(screen.getByLabelText("End date")).toBeInTheDocument();
+  });
+
+  it("requests the selected range and announces the filtered count", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            id: "ev1",
+            type: "stream_created",
+            description: "Event 1",
+            timestamp: "2026-01-05T10:00:00Z",
+          },
+          {
+            id: "ev2",
+            type: "stream_created",
+            description: "Event 2",
+            timestamp: "2026-01-20T10:00:00Z",
+          },
+        ],
+      }),
+    });
+
+    render(<ActivityPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("activity-timeline")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText("Start date"), {
+      target: { value: "2026-01-01" },
+    });
+    fireEvent.change(screen.getByLabelText("End date"), {
+      target: { value: "2026-01-31" },
+    });
+
+    await waitFor(() => {
+      const calls = (global.fetch as jest.Mock).mock.calls;
+      expect(calls[calls.length - 1][0]).toBe(
+        "/api/activity?limit=50&from=2026-01-01&to=2026-01-31",
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Loaded 2 events");
+    });
+  });
+
+  it("refetches with only the date bounds that are set", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [] }),
+    });
+
+    render(<ActivityPage />);
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("End date"), {
+      target: { value: "2026-01-31" },
+    });
+
+    await waitFor(() => {
+      const calls = (global.fetch as jest.Mock).mock.calls;
+      expect(calls[calls.length - 1][0]).toBe(
+        "/api/activity?limit=50&to=2026-01-31",
+      );
+    });
+  });
+
+  it("shows the range-aware empty state when no events match", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [
+            {
+              id: "ev1",
+              type: "stream_created",
+              description: "Event 1",
+              timestamp: "2026-01-05T10:00:00Z",
+            },
+          ],
+        }),
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [] }),
+      });
+
+    render(<ActivityPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("activity-timeline")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText("Start date"), {
+      target: { value: "2026-02-01" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("No activity in this range")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("activity-live-region")).toHaveTextContent(
+      "No activity to display.",
+    );
+  });
+
+  it("regroups the feed when the display time zone changes without a reload", async () => {
+          {
+            description: "Late event",
+            timestamp: "2020-01-01T20:00:00.000Z",
+          },
+        ],
+      }),
+    });
+
+
+    });
+    expect(screen.getByText("Jan 1, 2020")).toBeInTheDocument();
+
+    act(() => {
+      setDisplayTimeZone("Asia/Kolkata");
+    });
+
+    expect(screen.getByText("Jan 2, 2020")).toBeInTheDocument();
+    expect(screen.queryByText("Jan 1, 2020")).not.toBeInTheDocument();
+  });
+
 });

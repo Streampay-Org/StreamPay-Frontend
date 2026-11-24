@@ -38,7 +38,7 @@
 //! );
 //! ```
 
-use crate::{storage, Stream, StreamStatus};
+use crate::{multi, recurring, storage, RecurringStream, SplitStream, Stream, StreamStatus};
 use soroban_sdk::{contracttype, Address, Env, Vec};
 
 /// Maximum number of streams returned in a single paginated query.
@@ -58,6 +58,34 @@ pub const MAX_PAGE_SIZE: u64 = 100;
 pub struct StreamPage {
     /// Streams in this page, ordered by ascending stream ID.
     pub streams: Vec<Stream>,
+    /// Exclusive cursor for the next page. `None` if this is the last page.
+    pub next_cursor: Option<u64>,
+}
+
+/// Paginated result containing split streams and an optional continuation cursor.
+///
+/// Off-chain consumers should check `next_cursor` after each query:
+/// - `Some(id)` → more split streams may exist; pass `id` as `start_after` to the next call.
+/// - `None` → end of result set; no further pages.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct SplitStreamPage {
+    /// Split streams in this page, ordered by ascending stream ID.
+    pub streams: Vec<SplitStream>,
+    /// Exclusive cursor for the next page. `None` if this is the last page.
+    pub next_cursor: Option<u64>,
+}
+
+/// Paginated result containing recurring streams and an optional continuation cursor.
+///
+/// Off-chain consumers should check `next_cursor` after each query:
+/// - `Some(id)` → more recurring streams may exist; pass `id` as `start_after` to the next call.
+/// - `None` → end of result set; no further pages.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct RecurringStreamPage {
+    /// Recurring streams in this page, ordered by ascending stream ID.
+    pub streams: Vec<RecurringStream>,
     /// Exclusive cursor for the next page. `None` if this is the last page.
     pub next_cursor: Option<u64>,
 }
@@ -359,10 +387,141 @@ pub fn list_streams_by_sender_and_status(
     }
 }
 
+/// Returns a paginated list of split streams where `recipient` is one of the
+/// stream's allocated recipients, ordered by ascending split stream ID.
+///
+/// A recipient that appears in multiple allocations within the same split
+/// stream is returned at most once for that stream.
+///
+/// # Parameters
+///
+/// - `recipient` — Filter: only return split streams containing `recipient`.
+/// - `start_after` — Exclusive cursor: return split streams with `id > start_after`.
+///   Pass `None` to start from split stream ID 1.
+/// - `limit` — Maximum number of split streams to return. Capped at [`MAX_PAGE_SIZE`].
+///
+/// # Returns
+///
+/// A [`SplitStreamPage`] with up to `limit` matching split streams.
+pub fn list_split_streams_by_recipient(
+    env: &Env,
+    recipient: &Address,
+    start_after: Option<u64>,
+    limit: u64,
+) -> SplitStreamPage {
+    let effective_limit = limit.min(MAX_PAGE_SIZE);
+    let start_id = start_after.unwrap_or(0).saturating_add(1);
+    let max_id = multi::peek_next_split_id(env);
+
+    let mut streams = Vec::new(env);
+    let mut current_id = start_id;
+    let mut collected = 0u64;
+
+    while current_id < max_id && collected < effective_limit {
+        if let Some(stream) = multi::peek_split_stream(env, current_id) {
+            if stream
+                .recipients
+                .iter()
+                .any(|alloc| alloc.recipient == *recipient)
+            {
+                streams.push_back(stream);
+                collected = collected.saturating_add(1);
+            }
+        }
+        current_id = current_id.saturating_add(1);
+    }
+
+    let next_cursor = if current_id < max_id {
+        Some(current_id.saturating_sub(1))
+    } else {
+        None
+    };
+
+    SplitStreamPage {
+        streams,
+        next_cursor,
+    }
+}
+
+/// Returns a paginated list of recurring streams created by `sender`, ordered
+/// by ascending recurring stream ID.
+///
+/// # Parameters
+///
+/// - `sender` — Filter: only return recurring streams where `stream.sender == sender`.
+/// - `start_after` — Exclusive cursor: return recurring streams with `id > start_after`.
+///   Pass `None` to start from recurring stream ID 1.
+/// - `limit` — Maximum number of recurring streams to return. Capped at [`MAX_PAGE_SIZE`].
+///
+/// # Returns
+///
+/// A [`RecurringStreamPage`] with up to `limit` matching recurring streams.
+pub fn list_recurring_by_sender(
+    env: &Env,
+    sender: &Address,
+    start_after: Option<u64>,
+    limit: u64,
+) -> RecurringStreamPage {
+    let effective_limit = limit.min(MAX_PAGE_SIZE);
+    let start_id = start_after.unwrap_or(0).saturating_add(1);
+    let max_id = recurring::peek_next_recurring_id(env);
+
+    let mut streams = Vec::new(env);
+    let mut current_id = start_id;
+    let mut collected = 0u64;
+
+    while current_id < max_id && collected < effective_limit {
+        if let Some(stream) = recurring::peek_recurring_stream(env, current_id) {
+            if stream.sender == *sender {
+                streams.push_back(stream);
+                collected = collected.saturating_add(1);
+            }
+        }
+        current_id = current_id.saturating_add(1);
+    }
+
+    let next_cursor = if current_id < max_id {
+        Some(current_id.saturating_sub(1))
+    } else {
+        None
+    };
+
+    RecurringStreamPage {
+        streams,
+        next_cursor,
+    }
+}
+
+/// Returns a bitmask of the contract's supported capabilities.
+///
+/// This read-only view allows off-chain indexers and dApps to programmatically
+/// discover which features are enabled in the currently deployed contract version.
+///
+/// # Capabilities Map
+/// - `1 << 0` (0x01): Basic linear streaming
+/// - `1 << 1` (0x02): Paginated stream enumeration (this module)
+/// - `1 << 2` (0x04): Multi-recipient split streams
+/// - `1 << 3` (0x08): Protocol fee configuration and sweeps
+/// - `1 << 4` (0x10): Per-organisation token allowlists
+///
+/// # Returns
+/// A `u32` bitmask where a set bit indicates the capability is supported.
+pub fn capabilities(_env: &Env) -> u32 {
+    0x1F // 1 | 2 | 4 | 8 | 16
+}
+
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::Contract;
     use soroban_sdk::testutils::Address as _;
+
+    fn setup_env() -> (Env, Address) {
+        let env = Env::default();
+        let contract_id = env.register(crate::Contract, ());
+        (env, contract_id)
+    }
 
     /// Helper to set up a test environment with multiple streams.
     fn setup_test_streams(env: &Env) -> (Address, Address, Address) {
@@ -371,9 +530,8 @@ mod tests {
         let recipient = Address::generate(env);
         let token = Address::generate(env);
 
-        // Create a sequence of streams with mixed senders/recipients/statuses
-        // Stream IDs will be 1, 2, 3, 4, 5, 6
-        for i in 1..=6 {
+        // Stream IDs 1–6 with varied senders/statuses
+        for i in 1u64..=6 {
             let stream = Stream {
                 id: i,
                 sender: if i % 2 == 0 {
@@ -395,13 +553,14 @@ mod tests {
                     6 => StreamStatus::Draft,
                     _ => StreamStatus::Active,
                 },
-                pause_time: 0,
+                paused_at: 0,
                 total_paused_duration: 0,
+                fee_bps: 0,
+                cliff_time: 0,
+                curve: crate::storage::ReleaseCurve::Linear,
             };
             storage::set_stream(env, i, &stream);
         }
-
-        // Set the next stream ID to 7
         storage::set_next_stream_id_for_test(env, 7);
 
         (sender_a, sender_b, recipient)
@@ -409,204 +568,235 @@ mod tests {
 
     #[test]
     fn test_list_streams_empty() {
-        let env = Env::default();
-        storage::set_next_stream_id_for_test(&env, 1);
+        let (env, contract_id) = setup_env();
+        env.as_contract(&contract_id, || {
+            storage::set_next_stream_id_for_test(&env, 1);
 
-        let page = list_streams(&env, None, 10);
+            let page = list_streams(&env, None, 10);
 
-        assert_eq!(page.streams.len(), 0);
-        assert_eq!(page.next_cursor, None);
+            assert_eq!(page.streams.len(), 0);
+            assert_eq!(page.next_cursor, None);
+        });
     }
 
     #[test]
     fn test_list_streams_all_fit_in_one_page() {
-        let env = Env::default();
-        setup_test_streams(&env);
+        let (env, contract_id) = setup_env();
+        env.as_contract(&contract_id, || {
+            setup_test_streams(&env);
 
-        let page = list_streams(&env, None, 10);
+            let page = list_streams(&env, None, 10);
 
-        assert_eq!(page.streams.len(), 6);
-        assert_eq!(page.next_cursor, None);
+            assert_eq!(page.streams.len(), 6);
+            assert_eq!(page.next_cursor, None);
+        });
     }
 
     #[test]
     fn test_list_streams_pagination() {
-        let env = Env::default();
-        setup_test_streams(&env);
+        let (env, contract_id) = setup_env();
+        env.as_contract(&contract_id, || {
+            setup_test_streams(&env);
 
-        // First page: limit 2
-        let page1 = list_streams(&env, None, 2);
-        assert_eq!(page1.streams.len(), 2);
-        assert_eq!(page1.streams.get(0).unwrap().id, 1);
-        assert_eq!(page1.streams.get(1).unwrap().id, 2);
-        assert!(page1.next_cursor.is_some());
+            // First page: limit 2
+            let page1 = list_streams(&env, None, 2);
+            assert_eq!(page1.streams.len(), 2);
+            assert_eq!(page1.streams.get(0).unwrap().id, 1);
+            assert_eq!(page1.streams.get(1).unwrap().id, 2);
+            assert!(page1.next_cursor.is_some());
 
-        // Second page: start_after = 2, limit 2
-        let page2 = list_streams(&env, page1.next_cursor, 2);
-        assert_eq!(page2.streams.len(), 2);
-        assert_eq!(page2.streams.get(0).unwrap().id, 3);
-        assert_eq!(page2.streams.get(1).unwrap().id, 4);
-        assert!(page2.next_cursor.is_some());
+            // Second page: start_after = 2, limit 2
+            let page2 = list_streams(&env, page1.next_cursor, 2);
+            assert_eq!(page2.streams.len(), 2);
+            assert_eq!(page2.streams.get(0).unwrap().id, 3);
+            assert_eq!(page2.streams.get(1).unwrap().id, 4);
+            assert!(page2.next_cursor.is_some());
 
-        // Third page: start_after = 4, limit 2
-        let page3 = list_streams(&env, page2.next_cursor, 2);
-        assert_eq!(page3.streams.len(), 2);
-        assert_eq!(page3.streams.get(0).unwrap().id, 5);
-        assert_eq!(page3.streams.get(1).unwrap().id, 6);
-        assert_eq!(page3.next_cursor, None);
+            // Third page: start_after = 4, limit 2
+            let page3 = list_streams(&env, page2.next_cursor, 2);
+            assert_eq!(page3.streams.len(), 2);
+            assert_eq!(page3.streams.get(0).unwrap().id, 5);
+            assert_eq!(page3.streams.get(1).unwrap().id, 6);
+            assert_eq!(page3.next_cursor, None);
+        });
     }
 
     #[test]
     fn test_list_streams_respects_max_page_size() {
-        let env = Env::default();
-        setup_test_streams(&env);
+        let (env, contract_id) = setup_env();
+        env.as_contract(&contract_id, || {
+            setup_test_streams(&env);
 
-        // Request limit > MAX_PAGE_SIZE
-        let page = list_streams(&env, None, MAX_PAGE_SIZE + 100);
+            // Request limit > MAX_PAGE_SIZE
+            let page = list_streams(&env, None, MAX_PAGE_SIZE + 100);
 
-        // Should be capped at min(6, MAX_PAGE_SIZE) = 6
-        assert_eq!(page.streams.len(), 6);
+            // Should be capped at min(6, MAX_PAGE_SIZE) = 6
+            assert_eq!(page.streams.len(), 6);
+        });
     }
 
     #[test]
     fn test_list_streams_by_sender() {
-        let env = Env::default();
-        let (sender_a, _sender_b, _recipient) = setup_test_streams(&env);
+        let (env, contract_id) = setup_env();
+        env.as_contract(&contract_id, || {
+            let (sender_a, _sender_b, _recipient) = setup_test_streams(&env);
 
-        let page = list_streams_by_sender(&env, &sender_a, None, 10);
+            let page = list_streams_by_sender(&env, &sender_a, None, 10);
 
-        // sender_a has streams 1, 3, 5 (odd IDs)
-        assert_eq!(page.streams.len(), 3);
-        assert_eq!(page.streams.get(0).unwrap().id, 1);
-        assert_eq!(page.streams.get(1).unwrap().id, 3);
-        assert_eq!(page.streams.get(2).unwrap().id, 5);
-        assert_eq!(page.next_cursor, None);
+            // sender_a has streams 1, 3, 5 (odd IDs)
+            assert_eq!(page.streams.len(), 3);
+            assert_eq!(page.streams.get(0).unwrap().id, 1);
+            assert_eq!(page.streams.get(1).unwrap().id, 3);
+            assert_eq!(page.streams.get(2).unwrap().id, 5);
+            assert_eq!(page.next_cursor, None);
+        });
     }
 
     #[test]
     fn test_list_streams_by_recipient() {
-        let env = Env::default();
-        let (_sender_a, _sender_b, recipient) = setup_test_streams(&env);
+        let (env, contract_id) = setup_env();
+        env.as_contract(&contract_id, || {
+            let (_sender_a, _sender_b, recipient) = setup_test_streams(&env);
 
-        let page = list_streams_by_recipient(&env, &recipient, None, 10);
+            let page = list_streams_by_recipient(&env, &recipient, None, 10);
 
-        // All 6 streams have the same recipient
-        assert_eq!(page.streams.len(), 6);
-        assert_eq!(page.next_cursor, None);
+            // All 6 streams have the same recipient
+            assert_eq!(page.streams.len(), 6);
+            assert_eq!(page.next_cursor, None);
+        });
     }
 
     #[test]
     fn test_list_streams_by_status() {
-        let env = Env::default();
-        setup_test_streams(&env);
+        let (env, contract_id) = setup_env();
+        env.as_contract(&contract_id, || {
+            setup_test_streams(&env);
 
-        let page = list_streams_by_status(&env, StreamStatus::Active, None, 10);
+            let page = list_streams_by_status(&env, StreamStatus::Active, None, 10);
 
-        // Streams 1, 2 are Active
-        assert_eq!(page.streams.len(), 2);
-        assert_eq!(page.streams.get(0).unwrap().id, 1);
-        assert_eq!(page.streams.get(1).unwrap().id, 2);
-        assert_eq!(page.next_cursor, None);
+            // Streams 1, 2 are Active
+            assert_eq!(page.streams.len(), 2);
+            assert_eq!(page.streams.get(0).unwrap().id, 1);
+            assert_eq!(page.streams.get(1).unwrap().id, 2);
+            assert_eq!(page.next_cursor, None);
+        });
     }
 
     #[test]
     fn test_list_streams_by_recipient_and_status() {
-        let env = Env::default();
-        let (_sender_a, _sender_b, recipient) = setup_test_streams(&env);
+        let (env, contract_id) = setup_env();
+        env.as_contract(&contract_id, || {
+            let (_sender_a, _sender_b, recipient) = setup_test_streams(&env);
 
-        let page = list_streams_by_recipient_and_status(
-            &env,
-            &recipient,
-            StreamStatus::Paused,
-            None,
-            10,
-        );
+            let page = list_streams_by_recipient_and_status(
+                &env,
+                &recipient,
+                StreamStatus::Paused,
+                None,
+                10,
+            );
 
-        // Streams 3, 4 are Paused
-        assert_eq!(page.streams.len(), 2);
-        assert_eq!(page.streams.get(0).unwrap().id, 3);
-        assert_eq!(page.streams.get(1).unwrap().id, 4);
-        assert_eq!(page.next_cursor, None);
+            // Streams 3, 4 are Paused
+            assert_eq!(page.streams.len(), 2);
+            assert_eq!(page.streams.get(0).unwrap().id, 3);
+            assert_eq!(page.streams.get(1).unwrap().id, 4);
+            assert_eq!(page.next_cursor, None);
+        });
     }
 
     #[test]
     fn test_list_streams_by_sender_and_status() {
-        let env = Env::default();
-        let (sender_a, _sender_b, _recipient) = setup_test_streams(&env);
+        let (env, contract_id) = setup_env();
+        env.as_contract(&contract_id, || {
+            let (sender_a, _sender_b, _recipient) = setup_test_streams(&env);
 
-        let page = list_streams_by_sender_and_status(
-            &env,
-            &sender_a,
-            StreamStatus::Active,
-            None,
-            10,
-        );
+            let page =
+                list_streams_by_sender_and_status(&env, &sender_a, StreamStatus::Active, None, 10);
 
-        // sender_a has odd IDs (1, 3, 5); only 1 is Active
-        assert_eq!(page.streams.len(), 1);
-        assert_eq!(page.streams.get(0).unwrap().id, 1);
-        assert_eq!(page.next_cursor, None);
+            // sender_a has odd IDs (1, 3, 5); only 1 is Active
+            assert_eq!(page.streams.len(), 1);
+            assert_eq!(page.streams.get(0).unwrap().id, 1);
+            assert_eq!(page.next_cursor, None);
+        });
     }
 
     #[test]
     fn test_pagination_with_gaps() {
-        let env = Env::default();
-        let sender = Address::generate(&env);
-        let recipient = Address::generate(&env);
-        let token = Address::generate(&env);
+        let (env, contract_id) = setup_env();
+        env.as_contract(&contract_id, || {
+            let sender = Address::generate(&env);
+            let recipient = Address::generate(&env);
+            let token = Address::generate(&env);
 
-        // Create streams 1, 2, 4, 5 (skip 3)
-        for i in &[1u64, 2, 4, 5] {
-            let stream = Stream {
-                id: *i,
-                sender: sender.clone(),
-                recipient: recipient.clone(),
-                token: token.clone(),
-                total_amount: 1000,
-                released_amount: 0,
-                start_time: 1000,
-                end_time: 2000,
-                duration: 1000,
-                last_update: 1000,
-                status: StreamStatus::Active,
-                pause_time: 0,
-                total_paused_duration: 0,
-            };
-            storage::set_stream(&env, *i, &stream);
-        }
-        storage::set_next_stream_id_for_test(&env, 6);
+            // Create streams 1, 2, 4, 5 (skip 3)
+            for i in &[1u64, 2, 4, 5] {
+                let stream = Stream {
+                    id: *i,
+                    sender: sender.clone(),
+                    recipient: recipient.clone(),
+                    token: token.clone(),
+                    total_amount: 1000,
+                    released_amount: 0,
+                    start_time: 1000,
+                    end_time: 2000,
+                    duration: 1000,
+                    last_update: 1000,
+                    status: StreamStatus::Active,
+                    paused_at: 0,
+                    total_paused_duration: 0,
+                    fee_bps: 0,
+                    cliff_time: 0,
+                    curve: crate::storage::ReleaseCurve::Linear,
+                };
+                storage::set_stream(&env, *i, &stream);
+            }
+            storage::set_next_stream_id_for_test(&env, 6);
 
-        let page = list_streams(&env, None, 10);
+            let page = list_streams(&env, None, 10);
 
-        // Should return 4 streams (1, 2, 4, 5), skipping the gap at 3
-        assert_eq!(page.streams.len(), 4);
-        assert_eq!(page.streams.get(0).unwrap().id, 1);
-        assert_eq!(page.streams.get(1).unwrap().id, 2);
-        assert_eq!(page.streams.get(2).unwrap().id, 4);
-        assert_eq!(page.streams.get(3).unwrap().id, 5);
-        assert_eq!(page.next_cursor, None);
+            // Should return 4 streams (1, 2, 4, 5), skipping the gap at 3
+            assert_eq!(page.streams.len(), 4);
+            assert_eq!(page.streams.get(0).unwrap().id, 1);
+            assert_eq!(page.streams.get(1).unwrap().id, 2);
+            assert_eq!(page.streams.get(2).unwrap().id, 4);
+            assert_eq!(page.streams.get(3).unwrap().id, 5);
+            assert_eq!(page.next_cursor, None);
+        });
     }
 
     #[test]
     fn test_no_streams_match_filter() {
-        let env = Env::default();
-        setup_test_streams(&env);
+        let (env, contract_id) = setup_env();
+        env.as_contract(&contract_id, || {
+            setup_test_streams(&env);
 
-        let non_existent_sender = Address::generate(&env);
-        let page = list_streams_by_sender(&env, &non_existent_sender, None, 10);
+            let non_existent_sender = Address::generate(&env);
+            let page = list_streams_by_sender(&env, &non_existent_sender, None, 10);
 
-        assert_eq!(page.streams.len(), 0);
-        assert_eq!(page.next_cursor, None);
+            assert_eq!(page.streams.len(), 0);
+            assert_eq!(page.next_cursor, None);
+        });
     }
 
     #[test]
     fn test_start_after_beyond_last_stream() {
-        let env = Env::default();
-        setup_test_streams(&env);
+        let (env, contract_id) = setup_env();
+        env.as_contract(&contract_id, || {
+            setup_test_streams(&env);
 
-        let page = list_streams(&env, Some(100), 10);
+            let page = list_streams(&env, Some(100), 10);
 
-        assert_eq!(page.streams.len(), 0);
-        assert_eq!(page.next_cursor, None);
+            assert_eq!(page.streams.len(), 0);
+            assert_eq!(page.next_cursor, None);
+        });
+    }
+
+    #[test]
+    fn test_capabilities() {
+        let (env, contract_id) = setup_env();
+        env.as_contract(&contract_id, || {
+            let caps = capabilities(&env);
+            assert_eq!(caps, 0x1F);
+        });
     }
 }

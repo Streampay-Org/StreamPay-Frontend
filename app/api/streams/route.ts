@@ -1,20 +1,60 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
 import {
   checkIdempotency,
   computeFingerprint,
-  decodeCursor,
-  encodeCursor,
   getStore,
   idempotencyToken,
   setIdempotency,
+  withLock,
 } from "@/app/lib/db";
 import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
 import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
-import { checkTokenAllowed, checkTokenAllowedForOrg, normaliseToken } from "@/app/lib/token-allowlist";
-import { validateCreateStreamBody } from "@/app/lib/stream-validation";
+import { checkTokenAllowed, normaliseToken } from "@/app/lib/token-allowlist";
+import { checkCreationQuota } from "@/app/lib/quota-enforcement";
+import {
+  creationQuotaResponse,
+  quotaUserId,
+  rateToStroops,
+  withStreamCreationQuotaLock,
+} from "@/app/lib/stream-create-core";
+import { recordCreationQuotaRejection } from "@/app/lib/org-quota-metrics";
 import { orgDb } from "@/app/lib/org-db";
+import {
+  idempotencyKeyErrorResponse,
+  validateIdempotencyKey,
+} from "@/app/lib/idempotency";
+import {
+  decodeStreamCursor,
+  encodeStreamCursor,
+  isAfterCursor,
+  type StreamCursor,
+} from "@/app/lib/stream-cursor";
+import {
+  extractCorrelationContext,
+  getCorrelationContext,
+  logger,
+  withCorrelationContext,
+} from "@/app/lib/logger";
+import { logAccessEvent } from "@/src/middleware/accessLog";
+import { streamsRateLimit, withRateLimitHeaders } from "@/src/middleware/rateLimit";
+import {
+  validateListStreamsQuery,
+} from "@/app/lib/stream-validation";
+import { createCacheHeaders, createStrongEtag, isIfNoneMatchMatch } from "@/src/middleware/etag";
+import { observeStreamsRequest } from "@/src/metrics/registry";
+import { withRouteTimeout } from "@/src/middleware/timeout";
+import { createStreamCore } from "@/app/lib/stream-create-core";
+import { appendStreamHistoryEvent } from "@/app/lib/stream-history-writer";
+import {
+  redactStreamPii,
+  resolveRequestActor,
+  resolveRequestTenant,
+  visibleTo,
+} from "@/app/lib/stream-visibility";
 
 function errorResponse(code: string, message: string, status: number) {
   return createErrorResponse(code, message, status);
@@ -37,176 +77,438 @@ function getHeader(request: Request, name: string): string | null {
   return request.headers?.get?.(name) ?? null;
 }
 
-export async function GET(request: Request) {
-  const { streamRepository } = getStore();
-  const url = getRequestUrl(request, "/api/streams");
-  const limitType = getLimitForRoute("GET", url.pathname);
-  const identity = getClientIdentity(request);
-  const result = await checkRateLimit(identity, limitType);
+type AccessLogContext = {
+  method: "GET" | "POST";
+  path: string;
+  status: number;
+  durationMs: number;
+  errorCode?: string;
+};
 
-  if (!result.allowed) {
-    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
-    return rateLimitResponse(result.retryAfter!);
+function emitAccessEvent(context: AccessLogContext) {
+  try {
+    logAccessEvent(context);
+  } catch (error) {
+    logger.warn("Failed to emit access log event", { error });
   }
-  recordRequest(url.pathname);
-
-  const { searchParams } = url;
-  const cursor = searchParams.get("cursor");
-  const status = searchParams.get("status");
-  const limit = Math.min(Number.parseInt(searchParams.get("limit") ?? "20", 10), 100);
-
-  let streams = Array.from(streamRepository.streams.values()).sort((left, right) => {
-    const timeCompare = left.createdAt.localeCompare(right.createdAt);
-    return timeCompare !== 0 ? timeCompare : left.id.localeCompare(right.id);
-  });
-
-  if (status) {
-    streams = streams.filter((stream) => stream.status === status);
-  }
-
-  if (cursor) {
-    let cursorId: string;
-    try {
-      cursorId = decodeCursor(cursor);
-    } catch {
-      return errorResponse("INVALID_CURSOR", "Malformed cursor", 422);
-    }
-    const cursorIndex = streams.findIndex((stream) => stream.id === cursorId);
-    if (cursorIndex >= 0) {
-      streams = streams.slice(cursorIndex + 1);
-    }
-  }
-
-  const paginatedStreams = streams.slice(0, limit);
-  const hasNext = streams.length > limit;
-  const nextCursor =
-    hasNext && paginatedStreams.length > 0
-      ? encodeCursor(paginatedStreams[paginatedStreams.length - 1].id)
-      : null;
-
-  logger.info("Streams listed successfully", {
-    count: paginatedStreams.length,
-    total: streamRepository.streams.size,
-  });
-
-  return NextResponse.json({
-    data: paginatedStreams,
-    links: { self: `/api/v1/streams?limit=${limit}` },
-    meta: { hasNext, nextCursor, total: streams.length },
-  });
 }
 
-export async function POST(request: Request) {
-  const { idempotencyStore, streamRepository } = getStore();
-  const url = getRequestUrl(request, "/api/streams");
-  const limitType = getLimitForRoute("POST", url.pathname);
-  const identity = getClientIdentity(request);
-  const result = await checkRateLimit(identity, limitType);
-
-  if (!result.allowed) {
-    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
-    return rateLimitResponse(result.retryAfter!);
+/**
+ * Map a final HTTP status to the stable `errorCode` recorded on access-log
+ * events. Codes mirror the error envelopes this route returns for each status.
+ */
+function statusToErrorCode(status: number): string {
+  switch (status) {
+    case 400:
+      return "INVALID_REQUEST";
+    case 401:
+      return "UNAUTHORIZED";
+    case 403:
+      return "FORBIDDEN";
+    case 404:
+      return "NOT_FOUND";
+    case 409:
+      return "CONFLICT";
+    case 422:
+      return "VALIDATION_ERROR";
+    case 429:
+      return "rate_limit_exceeded";
+    case 504:
+      return "GATEWAY_TIMEOUT";
+    default:
+      return status >= 500 ? "INTERNAL_ERROR" : `HTTP_${status}`;
   }
-  recordRequest(url.pathname);
+}
 
-  const idempotencyKey = getHeader(request, "Idempotency-Key");
-  const token = idempotencyKey ? idempotencyToken("streams.create", idempotencyKey) : null;
+function durationMsFrom(start: [number, number]): number {
+  const [seconds, nanoseconds] = process.hrtime(start);
+  return seconds * 1000 + nanoseconds / 1_000_000;
+}
 
-  let body: Record<string, unknown>;
+function isTimeoutResponse(response: Response): boolean {
+  return response.status === 504;
+}
+
+function wrapWithTimeout(
+  request: Request,
+  method: "GET" | "POST",
+  path: string,
+  handler: (request: Request) => Promise<Response>,
+): Promise<Response> {
+  const start = process.hrtime();
+  const run = () => withRouteTimeout(request, async () => {
+    const response = await handler(request);
+    if (isTimeoutResponse(response)) {
+      emitAccessEvent({
+        method,
+        path,
+        status: response.status,
+        durationMs: durationMsFrom(start),
+        errorCode: "GATEWAY_TIMEOUT",
+      });
+    }
+    return response;
+  });
+
+  // Establish a request-scoped correlation context (validated x-request-id)
+  // when no upstream wrapper has, so every envelope and log line carries it.
+  if (getCorrelationContext() || !request.headers) return run();
+  return withCorrelationContext(extractCorrelationContext(request.headers), run);
+}
+
+async function handleStreamsGet(request: Request) {
+  const start = process.hrtime();
+  let status = 200;
+
   try {
-    body = await request.json();
-  } catch {
-    return errorResponse("INVALID_REQUEST", "Request body must be valid JSON", 400);
-  }
+    const { streamRepository } = getStore();
+    const rateLimitResult = await streamsRateLimit(request, "GET", "/api/streams");
+    if (!rateLimitResult.allowed) {
+      status = rateLimitResult.response.status;
+      return rateLimitResult.response;
+    }
 
-  const fingerprint = computeFingerprint("POST", "/api/streams", body);
+    const url = getRequestUrl(request, "/api/streams");
+    const { searchParams } = url;
+    const rawQuery: Record<string, string> = {};
+    for (const key of ["limit", "status", "cursor"] as const) {
+      const value = searchParams.get(key);
+      if (value !== null) {
+        rawQuery[key] = value;
+      }
+    }
 
-  if (token) {
-    const cached = checkIdempotency(idempotencyStore, token, fingerprint);
-    if (cached) {
-      if (!cached.ok) {
-        return NextResponse.json(
-          { error: { code: "IDEMPOTENCY_CONFLICT", message: "Idempotency key has been used with a different request." } },
-          { status: 409 },
+    const { errors: queryErrors, values: query } = validateListStreamsQuery(rawQuery);
+    if (queryErrors.length > 0) {
+      status = 422;
+      logger.warn("Stream list validation failed", { errors: queryErrors });
+      return NextResponse.json(
+        {
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "One or more query parameters are invalid.",
+            details: queryErrors,
+            request_id: getCorrelationContext()?.request_id,
+          },
+        },
+        { status },
+      );
+    }
+
+    const cursor = query.cursor ?? null;
+    const streamStatus = query.status ?? null;
+    const limit = query.limit ?? 20;
+
+    const tenant = resolveRequestTenant(request);
+    const actor = resolveRequestActor(request);
+    const isVisible = visibleTo(actor, tenant);
+
+    const tenantCandidates = streamRepository.listByTenant
+      ? streamRepository.listByTenant(tenant)
+      : Array.from(streamRepository.streams.values());
+
+    const sortedStreams = tenantCandidates
+      .filter(isVisible)
+      .sort((left, right) => {
+        const timeCompare = left.createdAt.localeCompare(right.createdAt);
+        return timeCompare !== 0 ? timeCompare : left.id.localeCompare(right.id);
+      });
+
+    let streams = streamStatus
+      ? sortedStreams.filter((stream) => stream.status === streamStatus)
+      : sortedStreams;
+
+    if (cursor) {
+      let keyset: StreamCursor;
+      try {
+        keyset = decodeStreamCursor(cursor, {
+          resolveLegacyId: (legacyId) => {
+            const legacy = streamRepository.streams.get(legacyId);
+            if (!legacy || !isVisible(legacy)) {
+              return null;
+            }
+            logger.warn("Deprecated plain-id pagination cursor used", {
+              streamId: legacyId,
+            });
+            return { createdAt: legacy.createdAt, id: legacy.id };
+          },
+        });
+      } catch {
+        status = 422;
+        return errorResponse(
+          "INVALID_CURSOR",
+          "Cursor is malformed or refers to a stream that no longer exists.",
+          422,
         );
       }
-      return NextResponse.json(cached.body, { status: cached.status });
+
+      const cursorTarget = streamRepository.streams.get(keyset.id);
+      if (cursorTarget && !isVisible(cursorTarget)) {
+        status = 422;
+        return errorResponse(
+          "INVALID_CURSOR",
+          "Cursor is malformed or refers to a stream that no longer exists.",
+          422,
+        );
+      }
+
+      streams = streams.filter((stream) => isAfterCursor(stream, keyset));
     }
-  }
 
-  // ── Schema validation (shared) ────────────────────────────────────────
-  const validationErrors = validateCreateStreamBody(body);
-  if (validationErrors.length > 0) {
-    logger.warn("Stream creation validation failed", {
-      errors: validationErrors,
+    const total = streams.length;
+    const rawPage = streams.slice(0, limit);
+    const paginatedStreams = actor ? rawPage : rawPage.map(redactStreamPii);
+    const hasNext = streams.length > limit;
+    const nextCursor =
+      hasNext && rawPage.length > 0
+        ? encodeStreamCursor(rawPage[rawPage.length - 1])
+        : null;
+
+    const payload = {
+      data: paginatedStreams,
+      links: { self: `/api/v1/streams?limit=${limit}` },
+      meta: { hasNext, nextCursor, total },
+    };
+    const etag = createStrongEtag(payload);
+
+    if (isIfNoneMatchMatch(etag, getHeader(request, "if-none-match"))) {
+      status = 304;
+      return withRateLimitHeaders(
+        new NextResponse(null, {
+          status,
+          headers: createCacheHeaders(etag),
+        }),
+        rateLimitResult.headers,
+      );
+    }
+
+    logger.info("Streams listed successfully", {
+      count: paginatedStreams.length,
+      total,
     });
-    return NextResponse.json(
-      {
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "One or more fields are invalid.",
-          details: validationErrors,
-          request_id: getCorrelationContext()?.request_id,
-        },
-      },
-      { status: 422 },
-    );
+
+    const response = NextResponse.json(payload);
+    for (const [name, value] of Object.entries(createCacheHeaders(etag))) {
+      response.headers.set(name, value);
+    }
+    status = 200;
+    return withRateLimitHeaders(response, rateLimitResult.headers);
+  } catch (error) {
+    status = 500;
+    logger.error("Streams list failed", { error });
+    return createErrorResponse("INTERNAL_ERROR", "Internal Server Error", 500);
+  } finally {
+    observeStreamsRequest("GET", status, start);
+    emitAccessEvent({
+      method: "GET",
+      path: "/api/streams",
+      status,
+      durationMs: durationMsFrom(start),
+      ...(status >= 400 ? { errorCode: statusToErrorCode(status) } : {}),
+    });
   }
+}
 
-  const { rate, recipient, schedule, token: rawToken } = body as {
-    rate: string;
-    recipient: string;
-    schedule: string;
-    token?: string;
-    orgId?: string;
-  };
+export async function GET(request: Request) {
+  return wrapWithTimeout(request, "GET", "/api/streams", handleStreamsGet);
+}
 
-  const tokenStr = rawToken?.trim() || "XLM";
-  let normalisedToken: string;
+async function handleStreamsPost(request: Request) {
+  const start = process.hrtime();
+  let status = 201;
+
   try {
-    normalisedToken = normaliseToken(tokenStr);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return createErrorResponse("INVALID_TOKEN", `Invalid token format: ${msg}`, 422);
-  }
+    const { idempotencyStore } = getStore();
+    const rateLimitResult = await streamsRateLimit(request, "POST", "/api/streams");
+    if (!rateLimitResult.allowed) {
+      status = rateLimitResult.response.status;
+      return rateLimitResult.response;
+    }
 
-  // Resolve org context from request body — if the stream is being created
-  // under an org, enforce that org's per-token allowlist; otherwise use global.
-  const orgId = (body as { orgId?: unknown }).orgId;
-  const org = typeof orgId === "string" ? orgDb.orgs.get(orgId) : undefined;
-
-  const allowlistResult = org
-    ? await checkTokenAllowedForOrg(normalisedToken, org)
-    : await checkTokenAllowed(normalisedToken);
-
-  if (!allowlistResult.accepted) {
-    logger.warn("Stream creation rejected: token not in allowlist", {
-      token: normalisedToken,
-      orgId: orgId ?? null,
-    });
-    return createErrorResponse("TOKEN_NOT_ALLOWED", allowlistResult.reason, 422);
-  }
+    const rawIdempotencyKey = getHeader(request, "Idempotency-Key");
+    let idempotencyKey: string | null = null;
+    if (rawIdempotencyKey !== null) {
+      const keyValidation = validateIdempotencyKey(rawIdempotencyKey);
+      if (!keyValidation.ok) {
+        status = 400;
+        return idempotencyKeyErrorResponse(keyValidation.reason);
+      }
+      idempotencyKey = keyValidation.key;
+    }
+    const token = idempotencyKey ? idempotencyToken("streams.create", idempotencyKey) : null;
 
   const id = `stream-${crypto.randomUUID().slice(0, 8)}`;
   const now = new Date().toISOString();
-  const newStream = {
+  const newStream: Stream = {
     createdAt: now,
     id,
-    nextAction: "start" as const,
-    rate,
-    recipient,
-    schedule,
-    status: "draft" as const,
+    nextAction: "start",
+    rate: rateValue,
+    recipient: recipientValue,
+    schedule: scheduleValue,
+    status: "draft",
     updatedAt: now,
     token: normalisedToken,
   };
 
-  streamRepository.streams.set(id, newStream);
-  const payload = { data: newStream, links: { self: `/api/v1/streams/${id}` } };
+  const userId = quotaUserId(identity);
+  const orgId = typeof body.orgId === "string" && body.orgId.trim()
+    ? body.orgId.trim()
+    : undefined;
 
-  if (token) {
-    setIdempotency(idempotencyStore, token, fingerprint, 201, payload);
+  return withStreamCreationQuotaLock(async () => {
+    if (token) {
+      const cached = checkIdempotency(idempotencyStore, token, fingerprint);
+      if (cached) {
+        if (!cached.ok) {
+          return NextResponse.json(
+            { error: { code: "IDEMPOTENCY_CONFLICT", message: "Idempotency key has been used with a different request." } },
+            { status: 409 },
+          );
+        }
+        return NextResponse.json(cached.body, { status: cached.status });
+      }
+    }
+
+    const quota = checkCreationQuota({
+      userId,
+      orgId,
+      amountStroops: rateToStroops(rateValue, normalisedToken),
+      now: new Date(now),
+    });
+    if (!quota.allowed) {
+      recordCreationQuotaRejection(quota.scope, quota.subject, quota.code);
+      return creationQuotaResponse(quota);
+    }
+
+    const storedStream: Stream = {
+      ...newStream,
+      ...(userId ? { senderAddress: userId } : {}),
+    };
+    streamRepository.streams.set(id, storedStream);
+    if (orgId) orgDb.streamOwnership.set(id, orgId);
+
+    const payload = { data: newStream, links: { self: `/api/v1/streams/${id}` } };
+    if (token) {
+      setIdempotency(idempotencyStore, token, fingerprint, 201, payload);
+    }
+
+    return NextResponse.json(payload, { status: 201 });
+  });
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      status = 400;
+      return errorResponse("INVALID_REQUEST", "Request body must be valid JSON", 400);
+    }
+
+    const fingerprint = computeFingerprint("POST", "/api/streams", body);
+
+    // Serialise creates that share an idempotency key so concurrent retries
+    // cannot both miss the cache and create duplicate streams.
+    const createOnce = async (): Promise<Response> => {
+      if (token) {
+        const cached = checkIdempotency(idempotencyStore, token, fingerprint);
+        if (cached) {
+          if (!cached.ok) {
+            status = 409;
+            return NextResponse.json(
+              { error: { code: "IDEMPOTENCY_CONFLICT", message: "Idempotency key has been used with a different request." } },
+              { status },
+            );
+          }
+          status = cached.status;
+          return NextResponse.json(cached.body, { status: cached.status });
+        }
+      }
+
+      const { totalAmount, startTime, endTime } = body as {
+        totalAmount?: string;
+        startTime?: string;
+        endTime?: string;
+      };
+      const authenticatedActor = tryAuthenticateRequest(request);
+      const explicitTenant =
+        getHeader(request, "x-tenant-id")?.trim() ||
+        getHeader(request, "x-streampay-tenant-id")?.trim() ||
+        undefined;
+      const senderAddress = authenticatedActor?.walletAddress ?? null;
+      const ownership: "individual" | "unclaimed" = authenticatedActor ? "individual" : "unclaimed";
+
+      const result = await createStreamCore(body, {
+        dryRun: false,
+        extras: {
+          ...(totalAmount === undefined ? {} : { totalAmount, releasedAmount: "0", vestedAmount: "0" }),
+          ...(startTime === undefined ? {} : { startTime, endTime }),
+          senderAddress,
+          ownership,
+          ...(explicitTenant ? { tenant: explicitTenant } : {}),
+        },
+      });
+      if (!result.ok && result.code === "ID_GENERATION_FAILED") {
+        status = 500;
+        logger.error("Stream creation failed: could not allocate a unique id");
+        return createErrorResponse(result.code, result.message, 500);
+      }
+      if (!result.ok) {
+        status = 422;
+        if (result.code === "VALIDATION_ERROR") {
+          logger.warn("Stream creation validation failed", { errors: result.details });
+        } else if (result.code === "TOKEN_NOT_ALLOWED") {
+          logger.warn("Stream creation rejected: token not in allowlist");
+        }
+        return NextResponse.json(
+          {
+            error: {
+              code: result.code,
+              message: result.message,
+              ...(result.details ? { details: result.details } : {}),
+              request_id: getCorrelationContext()?.request_id,
+            },
+          },
+          { status },
+        );
+      }
+
+      const stream = result.stream;
+
+      appendStreamHistoryEvent({
+        streamId: stream.id,
+        type: "created",
+        toStatus: "draft",
+        at: stream.createdAt,
+        actorWallet: getHeader(request, "Actor-Wallet-Address"),
+      });
+
+      const payload = { data: stream, links: { self: `/api/v1/streams/${stream.id}` } };
+
+      if (token) {
+        setIdempotency(idempotencyStore, token, fingerprint, 201, payload);
+      }
+
+      status = 201;
+      return NextResponse.json(payload, { status: 201 });
+    };
+
+    const response = token ? await withLock(`create:${token}`, createOnce) : await createOnce();
+    return withRateLimitHeaders(response, rateLimitResult.headers);
+  } catch (error) {
+    status = 500;
+    logger.error("Stream creation failed", { error });
+    return createErrorResponse("INTERNAL_ERROR", "Internal Server Error", 500);
+  } finally {
+    observeStreamsRequest("POST", status, start);
+    emitAccessEvent({
+      method: "POST",
+      path: "/api/streams",
+      status,
+      durationMs: durationMsFrom(start),
+      ...(status >= 400 ? { errorCode: statusToErrorCode(status) } : {}),
+    });
   }
+}
 
-  return NextResponse.json(payload, { status: 201 });
+export async function POST(request: Request) {
+  return wrapWithTimeout(request, "POST", "/api/streams", handleStreamsPost);
 }

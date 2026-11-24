@@ -1,113 +1,91 @@
-import { NextResponse } from "next/server";
-import { errorResponse, ErrorCode } from "@/app/lib/errors/server";
+import { NextRequest, NextResponse } from "next/server";
+import { errorResponse, ErrorCode } from "@app/lib/errors/server";
+import { withTimeout, WEBHOOK_TIMEOUT_MS } from "@src/middleware/timeout";
+import {
+  extractCorrelationContext,
+  logger,
+  withCorrelationContext,
+} from "@app/lib/logger";
+import { getWebhookSubscriptionStore } from "@app/lib/webhook-store";
+import { webhookDeliveryStore } from "@app/lib/webhook-delivery-store";
+import {
+  computeSuccessRatePct,
+  deriveHealthStatus,
+  getSubscriptionStats,
+  type WebhookDeliveryStats,
+  type WebhookHealthResponse,
+} from "./health";
 
-/**
- * GET /api/webhooks/health
- *
- * Returns the health status of the webhook delivery system along with
- * per-subscription delivery statistics.
- *
- * Response shape:
- * ```json
- * {
- *   "status": "ok",
- *   "checked_at": "2024-01-01T00:00:00.000Z",
- *   "subscriptions": {
- *     "total": 0,
- *     "active": 0,
- *     "degraded": 0,
- *     "disabled": 0
- *   },
- *   "delivery_stats": {
- *     "total": 0,
- *     "delivered": 0,
- *     "failed": 0,
- *     "pending": 0,
- *     "dlq": 0,
- *     "success_rate_pct": 100
- *   }
- * }
- * ```
- */
+type WebhookDeliveryStatsWithStale = WebhookDeliveryStats & { stale: number };
 
-export interface WebhookSubscriptionStats {
-  total: number;
-  active: number;
-  degraded: number;
-  disabled: number;
-}
+export async function GET(request?: Request | NextRequest) {
+  const reqHeaders = request?.headers ?? new Headers();
+  const context = extractCorrelationContext(reqHeaders);
 
-export interface WebhookDeliveryStats {
-  total: number;
-  delivered: number;
-  failed: number;
-  pending: number;
-  dlq: number;
-  /** Percentage of deliveries that succeeded (0–100). */
-  success_rate_pct: number;
-}
+  return withCorrelationContext(context, async () => {
+    try {
+      return await withTimeout(
+        WEBHOOK_TIMEOUT_MS,
+        request ?? {},
+        async () => {
+          const now = new Date();
+          const subscriptions = await getSubscriptionStats(
+            getWebhookSubscriptionStore(),
+            webhookDeliveryStore,
+          );
+          const rawStats = webhookDeliveryStore.getDeliveryHealthStats(
+            now,
+            WEBHOOK_TIMEOUT_MS,
+          );
 
-export interface WebhookHealthResponse {
-  status: "ok" | "degraded" | "unhealthy";
-  checked_at: string;
-  subscriptions: WebhookSubscriptionStats;
-  delivery_stats: WebhookDeliveryStats;
-}
+          const delivery_stats: WebhookDeliveryStatsWithStale = {
+            ...rawStats,
+            success_rate_pct: computeSuccessRatePct(
+              rawStats.delivered,
+              rawStats.failed,
+              rawStats.dlq,
+            ),
+          };
 
-/**
- * Derive an overall health status from subscription and delivery stats.
- *
- * Rules:
- * - "unhealthy" when more than 50 % of subscriptions are degraded/disabled
- * - "degraded"  when any subscriptions are degraded or DLQ depth > 0
- * - "ok"        otherwise
- */
-export function deriveHealthStatus(
-  subs: WebhookSubscriptionStats,
-  stats: WebhookDeliveryStats,
-): WebhookHealthResponse["status"] {
-  const degradedRatio =
-    subs.total > 0 ? (subs.degraded + subs.disabled) / subs.total : 0;
-  if (degradedRatio > 0.5) return "unhealthy";
-  if (subs.degraded > 0 || stats.dlq > 0) return "degraded";
-  return "ok";
-}
+          const baseStatus = deriveHealthStatus(subscriptions, delivery_stats);
+          // Distinguish stale deliveries from failed ones: a stale delivery is
+          // a pending delivery that exceeded WEBHOOK_TIMEOUT_MS. It should mark
+          // the system degraded even if no hard failures have occurred.
+          const status: WebhookHealthResponse["status"] =
+            delivery_stats.stale > 0 && baseStatus === "ok"
+              ? "degraded"
+              : baseStatus;
 
-export async function GET() {
-  try {
-    // TODO: replace stubs with real data-layer queries once persistence is wired up.
-    const subscriptions: WebhookSubscriptionStats = {
-      total: 0,
-      active: 0,
-      degraded: 0,
-      disabled: 0,
-    };
+          const checked_at = now.toISOString();
 
-    const delivery_stats: WebhookDeliveryStats = {
-      total: 0,
-      delivered: 0,
-      failed: 0,
-      pending: 0,
-      dlq: 0,
-      success_rate_pct: 100,
-    };
+          const body: WebhookHealthResponse = {
+            status,
+            checked_at,
+            subscriptions,
+            delivery_stats,
+          };
 
-    const status = deriveHealthStatus(subscriptions, delivery_stats);
-    const checked_at = new Date().toISOString();
+          logger.info("Webhook health stats retrieved", {
+            status,
+            total_subscriptions: subscriptions.total,
+            stale_count: delivery_stats.stale,
+            dlq_depth: delivery_stats.dlq,
+          });
 
-    const body: WebhookHealthResponse = {
-      status,
-      checked_at,
-      subscriptions,
-      delivery_stats,
-    };
-
-    return NextResponse.json(body, { status: 200 });
-  } catch {
-    return errorResponse(
-      ErrorCode.INTERNAL_SERVER_ERROR,
-      "Failed to retrieve webhook health stats.",
-      500,
-    );
-  }
+          return NextResponse.json(body, { status: 200 });
+        },
+      );
+    } catch (error) {
+      try {
+        logger.error("Failed to retrieve webhook health stats", { error });
+      } catch {
+        // Fall through if logger fails (e.g., clock/formatting error)
+      }
+      return errorResponse(
+        ErrorCode.INTERNAL_SERVER_ERROR,
+        "Failed to retrieve webhook health stats.",
+        500,
+      );
+    }
+  });
 }

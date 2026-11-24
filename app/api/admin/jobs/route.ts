@@ -62,10 +62,18 @@ async function authenticate(request: Request): Promise<NextResponse | null> {
 }
 
 /** Summarise a single queue's jobs into a serialisable snapshot. */
-function queueSnapshot(queue: { getAllJobs: () => ReturnType<typeof settlementQueue.getAllJobs> }) {
+function queueSnapshot(queue: {
+  getAllJobs: () => ReturnType<typeof settlementQueue.getAllJobs>;
+  getDeadLetters?: () => ReturnType<typeof settlementQueue.getDeadLetters>;
+  getStats?: () => ReturnType<typeof settlementQueue.getStats>;
+}) {
   const jobs = queue.getAllJobs();
+  const stats = queue.getStats?.();
+  const deadLetters = queue.getDeadLetters?.() ?? [];
   return {
     count: jobs.length,
+    capacity: stats?.capacity,
+    deadLettered: deadLetters.length,
     jobs: jobs.map((j) => ({
       id:            j.id,
       queueName:     j.queueName,
@@ -73,6 +81,16 @@ function queueSnapshot(queue: { getAllJobs: () => ReturnType<typeof settlementQu
       maxAttempts:   j.maxAttempts,
       createdAt:     j.createdAt,
       failed:        j.attempts >= j.maxAttempts,
+      correlationId: j.correlationContext?.correlation_id ?? null,
+    })),
+    deadLetters: deadLetters.map((j) => ({
+      id:            j.id,
+      queueName:     j.queueName,
+      attempts:      j.attempts,
+      maxAttempts:   j.maxAttempts,
+      createdAt:     j.createdAt,
+      failedAt:      j.failedAt,
+      reason:        j.reason,
       correlationId: j.correlationContext?.correlation_id ?? null,
     })),
   };
@@ -115,6 +133,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       total:   allJobs.length,
       pending: allJobs.filter((j) => !j.failed).length,
       failed:  allJobs.filter((j) => j.failed).length,
+      deadLettered: Object.values(queues).reduce((sum, q) => sum + q.deadLettered, 0),
     };
 
     logger.info("Admin jobs status fetched", {

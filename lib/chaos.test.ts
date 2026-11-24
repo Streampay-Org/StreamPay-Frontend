@@ -4,35 +4,35 @@ import { applyChaos, getChaosConfig } from "./chaos";
 
 describe("getChaosConfig", () => {
   it("is disabled by default", () => {
-    const config = getChaosConfig({});
+    const config = getChaosConfig({ NODE_ENV: "test" });
     expect(config.enabled).toBe(false);
   });
 
   it("is force-disabled in production even when CHAOS_ENABLED=true", () => {
-    const config = getChaosConfig({ NODE_ENV: "production", CHAOS_ENABLED: "true" });
+    const config = getChaosConfig({ NODE_ENV: "production" as const, CHAOS_ENABLED: "true" });
     expect(config.enabled).toBe(false);
   });
 
   it("enables in non-production when CHAOS_ENABLED=true", () => {
-    const config = getChaosConfig({ NODE_ENV: "development", CHAOS_ENABLED: "true" });
+    const config = getChaosConfig({ NODE_ENV: "development" as const, CHAOS_ENABLED: "true" });
     expect(config.enabled).toBe(true);
   });
 
   it("clamps the error rate into [0, 1]", () => {
-    expect(getChaosConfig({ CHAOS_ERROR_RATE: "5" }).errorRate).toBe(1);
-    expect(getChaosConfig({ CHAOS_ERROR_RATE: "-2" }).errorRate).toBe(0);
-    expect(getChaosConfig({ CHAOS_ERROR_RATE: "0.3" }).errorRate).toBeCloseTo(0.3);
+    expect(getChaosConfig({ NODE_ENV: "test", CHAOS_ERROR_RATE: "5" }).errorRate).toBe(1);
+    expect(getChaosConfig({ NODE_ENV: "test", CHAOS_ERROR_RATE: "-2" }).errorRate).toBe(0);
+    expect(getChaosConfig({ NODE_ENV: "test", CHAOS_ERROR_RATE: "0.3" }).errorRate).toBeCloseTo(0.3);
   });
 
   it("falls back to defaults for invalid numbers", () => {
-    const config = getChaosConfig({ CHAOS_LATENCY_MS: "abc", CHAOS_ERROR_STATUS: "nan" });
+    const config = getChaosConfig({ NODE_ENV: "test", CHAOS_LATENCY_MS: "abc", CHAOS_ERROR_STATUS: "nan" });
     expect(config.latencyMs).toBe(0);
     expect(config.errorStatus).toBe(503);
   });
 
   it("clamps error status into the 4xx/5xx range", () => {
-    expect(getChaosConfig({ CHAOS_ERROR_STATUS: "200" }).errorStatus).toBe(400);
-    expect(getChaosConfig({ CHAOS_ERROR_STATUS: "700" }).errorStatus).toBe(599);
+    expect(getChaosConfig({ NODE_ENV: "test", CHAOS_ERROR_STATUS: "200" }).errorStatus).toBe(400);
+    expect(getChaosConfig({ NODE_ENV: "test", CHAOS_ERROR_STATUS: "700" }).errorStatus).toBe(599);
   });
 });
 

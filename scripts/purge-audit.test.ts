@@ -37,4 +37,27 @@ describe("purge-audit CLI", () => {
       request_id: "audit-purge-argument-error",
     });
   });
+
+  it("prints usage and exits successfully for help requests", () => {
+    const log = jest.fn();
+    const error = jest.fn();
+
+    const exitCode = runPurgeCli(["--help"], { error, log });
+
+    expect(exitCode).toBe(0);
+    expect(error).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("Usage: ts-node scripts/purge-audit.ts"));
+  });
+
+  it("trims and validates boundary values", () => {
+    const options = parsePurgeArgs([
+      "--older-than-days",
+      " 10 ",
+      "--request-id",
+      "  req-42  ",
+    ]);
+
+    expect(options.olderThanDays).toBe(10);
+    expect(options.requestId).toBe("req-42");
+  });
 });

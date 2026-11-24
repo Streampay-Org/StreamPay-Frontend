@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::single_match)]
 //! # Property-based tests for linear release math
 //!
 //! These tests use `proptest` to verify invariants that must hold for every
@@ -20,7 +21,7 @@
 #![allow(clippy::unwrap_used)] // proptest closures require `unwrap`
 #![allow(clippy::expect_used)]
 
-use crate::{release, Error, Stream, StreamStatus};
+use crate::{release, Error, Milestone, ReleaseCurve, Stream, StreamStatus};
 use proptest::prelude::*;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::Address;
@@ -50,8 +51,11 @@ fn make_stream(
         duration: end_time.saturating_sub(start_time),
         last_update: start_time,
         status: StreamStatus::Active,
-        pause_time: 0,
+        paused_at: 0,
         total_paused_duration: 0,
+        cliff_time: 0,
+        fee_bps: 0,
+        curve: ReleaseCurve::Linear,
     }
 }
 
@@ -76,12 +80,11 @@ fn safe_timestamp() -> impl Strategy<Value = u64> {
 
 /// A valid `(start, end)` pair with `end > start` and both in safe range.
 fn valid_time_range() -> impl Strategy<Value = (u64, u64)> {
-    safe_timestamp()
-        .prop_flat_map(|start| {
-            // end is at least start+1, at most start + 2^32 seconds (~136 years)
-            let end_range = (start + 1)..=start.saturating_add(u32::MAX as u64);
-            end_range.prop_map(move |end| (start, end))
-        })
+    safe_timestamp().prop_flat_map(|start| {
+        // end is at least start+1, at most start + 2^32 seconds (~136 years)
+        let end_range = (start + 1)..=start.saturating_add(u32::MAX as u64);
+        end_range.prop_map(move |end| (start, end))
+    })
 }
 
 // ── property tests ────────────────────────────────────────────────────────────
@@ -112,14 +115,50 @@ proptest! {
         now1 in safe_timestamp(),
         delta in 0_u64..=1_000_u64,
     ) {
-        let env = soroban_sdk::Env::default();
-        let stream = make_stream(&env, total, 0, start, end);
-        let now2 = now1.saturating_add(delta);
-        let v1 = release::vested_amount(&stream, now1);
-        let v2 = release::vested_amount(&stream, now2);
-        match (v1, v2) {
-            (Ok(a), Ok(b)) => prop_assert!(a <= b, "vested not monotone: {a} > {b} at {now1}..{now2}"),
-            _ => {} // overflow cases are fine to skip
+        let (env, _admin, sender, recipient, token) = setup_env();
+        let contract_id = env.register(Contract, ());
+        let client = ContractClient::new(&env, &contract_id);
+
+        let stream_id = client
+            .create_stream(&sender, &recipient, &token, &total_amount, &1_000, &(1_000 + duration));
+
+        // Advance to halfway point
+        env.ledger().set_timestamp(1_000 + duration / 2);
+
+        let withdrawable_before = client.withdrawable(&stream_id);
+        let stream_before = client.get_stream(&stream_id);
+
+        // Withdraw a fraction of the withdrawable amount
+        let withdraw_amount = withdrawable_before / withdraw_fraction as i128;
+        if withdraw_amount > 0 {
+            let _ = client.withdraw(&recipient, &stream_id, &withdraw_amount);
+
+            let stream_after = client.get_stream(&stream_id);
+            let withdrawable_after = client.withdrawable(&stream_id);
+
+            // Invariant: released_amount increased by withdrawn amount
+            prop_assert_eq!(
+                stream_after.released_amount,
+                stream_before.released_amount + withdraw_amount
+            );
+
+            // Invariant: released_amount <= total_amount
+            prop_assert!(
+                stream_after.released_amount <= total_amount,
+                "released_amount after withdrawal should not exceed total_amount"
+            );
+
+            // Invariant: withdrawable decreased appropriately
+            prop_assert!(
+                withdrawable_after <= withdrawable_before,
+                "withdrawable should decrease after withdrawal"
+            );
+
+            // Invariant: no overflow in calculations
+            prop_assert!(
+                stream_after.released_amount >= 0,
+                "released_amount should remain non-negative"
+            );
         }
     }
 
@@ -208,5 +247,85 @@ proptest! {
         let mut stream = make_stream(&env, total, 0, start, end);
         stream.status = StreamStatus::Draft;
         prop_assert_eq!(release::vested_amount(&stream, now), Ok(0));
+    }
+
+    /// P9: With a valid cliff_time in [start, end], vested is always in
+    /// [0, total] and monotonically non-decreasing in time.
+    #[test]
+    fn prop_cliff_vested_bounds_and_monotonic(
+        total in safe_amount(),
+        (start, end) in valid_time_range(),
+        cliff_offset in 0_u64..=u32::MAX as u64,
+        now1 in safe_timestamp(),
+        delta in 0_u64..=10_000_u64,
+    ) {
+        let env = soroban_sdk::Env::default();
+        let duration = end - start;
+        let cliff_time = start + (cliff_offset % (duration + 1));
+        let mut stream = make_stream(&env, total, 0, start, end);
+        stream.cliff_time = cliff_time;
+
+        let now2 = now1.saturating_add(delta);
+        if let (Ok(v1), Ok(v2)) = (
+            release::vested_amount(&stream, now1),
+            release::vested_amount(&stream, now2),
+        ) {
+            prop_assert!(v1 >= 0 && v1 <= total, "v1={v1} out of [0, {total}]");
+            prop_assert!(v2 >= 0 && v2 <= total, "v2={v2} out of [0, {total}]");
+            prop_assert!(v1 <= v2, "not monotonic: v1={v1} > v2={v2}");
+        }
+    }
+
+    /// P9: Milestone streams are monotonically non-decreasing in time,
+    /// bounded by `total_amount`, and equal `total_amount` at `end_time`.
+    fn prop_milestone_monotonic_bounded_and_full_at_end(
+        total in 1_i128..=1_000_000_000_i128,
+        start in 1_000_u64..=10_000_u64,
+        d1 in 1_u64..=1_000_u64,
+        d2 in 1_u64..=1_000_u64,
+        bps1 in 0_u32..=10_000_u32,
+        t1_offset in 0_u64..=3_000_u64,
+        dt in 0_u64..=1_000_u64,
+    ) {
+        let m1_time = start + d1;
+        let end = m1_time + d2;
+        let mut ms = soroban_sdk::Vec::new(&env);
+        ms.push_back(Milestone { time: m1_time, cumulative_bps: bps1 });
+        ms.push_back(Milestone { time: end, cumulative_bps: 10_000 });
+
+        stream.curve = ReleaseCurve::Milestones(ms);
+
+        let now1 = start.saturating_add(t1_offset);
+        let now2 = now1.saturating_add(dt);
+
+        let v1 = release::vested_amount(&stream, now1).unwrap();
+        let v2 = release::vested_amount(&stream, now2).unwrap();
+        let v_end = release::vested_amount(&stream, end).unwrap();
+
+        prop_assert!(v1 >= 0 && v1 <= total);
+        prop_assert!(v2 >= 0 && v2 <= total);
+        prop_assert!(v1 <= v2, "milestone vested decreased: v1={v1} > v2={v2}");
+        prop_assert_eq!(v_end, total);
+    }
+
+    /// P10: Linear streams match the legacy formula `total * elapsed / duration`.
+    fn prop_linear_matches_legacy_formula(
+        total in 1_i128..=1_000_000_000_i128,
+        start in 0_u64..=100_000_u64,
+        duration in 1_u64..=100_000_u64,
+        now in 0_u64..=250_000_u64,
+    ) {
+        let end = start + duration;
+        let stream = make_stream(&env, total, 0, start, end);
+
+        let clamped = now.max(start).min(end);
+        let elapsed = clamped.saturating_sub(start);
+        let expected = if elapsed >= duration {
+            total
+        } else {
+            total * i128::from(elapsed) / i128::from(duration)
+        };
+
+        prop_assert_eq!(release::vested_amount(&stream, now), Ok(expected));
     }
 }

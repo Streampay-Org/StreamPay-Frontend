@@ -108,4 +108,14 @@ describe("WalletModal", () => {
       expect(btn).toHaveAttribute("aria-label");
     });
   });
+
+  it("renders the general wallet compatibility documentation link with correct attributes", () => {
+    render(<WalletModal isOpen={true} onClose={() => {}} onSelect={() => {}} />);
+
+    const generalDocsLink = screen.getByRole("link", { name: "wallet compatibility docs" });
+    expect(generalDocsLink).toBeInTheDocument();
+    expect(generalDocsLink).toHaveAttribute("href", "https://docs.streampay.io/wallet-compatibility");
+    expect(generalDocsLink).toHaveAttribute("target", "_blank");
+    expect(generalDocsLink).toHaveAttribute("rel", "noopener noreferrer");
+  });
 });

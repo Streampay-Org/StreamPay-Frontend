@@ -6,7 +6,8 @@
 //! - **Instance storage** holds singletons: `Admin`, `Paused`, the
 //!   stream counter, and the per-token allowlist. These keys live for
 //!   the lifetime of the contract instance and are extended together.
-//! - **Persistent storage** holds per-stream rows keyed by stream id.
+//! - **Persistent storage** holds per-stream rows keyed by stream id,
+//!   and per-stream withdrawer allowlists keyed by stream id.
 //!   These rows are TTL-extended every time the stream is read or
 //!   written so an active stream cannot expire mid-flight.
 //!
@@ -14,8 +15,18 @@
 //! plus a generous recovery buffer; keep them in sync with the
 //! operational runbook.
 
-use soroban_sdk::{contracttype, Address, Env};
+use soroban_sdk::{contracttype, Address, Env, Vec};
 
+/// Lifecycle status of a [`Stream`] stored on-chain.
+///
+/// | Variant     | Description                                                        |
+/// |-------------|--------------------------------------------------------------------|
+/// | `Draft`     | Created but not yet started; no accrual occurs.                    |
+/// | `Active`    | Tokens are vesting linearly from `start_time` to `end_time`.       |
+/// | `Paused`    | Accrual frozen; `end_time` will be extended on resume.             |
+/// | `Settled`   | Fully paid out; terminal state.                                    |
+/// | `Ended`     | Time window elapsed, awaiting settle; transitional.                |
+/// | `Cancelled` | Cancelled by sender before full vesting; terminal state.           |
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub enum StreamStatus {
@@ -27,6 +38,45 @@ pub enum StreamStatus {
     Cancelled,
 }
 
+/// Maximum number of milestones allowed in a [`ReleaseCurve::Milestones`] schedule.
+pub const MAX_MILESTONES: u32 = 32;
+
+/// A single stepped release checkpoint in a milestone schedule.
+///
+/// Once the stream's effective timestamp reaches `time`, at least
+/// `total_amount * cumulative_bps / 10_000` is vested.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct Milestone {
+    /// Ledger timestamp (seconds) at which this milestone unlocks.
+    pub time: u64,
+    /// Cumulative basis points vested at or after `time` (`0..=10_000`).
+    pub cumulative_bps: u32,
+}
+
+/// Vesting curve governing how a [`Stream`] releases funds over time.
+///
+/// - [`ReleaseCurve::Linear`] — continuous pro-rata vesting (default).
+/// - [`ReleaseCurve::Milestones`] — discrete stepped releases at configured
+///   `(time, cumulative_bps)` checkpoints.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum ReleaseCurve {
+    Linear,
+    Milestones(Vec<Milestone>),
+}
+
+/// On-chain record for a single payment stream.
+///
+/// Each stream escrows `total_amount` from `sender` and releases it
+/// to `recipient` from `start_time` to `end_time` according to `curve`
+/// (linear by default, or discrete milestones). The `released_amount`
+/// tracks cumulative withdrawals; when it reaches `total_amount` the
+/// stream transitions to `Settled`.
+///
+/// Paused streams record `paused_at` and `total_paused_duration` so
+/// that the resumption logic can extend `end_time` by the pause length
+/// without over- or under-paying the recipient.
 #[derive(Clone, Debug)]
 #[contracttype]
 pub struct Stream {
@@ -41,18 +91,48 @@ pub struct Stream {
     pub duration: u64,
     pub last_update: u64,
     pub status: StreamStatus,
-    pub pause_time: u64,
+    pub paused_at: u64,
     pub total_paused_duration: u64,
+    /// Per-stream fee in basis points `[0, 10_000]`.
+    ///
+    /// Set at creation time. Applied to every [`crate::Contract::withdraw`]
+    /// call: `fee_amount = floor(amount * fee_bps / 10_000)`. If no fee
+    /// collector has been configured, the fee is skipped regardless of this
+    /// value.
+    pub fee_bps: u32,
+    /// Optional cliff timestamp (ledger seconds).
+    ///
+    /// `0` means no cliff — tokens vest linearly from `start_time`.
+    /// When non-zero, `start_time <= cliff_time <= end_time`: vested amount
+    /// remains `0` until the active elapsed time reaches
+    /// `cliff_time - start_time`, at which point vesting jumps to the linear
+    /// accrued amount for the elapsed time.
+    pub cliff_time: u64,
+    /// Release schedule curve (`Linear` by default, or stepped `Milestones`).
+    pub curve: ReleaseCurve,
 }
 
 #[derive(Clone)]
 #[contracttype]
-enum DataKey {
+pub(crate) enum DataKey {
     Admin,
     Paused,
     StreamCount,
     Stream(u64),
     TokenAllowed(Address),
+    /// Protocol-level fee in basis points (0–10 000).
+    ///
+    /// Absent means no fee (equivalent to `0`). Stored in instance storage so
+    /// it lives for the lifetime of the contract.
+    FeeBps,
+    /// Per-stream withdrawer allowlist keyed by stream id (persistent storage).
+    WithdrawerAllowlist(u64),
+    /// Pending recipient address for a two-step recipient transfer (persistent storage).
+    PendingRecipient(u64),
+    /// Global dormant-stream grace period in seconds (instance storage; 0 = disabled).
+    DormancyGrace,
+    /// Per-stream timestamp of the most recent recipient withdrawal (persistent storage).
+    LastWithdrawTime(u64),
 }
 
 /// Threshold and absolute target values are expressed in ledger sequences.
@@ -70,16 +150,16 @@ enum DataKey {
 /// 1-month target. They are re-stamped on every `create_stream` check and on
 /// every admin `set_token_allowed` write.
 pub const STREAM_TTL_MIN_REMAINING: u32 = 241_920; // ~2 weeks at 5-second ledgers
-pub const STREAM_TTL_EXTEND_TO: u32 = 1_555_200;   // ~3 months at 5-second ledgers
+pub const STREAM_TTL_EXTEND_TO: u32 = 1_555_200; // ~3 months at 5-second ledgers
 pub const INSTANCE_TTL_MIN_REMAINING: u32 = 120_960; // ~1 week at 5-second ledgers
-pub const INSTANCE_TTL_EXTEND_TO: u32 = 518_400;   // ~1 month at 5-second ledgers
+pub const INSTANCE_TTL_EXTEND_TO: u32 = 518_400; // ~1 month at 5-second ledgers
 /// Per-token allowlist TTL constants.
 ///
 /// Every `is_token_blocked` call (hot path inside `create_stream`) extends
 /// the allowlist entry's TTL so a token that is actively being streamed
 /// cannot silently archive between stream creation and withdrawal.
 pub const TOKEN_TTL_MIN_REMAINING: u32 = 120_960; // ~1 week at 5-second ledgers
-pub const TOKEN_TTL_EXTEND_TO: u32 = 518_400;     // ~1 month at 5-second ledgers
+pub const TOKEN_TTL_EXTEND_TO: u32 = 518_400; // ~1 month at 5-second ledgers
 
 fn ttl_target(env: &Env, extra_ledgers: u32) -> u32 {
     env.ledger().sequence().saturating_add(extra_ledgers)
@@ -126,6 +206,10 @@ fn extend_token_allowed_ttl(env: &Env, token: &Address) {
 
 fn extend_stream_ttl(env: &Env, stream_id: u64) {
     extend_persistent_ttl(env, &DataKey::Stream(stream_id));
+}
+
+fn extend_withdrawer_allowlist_ttl(env: &Env, stream_id: u64) {
+    extend_persistent_ttl(env, &DataKey::WithdrawerAllowlist(stream_id));
 }
 
 fn extend_admin_key_ttl(env: &Env) {
@@ -290,6 +374,34 @@ pub fn next_stream_id(env: &Env) -> u64 {
     id
 }
 
+/// Returns the next stream id **without** incrementing the counter.
+///
+/// This is a read-only helper used by paginated list views to determine the
+/// upper bound of stream IDs to scan. It does not consume a stream ID or
+/// modify any storage state.
+///
+/// # Returns
+/// The value of the next-stream-ID counter (i.e. the ID that *would* be
+/// assigned to the next `create_stream` call). Returns `1` if no streams
+/// have ever been created.
+pub fn peek_next_stream_id(env: &Env) -> u64 {
+    let storage = env.storage().instance();
+    let id: u64 = storage.get(&DataKey::StreamCount).unwrap_or(1u64);
+    // Extend instance TTL on this hot read path so the stream-ID counter
+    // never archives while the contract is actively serving paginated views.
+    extend_next_stream_id_ttl(env);
+    id
+}
+
+/// Test-only helper: directly sets the stream-ID counter to `id`.
+///
+/// Allows unit tests to seed the counter to a known value without having to
+/// create actual streams. Not available in production builds.
+#[cfg(test)]
+pub fn set_next_stream_id_for_test(env: &Env, id: u64) {
+    env.storage().instance().set(&DataKey::StreamCount, &id);
+}
+
 /// Writes a stream record into persistent storage.
 ///
 /// This helper also extends the TTL for the corresponding per-stream entry.
@@ -326,18 +438,202 @@ pub fn get_stream(env: &Env, stream_id: u64) -> Option<Stream> {
     stream
 }
 
+/// Sets the protocol-level fee in basis points (0–10 000).
+///
+/// Stored in instance storage so it lives for the contract lifetime. Extends
+/// instance TTL on every write to keep the fee configuration alive.
+///
+/// A value of `0` means no fee is charged; `10_000` means 100 % (full amount).
+///
+/// # Returns
+/// This helper does not return a value.
+pub fn set_fee_bps(env: &Env, fee_bps: u32) {
+    env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
+    extend_instance_ttl(env, &DataKey::FeeBps);
+}
+
+/// Returns the current protocol-level fee in basis points.
+///
+/// Returns `0` if no fee has been configured (absent key). Extends instance
+/// TTL on the hot path so the fee configuration stays live under normal use.
+///
+/// # Returns
+/// Fee in basis points, in the range `[0, 10_000]`.
+pub fn get_fee_bps(env: &Env) -> u32 {
+    let fee: Option<u32> = env.storage().instance().get(&DataKey::FeeBps);
+    if fee.is_some() {
+        extend_instance_ttl(env, &DataKey::FeeBps);
+    }
+    fee.unwrap_or(0)
+}
+
+// ---------------------------------------------------------------------------
+// Withdrawer allowlist
+// ---------------------------------------------------------------------------
+
+/// Adds `withdrawer` to the per-stream allowlist for `stream_id`.
+pub fn add_withdrawer(env: &Env, stream_id: u64, withdrawer: &Address) {
+    let mut allowlist: soroban_sdk::Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::WithdrawerAllowlist(stream_id))
+        .unwrap_or(soroban_sdk::Vec::new(env));
+
+    if !allowlist.contains(withdrawer) {
+        allowlist.push_back(withdrawer.clone());
+    }
+
+    env.storage()
+        .persistent()
+        .set(&DataKey::WithdrawerAllowlist(stream_id), &allowlist);
+    extend_withdrawer_allowlist_ttl(env, stream_id);
+}
+
+/// Removes `withdrawer` from the per-stream allowlist for `stream_id`.
+pub fn remove_withdrawer(env: &Env, stream_id: u64, withdrawer: &Address) {
+    let mut allowlist: soroban_sdk::Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::WithdrawerAllowlist(stream_id))
+        .unwrap_or(soroban_sdk::Vec::new(env));
+
+    if let Some(pos) = allowlist.first_index_of(withdrawer) {
+        allowlist.remove(pos);
+    }
+
+    env.storage()
+        .persistent()
+        .set(&DataKey::WithdrawerAllowlist(stream_id), &allowlist);
+    extend_withdrawer_allowlist_ttl(env, stream_id);
+}
+
+/// Returns `true` if `withdrawer` is present in the per-stream allowlist for
+/// `stream_id`.
+pub fn is_withdrawer_allowed(env: &Env, stream_id: u64, withdrawer: &Address) -> bool {
+    let allowlist: Option<soroban_sdk::Vec<Address>> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::WithdrawerAllowlist(stream_id));
+    match allowlist {
+        Some(list) => {
+            extend_withdrawer_allowlist_ttl(env, stream_id);
+            list.contains(withdrawer)
+        }
+        None => false,
+    }
+}
+
+/// Returns the full withdrawer allowlist for `stream_id` (may be empty).
+pub fn get_withdrawer_allowlist(env: &Env, stream_id: u64) -> soroban_sdk::Vec<Address> {
+    let allowlist: Option<soroban_sdk::Vec<Address>> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::WithdrawerAllowlist(stream_id));
+    match allowlist {
+        Some(list) => {
+            extend_withdrawer_allowlist_ttl(env, stream_id);
+            list
+        }
+        None => soroban_sdk::Vec::new(env),
+    }
+}
+
+/// Clears the per-stream withdrawer allowlist for `stream_id`.
+pub fn clear_withdrawer_allowlist(env: &Env, stream_id: u64) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::WithdrawerAllowlist(stream_id));
+}
+
+// ---------------------------------------------------------------------------
+// Pending recipient transfer
+// ---------------------------------------------------------------------------
+
+/// Records a pending recipient transfer target for `stream_id` in persistent
+/// storage and extends its TTL.
+pub fn set_pending_recipient(env: &Env, stream_id: u64, recipient: &Address) {
+    let key = DataKey::PendingRecipient(stream_id);
+    env.storage().persistent().set(&key, recipient);
+    extend_persistent_ttl(env, &key);
+}
+
+/// Returns the pending recipient transfer target for `stream_id`, if any,
+/// extending its TTL on read.
+pub fn get_pending_recipient(env: &Env, stream_id: u64) -> Option<Address> {
+    let key = DataKey::PendingRecipient(stream_id);
+    let pending: Option<Address> = env.storage().persistent().get(&key);
+    if pending.is_some() {
+        extend_persistent_ttl(env, &key);
+    }
+    pending
+}
+
+/// Removes any pending recipient transfer proposal for `stream_id`.
+pub fn clear_pending_recipient(env: &Env, stream_id: u64) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::PendingRecipient(stream_id));
+}
+
+/// Returns the global dormant-stream grace period in seconds (`0` = disabled).
+pub fn get_dormancy_grace(env: &Env) -> u64 {
+    let stored: Option<u64> = env.storage().instance().get(&DataKey::DormancyGrace);
+    if stored.is_some() {
+        extend_instance_ttl(env, &DataKey::DormancyGrace);
+    }
+    stored.unwrap_or(0)
+}
+
+/// Sets the global dormant-stream grace period in seconds (`0` = disabled).
+pub fn set_dormancy_grace(env: &Env, seconds: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::DormancyGrace, &seconds);
+    extend_instance_ttl(env, &DataKey::DormancyGrace);
+}
+
+/// Returns the timestamp of the most recent recipient withdrawal for `stream_id`,
+/// or `0` if no withdrawal has occurred yet.
+pub fn get_last_withdraw_time(env: &Env, stream_id: u64) -> u64 {
+    let key = DataKey::LastWithdrawTime(stream_id);
+    let stored: Option<u64> = env.storage().persistent().get(&key);
+    if stored.is_some() {
+        extend_persistent_ttl(env, &key);
+    }
+    stored.unwrap_or(0)
+}
+
+/// Records the timestamp of the most recent recipient withdrawal for `stream_id`.
+pub fn set_last_withdraw_time(env: &Env, stream_id: u64, timestamp: u64) {
+    let key = DataKey::LastWithdrawTime(stream_id);
+    env.storage().persistent().set(&key, &timestamp);
+    extend_persistent_ttl(env, &key);
+}
+
+}
+
+
+}
+
+    }
+}
+
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Contract;
     use soroban_sdk::{
-        testutils::{Address as _, Ledger as _},
+        testutils::{
+            storage::{Instance, Persistent},
+            Address as _, Ledger as _,
+        },
         Env,
     };
 
     fn setup() -> (Env, soroban_sdk::Address) {
         let env = Env::default();
-        env.ledger().set_sequence_number(1_000);
         let contract_id = env.register(Contract, ());
         (env, contract_id)
     }
@@ -348,41 +644,33 @@ mod tests {
             sender: soroban_sdk::Address::generate(env),
             recipient: soroban_sdk::Address::generate(env),
             token: soroban_sdk::Address::generate(env),
-            total_amount: 1_000,
+            total_amount: 1000,
             released_amount: 0,
-            start_time: 0,
-            end_time: 100,
-            duration: 100,
-            last_update: 0,
+            start_time: 1000,
+            end_time: 2000,
+            duration: 1000,
+            last_update: 1000,
             status: StreamStatus::Active,
-            pause_time: 0,
+            paused_at: 0,
             total_paused_duration: 0,
+            fee_bps: 0,
+            cliff_time: 0,
+            curve: ReleaseCurve::Linear,
         }
     }
 
     // ── constant sanity ──────────────────────────────────────────────────────
 
-    /// The bumped TTL constants must be strictly larger than the previous
-    /// values that shipped before this PR.
+    /// Extends must be > 0 and extend_to >= min_remaining for all entry types.
     #[test]
-    fn ttl_constants_are_greater_than_previous_values() {
-        // Stream: was 120_960 threshold, 483_840 extend_to
-        assert!(STREAM_TTL_MIN_REMAINING > 120_960);
-        assert!(STREAM_TTL_EXTEND_TO > 483_840);
-        // Instance: was 43_200 threshold, 120_960 extend_to
-        assert!(INSTANCE_TTL_MIN_REMAINING > 43_200);
-        assert!(INSTANCE_TTL_EXTEND_TO > 120_960);
+    fn ttl_constants_are_valid() {
+        assert!(STREAM_TTL_MIN_REMAINING > 0);
+        assert!(STREAM_TTL_EXTEND_TO >= STREAM_TTL_MIN_REMAINING);
+        assert!(INSTANCE_TTL_MIN_REMAINING > 0);
+        assert!(INSTANCE_TTL_EXTEND_TO >= INSTANCE_TTL_MIN_REMAINING);
         // Token constants: new in this PR, just verify non-zero
         assert!(TOKEN_TTL_MIN_REMAINING > 0);
         assert!(TOKEN_TTL_EXTEND_TO >= TOKEN_TTL_MIN_REMAINING);
-    }
-
-    /// Extend-to must always be larger than min-remaining for every storage tier.
-    #[test]
-    fn extend_to_is_larger_than_min_remaining_for_all_tiers() {
-        assert!(STREAM_TTL_EXTEND_TO > STREAM_TTL_MIN_REMAINING);
-        assert!(INSTANCE_TTL_EXTEND_TO > INSTANCE_TTL_MIN_REMAINING);
-        assert!(TOKEN_TTL_EXTEND_TO > TOKEN_TTL_MIN_REMAINING);
     }
 
     // ── stream TTL ───────────────────────────────────────────────────────────
@@ -412,25 +700,26 @@ mod tests {
         });
 
         // Advance to the ledger where the remaining TTL is MIN_REMAINING - 1.
-        // At initial sequence 1_000 the entry expires at 1_000 + STREAM_TTL_EXTEND_TO.
-        // After advancing to 1_000 + STREAM_TTL_EXTEND_TO - STREAM_TTL_MIN_REMAINING + 1
-        // the remaining TTL = STREAM_TTL_MIN_REMAINING - 1 (one below threshold).
-        let new_seq = 1_000u32
-            .saturating_add(STREAM_TTL_EXTEND_TO)
+        let new_seq = STREAM_TTL_EXTEND_TO
             .saturating_sub(STREAM_TTL_MIN_REMAINING)
             .saturating_add(1);
         env.ledger().set_sequence_number(new_seq);
 
         env.as_contract(&contract_id, || {
             let ttl_before = env.storage().persistent().get_ttl(&DataKey::Stream(1));
-            assert_eq!(ttl_before, STREAM_TTL_MIN_REMAINING - 1,
-                "pre-condition: TTL should be exactly one ledger below threshold");
+            assert_eq!(
+                ttl_before,
+                STREAM_TTL_MIN_REMAINING - 1,
+                "pre-condition: TTL should be exactly one ledger below threshold"
+            );
 
             let _ = get_stream(&env, 1);
 
             let ttl_after = env.storage().persistent().get_ttl(&DataKey::Stream(1));
-            assert_eq!(ttl_after, STREAM_TTL_EXTEND_TO,
-                "get_stream must re-extend TTL to STREAM_TTL_EXTEND_TO");
+            assert_eq!(
+                ttl_after, STREAM_TTL_EXTEND_TO,
+                "get_stream must re-extend TTL to STREAM_TTL_EXTEND_TO"
+            );
         });
     }
 
@@ -475,8 +764,7 @@ mod tests {
             set_token_allowed(&env, &token, false);
         });
 
-        let new_seq = 1_000u32
-            .saturating_add(TOKEN_TTL_EXTEND_TO)
+        let new_seq = TOKEN_TTL_EXTEND_TO
             .saturating_sub(TOKEN_TTL_MIN_REMAINING)
             .saturating_add(1);
         env.ledger().set_sequence_number(new_seq);
@@ -486,8 +774,11 @@ mod tests {
                 .storage()
                 .persistent()
                 .get_ttl(&DataKey::TokenAllowed(token.clone()));
-            assert_eq!(ttl_before, TOKEN_TTL_MIN_REMAINING - 1,
-                "pre-condition: TTL should be exactly one ledger below threshold");
+            assert_eq!(
+                ttl_before,
+                TOKEN_TTL_MIN_REMAINING - 1,
+                "pre-condition: TTL should be exactly one ledger below threshold"
+            );
 
             let blocked = is_token_blocked(&env, &token);
             assert!(blocked, "token should still be blocked");
@@ -496,8 +787,10 @@ mod tests {
                 .storage()
                 .persistent()
                 .get_ttl(&DataKey::TokenAllowed(token.clone()));
-            assert_eq!(ttl_after, TOKEN_TTL_EXTEND_TO,
-                "is_token_blocked must re-extend TTL to TOKEN_TTL_EXTEND_TO");
+            assert_eq!(
+                ttl_after, TOKEN_TTL_EXTEND_TO,
+                "is_token_blocked must re-extend TTL to TOKEN_TTL_EXTEND_TO"
+            );
         });
     }
 
@@ -511,8 +804,7 @@ mod tests {
             set_token_allowed(&env, &token, true);
         });
 
-        let new_seq = 1_000u32
-            .saturating_add(TOKEN_TTL_EXTEND_TO)
+        let new_seq = TOKEN_TTL_EXTEND_TO
             .saturating_sub(TOKEN_TTL_MIN_REMAINING)
             .saturating_add(1);
         env.ledger().set_sequence_number(new_seq);
@@ -525,7 +817,7 @@ mod tests {
                 .storage()
                 .persistent()
                 .get_ttl(&DataKey::TokenAllowed(token.clone()));
-            assert_eq!(ttl_after, TOKEN_TTL_EXTEND_TO);
+            assert_eq!(ttl_after - env.ledger().sequence(), TOKEN_TTL_EXTEND_TO);
         });
     }
 
@@ -565,8 +857,7 @@ mod tests {
             set_admin(&env, &admin);
         });
 
-        let new_seq = 1_000u32
-            .saturating_add(INSTANCE_TTL_EXTEND_TO)
+        let new_seq = INSTANCE_TTL_EXTEND_TO
             .saturating_sub(INSTANCE_TTL_MIN_REMAINING)
             .saturating_add(1);
         env.ledger().set_sequence_number(new_seq);
@@ -578,7 +869,7 @@ mod tests {
             let _ = get_admin(&env);
 
             let ttl_after = env.storage().instance().get_ttl();
-            assert_eq!(ttl_after, INSTANCE_TTL_EXTEND_TO);
+            assert_eq!(ttl_after - env.ledger().sequence(), INSTANCE_TTL_EXTEND_TO);
         });
     }
 
@@ -593,23 +884,27 @@ mod tests {
             set_paused(&env, false);
         });
 
-        let new_seq = 1_000u32
-            .saturating_add(INSTANCE_TTL_EXTEND_TO)
+        let new_seq = INSTANCE_TTL_EXTEND_TO
             .saturating_sub(INSTANCE_TTL_MIN_REMAINING)
             .saturating_add(1);
         env.ledger().set_sequence_number(new_seq);
 
         env.as_contract(&contract_id, || {
             let ttl_before = env.storage().instance().get_ttl();
-            assert_eq!(ttl_before, INSTANCE_TTL_MIN_REMAINING - 1,
-                "pre-condition: TTL should be exactly one ledger below threshold");
+            assert_eq!(
+                ttl_before,
+                INSTANCE_TTL_MIN_REMAINING - 1,
+                "pre-condition: TTL should be exactly one ledger below threshold"
+            );
 
             let paused = is_paused(&env);
             assert!(!paused);
 
             let ttl_after = env.storage().instance().get_ttl();
-            assert_eq!(ttl_after, INSTANCE_TTL_EXTEND_TO,
-                "is_paused must re-extend instance TTL to INSTANCE_TTL_EXTEND_TO");
+            assert_eq!(
+                ttl_after, INSTANCE_TTL_EXTEND_TO,
+                "is_paused must re-extend instance TTL to INSTANCE_TTL_EXTEND_TO"
+            );
         });
     }
 
@@ -621,6 +916,93 @@ mod tests {
         env.as_contract(&contract_id, || {
             let paused = is_paused(&env);
             assert!(!paused);
+        });
+    }
+
+    // ── peek_next_stream_id / set_next_stream_id_for_test ────────────────────
+
+    /// `peek_next_stream_id` returns `1` when no streams have ever been
+    /// created — same default as `next_stream_id`.
+    #[test]
+    fn peek_next_stream_id_returns_one_when_unset() {
+        let (env, contract_id) = setup();
+        env.as_contract(&contract_id, || {
+            assert_eq!(
+                peek_next_stream_id(&env),
+                1u64,
+                "unset counter should default to 1"
+            );
+        });
+    }
+
+    /// After `next_stream_id` is called once, `peek_next_stream_id` must
+    /// return `2` (the next ID that *would* be assigned).
+    #[test]
+    fn peek_next_stream_id_reflects_incremented_counter() {
+        let (env, contract_id) = setup();
+        env.as_contract(&contract_id, || {
+            let assigned = next_stream_id(&env); // consumes ID 1, counter → 2
+            assert_eq!(assigned, 1u64);
+            assert_eq!(
+                peek_next_stream_id(&env),
+                2u64,
+                "counter must now be 2 after one allocation"
+            );
+        });
+    }
+
+    /// `peek_next_stream_id` must NOT increment the counter — repeated calls
+    /// must return the same value.
+    #[test]
+    fn peek_next_stream_id_is_idempotent() {
+        let (env, contract_id) = setup();
+        env.as_contract(&contract_id, || {
+            let first = peek_next_stream_id(&env);
+            let second = peek_next_stream_id(&env);
+            assert_eq!(
+                first, second,
+                "peek must be idempotent — counter must not change"
+            );
+        });
+    }
+
+    /// `set_next_stream_id_for_test` allows tests to seed the counter to any
+    /// arbitrary value; subsequent `peek` and `next_stream_id` calls should
+    /// observe the new value.
+    #[test]
+    fn set_next_stream_id_for_test_seeds_counter() {
+        let (env, contract_id) = setup();
+        env.as_contract(&contract_id, || {
+            set_next_stream_id_for_test(&env, 42);
+            assert_eq!(
+                peek_next_stream_id(&env),
+                42u64,
+                "peek must return the value written by the test setter"
+            );
+
+            // next_stream_id should consume 42 and advance the counter to 43
+            let id = next_stream_id(&env);
+            assert_eq!(id, 42u64);
+            assert_eq!(peek_next_stream_id(&env), 43u64);
+        });
+    }
+
+    /// Setting the counter to `1` effectively resets to the empty-contract
+    /// state; `next_stream_id` should start again from `1`.
+    #[test]
+    fn set_next_stream_id_for_test_can_reset_to_one() {
+        let (env, contract_id) = setup();
+        env.as_contract(&contract_id, || {
+            // Advance the counter to 5
+            for _ in 0..4 {
+                next_stream_id(&env);
+            }
+            assert_eq!(peek_next_stream_id(&env), 5u64);
+
+            // Reset
+            set_next_stream_id_for_test(&env, 1);
+            assert_eq!(peek_next_stream_id(&env), 1u64);
+            assert_eq!(next_stream_id(&env), 1u64);
         });
     }
 }

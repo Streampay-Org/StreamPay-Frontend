@@ -22,6 +22,7 @@ import { requireAdmin } from "@/app/lib/admin-guard";
 import { db } from "@/app/lib/db";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
 import { getCorrelationContext, logger, withCorrelationContext } from "@/app/lib/logger";
+import { publishStreamChange } from "@/app/lib/stream-publish";
 import crypto from "crypto";
 import type { Stream } from "@/app/types/openapi";
 
@@ -62,7 +63,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       return errorResponse("INVALID_REQUEST", "Request body must be valid JSON.", 400);
     }
 
-    const { senderAddress } = body as Record<string, unknown>;
+    const { senderAddress, reason } = body as Record<string, unknown>;
     if (typeof senderAddress !== "string" || senderAddress.trim().length === 0) {
       return errorResponse(
         "VALIDATION_ERROR",
@@ -71,7 +72,16 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
+    if (typeof reason !== "string" || reason.trim().length < 10) {
+      return errorResponse(
+        "VALIDATION_ERROR",
+        "Body must contain a reason string of at least 10 characters.",
+        422,
+      );
+    }
+
     const trimmedSender = senderAddress.trim();
+    const trimmedReason = reason.trim();
 
     logger.info("Admin pause-by-sender authenticated", {
       senderAddress: trimmedSender,
@@ -100,6 +110,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     // ── Pause each active stream ───────────────────────────────────────────
     const now = new Date().toISOString();
     const paused: Stream[] = [];
+    let auditRequestId: string | null = null;
 
     for (const stream of activeStreams) {
       const before = { ...stream };
@@ -114,15 +125,26 @@ export async function POST(request: Request): Promise<NextResponse> {
 
       db.streams.set(stream.id, updated);
 
-      recordPrivilegedStreamAuditEvent({
+      publishStreamChange({
+        action: "pause",
+        actor: request.headers.get("Actor-Wallet-Address") ?? undefined,
+        after: updated,
+        before,
+        correlationId: correlation_id,
+      });
+
+      const auditEntry = recordPrivilegedStreamAuditEvent({
         action: "admin.pause-by-sender",
         after: updated as any,
         before: before as any,
         request,
         streamId: stream.id,
         targetAccount: stream.recipient,
-        metadata: { senderAddress: trimmedSender, pausedAt: now },
+        metadata: { senderAddress: trimmedSender, pausedAt: now, reason: trimmedReason },
       });
+      if (!auditRequestId) {
+        auditRequestId = auditEntry.requestId;
+      }
 
       paused.push(updated);
     }
@@ -139,6 +161,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         count: paused.length,
         senderAddress: trimmedSender,
       },
+      auditRequestId: auditRequestId ?? request_id,
     });
   });
 }

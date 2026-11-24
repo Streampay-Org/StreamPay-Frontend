@@ -8,6 +8,13 @@ type Props = {
   reset: () => void;
 };
 
+function isChunkLoadError(error: Error): boolean {
+  const haystack = `${error.name} ${error.message}`.toLowerCase();
+  return /chunkloaderror|failed to fetch dynamically imported module|loading chunk/i.test(
+    haystack
+  );
+}
+
 /**
  * Route-level error boundary for /streams/[id]/receipt.
  *
@@ -17,6 +24,14 @@ type Props = {
  * to the receipt context ("your payment data is safe").
  */
 export default function ReceiptError({ error, reset }: Props) {
+  const handleReset = () => {
+    if (isChunkLoadError(error)) {
+      window.location.reload();
+    } else {
+      reset();
+    }
+  };
+
   return (
     <ErrorRecovery
       body="Something went wrong while loading this payment receipt. Your payment data is safe — this is a display issue only. Try refreshing, or go back to your streams list."
@@ -26,7 +41,7 @@ export default function ReceiptError({ error, reset }: Props) {
       primaryAction={
         <button
           className="button button--primary error-page__action"
-          onClick={reset}
+          onClick={handleReset}
           type="button"
         >
           Try again

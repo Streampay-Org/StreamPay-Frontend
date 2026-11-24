@@ -4,6 +4,7 @@
 //! the contract client interface with real on-chain state.
 
 #![cfg(test)]
+#![allow(clippy::unwrap_used)]
 
 use crate::{Contract, ContractClient, StreamStatus};
 use soroban_sdk::testutils::Address as _;
@@ -163,18 +164,14 @@ fn test_list_streams_by_sender() {
     );
 
     // Query sender_a's streams
-    let page = ctx
-        .client
-        .list_streams_by_sender(&ctx.sender_a, &None, &10);
+    let page = ctx.client.list_streams_by_sender(&ctx.sender_a, &None, &10);
 
     assert_eq!(page.streams.len(), 2);
     assert_eq!(page.streams.get(0).unwrap().sender, ctx.sender_a);
     assert_eq!(page.streams.get(1).unwrap().sender, ctx.sender_a);
 
     // Query sender_b's streams
-    let page = ctx
-        .client
-        .list_streams_by_sender(&ctx.sender_b, &None, &10);
+    let page = ctx.client.list_streams_by_sender(&ctx.sender_b, &None, &10);
 
     assert_eq!(page.streams.len(), 1);
     assert_eq!(page.streams.get(0).unwrap().sender, ctx.sender_b);
@@ -375,24 +372,18 @@ fn test_list_streams_sender_status() {
     );
 
     // Query sender_a's active streams
-    let page = ctx.client.list_streams_sender_status(
-        &ctx.sender_a,
-        &StreamStatus::Active,
-        &None,
-        &10,
-    );
+    let page =
+        ctx.client
+            .list_streams_sender_status(&ctx.sender_a, &StreamStatus::Active, &None, &10);
 
     assert_eq!(page.streams.len(), 1);
     assert_eq!(page.streams.get(0).unwrap().sender, ctx.sender_a);
     assert_eq!(page.streams.get(0).unwrap().status, StreamStatus::Active);
 
     // Query sender_a's settled streams
-    let page = ctx.client.list_streams_sender_status(
-        &ctx.sender_a,
-        &StreamStatus::Settled,
-        &None,
-        &10,
-    );
+    let page =
+        ctx.client
+            .list_streams_sender_status(&ctx.sender_a, &StreamStatus::Settled, &None, &10);
 
     assert_eq!(page.streams.len(), 1);
     assert_eq!(page.streams.get(0).unwrap().sender, ctx.sender_a);

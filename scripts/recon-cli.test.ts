@@ -38,6 +38,21 @@ describe("parseReconArgs", () => {
     expect(opts.dryRun).toBe(true);
   });
 
+  it("resolves tolerance from RECONCILE_TOLERANCE env var", () => {
+    const originalEnv = process.env.RECONCILE_TOLERANCE;
+    process.env.RECONCILE_TOLERANCE = "500";
+    try {
+      const opts = parseReconArgs(["--stream-id", "stream_123"]);
+      expect(opts.tolerance).toBe(500n);
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.RECONCILE_TOLERANCE;
+      } else {
+        process.env.RECONCILE_TOLERANCE = originalEnv;
+      }
+    }
+  });
+
   it("parses --request-id", () => {
     const opts = parseReconArgs([
       "--stream-id",

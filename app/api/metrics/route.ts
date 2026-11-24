@@ -1,6 +1,10 @@
-import { NextResponse } from "next/server";
 import { logger } from "@/app/lib/logger";
 import { getMetrics } from "@/app/lib/rate-limit-metrics";
+import { withRouteSpan } from "@/lib/routeSpan";
+import { registry } from "@/src/metrics/registry";
+import { NextResponse } from "next/server";
+import { withRouteTimeout } from "@/src/middleware/timeout";
+import { createHash, timingSafeEqual } from "crypto";
 
 /**
  * GET /api/metrics
@@ -13,30 +17,36 @@ import { getMetrics } from "@/app/lib/rate-limit-metrics";
  * `Authorization: Bearer <token>`. If the variable is unset the route is
  * disabled (returns 503) so metrics are never exposed accidentally.
  *
- * The token comparison is constant-time to avoid leaking its length or
- * contents through timing side-channels.
+ * The token comparison is constant-time (comparing SHA-256 digests via
+ * crypto.timingSafeEqual) to avoid leaking its length or contents through
+ * timing side-channels.
  *
  * ## Response
  * - `200 text/plain; version=0.0.4` — Prometheus metrics on success.
  * - `401` — missing or malformed `Authorization` header.
  * - `403` — token present but incorrect.
  * - `503` — endpoint disabled (no token configured).
+ *
+ * ## Metrics surface
+ * Two metric sources are concatenated:
+ *
+ * 1. Custom in-process counters (`streampay_requests_total`,
+ *    `streampay_rate_limit_throttled_total`, `streampay_metrics_up`).
+ * 2. The shared Prometheus `prom-client` registry, which carries the
+ *    `webhook_*` family and the new `wallet_auth_*` family powering
+ *    per-endpoint observability of `/api/auth/wallet`.
  */
 
 const PROM_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8";
 
 /**
- * Constant-time string comparison. Returns `true` only when both inputs are
- * identical. The loop always runs over the longer of the two lengths so the
- * timing does not depend on where the first mismatch occurs.
+ * Constant-time string comparison using SHA-256 digests and
+ * crypto.timingSafeEqual to prevent timing side-channel attacks.
  */
-function timingSafeEqual(a: string, b: string): boolean {
-  const len = Math.max(a.length, b.length);
-  let mismatch = a.length ^ b.length;
-  for (let i = 0; i < len; i += 1) {
-    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return mismatch === 0;
+function safeCompareTokens(presented: string, expected: string): boolean {
+  const presentedDigest = createHash("sha256").update(presented).digest();
+  const expectedDigest = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(presentedDigest, expectedDigest);
 }
 
 /** Escapes a Prometheus label value per the text exposition format spec. */
@@ -78,14 +88,14 @@ function renderPrometheus(): string {
   return `${lines.join("\n")}\n`;
 }
 
-export async function GET(request: Request): Promise<NextResponse> {
+async function handleMetricsGet(request: Request): Promise<NextResponse> {
   const expected = process.env.METRICS_AUTH_TOKEN;
 
   if (!expected) {
     logger.warn("Metrics endpoint requested but METRICS_AUTH_TOKEN is not configured");
     return NextResponse.json(
       { error: { code: "METRICS_DISABLED", message: "Metrics endpoint is not configured." } },
-      { status: 503 }
+      { status: 503, headers: { "Cache-Control": "no-store" } }
     );
   }
 
@@ -94,21 +104,33 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (!match) {
     return NextResponse.json(
       { error: { code: "UNAUTHORIZED", message: "Missing or malformed Authorization header." } },
-      { status: 401, headers: { "WWW-Authenticate": "Bearer" } }
+      { status: 401, headers: { "WWW-Authenticate": "Bearer", "Cache-Control": "no-store" } }
     );
   }
 
-  if (!timingSafeEqual(match[1], expected)) {
+  if (!safeCompareTokens(match[1], expected)) {
     logger.warn("Metrics endpoint rejected an invalid token");
     return NextResponse.json(
       { error: { code: "FORBIDDEN", message: "Invalid metrics token." } },
-      { status: 403 }
+      { status: 403, headers: { "Cache-Control": "no-store" } }
     );
   }
 
-  const body = renderPrometheus();
+  // Render the two metric surfaces back to back. Each source already emits
+  // its content with trailing newlines, so a straightforward concat produces
+  // a well-formed Prometheus exposition document.
+  const custom = renderPrometheus();
+  const promClient = await registry.metrics();
+
+  const body = `${custom}${promClient}`;
   return new NextResponse(body, {
     status: 200,
     headers: { "Content-Type": PROM_CONTENT_TYPE, "Cache-Control": "no-store" },
   });
+}
+
+export async function GET(request: Request): Promise<Response> {
+  return withRouteSpan("/api/metrics", () =>
+    withRouteTimeout(request, () => handleMetricsGet(request)),
+  )(request);
 }

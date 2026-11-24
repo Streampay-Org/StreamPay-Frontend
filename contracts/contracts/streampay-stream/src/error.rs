@@ -47,4 +47,38 @@ pub enum Error {
     SelfStream = 12,
     /// 13: Contract has already been initialised.
     AlreadyInitialized = 13,
+    /// 14: Provided admin nonce is lower than the stored counter (stale / replayed).
+    NonceTooLow = 14,
+    /// 15: Provided admin nonce is higher than the stored counter (out-of-order gap).
+    NonceOutOfOrder = 15,
+    /// 16: Recipient does not have a trustline for the token.
+    RecipientTrustlineMissing = 16,
+    /// 17: Protocol fee exceeds the caller's `max_fee_bps` slippage guard.
+    FeeTooHigh = 17,
+    /// 18: Fee basis points value exceeds the maximum allowed (10 000).
+    InvalidFeeBps = 18,
+    /// 19: No accumulated fees are available to sweep (all per-stream balances are zero).
+    SweepNoFees = 19,
+    /// 20: Accumulated fee balance for a stream underflows or would produce an
+    ///     invalid token transfer amount.  Guards against integer manipulation.
+    SweepAmountMismatch = 20,
+    /// 21: Admin action is currently in cooldown.
+    AdminCooldown = 21,
+    /// 22: Sender is in cooloff period and cannot create a new stream yet.
+    CooloffActive = 22,
+    /// 23: Stream `total_amount` exceeds the configured per-token maximum cap.
+    AmountTooLarge = 23,
+    /// 24: Stream is not yet eligible for dormant sweeping (not ended, nothing
+    ///     withdrawable, or grace period has not elapsed).
+    NotDormant = 24,
+    /// 25: Dormant-stream sweeping is disabled (`DormancyGrace == 0`).
+    DormancyDisabled = 25,
+    /// 26: No pending recipient transfer proposal exists for the stream.
+    NoPendingTransfer = 26,
+    /// 24: No pending recipient transfer proposal exists for the stream.
+    NoPendingTransfer = 24,
+    /// 24: Milestone release schedule is empty, exceeds the maximum length,
+    ///     has unsorted or out-of-window timestamps, or invalid cumulative
+    ///     basis points.
+    InvalidSchedule = 24,
 }

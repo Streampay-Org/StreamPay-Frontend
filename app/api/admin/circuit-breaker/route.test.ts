@@ -1,8 +1,10 @@
 /** @jest-environment node */
 import { POST, GET } from "./route";
 import { _resetAdminStateForTesting } from "@/app/lib/admin-guard";
+import { auditLogStore, resetAuditLogStore } from "@/app/lib/audit-log";
 
 const ADMIN_ADDRESS = "GADMIN_TEST_ADDRESS_12345";
+const VALID_REASON = "Investigating elevated error rates on subsystem";
 
 /** Build a request with the test admin wallet address header. */
 function makeRequest(
@@ -30,11 +32,16 @@ function makeUnauthorizedRequest(body?: Record<string, unknown>): Request {
 
 beforeEach(() => {
   _resetAdminStateForTesting(ADMIN_ADDRESS);
+  resetAuditLogStore();
 });
 
 describe("POST /api/admin/circuit-breaker", () => {
   it("trips the indexer circuit breaker and returns updated state", async () => {
-    const request = makeRequest("POST", { target: "indexer", open: true });
+    const request = makeRequest("POST", {
+      target: "indexer",
+      open: true,
+      reason: VALID_REASON,
+    });
     const response = await POST(request);
 
     expect(response.status).toBe(200);
@@ -42,28 +49,54 @@ describe("POST /api/admin/circuit-breaker", () => {
     expect(body.data.indexer.open).toBe(true);
     expect(body.data.indexer.updatedAt).not.toBeNull();
     expect(body.data.webhook.open).toBe(false);
+    expect(body.auditRequestId).toBeTruthy();
+
+    const entries = auditLogStore.list({ action: "admin.circuit-breaker.indexer.trip" });
+    expect(entries.length).toBeGreaterThanOrEqual(1);
+    expect(entries[0].metadata?.reason).toBe(VALID_REASON);
   });
 
   it("resets the webhook circuit breaker after tripping it", async () => {
     // First trip it
-    await POST(makeRequest("POST", { target: "webhook", open: true }));
+    await POST(makeRequest("POST", { target: "webhook", open: true, reason: VALID_REASON }));
     // Then reset
-    const response = await POST(makeRequest("POST", { target: "webhook", open: false }));
+    const response = await POST(
+      makeRequest("POST", { target: "webhook", open: false, reason: "Webhook endpoint recovered" }),
+    );
 
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data.webhook.open).toBe(false);
+    expect(body.auditRequestId).toBeTruthy();
   });
 
   it("returns 422 when target is missing", async () => {
-    const response = await POST(makeRequest("POST", { open: true }));
+    const response = await POST(makeRequest("POST", { open: true, reason: VALID_REASON }));
     expect(response.status).toBe(422);
     const body = await response.json();
     expect(body.error.code).toBe("VALIDATION_ERROR");
   });
 
   it("returns 422 when target is invalid", async () => {
-    const response = await POST(makeRequest("POST", { target: "unknown-system", open: true }));
+    const response = await POST(
+      makeRequest("POST", { target: "unknown-system", open: true, reason: VALID_REASON }),
+    );
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns 422 when reason is missing", async () => {
+    const response = await POST(makeRequest("POST", { target: "indexer", open: true }));
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns 422 when reason is too short", async () => {
+    const response = await POST(
+      makeRequest("POST", { target: "indexer", open: true, reason: "too short" }),
+    );
     expect(response.status).toBe(422);
     const body = await response.json();
     expect(body.error.code).toBe("VALIDATION_ERROR");

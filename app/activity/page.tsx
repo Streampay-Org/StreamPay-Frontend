@@ -1,84 +1,219 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { EmptyState } from "../components/EmptyState";
-import { PageError } from "../components/PageError";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { StateTriad } from "../components/StateTriad";
 import {
   ActivityTimeline,
   ActivityTimelineSkeleton,
+  type ActivityEvent,
   type ActivityGroup,
 } from "../components/ActivityTimeline";
+import type { StateTriadState } from "../components/StateTriad";
+import { LiveRegion } from "../components/LiveRegion";
+import { DateRangePicker } from "../components/DateRangePicker";
+import {
+  DEFAULT_TIME_ZONE,
+  getDisplayTimeZone,
+  subscribeToDisplayTimeZone,
+} from "../lib/timezone";
 
 type ActivityPageState = "loading" | "populated" | "empty" | "error";
 
-const MOCK_ACTIVITY: ActivityGroup[] = [
-  {
-    date: "Today",
-    events: [
-      {
-        id: "1",
-        type: "stream_created",
-        title: "New stream created for Project Alpha",
-        timestamp: "2026-06-27T10:00:00.000Z",
-        link: "/streams/alpha",
-        status: "accent",
-      },
-      {
-        id: "2",
-        type: "wallet_connected",
-        title: "Wallet connected (G...7X9)",
-        timestamp: "2026-06-27T07:00:00.000Z",
-        status: "success",
-      },
-    ],
-  },
-  {
-    date: "Yesterday",
-    events: [
-      {
-        id: "3",
-        type: "stream_settled",
-        title: "Design Retainer stream settled",
-        timestamp: "2026-06-26T16:00:00.000Z",
-        link: "/receipt/settle-123",
-        status: "info",
-      },
-      {
-        id: "4",
-        type: "funds_withdrawn",
-        title: "1,200.50 XLM withdrawn to wallet",
-        timestamp: "2026-06-26T12:00:00.000Z",
-        link: "/receipt/withdraw-456",
-        status: "warning",
-      },
-    ],
-  },
-];
+interface DateRange {
+  startDate: string;
+  endDate: string;
+}
+
+type RawActivityEvent = {
+  id: string;
+  type: string;
+  description?: string;
+  timestamp: string;
+  streamId?: string;
+  isDeleted?: boolean;
+};
+
+const STATUS_BY_TYPE: Record<string, ActivityEvent["status"]> = {
+  stream_created: "accent",
+  wallet_connected: "success",
+  funds_withdrawn: "warning",
+  stream_settled: "info",
+};
+
+function dayKey(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone,
+  }).format(date);
+}
+
+function shiftDayKey(key: string, days: number): string {
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day) + days * 86400000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+function formatDayLabel(date: Date, timeZone: string, now: Date): string {
+  const key = dayKey(date, timeZone);
+  const todayKey = dayKey(now, timeZone);
+
+  if (key === todayKey) return "Today";
+  if (key === shiftDayKey(todayKey, -1)) return "Yesterday";
+
+  return new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone,
+  }).format(date);
+}
+
+function groupActivityEvents(
+  events: RawActivityEvent[],
+  timeZone: string,
+  now: Date
+): ActivityGroup[] {
+  const groups = new Map<string, ActivityEvent[]>();
+
+  for (const event of events) {
+    const date = new Date(event.timestamp);
+    const label = Number.isNaN(date.getTime())
+      ? "Unknown"
+      : formatDayLabel(date, timeZone, now);
+    const type = event.type.replace(".", "_");
+
+    const uiEvent: ActivityEvent = {
+      id: event.id,
+      type: type as ActivityEvent["type"],
+      title: event.description || type,
+      timestamp: event.timestamp,
+      link:
+        event.streamId && !event.isDeleted
+          ? `/streams/${event.streamId}`
+          : undefined,
+      status: STATUS_BY_TYPE[type] ?? "info",
+    };
+
+    const bucket = groups.get(label);
+    if (bucket) {
+      bucket.push(uiEvent);
+    } else {
+      groups.set(label, [uiEvent]);
+    }
+  }
+
+  return Array.from(groups, ([date, groupEvents]) => ({
+    date,
+    events: groupEvents,
+  }));
+}
 
 export default function ActivityPage() {
   const [pageState, setPageState] = useState<ActivityPageState>("loading");
-  const [activities, setActivities] = useState<ActivityGroup[]>([]);
-  // Incrementing this key re-triggers the data-loading effect (retry).
+  const [errorMessage, setErrorMessage] = useState<string>("");
+  const [activityEvents, setActivityEvents] = useState<RawActivityEvent[]>([]);
+  const [timeZone, setTimeZone] = useState<string>(DEFAULT_TIME_ZONE);
   const [loadKey, setLoadKey] = useState(0);
+  const [dateRange, setDateRange] = useState<DateRange>({
+    startDate: "",
+    endDate: "",
+  });
+
+  useEffect(() => {
+    setTimeZone(getDisplayTimeZone());
+    return subscribeToDisplayTimeZone(setTimeZone);
+  }, []);
+
+  const activities = useMemo(
+    () => groupActivityEvents(activityEvents, timeZone, new Date()),
+    [activityEvents, timeZone]
+  );
 
   const handleRetry = useCallback(() => {
     setLoadKey((k) => k + 1);
   }, []);
 
+  const handleDateRangeChange = useCallback((range: DateRange) => {
+    setDateRange(range);
+  }, []);
+
   useEffect(() => {
+    let mounted = true;
     setPageState("loading");
 
-    // In production replace with a real API call; reject to exercise error path.
-    const timer = setTimeout(() => {
-      setActivities(MOCK_ACTIVITY);
-      setPageState(MOCK_ACTIVITY.length > 0 ? "populated" : "empty");
-    }, 1500);
+    async function fetchActivity() {
+      try {
+        const params = new URLSearchParams({ limit: "50" });
+        if (dateRange.startDate) params.set("from", dateRange.startDate);
+        if (dateRange.endDate) params.set("to", dateRange.endDate);
 
-    return () => clearTimeout(timer);
-  }, [loadKey]);
+        const res = await fetch(`/api/activity?${params.toString()}`, {
+          headers: {
+            "x-tenant-id": "default-tenant", // Assuming a tenant or passing whatever is available
+          }
+        });
+        if (!res.ok) throw new Error("Failed to fetch");
+        const body = await res.json();
+        
+        if (!mounted) return;
+
+        const events: RawActivityEvent[] = Array.isArray(body.data) ? body.data : [];
+
+        setActivityEvents(events);
+        setPageState(events.length > 0 ? "populated" : "empty");
+      } catch (err: unknown) {
+        if (mounted) {
+          setPageState("error");
+          setErrorMessage(err instanceof Error && err.message ? err.message : "Couldn't load your activity");
+        }
+      }
+    }
+    
+    void fetchActivity();
+
+    return () => { mounted = false; };
+  }, [loadKey, dateRange.startDate, dateRange.endDate]);
+
+  const hasDateRange = Boolean(dateRange.startDate || dateRange.endDate);
+
+  // Map to StateTriad state
+  const getTriadState = (): StateTriadState => {
+    if (pageState === "loading") return "loading";
+    if (pageState === "error") return "error";
+    if (pageState === "empty" || activities.length === 0) return "empty";
+    return "success";
+  };
+
+  const totalEvents = activities.reduce((sum, g) => sum + g.events.length, 0);
+
+  let announcement = "";
+  let politeness: "polite" | "assertive" = "polite";
+
+  if (pageState === "loading") {
+    announcement = "Loading activity…";
+    politeness = "polite";
+  } else if (pageState === "error") {
+    announcement = errorMessage || "Couldn't load your activity";
+    politeness = "assertive";
+  } else if (pageState === "empty" || totalEvents === 0) {
+    announcement = "No activity to display.";
+    politeness = "polite";
+  } else {
+    announcement = `Loaded ${totalEvents} event${totalEvents === 1 ? "" : "s"}`;
+    politeness = "polite";
+  }
 
   return (
     <main className="page-shell">
+      <LiveRegion
+        message={announcement}
+        politeness={politeness}
+        data-testid="activity-live-region"
+      />
+
       <section className="page-hero">
         <div>
           <p className="page-hero__eyebrow">Activity</p>
@@ -90,20 +225,17 @@ export default function ActivityPage() {
         </div>
       </section>
 
-      {/*
-       * aria-live="polite" lets screen readers announce content changes without
-       * interrupting. aria-busy signals that a fetch is in progress so assistive
-       * technology can defer reading until data arrives.
-       */}
       <section
         aria-busy={pageState === "loading"}
         aria-labelledby="activity-overview-title"
-        aria-live="polite"
         className="stream-layout"
       >
         <div className="section-heading">
           <div>
-            <h2 className="section-heading__title" id="activity-overview-title">
+            <h2
+              className="section-heading__title"
+              id="activity-overview-title"
+            >
               Activity feed
             </h2>
             <p className="section-heading__description">
@@ -113,33 +245,42 @@ export default function ActivityPage() {
           </div>
         </div>
 
-        {/* Screen-reader-only live announcement for state changes */}
-        <span aria-live="polite" className="sr-only" role="status">
-          {pageState === "loading"
-            ? "Loading activity feed…"
-            : pageState === "error"
-              ? "Failed to load activity feed."
-              : ""}
-        </span>
+        <div className="activity-filters flex flex-col gap-2">
+          <DateRangePicker
+            startDate={dateRange.startDate}
+            endDate={dateRange.endDate}
+            onChange={handleDateRangeChange}
+            label="Filter by date"
+          />
+        </div>
 
-        {pageState === "loading" ? (
-          <ActivityTimelineSkeleton />
-        ) : pageState === "error" ? (
-          <PageError
-            heading="Couldn't load your activity"
-            message="There was a problem fetching your activity feed. Check your connection and try again."
-            onRetry={handleRetry}
-          />
-        ) : activities.length > 0 ? (
+        <StateTriad
+          state={getTriadState()}
+          loading={{
+            renderSkeleton: () => <ActivityTimelineSkeleton />,
+          }}
+          empty={{
+            eyebrow: "Activity",
+            title: hasDateRange
+              ? "No activity in this range"
+              : "Activity will appear here",
+            description: hasDateRange
+              ? "No events matched the selected dates. Try widening the range to see more activity."
+              : "Any payment stream updates, payments, or wallet events will show up once activity begins. Stay connected to monitor your flow.",
+            actionLabel: "View Streams",
+            onAction: () => {
+              window.location.href = "/streams";
+            },
+          }}
+          error={{
+            heading: "Couldn't load your activity",
+            message:
+              "There was a problem fetching your activity feed. Check your connection and try again.",
+            onRetry: handleRetry,
+          }}
+        >
           <ActivityTimeline groups={activities} />
-        ) : (
-          <EmptyState
-            actionLabel="View streams"
-            description="Any payment stream updates, payments, or wallet events will show up once activity begins. Stay connected to monitor your flow."
-            eyebrow="Activity"
-            title="Activity will appear here"
-          />
-        )}
+        </StateTriad>
       </section>
     </main>
   );

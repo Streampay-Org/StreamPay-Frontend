@@ -2,17 +2,20 @@
 
 import jwt from "jsonwebtoken";
 import { GET } from "./route";
-import { JWT_SECRET } from "@/app/lib/auth";
+import { getJwtSecret } from "@/app/lib/auth";
 import { auditLogStore, resetAuditLogStore } from "@/app/lib/audit-log";
+import { getRateLimitStore, InMemoryRateLimitStore, resetRateLimitStore } from "@/app/lib/rate-limit-store";
+import { AuditResponseSchema } from "@/app/lib/dtos/audit.dto";
 
 function signAccessToken(role: string, actorId: string) {
-  return jwt.sign({ sub: `${actorId}-wallet`, role, actorId, iss: "streampay", aud: "streampay-api" }, JWT_SECRET, {
+  return jwt.sign({ sub: `${actorId}-wallet`, role, actorId, iss: "streampay", aud: "streampay-api" }, getJwtSecret(), {
     expiresIn: "15m",
   });
 }
 
 describe("GET /api/audit", () => {
   beforeEach(() => {
+    resetRateLimitStore();
     resetAuditLogStore();
     auditLogStore.append({
       action: "stream.settle",
@@ -23,6 +26,12 @@ describe("GET /api/audit", () => {
       target: { account: "acct_demo_admin", id: "stream-ada", type: "stream" },
       timestamp: "2026-04-28T12:00:00.000Z",
     });
+  });
+
+  afterEach(() => {
+    const store = getRateLimitStore();
+    if (store instanceof InMemoryRateLimitStore) store.destroy();
+    resetRateLimitStore();
   });
 
   it("rejects standard users from reading audit logs", async () => {
@@ -50,6 +59,8 @@ describe("GET /api/audit", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
+    const parsed = AuditResponseSchema.safeParse(body);
+    expect(parsed.success).toBe(true);
     expect(body.meta.chainIntact).toBe(true);
     expect(body.data).toHaveLength(1);
     expect(body.data[0].action).toBe("stream.settle");
@@ -71,5 +82,50 @@ describe("GET /api/audit", () => {
     expect(response.headers.get("content-type")).toContain("application/x-ndjson");
     expect(row.redactedTargetAccount).toBe("acct***dmin");
     expect(row.requestId).toBe("req-audit-json");
+  });
+
+  it("filters entries by startDate and endDate", async () => {
+    auditLogStore.append({
+      action: "stream.create",
+      actor: { id: "ops-admin-42", role: "admin" },
+      requestId: "req-audit-early",
+      target: { id: "stream-early", type: "stream" },
+      timestamp: "2026-04-20T08:00:00.000Z",
+    });
+
+    const request = new Request(
+      "http://localhost/api/audit?startDate=2026-04-25T00:00:00.000Z&endDate=2026-04-30T23:59:59.999Z",
+      {
+        headers: {
+          authorization: `Bearer ${signAccessToken("compliance", "comp-1")}`,
+        },
+      },
+    );
+
+    const response = await GET(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].requestId).toBe("req-audit-json");
+  });
+
+  it("rate limits audit exports in the export bucket", async () => {
+    const request = new Request("http://localhost/api/audit?export=ndjson", {
+      headers: {
+        authorization: `Bearer ${signAccessToken("admin", "ops-export-42")}`,
+      },
+    });
+
+    for (let index = 0; index < 5; index += 1) {
+      expect((await GET(request)).status).toBe(200);
+    }
+
+    const limited = await GET(request);
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("Retry-After")).toBeTruthy();
+    expect(await limited.json()).toMatchObject({
+      error: { code: "rate_limit_exceeded", request_id: expect.any(String) },
+    });
   });
 });

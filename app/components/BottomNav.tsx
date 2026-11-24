@@ -8,6 +8,8 @@ export type BottomNavItem = {
   href: string;
   /** Visible, human-readable label. */
   label: string;
+  /** Optional icon rendered above the label. */
+  icon?: React.ReactNode;
   /** Count of pending actions; renders a badge when greater than zero. */
   badgeCount?: number;
 };
@@ -51,6 +53,11 @@ export function BottomNav({ items, maxBadgeCount = 9 }: BottomNavProps) {
                 className={`bottom-nav__link${active ? " bottom-nav__link--active" : ""}`}
                 aria-current={active ? "page" : undefined}
               >
+                {item.icon && (
+                  <span className="bottom-nav__icon" aria-hidden="true">
+                    {item.icon}
+                  </span>
+                )}
                 <span className="bottom-nav__label">{item.label}</span>
 
                 {hasBadge && (

@@ -1,9 +1,11 @@
 /** @jest-environment node */
+import { NextRequest } from "next/server";
 import { POST } from "./route";
-import { resetDb } from "@/app/lib/db";
+import { getStore, resetDb } from "@/app/lib/db";
 import { _resetAllowlistForTesting, addAllowedToken } from "@/app/lib/token-allowlist";
 import { _resetOrgDbForTesting } from "@/app/lib/org-db";
 import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
+import { _resetQuotasForTesting, upsertQuota } from "@/app/lib/quotas";
 
 const VALID_RECIPIENT = "GDSBCG3OKHCMMWS5EBH2X7XOYTJRWXN2YYQPCNS5OFBU4IDO4X7OFSQA";
 
@@ -19,14 +21,14 @@ const anotherValidStream = {
   schedule: "week",
 };
 
-function makeRequest(body: unknown, auth = true): Request {
+function makeRequest(body: unknown, auth = true): NextRequest {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   if (auth) {
     headers["authorization"] = "Bearer test-token";
   }
-  return new Request("http://localhost/api/streams/batch", {
+  return new NextRequest("http://localhost/api/streams/batch", {
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -39,6 +41,7 @@ describe("POST /api/streams/batch", () => {
     _resetAllowlistForTesting();
     addAllowedToken("XLM");
     _resetOrgDbForTesting();
+    _resetQuotasForTesting();
     resetRateLimitStore();
   });
 
@@ -122,7 +125,7 @@ describe("POST /api/streams/batch", () => {
         "Content-Type": "application/json",
         authorization: "NotBearer token",
       };
-      const req = new Request("http://localhost/api/streams/batch", {
+      const req = new NextRequest("http://localhost/api/streams/batch", {
         method: "POST",
         headers,
         body: JSON.stringify([validStream]),
@@ -142,7 +145,7 @@ describe("POST /api/streams/batch", () => {
     });
 
     it("rejects non-JSON body", async () => {
-      const req = new Request("http://localhost/api/streams/batch", {
+      const req = new NextRequest("http://localhost/api/streams/batch", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -247,13 +250,13 @@ describe("POST /api/streams/batch", () => {
   });
 
   describe("idempotency", () => {
-    function makeIdempotentRequest(body: unknown, key: string): Request {
+    function makeIdempotentRequest(body: unknown, key: string): NextRequest {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         authorization: "Bearer test-token",
         "Idempotency-Key": key,
       };
-      return new Request("http://localhost/api/streams/batch", {
+      return new NextRequest("http://localhost/api/streams/batch", {
         method: "POST",
         headers,
         body: JSON.stringify(body),
@@ -286,5 +289,22 @@ describe("POST /api/streams/batch", () => {
       const body = await res2.json();
       expect(body.error.code).toBe("IDEMPOTENCY_CONFLICT");
     });
+  });
+
+  it("rejects a batch that would exceed an org quota without persisting partial results", async () => {
+    upsertQuota({ scope: "org", subject: "org-batch-quota", maxActiveStreams: 1 });
+    const initialSize = getStore().streamRepository.streams.size;
+    const res = await POST(
+      makeRequest([
+        { ...validStream, orgId: "org-batch-quota" },
+        { ...anotherValidStream, orgId: "org-batch-quota" },
+      ]),
+    );
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({
+      error: { code: "QUOTA_ACTIVE_STREAMS_EXCEEDED" },
+    });
+    expect(getStore().streamRepository.streams.size).toBe(initialSize);
   });
 });

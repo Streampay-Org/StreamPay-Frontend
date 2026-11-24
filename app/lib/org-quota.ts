@@ -15,6 +15,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { getCorrelationContext } from "./logger";
 import { ORG_DAILY_STREAM_QUOTA } from "./rate-limit-config";
 import { getOrgQuotaStore } from "./org-quota-store";
 import { recordOrgQuotaRejection } from "./org-quota-metrics";
@@ -58,6 +59,7 @@ export async function checkOrgDailyQuota(orgId: string): Promise<OrgQuotaResult>
  *   - JSON error body matching the project's error envelope
  */
 export function orgQuotaResponse(retryAfter: number): NextResponse {
+  const requestId = getCorrelationContext()?.request_id ?? `req-${crypto.randomUUID()}`;
   return NextResponse.json(
     {
       error: {
@@ -65,6 +67,7 @@ export function orgQuotaResponse(retryAfter: number): NextResponse {
         message:
           "Your organisation has reached the daily stream creation limit. " +
           "Quota resets at UTC midnight.",
+        request_id: requestId,
       },
     },
     {

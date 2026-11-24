@@ -35,12 +35,17 @@ export interface OrgQuotaStore {
    * remaining until the quota window resets.
    */
   increment(orgId: string): Promise<QuotaIncrementResult>;
-
+ 
   /**
    * Returns the current counter for the org without incrementing it.
    * Useful in tests and health-check endpoints.
    */
   peek(orgId: string): Promise<number>;
+
+  /**
+  * Frees any background resources associated with this store.
+  */
+  destroy?(): void;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -133,5 +138,8 @@ export function setOrgQuotaStore(store: OrgQuotaStore): void {
 }
 
 export function resetOrgQuotaStore(): void {
+  if (globalQuotaStore && typeof (globalQuotaStore as any).destroy === "function") {
+    (globalQuotaStore as any).destroy();
+  }
   globalQuotaStore = null;
 }

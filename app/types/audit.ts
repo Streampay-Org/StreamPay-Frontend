@@ -35,6 +35,11 @@ export interface AuditListFilters {
   requestId?: string | null;
   q?: string | null;
   limit?: number;
+  orgId?: string | null;
+  cursor?: string | null;
+  format?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
 }
 
 export interface AuditExportRow {
@@ -57,6 +62,16 @@ export interface AuditExportRow {
   redactionPolicy: "mask-target-account";
 }
 
+export interface AuditCheckpoint {
+  checkpointId: string;
+  purgedCount: number;
+  firstPurgedId: string;
+  lastPurgedId: string;
+  lastPurgedHash: string;
+  cutoff: string;
+  createdAt: string;
+}
+
 export interface AuditPurgeResult {
   chainIntactAfter: boolean;
   chainIntactBefore: boolean;
@@ -65,4 +80,20 @@ export interface AuditPurgeResult {
   purgedEntries: number;
   purgedIds: string[];
   retainedEntries: number;
+  checkpointId: string | null;
+}
+
+export interface DeepArchiveEntry {
+  entry: AuditEntry;
+  archivedAt: string;
+}
+
+export interface DeepArchiveResult {
+  archivedCount: number;
+  archivedEntryIds: string[];
+  chainIntactBefore: boolean;
+  chainIntactAfter: boolean;
+  cutoffTimestamp: string;
+  archivedAt: string;
+  checkpointId: string | null;
 }

@@ -30,10 +30,16 @@ function resolveBin(packageName) {
   return path.join(path.dirname(packageJsonPath), binPath);
 }
 
-const localBins = { eslint: resolveBin('eslint'), jest: resolveBin('jest'), next: resolveBin('next') };
+const localBinPackageMap = { eslint: 'eslint', jest: 'jest', next: 'next' };
 
-const result = localBins[command]
-  ? spawnSync(process.execPath, [localBins[command], ...args], {
+function getLocalBin(commandName) {
+  const packageName = localBinPackageMap[commandName];
+  return packageName ? resolveBin(packageName) : undefined;
+}
+
+const localBin = getLocalBin(command);
+const result = localBin
+  ? spawnSync(process.execPath, [localBin, ...args], {
     cwd: canonicalCwd,
     stdio: "inherit",
   })

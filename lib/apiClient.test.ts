@@ -14,13 +14,18 @@ import { isStreamPayError } from '@/app/lib/errors/mapper';
 
 // Mock global fetch
 const mockFetch = jest.fn();
-global.fetch = mockFetch as unknown as typeof fetch;
+global.fetch = mockFetch;
+
+beforeEach(() => {
+  mockFetch.mockClear();
+  document.cookie = 'csrf-token=csrf-test-token; Path=/';
+});
+
+afterEach(() => {
+  document.cookie = 'csrf-token=; Max-Age=0; Path=/';
+});
 
 describe('fetchWithIdempotency', () => {
-  beforeEach(() => {
-    mockFetch.mockClear();
-  });
-
   it('makes successful GET request', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -64,6 +69,43 @@ describe('fetchWithIdempotency', () => {
     const callArgs = mockFetch.mock.calls[0];
     const headers = callArgs[1].headers as Headers;
     expect(headers.get('Idempotency-Key')).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('echoes the CSRF cookie on mutating requests', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ success: true }),
+    });
+
+    await fetchWithIdempotency('/api/test', { method: 'POST' });
+
+    const headers = mockFetch.mock.calls[0][1].headers as Headers;
+    expect(headers.get('x-csrf-token')).toBe('csrf-test-token');
+  });
+
+  it('initializes the CSRF cookie before its first mutating request', async () => {
+    document.cookie = 'csrf-token=; Max-Age=0; Path=/';
+    mockFetch.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/csrf') {
+        expect(options?.method).toBe('GET');
+        document.cookie = 'csrf-token=initialized-csrf-token; Path=/';
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ success: true }),
+      };
+    });
+
+    await fetchWithIdempotency('/api/test', { method: 'POST' });
+
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/csrf');
+    expect((mockFetch.mock.calls[1][1].headers as Headers).get('x-csrf-token')).toBe(
+      'initialized-csrf-token',
+    );
   });
 
   it('preserves existing idempotency key', async () => {
@@ -279,3 +321,53 @@ describe('HTTP verb helpers', () => {
     );
   });
 });
+
+describe('fetchForAccount', () => {
+  beforeEach(() => {
+    mockFetch.mockClear();
+  });
+
+  it('fetches successfully for active account', async () => {
+    const { fetchForAccount, defaultAccountFetchCoordinator } = await import('./apiClient');
+    defaultAccountFetchCoordinator.switchAccount('GA_ALICE');
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ streams: ['stream-alice'] }),
+    });
+
+    const result = await fetchForAccount('GA_ALICE', '/api/streams');
+    expect(result).toEqual({ streams: ['stream-alice'] });
+  });
+
+  it('discards response if account switches before resolution', async () => {
+    const { fetchForAccount, defaultAccountFetchCoordinator, AccountSwitchedError } = await import('./apiClient');
+    defaultAccountFetchCoordinator.switchAccount('GA_ALICE');
+
+    mockFetch.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              ok: true,
+              status: 200,
+              headers: new Headers({ 'content-type': 'application/json' }),
+              json: async () => ({ streams: ['stream-alice'] }),
+            });
+          }, 50);
+        })
+    );
+
+    const alicePromise = fetchForAccount('GA_ALICE', '/api/streams');
+    const aliceCatch = alicePromise.catch((err) => err);
+
+    // Switch to Bob while Alice is in-flight
+    defaultAccountFetchCoordinator.switchAccount('GA_BOB');
+
+    const err = await aliceCatch;
+    expect(err).toBeInstanceOf(AccountSwitchedError);
+  });
+});
+

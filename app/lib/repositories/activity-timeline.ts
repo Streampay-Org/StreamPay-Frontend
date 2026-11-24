@@ -19,9 +19,17 @@ function decodeCompositeCursor(cursor: string): { timestamp: string; id: string 
   if (separatorIndex === -1) {
     throw new Error("Invalid cursor: malformed composite key");
   }
+  const timestamp = decoded.slice(0, separatorIndex);
+  const id = decoded.slice(separatorIndex + 1);
+  if (Number.isNaN(Date.parse(timestamp))) {
+    throw new Error("Invalid cursor: timestamp segment is not a valid ISO-8601 string");
+  }
+  if (!/^[A-Za-z0-9._:-]+$/.test(id)) {
+    throw new Error("Invalid cursor: id segment contains disallowed characters");
+  }
   return {
-    timestamp: decoded.slice(0, separatorIndex),
-    id: decoded.slice(separatorIndex + 1),
+    timestamp,
+    id,
   };
 }
 
@@ -29,6 +37,11 @@ export interface ActivityTimelineEntry {
   id: string;
   type: string;
   streamId?: string;
+  /**
+   * Wallet that produced a non-stream event (for example `wallet.connected`).
+   * Stream events derive their owner from the associated stream record.
+   */
+  actorAddress?: string;
   timestamp: string;
   description: string;
   projectedAt: string;
@@ -39,6 +52,12 @@ export interface ActivityTimelineQuery {
   limit: number;
   streamId?: string;
   type?: string;
+  /**
+   * Additional request-scoped filter. Applied before `total`, cursor slicing
+   * and `hasNext` are computed so pagination metadata reflects the visible
+   * (scoped) set only.
+   */
+  predicate?: (entry: ActivityTimelineEntry) => boolean;
 }
 
 export interface ActivityTimelineQueryResult {
@@ -73,7 +92,7 @@ class InMemoryActivityTimelineStore implements ActivityTimelineStore {
   }
 
   query(params: ActivityTimelineQuery): ActivityTimelineQueryResult {
-    const { cursor, limit, streamId, type } = params;
+    const { cursor, limit, streamId, type, predicate } = params;
     let filtered = this.entries;
 
     if (streamId) {
@@ -81,6 +100,9 @@ class InMemoryActivityTimelineStore implements ActivityTimelineStore {
     }
     if (type) {
       filtered = filtered.filter((e) => e.type === type);
+    }
+    if (predicate) {
+      filtered = filtered.filter(predicate);
     }
 
     const totalFiltered = filtered.length;
@@ -158,6 +180,26 @@ export function createActivityTimelineStore(): ActivityTimelineStore {
   return new InMemoryActivityTimelineStore();
 }
 
+export function mergeActivityTimelinePages(
+  pages: ActivityTimelineEntry[][],
+): ActivityTimelineEntry[] {
+  const byId = new Map<string, ActivityTimelineEntry>();
+
+  for (const page of pages) {
+    for (const entry of page) {
+      const existing = byId.get(entry.id);
+      if (!existing || entry.timestamp.localeCompare(existing.timestamp) > 0) {
+        byId.set(entry.id, entry);
+      }
+    }
+  }
+
+  return [...byId.values()].sort((a, b) => {
+    const tsCmp = b.timestamp.localeCompare(a.timestamp);
+    return tsCmp !== 0 ? tsCmp : b.id.localeCompare(a.id);
+  });
+}
+
 export function activityEventToTimelineEntry(
   event: ActivityEvent,
   projectedAt?: string,
@@ -166,6 +208,7 @@ export function activityEventToTimelineEntry(
     id: event.id,
     type: event.type,
     streamId: event.streamId,
+    actorAddress: event.actorAddress,
     timestamp: event.timestamp,
     description: event.description,
     projectedAt: projectedAt ?? new Date().toISOString(),

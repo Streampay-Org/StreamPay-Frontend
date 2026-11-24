@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
+import { getCorrelationContext } from "./logger";
 import { RATE_LIMITS, getLimitForRoute, LimitType } from "./rate-limit-config";
 import { getRateLimitStore } from "./rate-limit-store";
+import { generateRequestId, REQUEST_ID_HEADER } from "@/lib/requestId";
+import { resolveClientIp } from "@/lib/clientIp";
+import { tryAuthenticateRequest } from "./auth";
+import crypto from "crypto";
 
-const JWT_SECRET = process.env.JWT_SECRET || "streampay-dev-secret-do-not-use-in-prod";
+const AUTH_ACTOR_CACHE = Symbol("streampay_auth_actor_cache");
 
 function getHeader(request: Request, name: string): string | null {
   return request.headers?.get?.(name) ?? null;
@@ -14,31 +19,74 @@ export interface ClientIdentity {
   displayValue: string;
 }
 
-function extractApiKey(request: Request): string | null {
-  return getHeader(request, "X-API-Key");
+function hashString(input: string): string {
+  return crypto.createHash("sha256").update(input, "utf8").digest("hex");
 }
 
-function extractWalletFromJwt(request: Request): string | null {
-  const authHeader = getHeader(request, "authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return null;
+function validateApiKey(key: string): { hashPrefix: string } | null {
+  const configuredKeysRaw = process.env.STREAMPAY_API_KEYS;
+  if (!configuredKeysRaw) return null;
+
+  const validHashes = configuredKeysRaw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0);
+
+  if (validHashes.length === 0) return null;
+
+  const keyHash = hashString(key).toLowerCase();
+  const keyHashBuffer = Buffer.from(keyHash, "utf8");
+
+  let matchFound = false;
+  for (const validHash of validHashes) {
+    const validHashBuffer = Buffer.from(validHash, "utf8");
+    if (
+      keyHashBuffer.length === validHashBuffer.length &&
+      crypto.timingSafeEqual(keyHashBuffer, validHashBuffer)
+    ) {
+      matchFound = true;
+    }
   }
 
-  try {
-    const token = authHeader.slice(7);
-    const { sub } = JSON.parse(atob(token.split(".")[1])) as { sub?: string };
-    return sub || null;
-  } catch {
-    return null;
+  if (matchFound) {
+    return { hashPrefix: keyHash.slice(0, 4) };
   }
+
+  return null;
+}
+
+function extractApiKey(request: Request): { value: string; displayValue: string } | null {
+  const rawKey = getHeader(request, "X-API-Key");
+  if (!rawKey) return null;
+
+  const validated = validateApiKey(rawKey);
+  if (!validated) return null;
+
+  return {
+    value: "api_key:" + validated.hashPrefix,
+    displayValue: validated.hashPrefix,
+  };
+}
+
+function extractWalletFromAuth(request: Request): string | null {
+  const cached = (request as unknown as Record<symbol, unknown>)[AUTH_ACTOR_CACHE] as
+    | { walletAddress?: string }
+    | undefined;
+  if (cached?.walletAddress) {
+    return cached.walletAddress;
+  }
+
+  const actor = tryAuthenticateRequest(request);
+  if (actor) {
+    (request as unknown as Record<symbol, unknown>)[AUTH_ACTOR_CACHE] = actor;
+    return actor.walletAddress;
+  }
+
+  return null;
 }
 
 function extractIp(request: Request): string {
-  return (
-    getHeader(request, "x-forwarded-for")?.split(",")[0]?.trim() ||
-    getHeader(request, "x-real-ip") ||
-    "unknown"
-  );
+  return resolveClientIp(request.headers);
 }
 
 export function getClientIdentity(request: Request): ClientIdentity {
@@ -46,12 +94,12 @@ export function getClientIdentity(request: Request): ClientIdentity {
   if (apiKey) {
     return {
       type: "api_key",
-      value: apiKey,
-      displayValue: apiKey.slice(0, 8) + "...",
+      value: apiKey.value,
+      displayValue: apiKey.displayValue,
     };
   }
 
-  const wallet = extractWalletFromJwt(request);
+  const wallet = extractWalletFromAuth(request);
   if (wallet) {
     return {
       type: "wallet",
@@ -68,36 +116,86 @@ export function getClientIdentity(request: Request): ClientIdentity {
   };
 }
 
+export interface RateLimitCheckResult {
+  allowed: boolean;
+  remaining: number;
+  limit: number;
+  resetAt: number;
+  retryAfter?: number;
+  degraded?: boolean;
+}
+
 export async function checkRateLimit(
   identity: ClientIdentity,
   limitType: LimitType
-): Promise<{ allowed: boolean; remaining: number; retryAfter?: number }> {
+): Promise<RateLimitCheckResult> {
   const store = getRateLimitStore();
   const config = RATE_LIMITS[limitType];
 
-  const result = await store.check(identity.value, config.limit, config.windowMs);
+  // Key per limit tier so one endpoint class cannot drain another's bucket.
+  const result = await store.check(
+    `${limitType}:${identity.value}`,
+    config.limit,
+    config.windowMs,
+  );
 
   return {
     allowed: result.allowed,
     remaining: result.allowed ? result.remaining : 0,
+    limit: config.limit,
+    resetAt: result.resetAt,
     retryAfter: result.retryAfter,
+    ...(result.degraded ? { degraded: true } : {}),
   };
 }
 
-export function rateLimitResponse(retryAfter: number) {
+/**
+ * Build standard `X-RateLimit-*` response headers from a rate-limit check result.
+ * Returns an empty object when the store failed open (degraded) or metadata is absent,
+ * so callers omit headers rather than emitting inaccurate values.
+ */
+export function rateLimitHeaders(
+  result: Partial<Pick<RateLimitCheckResult, "allowed" | "remaining" | "limit" | "resetAt" | "degraded">>,
+): Record<string, string> {
+  if (result.degraded || result.limit === undefined || result.resetAt === undefined) {
+    return {};
+  }
+
+  const remaining = result.allowed === false ? 0 : Math.max(0, result.remaining ?? 0);
+  return {
+    "X-RateLimit-Limit": String(result.limit),
+    "X-RateLimit-Remaining": String(remaining),
+    "X-RateLimit-Reset": String(result.resetAt),
+  };
+}
+
+export function rateLimitResponse(
+  retryAfter: number,
+  result?: Partial<Pick<RateLimitCheckResult, "limit" | "resetAt" | "degraded">>,
+) {
+  const requestId =
+    getCorrelationContext()?.request_id ?? generateRequestId();
+
+  const rlHeaders = result
+    ? rateLimitHeaders({ ...result, allowed: false, remaining: 0 })
+    : {};
+
   return NextResponse.json(
     {
       error: {
         code: "rate_limit_exceeded",
         message: "Rate limit exceeded. Please try again later.",
+        request_id: requestId,
       },
     },
     {
       status: 429,
       headers: {
+        ...rlHeaders,
         "Retry-After": String(retryAfter),
+        [REQUEST_ID_HEADER]: requestId,
       },
-    }
+    },
   );
 }
 
@@ -114,8 +212,12 @@ export async function withRateLimit(
   const result = await checkRateLimit(identity, limitType);
 
   if (!result.allowed) {
-    return rateLimitResponse(result.retryAfter!);
+    return rateLimitResponse(result.retryAfter!, result);
   }
 
-  return handler();
+  const response = await handler();
+  for (const [name, value] of Object.entries(rateLimitHeaders(result))) {
+    response.headers.set(name, value);
+  }
+  return response;
 }

@@ -1,11 +1,15 @@
+/** @jest-environment node */
 /**
  * withdraw.feeBump.test.ts
  *
  * Unit tests for the fee-bump logic in `lib/feeBump.ts`.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "@jest/globals";
 import { isFeeRelatedFailure, maybeFeeBump } from "@/lib/feeBump";
+import { FeeBumpTransaction, TransactionBuilder } from "@stellar/stellar-sdk";
+import { makeInnerTransaction } from "@/lib/__fixtures__/feeBump";
+const fixture = makeInnerTransaction();
 import type { Stream } from "@/app/types/openapi";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -13,16 +17,14 @@ import type { Stream } from "@/app/types/openapi";
 function makeStream(overrides: Partial<Stream> = {}): Stream {
   return {
     id: "stream-1",
-    sender: "GSENDER",
-    recipient: "GRECIPIENT",
-    tokenAddress: "CTOKEN",
-    amount: "1000",
-    startTime: new Date().toISOString(),
-    endTime: new Date(Date.now() + 60_000).toISOString(),
+    recipient: "GRECIPIENT000000000000000000000000000000000000000000000",
+    rate: "100",
+    schedule: "linear",
     status: "ended",
+    token: "XLM",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    settlementTxHash: "abc123",
+    settlementTxHash: fixture.hash,
     ...overrides,
   } as Stream;
 }
@@ -35,7 +37,7 @@ function makeFeeFailedStream(): Stream {
       requestedAt: new Date().toISOString(),
       lastCheckedAt: new Date().toISOString(),
       attempts: 1,
-      settlementTxHash: "abc123",
+      settlementTxHash: fixture.hash,
     },
   });
 }
@@ -56,7 +58,7 @@ describe("isFeeRelatedFailure", () => {
         requestedAt: new Date().toISOString(),
         lastCheckedAt: new Date().toISOString(),
         attempts: 1,
-        settlementTxHash: "abc123",
+        settlementTxHash: fixture.hash,
       },
     });
     expect(isFeeRelatedFailure({ stream, alert: false })).toBe(true);
@@ -70,7 +72,7 @@ describe("isFeeRelatedFailure", () => {
         requestedAt: new Date().toISOString(),
         lastCheckedAt: new Date().toISOString(),
         attempts: 1,
-        settlementTxHash: "abc123",
+        settlementTxHash: fixture.hash,
       },
     });
     expect(isFeeRelatedFailure({ stream, alert: false })).toBe(true);
@@ -84,7 +86,7 @@ describe("isFeeRelatedFailure", () => {
         requestedAt: new Date().toISOString(),
         lastCheckedAt: new Date().toISOString(),
         attempts: 1,
-        settlementTxHash: "abc123",
+        settlementTxHash: fixture.hash,
       },
     });
     expect(isFeeRelatedFailure({ stream, alert: false })).toBe(false);
@@ -97,7 +99,7 @@ describe("isFeeRelatedFailure", () => {
         requestedAt: new Date().toISOString(),
         lastCheckedAt: new Date().toISOString(),
         attempts: 1,
-        settlementTxHash: "abc123",
+        settlementTxHash: fixture.hash,
       },
     });
     expect(isFeeRelatedFailure({ stream, alert: false })).toBe(false);
@@ -126,7 +128,7 @@ describe("maybeFeeBump", () => {
         requestedAt: new Date().toISOString(),
         lastCheckedAt: new Date().toISOString(),
         attempts: 1,
-        settlementTxHash: "abc123",
+        settlementTxHash: fixture.hash,
       },
     });
     const { feeBump } = await maybeFeeBump({ stream, alert: true });
@@ -143,7 +145,7 @@ describe("maybeFeeBump", () => {
   });
 
   it("returns error when no settlement tx hash is available", async () => {
-    process.env.FEE_BUMP_SECRET_KEY = "STEST_SECRET_KEY";
+    process.env.FEE_BUMP_SECRET_KEY = fixture.payer.secret();
     const stream = makeFeeFailedStream();
     stream.settlementTxHash = undefined as unknown as string;
     if (stream.withdrawal) {
@@ -155,7 +157,7 @@ describe("maybeFeeBump", () => {
   });
 
   it("handles Horizon fetch failure gracefully", async () => {
-    process.env.FEE_BUMP_SECRET_KEY = "STEST_SECRET_KEY";
+    process.env.FEE_BUMP_SECRET_KEY = fixture.payer.secret();
     const stream = makeFeeFailedStream();
 
     const mockFetch = async () => {
@@ -171,20 +173,26 @@ describe("maybeFeeBump", () => {
   });
 
   it("handles successful fee-bump submission", async () => {
-    process.env.FEE_BUMP_SECRET_KEY = "STEST_SECRET_KEY";
+    process.env.FEE_BUMP_SECRET_KEY = fixture.payer.secret();
     const stream = makeFeeFailedStream();
 
     let callCount = 0;
-    const mockFetch = async (url: string) => {
+    const mockFetch = async (_url: string, init?: RequestInit) => {
       callCount++;
       if (callCount === 1) {
         // First call: fetch original tx envelope
         return new Response(
-          JSON.stringify({ envelope_xdr: "original_envelope_xdr" }),
+          JSON.stringify({ envelope_xdr: fixture.xdr }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
-      // Second call: submit fee-bump tx
+      // Second call carries a real envelope preserving the signed inner tx.
+      const xdr = new URLSearchParams(String(init?.body)).get("tx");
+      expect(xdr).not.toBeNull();
+      const outer = TransactionBuilder.fromXDR(xdr!, fixture.passphrase) as FeeBumpTransaction;
+      expect(outer).toBeInstanceOf(FeeBumpTransaction);
+      expect(outer.innerTransaction.toXDR()).toBe(fixture.xdr);
+      expect(fixture.payer.verify(outer.hash(), outer.signatures[0].signature())).toBe(true);
       return new Response(
         JSON.stringify({ hash: "new_fee_bumped_hash" }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -204,7 +212,7 @@ describe("maybeFeeBump", () => {
   });
 
   it("handles fee-bump submission failure", async () => {
-    process.env.FEE_BUMP_SECRET_KEY = "STEST_SECRET_KEY";
+    process.env.FEE_BUMP_SECRET_KEY = fixture.payer.secret();
     const stream = makeFeeFailedStream();
 
     let callCount = 0;
@@ -212,7 +220,7 @@ describe("maybeFeeBump", () => {
       callCount++;
       if (callCount === 1) {
         return new Response(
-          JSON.stringify({ envelope_xdr: "original_envelope_xdr" }),
+          JSON.stringify({ envelope_xdr: fixture.xdr }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
@@ -229,7 +237,7 @@ describe("maybeFeeBump", () => {
   });
 
   it("handles network error during submission", async () => {
-    process.env.FEE_BUMP_SECRET_KEY = "STEST_SECRET_KEY";
+    process.env.FEE_BUMP_SECRET_KEY = fixture.payer.secret();
     const stream = makeFeeFailedStream();
 
     let callCount = 0;
@@ -237,7 +245,7 @@ describe("maybeFeeBump", () => {
       callCount++;
       if (callCount === 1) {
         return new Response(
-          JSON.stringify({ envelope_xdr: "original_envelope_xdr" }),
+          JSON.stringify({ envelope_xdr: fixture.xdr }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }

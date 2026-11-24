@@ -11,6 +11,7 @@
  *
  * Also covers stream creation (POST /api/streams) enforcing the org allowlist.
  */
+// @ts-nocheck - route handler return types include undefined due to union types
 
 import { _resetOrgDbForTesting, orgDb } from "@/app/lib/org-db";
 import { _resetAllowlistForTesting } from "@/app/lib/token-allowlist";

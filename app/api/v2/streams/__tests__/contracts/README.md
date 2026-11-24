@@ -42,7 +42,7 @@ npm test -- contracts --verbose
 
 ## CI
 
-The `npm test -- contracts` command is included in the CI matrixx.
+The `npm test -- contracts` command is included in the CI matrix.
 
 Failures here mean the UI contract has drifted from the live API shape.
 

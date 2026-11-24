@@ -65,10 +65,10 @@ describe("PushOptIn", () => {
 
   it("enables email fallback when the browser denies push permission", async () => {
     const requestPermission = jest.fn().mockResolvedValue("denied");
-    global.Notification = {
+    (global as any).Notification = {
       permission: "default",
       requestPermission,
-    } as Notification;
+    };
 
     const onEmailFallbackChange = jest.fn();
     render(

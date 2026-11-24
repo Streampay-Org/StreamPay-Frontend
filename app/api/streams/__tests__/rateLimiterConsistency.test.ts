@@ -12,6 +12,7 @@ function createReq(url: string, method: string = "POST"): any {
     headers: {
       "Content-Type": "application/json",
       "X-Real-IP": "127.0.0.1",
+      "Idempotency-Key": `idempotency-${Math.random().toString(36).slice(2)}`,
     },
   });
 }
@@ -46,14 +47,14 @@ describe("Rate Limiting Consistency - Settle and Pause", () => {
 
   describe("Settle Endpoint Rate Limiting", () => {
     it("should return 429 when rate limit is exceeded for settle", async () => {
-      const req = createReq(`http://localhost/api/streams/${STREAM_ID}/settle`);
-      
       // Exhaust the limit (10 for 'write' tier)
       for (let i = 0; i < 10; i++) {
-        await settlePOST(req, ctx(STREAM_ID));
+        db.streams.set(STREAM_ID, { id: STREAM_ID, status: "active", recipient: "Ada", updatedAt: new Date().toISOString() } as any);
+        await settlePOST(createReq(`http://localhost/api/streams/${STREAM_ID}/settle`), ctx(STREAM_ID));
       }
 
       // The 11th request should be rate limited
+      const req = createReq(`http://localhost/api/streams/${STREAM_ID}/settle`);
       const res = await settlePOST(req, ctx(STREAM_ID));
       
       expect(res.status).toBe(429);
@@ -75,14 +76,14 @@ describe("Rate Limiting Consistency - Settle and Pause", () => {
 
   describe("Pause Endpoint Rate Limiting", () => {
     it("should return 429 when rate limit is exceeded for pause", async () => {
-      const req = createReq(`http://localhost/api/streams/${STREAM_ID}/pause`);
-      
       // Exhaust the limit (10 for 'write' tier)
       for (let i = 0; i < 10; i++) {
-        await pausePOST(req, ctx(STREAM_ID));
+        db.streams.set(STREAM_ID, { id: STREAM_ID, status: "active", recipient: "Ada", updatedAt: new Date().toISOString() } as any);
+        await pausePOST(createReq(`http://localhost/api/streams/${STREAM_ID}/pause`), ctx(STREAM_ID));
       }
 
       // The 11th request should be rate limited
+      const req = createReq(`http://localhost/api/streams/${STREAM_ID}/pause`);
       const res = await pausePOST(req, ctx(STREAM_ID));
       
       expect(res.status).toBe(429);

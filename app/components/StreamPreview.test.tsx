@@ -40,7 +40,7 @@ describe("StreamPreview", () => {
 
   it("shortens the recipient address but keeps the full value in the title", () => {
     render(<StreamPreview data={BASE} />);
-    const dd = screen.getByText(/GABCDE…UVW/);
+    const dd = screen.getByText(/GABCDE…TUVW/);
     expect(dd).toHaveAttribute("title", BASE.recipient);
   });
 
@@ -54,7 +54,7 @@ describe("StreamPreview", () => {
 
   it("shows who pays gas", () => {
     const { rerender } = render(<StreamPreview data={{ ...BASE, gasOnRecipient: true }} />);
-    expect(screen.getByText(/recipient/i)).toBeInTheDocument();
+    expect(screen.getByText("Recipient", { selector: "dd" })).toBeInTheDocument();
 
     rerender(<StreamPreview data={{ ...BASE, gasOnRecipient: false }} />);
     expect(screen.getByText(/you \(sender\)/i)).toBeInTheDocument();

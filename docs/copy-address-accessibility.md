@@ -11,8 +11,9 @@ The `CopyAddress` component provides inline copy-to-clipboard functionality for 
 - **Distinguishable**: The copy button has clear visual states (default, hover, copied) with sufficient color contrast
 
 ### 2. Operable
-- **Keyboard Accessible**: The copy button is a native `<button>` element, fully keyboard accessible
-- **Focus Indicators**: Inherits focus styles from `app/styles/focus.css` (2px solid accent color with offset)
+- **Keyboard Accessible**: The copy button is a native `<button>` element, and the optional explorer link is a native `<a>` element. Both are fully keyboard accessible
+- **Focus Indicators**: Both interactive elements inherit the shared keyboard focus ring from `app/styles/focus.css` (2px solid accent color with a background-safe offset and no visible ring for mouse-only focus)
+- **Tab Order**: When the explorer link is enabled, it appears after the copy button in the natural keyboard navigation order
 - **Timing**: The "Copied" success state automatically resets after 2 seconds, but doesn't interfere with user control
 - **No Seizure Risk**: No flashing or strobing content
 
@@ -40,9 +41,11 @@ The component inherits responsive behavior from parent containers and the existi
 - Sufficient spacing between interactive elements
 
 ### Print Support
-- Truncated addresses are hidden in print mode (`.no-print` class)
-- Full addresses are shown in print mode (`.print-only` class)
+- Truncated addresses are hidden in print mode (`.no-print`)
+- Full addresses are shown in print mode (`.print-only`)
 - Copy button is hidden in print mode
+- Explorer links are hidden in print mode through the `.no-print` class
+- When `printOnly` is enabled, neither the copy button nor the explorer link is rendered
 
 ## Color Contrast
 
@@ -58,13 +61,15 @@ The component inherits responsive behavior from parent containers and the existi
 ## Keyboard Navigation
 
 ### Tab Order
-- Copy button is included in natural tab order
-- Focus indicator: 2px solid accent color with 2px offset
+- Copy button is included in the natural tab order
+- When enabled, the explorer link follows the copy button in the natural tab order
+- Both elements inherit the shared focus indicator from `app/styles/focus.css`
 
 ### Keyboard Shortcuts
-- `Tab`: Navigate to copy button
-- `Enter`/`Space`: Activate copy button
-- `Esc`: No specific action (button focus can be moved away)
+- `Tab`: Navigate to the copy button and, when available, the explorer link
+- `Enter`/`Space`: Activate the copy button
+- `Enter`: Follow the explorer link
+- `Esc`: No specific action (focus can be moved away)
 
 ## Screen Reader Support
 
@@ -72,6 +77,7 @@ The component inherits responsive behavior from parent containers and the existi
 - Button: "Copy to clipboard" (aria-label)
 - Success state: Button text changes to "Copied" (announced by screen readers)
 - Address display: Truncated version has `aria-hidden="true"` to avoid redundancy
+- Explorer link: "View on explorer" (aria-label)
 
 ### NVDA/JAWS
 - Properly announces button purpose and state changes
@@ -116,6 +122,9 @@ The component inherits responsive behavior from parent containers and the existi
 - `className`: Optional custom class for wrapper
 - `showCopyButton`: Whether to show copy button (default: true)
 - `printOnly`: Show only full address, no truncation or button (default: false)
+- `explorer`: Optional configuration for the external Stellar explorer link:
+  - `kind`: `"account"` for Stellar account addresses or `"tx"` for transaction hashes
+  - `network`: Stellar network (`"mainnet"` or `"testnet"`)
 
 ## Future Enhancements
 

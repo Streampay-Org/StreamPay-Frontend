@@ -46,9 +46,9 @@ function createErrorResponse(code: string, message: string, status: number) {
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const streamId = params.id;
+  const { id: streamId } = await params;
 
   // Validate streamId is a non-empty string
   if (!streamId || typeof streamId !== "string" || streamId.trim() === "") {
@@ -110,7 +110,7 @@ export async function GET(
   // the stream is absent on-chain, so we treat that as null (not found).
   let onChainFallback: OnChainStream | null = null;
   try {
-    onChainFallback = await onChainClient.fetchStream(streamId);
+    onChainFallback = await onChainClient.fetchStream('testnet', streamId);
   } catch {
     // Stream not found on-chain — reconciliation will surface a presence diff
   }
@@ -199,6 +199,8 @@ export async function GET(
       data: {
         streamId,
         checkedAt: new Date().toISOString(),
+        dryRun: true,
+        mode: "DRY_RUN",
         inSync: diffs.length === 0,
         diffs,
         db: dbSnapshot,

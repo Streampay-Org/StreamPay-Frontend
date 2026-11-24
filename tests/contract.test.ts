@@ -8,6 +8,11 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { GET as getV2Streams, POST as createV2Stream } from "@/app/api/v2/streams/route";
+import { GET as getV2StreamById } from "@/app/api/v2/streams/[id]/route";
+import { createDefaultStore, setStore, db } from "@/app/lib/db";
+import { resetOrgQuotaStore } from "@/app/lib/org-quota-store";
+import type { Stream } from "@/app/types/openapi";
 
 // ---------------------------------------------------------------------------
 // Load spec once
@@ -60,6 +65,34 @@ function assertWalletToken(obj: unknown): void {
   expect(new Date(o.expires_at as string).getTime()).not.toBeNaN();
 }
 
+function makeApiRequest(method: string, pathSuffix: string, body?: unknown): Request {
+  const url = `http://localhost${pathSuffix}`;
+  const headers = new Headers({ Authorization: "Bearer test-token" });
+  if (body !== undefined) {
+    headers.set("Content-Type", "application/json");
+  }
+  const init: RequestInit = { method, headers };
+  if (body !== undefined) {
+    init.body = JSON.stringify(body);
+  }
+  return new Request(url, init);
+}
+
+function createTestStream(id: string): Stream {
+  const now = new Date().toISOString();
+  return {
+    id,
+    recipient: "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+    rate: "120",
+    schedule: "month",
+    status: "draft",
+    nextAction: "start",
+    createdAt: now,
+    updatedAt: now,
+    token: "XLM",
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Spec sanity — confirm we're reading the right document
 // ---------------------------------------------------------------------------
@@ -73,6 +106,18 @@ describe("openapi.json meta", () => {
     const paths = Object.keys(spec.paths);
     expect(paths).toContain("/api/auth/wallet");
     expect(paths).toContain("/api/v2/streams");
+    expect(paths).toContain("/api/v2/streams/{id}");
+    expect(paths).toContain("/api/v2/streams/{id}/start");
+    expect(paths).toContain("/api/v2/streams/{id}/stop");
+    expect(paths).toContain("/api/v2/streams/{id}/pause");
+    expect(paths).toContain("/api/v2/streams/{id}/settle");
+    expect(paths).toContain("/api/streams");
+    expect(paths).toContain("/api/streams/search");
+    expect(paths).toContain("/api/streams/{id}");
+    expect(paths).toContain("/api/streams/{id}/start");
+    expect(paths).toContain("/api/streams/{id}/stop");
+    expect(paths).toContain("/api/streams/{id}/pause");
+    expect(paths).toContain("/api/streams/{id}/settle");
     expect(paths).toContain("/api/webhooks/dlq");
     expect(paths).toContain("/api/webhooks/deliveries");
     expect(paths).toContain("/api/debug/kms-sign");
@@ -84,6 +129,32 @@ describe("openapi.json meta", () => {
     expect(schemas).toContain("StreamV2");
     expect(schemas).toContain("WalletChallenge");
     expect(schemas).toContain("WalletToken");
+  });
+
+  describe("streams CRUD examples coverage", () => {
+    const streamsPaths = Object.entries(spec.paths).filter(
+      ([p]) => p.includes("/stream"),
+    );
+
+    for (const [path, pathItem] of streamsPaths) {
+      for (const method of ["get", "post", "put", "delete", "patch"] as const) {
+        const op = pathItem[method];
+        if (!op) continue;
+
+        for (const [status, response] of Object.entries(op.responses ?? {})) {
+          const content = response.content;
+          if (!content) continue;
+
+          for (const [mime, mt] of Object.entries(content)) {
+            if (status.startsWith("2") || status.startsWith("4")) {
+              it(`${method.toUpperCase()} ${path} ${status} has example(s)`, () => {
+                expect(mt.examples ?? mt.example).toBeTruthy();
+              });
+            }
+          }
+        }
+      }
+    }
   });
 });
 
@@ -204,6 +275,120 @@ describe("StreamV2 shape", () => {
     const response = { streams: [activeStream, draftStream] };
     expect(Array.isArray(response.streams)).toBe(true);
     response.streams.forEach((s) => assertStreamV2(s));
+  });
+
+  it("GET /api/v2/streams openapi examples conform to schema", () => {
+    const examples = spec.paths["/api/v2/streams"].get.responses["200"].content["application/json"].examples;
+    for (const [name, ex] of Object.entries<Record<string, unknown>>(examples)) {
+      const val = ex.value as Record<string, unknown>;
+      expect(Array.isArray(val.streams)).toBe(true);
+      (val.streams as unknown[]).forEach((s) => assertStreamV2(s));
+      expect(val).toHaveProperty("meta");
+      expect(val).toHaveProperty("links");
+    }
+  });
+
+  it("POST /api/v2/streams openapi response examples conform to schema", () => {
+    const examples = spec.paths["/api/v2/streams"].post.responses["201"].content["application/json"].examples;
+    for (const [, ex] of Object.entries<Record<string, unknown>>(examples)) {
+      assertStreamV2(ex.value);
+    }
+  });
+
+  it("GET /api/v2/streams/{id} openapi examples conform to schema", () => {
+    const examples = spec.paths["/api/v2/streams/{id}"].get.responses["200"].content["application/json"].examples;
+    for (const [, ex] of Object.entries<Record<string, unknown>>(examples)) {
+      const val = ex.value as Record<string, unknown>;
+      assertStreamV2((val as { data: unknown }).data);
+    }
+  });
+});
+
+describe("/api/v2/streams runtime contract", () => {
+  beforeEach(() => {
+    setStore(createDefaultStore());
+    resetOrgQuotaStore();
+  });
+
+  afterAll(() => {
+    resetOrgQuotaStore();
+  });
+
+  it("returns a top-level streams array for GET /api/v2/streams", async () => {
+    const stream = createTestStream("stream_test_1");
+    db.streams.set(stream.id, stream);
+
+    const response = await getV2Streams(makeApiRequest("GET", "/api/v2/streams?limit=10"));
+    expect(response.status).toBe(200);
+
+    const body = await response.json();
+    expect(Array.isArray(body.streams)).toBe(true);
+    expect(body.streams.length).toBeGreaterThanOrEqual(1);
+    expect(body.streams.some((item: Record<string, unknown>) => item.id === stream.id)).toBe(true);
+    expect(body.streams.find((item: Record<string, unknown>) => item.id === stream.id)).toMatchObject({
+      id: stream.id,
+      recipient: stream.recipient,
+      status: stream.status,
+      allowed_actions: ["start"],
+      settlement: null,
+    });
+
+    // Verify meta and links fields per openapi.json
+    expect(body).toHaveProperty("meta");
+    expect(body.meta).toHaveProperty("hasNext");
+    expect(body.meta).toHaveProperty("nextCursor");
+    expect(body.meta).toHaveProperty("total");
+    expect(body).toHaveProperty("links");
+    expect(body.links).toHaveProperty("self");
+  });
+
+  it("returns a StreamV2 object for POST /api/v2/streams", async () => {
+    const response = await createV2Stream(
+      makeApiRequest("POST", "/api/v2/streams", {
+        recipient: "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+        rate: "120",
+        schedule: "month",
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.id).toBeTruthy();
+    expect(body.allowed_actions).toEqual(["start"]);
+    expect(body.created_at).toBeTruthy();
+    expect(body.links).toBeUndefined();
+  });
+
+  it("returns an ErrorEnvelope with request_id for invalid POST /api/v2/streams", async () => {
+    const response = await createV2Stream(
+      makeApiRequest("POST", "/api/v2/streams", {
+        recipient: "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+      }),
+    );
+
+    expect(response.status).toBe(422);
+    const body = await response.json();
+
+    expect(body.error).toEqual(expect.objectContaining({
+      code: "VALIDATION_ERROR",
+      message: expect.any(String),
+      request_id: expect.any(String),
+    }));
+    expect(body.error.request_id).toMatch(/^req-/);
+  });
+
+  it("returns a 404 ErrorEnvelope with request_id for GET /api/v2/streams/:id when missing", async () => {
+    const response = await getV2StreamById(
+      makeApiRequest("GET", "/api/v2/streams/nonexistent"),
+      { params: Promise.resolve({ id: "nonexistent" }) },
+    );
+
+    expect(response.status).toBe(404);
+    const body = await response.json();
+    expect(body.error).toEqual(expect.objectContaining({
+      code: "STREAM_NOT_FOUND",
+      request_id: expect.any(String),
+    }));
   });
 });
 

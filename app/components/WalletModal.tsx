@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo } from "react";
+import { createPortal } from "react-dom";
 import { Modal } from "./Modal";
 import { getSortedProviders, setMRUWalletId, type WalletProvider } from "../state/walletPrefs";
 
@@ -68,7 +69,9 @@ export function WalletModal({ isOpen, onClose, onSelect }: WalletModalProps) {
     onClose();
   };
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <Modal isOpen={isOpen} onClose={onClose} title="Connect Wallet">
       <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "1rem" }}>
         {providers.map((provider) => {
@@ -99,6 +102,8 @@ export function WalletModal({ isOpen, onClose, onSelect }: WalletModalProps) {
               }}
               onMouseOver={(e) => (e.currentTarget.style.background = "var(--panel-elevated)")}
               onMouseOut={(e) => (e.currentTarget.style.background = "var(--panel)")}
+              onFocus={(e) => (e.currentTarget.style.background = "var(--panel-elevated)")}
+              onBlur={(e) => (e.currentTarget.style.background = "var(--panel)")}
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <span>{provider.name}</span>
@@ -129,6 +134,8 @@ export function WalletModal({ isOpen, onClose, onSelect }: WalletModalProps) {
                     style={docsLinkStyle}
                     onMouseOver={(e) => (e.currentTarget.style.color = "var(--accent)")}
                     onMouseOut={(e) => (e.currentTarget.style.color = "var(--muted-light)")}
+                    onFocus={(e) => (e.currentTarget.style.color = "var(--accent)")}
+                    onBlur={(e) => (e.currentTarget.style.color = "var(--muted-light)")}
                   >
                     Docs &nearr;
                   </a>
@@ -138,6 +145,37 @@ export function WalletModal({ isOpen, onClose, onSelect }: WalletModalProps) {
           );
         })}
       </div>
-    </Modal>
+      <div
+        style={{
+          marginTop: "1.25rem",
+          paddingTop: "0.75rem",
+          borderTop: "1px solid var(--border)",
+          fontSize: "0.8rem",
+          color: "var(--muted-light)",
+          textAlign: "center",
+          lineHeight: 1.4,
+        }}
+      >
+        <span>Need help? View our </span>
+        <a
+          href="https://docs.streampay.io/wallet-compatibility"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="wallet compatibility docs"
+          style={{
+            color: "var(--accent)",
+            textDecoration: "underline",
+            transition: "color 0.2s",
+          }}
+          onMouseOver={(e) => (e.currentTarget.style.color = "var(--foreground)")}
+          onMouseOut={(e) => (e.currentTarget.style.color = "var(--accent)")}
+          onFocus={(e) => (e.currentTarget.style.color = "var(--foreground)")}
+          onBlur={(e) => (e.currentTarget.style.color = "var(--accent)")}
+        >
+          wallet compatibility docs
+        </a>
+      </div>
+    </Modal>,
+    document.body,
   );
 }

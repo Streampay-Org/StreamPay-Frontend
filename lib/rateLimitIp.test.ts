@@ -1,4 +1,9 @@
-import { checkIpRateLimit, rateLimitResponse, WALLET_RATE_LIMITS } from "./rateLimitIp";
+import {
+  checkIpRateLimit,
+  rateLimitResponse,
+  resolveCorrelationId,
+  WALLET_RATE_LIMITS,
+} from "./rateLimitIp";
 import { InMemoryRateLimitStore } from "@/app/lib/rate-limit-store";
 import { resetMetrics } from "@/app/lib/rate-limit-metrics";
 
@@ -13,10 +18,19 @@ jest.mock("next/server", () => ({
   },
 }));
 
-function makeRequest(ipHeader?: string, ipValue?: string) {
+function makeRequest(
+  ipHeader?: string,
+  ipValue?: string,
+  extraHeaders?: Record<string, string>
+) {
   const headers = new Map<string, string>();
   if (ipHeader && ipValue) {
     headers.set(ipHeader, ipValue);
+  }
+  if (extraHeaders) {
+    for (const [k, v] of Object.entries(extraHeaders)) {
+      headers.set(k, v);
+    }
   }
   return {
     headers,
@@ -26,6 +40,7 @@ function makeRequest(ipHeader?: string, ipValue?: string) {
 
 beforeEach(() => {
   resetMetrics();
+  jest.restoreAllMocks();
 });
 
 describe("WALLET_RATE_LIMITS", () => {
@@ -37,6 +52,32 @@ describe("WALLET_RATE_LIMITS", () => {
   it("should have correct login limit", () => {
     expect(WALLET_RATE_LIMITS.login.limit).toBe(5);
     expect(WALLET_RATE_LIMITS.login.windowMs).toBe(60_000);
+  });
+});
+
+describe("resolveCorrelationId", () => {
+  it("uses x-request-id when present", () => {
+    const req = makeRequest(undefined, undefined, { "x-request-id": "req_abc" });
+    expect(resolveCorrelationId(req)).toBe("req_abc");
+  });
+
+  it("falls back to x-correlation-id", () => {
+    const req = makeRequest(undefined, undefined, {
+      "x-correlation-id": "corr_xyz",
+    });
+    expect(resolveCorrelationId(req)).toBe("corr_xyz");
+  });
+
+  it("generates a req_ id when no correlation headers exist", () => {
+    const req = makeRequest();
+    expect(resolveCorrelationId(req)).toMatch(/^req_/);
+  });
+
+  it("trims whitespace from forwarded ids", () => {
+    const req = makeRequest(undefined, undefined, {
+      "x-request-id": "  req_trim  ",
+    });
+    expect(resolveCorrelationId(req)).toBe("req_trim");
   });
 });
 
@@ -131,7 +172,7 @@ describe("checkIpRateLimit", () => {
       await checkIpRateLimit(req, "login", store);
     }
 
-    let blocked = await checkIpRateLimit(req, "login", store);
+    const blocked = await checkIpRateLimit(req, "login", store);
     expect(blocked.allowed).toBe(false);
 
     jest.advanceTimersByTime(60_001);
@@ -142,6 +183,56 @@ describe("checkIpRateLimit", () => {
     jest.useRealTimers();
     store.destroy();
   });
+
+  it("emits structured throttle log with correlation id when blocked", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const store = new InMemoryRateLimitStore();
+    const req = makeRequest("x-forwarded-for", "9.9.9.9", {
+      "x-request-id": "req_throttle_test",
+    });
+
+    for (let i = 0; i < 5; i++) {
+      await checkIpRateLimit(req, "login", store);
+    }
+    await checkIpRateLimit(req, "login", store);
+
+    const walletLog = warn.mock.calls
+      .map((c) => {
+        try {
+          return JSON.parse(String(c[0]));
+        } catch {
+          return null;
+        }
+      })
+      .find((p) => p?.event === "wallet_ip_rate_limit_exceeded");
+
+    expect(walletLog).toBeDefined();
+    expect(walletLog.request_id).toBe("req_throttle_test");
+    expect(walletLog.limitType).toBe("login");
+    expect(walletLog.identityDisplay).toBe("9.9.9.0/24");
+
+    store.destroy();
+  });
+
+  it("ignores blank x-forwarded-for and falls through to x-real-ip", async () => {
+    const store = new InMemoryRateLimitStore();
+    const headers = new Map<string, string>();
+    headers.set("x-forwarded-for", "  , ");
+    headers.set("x-real-ip", "198.51.100.1");
+    const req = {
+      headers,
+      nextUrl: { pathname: "/api/auth/wallet" },
+    } as any;
+
+    // Exhaust login for this IP, then confirm a different blank-forwarded IP
+    // still shares the same bucket as x-real-ip.
+    for (let i = 0; i < 5; i++) {
+      await checkIpRateLimit(req, "login", store);
+    }
+    const blocked = await checkIpRateLimit(req, "login", store);
+    expect(blocked.allowed).toBe(false);
+    store.destroy();
+  });
 });
 
 describe("rateLimitResponse", () => {
@@ -149,12 +240,21 @@ describe("rateLimitResponse", () => {
     const res = rateLimitResponse(30);
     expect(res.status).toBe(429);
     expect((res as any).body.error.code).toBe("rate_limit_exceeded");
-    expect((res as any).body.error.message).toBe("Too many requests. Please try again later.");
+    expect((res as any).body.error.message).toBe(
+      "Too many requests. Please try again later."
+    );
+    expect(typeof (res as any).body.error.request_id).toBe("string");
+    expect((res as any).body.error.request_id.length).toBeGreaterThan(0);
   });
 
-  it("should set Retry-After header", () => {
-    const res = rateLimitResponse(45);
+  it("should set Retry-After and x-request-id headers", () => {
+    const req = makeRequest(undefined, undefined, {
+      "x-request-id": "req_header_echo",
+    });
+    const res = rateLimitResponse(45, req);
     expect((res as any).headers["Retry-After"]).toBe("45");
+    expect((res as any).headers["x-request-id"]).toBe("req_header_echo");
+    expect((res as any).body.error.request_id).toBe("req_header_echo");
   });
 });
 
@@ -165,7 +265,7 @@ describe("rate limit isolation between limit types", () => {
 
     for (let i = 0; i < 20; i++) {
       const res = await checkIpRateLimit(req, "challenge", store);
-      if (i < 20) expect(res.allowed).toBe(true);
+      expect(res.allowed).toBe(true);
     }
 
     const challengeBlocked = await checkIpRateLimit(req, "challenge", store);
@@ -174,6 +274,33 @@ describe("rate limit isolation between limit types", () => {
     const loginAllowed = await checkIpRateLimit(req, "login", store);
     expect(loginAllowed.allowed).toBe(true);
 
+    store.destroy();
+  });
+});
+
+describe("Wallet login rotating XFF spoofing scenario 9", () => {
+  it("scenario 9: Wallet login, 6 attempts with rotating XFF - the 6th returns 429", async () => {
+    const store = new InMemoryRateLimitStore();
+    let lastResult: any;
+
+    for (let i = 0; i < 6; i++) {
+      // Attacker tries to bypass rate limit by rotating spoofed client XFF header: "spoofed.ip.i, 198.51.100.1"
+      // Since trustedProxyHops = 1, resolveClientIp selects the trusted hop 198.51.100.1 every time!
+      const req = {
+        headers: new Map([
+          ["x-forwarded-for", "10.0.0." + i + ", 198.51.100.1"],
+        ]),
+        nextUrl: { pathname: "/api/auth/wallet" },
+      } as any;
+
+      lastResult = await checkIpRateLimit(req, "login", store);
+      if (i < 5) {
+        expect(lastResult.allowed).toBe(true);
+      }
+    }
+
+    expect(lastResult.allowed).toBe(false);
+    expect(lastResult.retryAfter).toBeDefined();
     store.destroy();
   });
 });

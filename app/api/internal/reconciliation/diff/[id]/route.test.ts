@@ -50,7 +50,7 @@ describe("GET /api/internal/reconciliation/diff/:id", () => {
       new Request("http://localhost/api/internal/reconciliation/diff/stream_1", {
         method: "GET",
       }),
-      { params: { id: "stream_1" } }
+      { params: Promise.resolve({ id: "stream_1" }) }
     );
 
     const body = await response.json();
@@ -61,7 +61,7 @@ describe("GET /api/internal/reconciliation/diff/:id", () => {
   it("conceals the route (404) when the signature is invalid", async () => {
     const response = await GET(
       makeRequest("stream_1", { "x-streampay-signature": "v1=badsig" }),
-      { params: { id: "stream_1" } }
+      { params: Promise.resolve({ id: "stream_1" }) }
     );
 
     expect(response.status).toBe(404);
@@ -79,7 +79,7 @@ describe("GET /api/internal/reconciliation/diff/:id", () => {
     });
     const response = await GET(
       new Request(url, { method: "GET", headers }),
-      { params: { id: "stream_1" } }
+      { params: Promise.resolve({ id: "stream_1" }) }
     );
 
     expect(response.status).toBe(404);
@@ -97,7 +97,7 @@ describe("GET /api/internal/reconciliation/diff/:id", () => {
     });
     const response = await GET(
       new Request(url, { method: "GET", headers }),
-      { params: { id: "stream_1" } }
+      { params: Promise.resolve({ id: "stream_1" }) }
     );
 
     expect(response.status).toBe(404);
@@ -107,7 +107,7 @@ describe("GET /api/internal/reconciliation/diff/:id", () => {
 
   it("returns 200 with inSync:true for a matching stream", async () => {
     const response = await GET(makeRequest("stream_1"), {
-      params: { id: "stream_1" },
+      params: Promise.resolve({ id: "stream_1" }),
     });
 
     const body = await response.json();
@@ -122,7 +122,7 @@ describe("GET /api/internal/reconciliation/diff/:id", () => {
 
   it("returns 200 with inSync:false and the diff for stream_2", async () => {
     const response = await GET(makeRequest("stream_2"), {
-      params: { id: "stream_2" },
+      params: Promise.resolve({ id: "stream_2" }),
     });
 
     const body = await response.json();
@@ -146,7 +146,7 @@ describe("GET /api/internal/reconciliation/diff/:id", () => {
     // The reconciliation service also catches the throw internally and records it
     // as an error (not a mismatch), so inSync is true with diffs:[].
     const response = await GET(makeRequest("stream-ada"), {
-      params: { id: "stream-ada" },
+      params: Promise.resolve({ id: "stream-ada" }),
     });
 
     const body = await response.json();
@@ -162,7 +162,7 @@ describe("GET /api/internal/reconciliation/diff/:id", () => {
   it("includes a checkedAt ISO timestamp", async () => {
     const before = Date.now();
     const response = await GET(makeRequest("stream_1"), {
-      params: { id: "stream_1" },
+      params: Promise.resolve({ id: "stream_1" }),
     });
     const after = Date.now();
 
@@ -177,7 +177,7 @@ describe("GET /api/internal/reconciliation/diff/:id", () => {
 
   it("returns 404 STREAM_NOT_FOUND for a completely unknown stream id", async () => {
     const response = await GET(makeRequest("does-not-exist"), {
-      params: { id: "does-not-exist" },
+      params: Promise.resolve({ id: "does-not-exist" }),
     });
 
     const body = await response.json();
@@ -197,7 +197,7 @@ describe("GET /api/internal/reconciliation/diff/:id", () => {
     });
     const response = await GET(
       new Request(url, { method: "GET", headers }),
-      { params: { id: "stream_1" } }
+      { params: Promise.resolve({ id: "stream_1" }) }
     );
 
     const body = await response.json();
