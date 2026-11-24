@@ -72,7 +72,12 @@ async function handleOrgGet(
 
   return NextResponse.json({
     data: {
-      ...org,
+      id: org.id,
+      name: org.name,
+      members: org.members,
+      policy: org.policy,
+      createdAt: org.createdAt,
+      updatedAt: org.updatedAt,
       ownedStreams: ownedStreamIds(orgId),
       tokenAllowlist: org.tokenAllowlist ?? [],
     },

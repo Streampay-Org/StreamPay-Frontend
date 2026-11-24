@@ -1295,6 +1295,101 @@
           }
         }
       },
+      "OrgReceiptThemeInput": {
+        "type": "object",
+        "properties": {
+          "accentColor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Three or six hex digits prefixed with #. Defaults to #1f6feb."
+          },
+          "logoUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absolute HTTPS URL on an approved host. Empty or null clears the logo."
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 140,
+            "description": "Plain-text message. The server counts UTF-16 code units."
+          }
+        }
+      },
+      "OrgReceiptThemeResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "links"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "orgId",
+              "theme",
+              "canEdit",
+              "logoAllowedHosts"
+            ],
+            "properties": {
+              "orgId": {
+                "type": "string"
+              },
+              "theme": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "accentColor"
+                    ],
+                    "properties": {
+                      "accentColor": {
+                        "type": "string",
+                        "pattern": "^#(?:[a-f0-9]{3}|[a-f0-9]{6})$"
+                      },
+                      "logoUrl": {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      "message": {
+                        "type": "string",
+                        "maxLength": 140
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "canEdit": {
+                "type": "boolean"
+              },
+              "logoAllowedHosts": {
+                "type": "string",
+                "description": "Comma-separated host patterns for editor validation."
+              }
+            }
+          },
+          "links": {
+            "type": "object",
+            "required": [
+              "self"
+            ],
+            "properties": {
+              "self": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "OrgPolicyResponse": {
         "type": "object",
         "required": [
@@ -1857,7 +1952,6 @@
               "type": "string",
               "pattern": "^G[A-Z2-7]{55}$",
               "example": "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ"
-              "example": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
             }
           }
         ],
@@ -5182,7 +5276,6 @@
       "post": {
         "operationId": "createStreamV2",
         "summary": "Create a payment stream (v2)",
-        "description": "Creates a payment stream using the v2 request and response shape. Requires bearer authentication and returns the created stream.",
         "description": "Creates a v2 payment stream for the authenticated sender and returns its initial representation.",
         "tags": [
           "Streams"
@@ -5994,7 +6087,6 @@
                       "allowed_actions": [],
                       "created_at": "2024-01-20T09:00:00.000Z",
                       "settlement": {
-                        "tx_hash": "000000000000",
                         "tx_hash": "a9d2c17e5f43",
                         "settled_at": "2024-01-20T09:05:00.000Z",
                         "amount": "0",
@@ -6338,7 +6430,6 @@
       "get": {
         "operationId": "listWebhookDeliveries",
         "summary": "List webhook delivery attempts",
-        "description": "Returns paginated webhook delivery attempts, including their status, retry count, and related endpoint.",
         "description": "Lists webhook delivery attempts with pagination for the authenticated caller.",
         "security": [],
         "tags": [
@@ -7394,41 +7485,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": ["recipient", "rate", "schedule"],
-                "properties": {
-                  "recipient": {
-                    "type": "string",
-                    "description": "Stellar public key of the recipient (56-character G… address).",
-                    "example": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG"
-                  },
-                  "rate": {
-                    "type": "string",
-                    "description": "Positive decimal payment amount per schedule interval (max 7 decimal places).",
-                    "example": "120"
-                  },
-                  "schedule": {
-                    "type": "string",
-                    "enum": ["second", "minute", "hour", "day", "week", "month", "year"],
-                    "description": "Payment interval.",
-                    "example": "month"
-                  },
-                  "token": {
-                    "type": "string",
-                    "description": "Stellar asset code (optional, defaults to XLM).",
-                    "example": "XLM"
-                  },
-                  "orgId": {
-                    "type": "string",
-                    "description": "Optional organization that owns this stream and whose configured quota applies.",
-                    "example": "org-acme"
-                  }
-                }
-              },
-              "example": {
-                "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
-                "rate": "120",
-                "schedule": "month"
                 "type": "object"
               }
             }
@@ -7445,31 +7501,6 @@
               }
             }
           },
-          "400": { "$ref": "#/components/responses/400" },
-          "401": { "$ref": "#/components/responses/401" },
-          "422": { "$ref": "#/components/responses/422" },
-          "429": {
-            "description": "Daily creation limit or configured stream quota exceeded. Retry-After indicates when the applicable quota resets.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds until the daily limit resets at UTC midnight or monthly volume quota resets at the next UTC month.",
-                "schema": { "type": "integer" }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
-                "example": {
-                  "error": {
-                    "code": "QUOTA_MONTHLY_VOLUME_EXCEEDED",
-                    "message": "The user has used 1000000000 of 1000000000 monthly XLM stroops.",
-                    "request_id": "req_01HZ9ABCDEF"
-                  }
-                }
-              }
-            }
-          },
-          "500": { "$ref": "#/components/responses/500" }
           "400": {
             "$ref": "#/components/responses/400"
           },
@@ -7925,6 +7956,224 @@
         }
       }
     },
+    "/api/orgs/{orgId}/receipt-theme": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "orgId",
+          "required": true,
+          "description": "Organization identifier",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "in": "header",
+          "name": "Actor-Wallet-Address",
+          "required": false,
+          "description": "Organization member wallet address. Must match the bearer token when both are supplied.",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Read the organization receipt theme",
+        "description": "Any organization member can read the theme.",
+        "operationId": "getOrgReceiptTheme",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+            {
+              "bearerAuth": []
+            }
+          ],
+        "responses": {
+          "200": {
+            "description": "Current theme after the operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgReceiptThemeResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Organization membership or owner access is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace the organization receipt theme",
+        "description": "Only organization owners can replace the theme. Changes are recorded in the audit log.",
+        "operationId": "updateOrgReceiptTheme",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+            {
+              "bearerAuth": []
+            }
+          ],
+        "responses": {
+          "200": {
+            "description": "Current theme after the operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgReceiptThemeResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Organization membership or owner access is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid receipt theme fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message",
+                        "request_id",
+                        "fields"
+                      ],
+                      "properties": {
+                        "code": {
+                          "const": "VALIDATION_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgReceiptThemeInput"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Reset the organization receipt theme",
+        "description": "Only organization owners can reset the theme. The reset restores the default receipt and is recorded in the audit log.",
+        "operationId": "resetOrgReceiptTheme",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+            {
+              "bearerAuth": []
+            }
+          ],
+        "responses": {
+          "200": {
+            "description": "Current theme after the operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgReceiptThemeResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Organization membership or owner access is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/orgs/{orgId}/policy": {
       "get": {
         "summary": "Get organization stream policy",
@@ -8061,7 +8310,6 @@
               }
             }
           },
-          "412": {
           "409": {
             "description": "Optimistic concurrency conflict (If-Match ETag mismatch)",
             "content": {

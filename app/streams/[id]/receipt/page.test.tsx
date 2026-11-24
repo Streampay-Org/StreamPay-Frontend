@@ -5,12 +5,20 @@
 import { render, screen } from "@testing-library/react";
 import StreamReceiptPage from "./page";
 import { notFound } from "next/navigation";
+import { _resetOrgDbForTesting, setOrgReceiptTheme } from "@/app/lib/org-db";
+
+jest.mock("next/headers", () => ({
+  headers: async () => new Headers(),
+  cookies: async () => ({ get: () => undefined }),
+}));
 
 jest.mock("next/navigation", () => ({
   notFound: jest.fn(),
 }));
 
 describe("StreamReceiptPage", () => {
+  afterEach(_resetOrgDbForTesting);
+
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -25,6 +33,17 @@ describe("StreamReceiptPage", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("stream-ada")).toBeInTheDocument();
     expect(screen.getByText("Ada Creative Studio")).toBeInTheDocument();
+  });
+
+  it("applies the current organization theme to a receipt request", async () => {
+    setOrgReceiptTheme("org-acme", { accentColor: "#456", message: "Thanks, Ada!" });
+    const params = Promise.resolve({ id: "stream-ada" });
+    const { rerender } = render(await StreamReceiptPage({ params }));
+    expect(screen.getByText("Thanks, Ada!")).toBeInTheDocument();
+
+    setOrgReceiptTheme("org-acme", undefined);
+    rerender(await StreamReceiptPage({ params }));
+    expect(screen.queryByText("Thanks, Ada!")).not.toBeInTheDocument();
   });
 
   it("renders the note textarea", async () => {
