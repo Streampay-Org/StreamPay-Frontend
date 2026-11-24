@@ -14,38 +14,51 @@
  */
 
 import { NextResponse } from "next/server";
-import { setPaused, getAdminState } from "@/app/lib/admin-guard";
+import { setPaused, getAdminState, requireAdmin } from "@/app/lib/admin-guard";
 import { recordPrivilegedStreamAuditEvent } from "@/app/lib/audit-log";
+
+const MIN_REASON_LENGTH = 10;
 
 function err(code: string, message: string, status: number) {
   return NextResponse.json({ error: { code, message } }, { status });
 }
 
 export async function POST(request: Request) {
+  const authResult = requireAdmin(request);
+  if (authResult instanceof NextResponse) return authResult;
+
   let body: unknown;
   try { body = await request.json(); } catch {
     return err("INVALID_REQUEST", "Request body must be valid JSON", 400);
   }
 
-  const { paused } = body as Record<string, unknown>;
+  const { paused, reason } = body as Record<string, unknown>;
   if (typeof paused !== "boolean") {
     return err("VALIDATION_ERROR", "Body must contain { paused: boolean }", 422);
   }
+  if (typeof reason !== "string" || reason.trim().length < MIN_REASON_LENGTH) {
+    return err(
+      "VALIDATION_ERROR",
+      `Body must contain a reason string of at least ${MIN_REASON_LENGTH} characters`,
+      422,
+    );
+  }
 
+  const trimmedReason = reason.trim();
   const result = setPaused(request, paused);
   if (result instanceof NextResponse) return result;
 
-  recordPrivilegedStreamAuditEvent({
+  const auditEntry = recordPrivilegedStreamAuditEvent({
     action: paused ? "admin.pause.activate" : "admin.pause.lift",
     before: { paused: !paused },
     after:  { paused },
-    metadata: { pausedAt: result.pausedAt },
+    metadata: { pausedAt: result.pausedAt, reason: trimmedReason },
     request,
     streamId: "global",
     targetAccount: result.adminAddress,
   });
 
-  return NextResponse.json({ data: result });
+  return NextResponse.json({ data: result, auditRequestId: auditEntry.requestId });
 }
 
 export async function GET() {

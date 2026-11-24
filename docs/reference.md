@@ -383,6 +383,7 @@ Quick links to the long-form docs under [docs/](docs/):
 - [StreamTypeChip focus accessibility](docs/streamtypechip-focus-accessibility.md)
 - [Help & FAQ page](/help) — in-app support page at `app/help/page.tsx`
 - [Exports access logs](docs/api/exports-access-logs.md) — structured per-request access logs for `/api/exports`
+- [Notification preferences API](docs/api/notifications-preferences.md) — `GET`/`PUT /api/notifications/preferences`, including `ETag` / `If-Match` concurrency
 [SECURITY.md](SECURITY.md) in the repository root.
 
 ## Troubleshooting

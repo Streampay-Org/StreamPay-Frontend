@@ -17,7 +17,10 @@
 //! | Version | Description                                 |
 //! |---------|---------------------------------------------|
 //! | `0`     | Unset — pre-migration contract (default).   |
-//! | `1`     | Current stable layout (no migration needed). |
+//! | `1`     | Initial layout marker (no data transformation). |
+//! | `2`     | Pause bookkeeping normalised on split and recurring records. |
+//! | `3`     | Initialise `cliff_time = 0` on existing `Stream` records. |
+//! | `3`     | Stream records gain `curve: ReleaseCurve` (default `Linear`). |
 //!
 //! When a new version of the contract requires a storage layout change,
 //! a new migration step is added to this module and the version
@@ -47,9 +50,11 @@
 //! 4. Write focused unit tests targeting the new step.
 //! 5. Update the doc comment table above.
 
+use core::cmp::{max, min};
+
 use crate::error::Error;
-use crate::storage;
-use soroban_sdk::{contracttype, Address, Env};
+use crate::storage::{self, DataKey, ReleaseCurve, Stream, StreamStatus};
+use soroban_sdk::{contracttype, Address, Env, TryFromVal, Val};
 
 // ── Version constants ─────────────────────────────────────────────────────────
 
@@ -58,7 +63,15 @@ use soroban_sdk::{contracttype, Address, Env};
 /// All new contracts are deployed at this version. The `migrate`
 /// entrypoint advances a contract toward this version one step at a
 /// time so that intermediate upgrades do not skip a layout change.
-pub const LATEST_VERSION: u32 = 1;
+pub const LATEST_VERSION: u32 = 3;
+
+/// Maximum number of split/recurring ids rewritten by a single `migrate` call.
+///
+/// Migration work is bounded so a large dataset cannot exceed the Soroban
+/// per-transaction budget. When the limit is reached the version marker stays
+/// at the previous value and the admin calls `migrate` again; `storage_version`
+/// only advances to [`LATEST_VERSION`] once every record has been visited.
+const MIGRATION_BATCH_SIZE: u64 = 50;
 
 /// Storage key for the contract's schema version.
 #[derive(Clone)]
@@ -66,6 +79,9 @@ pub const LATEST_VERSION: u32 = 1;
 enum VersionKey {
     /// Singleton: the current [`StorageVersion`] of the contract.
     StorageVersion,
+    /// Cursor for a partially applied migration step: the next record id to
+    /// rewrite. Absent when no step is in progress.
+    MigrationCursor,
 }
 
 /// On-chain record of the contract's schema version.
@@ -116,6 +132,152 @@ fn set_version(env: &Env, version: u32) {
         .saturating_add(crate::storage::INSTANCE_TTL_MIN_REMAINING);
     let target = threshold.saturating_add(crate::storage::INSTANCE_TTL_EXTEND_TO);
     env.storage().instance().extend_ttl(threshold, target);
+}
+
+/// Advances the storage version by one step, rewriting records in batches.
+///
+/// Returns `true` when the step is complete. A `false` return means the batch
+/// limit was hit; the cursor is persisted and a later call continues from it.
+fn migrate_records_step(env: &Env) -> bool {
+    let start: u64 = env
+        .storage()
+        .instance()
+        .get(&VersionKey::MigrationCursor)
+        .unwrap_or(1);
+
+    let last = max(
+        crate::multi::next_split_stream_id(env),
+        crate::recurring::next_recurring_id(env),
+    );
+
+    if start >= last {
+        env.storage()
+            .instance()
+            .remove(&VersionKey::MigrationCursor);
+        return true;
+    }
+
+    let end = min(start.saturating_add(MIGRATION_BATCH_SIZE), last);
+    crate::multi::migrate_records(env, start, end);
+    crate::recurring::migrate_records(env, start, end);
+
+    if end >= last {
+        env.storage()
+            .instance()
+            .remove(&VersionKey::MigrationCursor);
+        true
+    } else {
+        env.storage()
+            .instance()
+            .set(&VersionKey::MigrationCursor, &end);
+        false
+    }
+}
+
+/// Migrates existing [`storage::Stream`] records in bounded batches, setting
+/// `cliff_time = 0` so pre-existing streams continue vesting linearly without
+/// a cliff and re-stamping their TTLs.
+///
+/// Returns `true` when all streams have been visited.
+fn migrate_streams_cliff_step(env: &Env) -> bool {
+    let start: u64 = env
+        .storage()
+        .instance()
+        .get(&VersionKey::MigrationCursor)
+        .unwrap_or(1);
+
+    let last = storage::peek_next_stream_id(env);
+
+    if start >= last {
+        env.storage()
+            .instance()
+            .remove(&VersionKey::MigrationCursor);
+        return true;
+    }
+
+    let end = min(start.saturating_add(MIGRATION_BATCH_SIZE), last);
+    for id in start..end {
+        if let Some(mut stream) = storage::get_stream(env, id) {
+            stream.cliff_time = 0;
+            storage::set_stream(env, id, &stream);
+        }
+    }
+
+    if end >= last {
+        env.storage()
+            .instance()
+            .remove(&VersionKey::MigrationCursor);
+        true
+    } else {
+        env.storage()
+            .instance()
+            .set(&VersionKey::MigrationCursor, &end);
+        false
+    }
+}
+
+/// Legacy v2 `Stream` layout prior to the addition of `curve: ReleaseCurve`.
+#[derive(Clone, Debug)]
+#[contracttype]
+struct LegacyStreamV2 {
+    pub id: u64,
+    pub sender: Address,
+    pub recipient: Address,
+    pub token: Address,
+    pub total_amount: i128,
+    pub released_amount: i128,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub duration: u64,
+    pub last_update: u64,
+    pub status: StreamStatus,
+    pub paused_at: u64,
+    pub total_paused_duration: u64,
+    pub fee_bps: u32,
+}
+
+/// Migrates existing v2 [`Stream`] records to v3 by attaching
+/// `curve: ReleaseCurve::Linear`.
+///
+/// Records are rewritten in bounded batches of [`MIGRATION_BATCH_SIZE`].
+/// Already-migrated v3 records and missing IDs are skipped (idempotent).
+fn migrate_stream_curves_step(env: &Env) -> bool {
+
+
+    }
+
+    let mut id = start;
+    while id < end {
+        let key = DataKey::Stream(id);
+        let raw: Option<Val> = env.storage().persistent().get(&key);
+        if let Some(val) = raw {
+            if Stream::try_from_val(env, &val).is_err() {
+                if let Ok(legacy) = LegacyStreamV2::try_from_val(env, &val) {
+                    let upgraded = Stream {
+                        id: legacy.id,
+                        sender: legacy.sender,
+                        recipient: legacy.recipient,
+                        token: legacy.token,
+                        total_amount: legacy.total_amount,
+                        released_amount: legacy.released_amount,
+                        start_time: legacy.start_time,
+                        end_time: legacy.end_time,
+                        duration: legacy.duration,
+                        last_update: legacy.last_update,
+                        status: legacy.status,
+                        paused_at: legacy.paused_at,
+                        total_paused_duration: legacy.total_paused_duration,
+                        fee_bps: legacy.fee_bps,
+                        curve: ReleaseCurve::Linear,
+                    };
+                    storage::set_stream(env, id, &upgraded);
+                }
+            }
+        }
+        id = id.saturating_add(1);
+    }
+
+    }
 }
 
 // ── Migration engine ─────────────────────────────────────────────────────────
@@ -176,19 +338,33 @@ pub fn migrate_internal(env: &Env, caller: &Address) -> Result<(), Error> {
         v = 1;
     }
 
+    // Step 1 → 2: normalise pause bookkeeping on split and recurring records
+    // and re-stamp their TTLs. Records are rewritten in bounded batches; when
+    // the batch limit is hit the version stays at 1 and the next `migrate`
+    // call resumes from the persisted cursor.
+    if v == 1 && migrate_records_step(env) {
+        set_version(env, 2);
+        v = 2;
+    }
+
+    // Step 2 → 3: initialise `cliff_time = 0` on all existing `Stream` records
+    // so pre-existing streams remain linearly withdrawable without a cliff.
+    if v == 2 && migrate_streams_cliff_step(env) {
+        set_version(env, 3);
+        v = 3;
+    }
+
+    // Step 2 → 3: backfill `curve: ReleaseCurve::Linear` on legacy v2 Stream
+    // records in bounded batches.
+    if v == 2 && migrate_stream_curves_step(env) {
+    }
+
     // ── Future steps ───────────────────────────────────────────────────
     // Add new `if v == N` blocks below this line for each new version.
-    //
-    // Example:
-    //   if v == 1 {
-    //       transform_something(env)?;
-    //       set_version(env, 2);
-    //       v = 2;
-    //   }
 
-    // All steps completed — the contract is now at LATEST_VERSION.
-    // Sanity-check the invariant (debug assertion, stripped in release).
-    debug_assert!(v == LATEST_VERSION);
+    // All steps completed — the contract is now at LATEST_VERSION. A step
+    // that returned `false` leaves the version unchanged on purpose.
+    debug_assert!(v <= LATEST_VERSION);
 
     Ok(())
 }
@@ -410,5 +586,47 @@ mod tests {
             !paused,
             "paused flag must still be readable after migration"
         );
+    }
+
+    #[test]
+    fn migrate_v2_to_v3_sets_cliff_time_zero_and_preserves_withdrawable() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Contract, ());
+        let client = crate::ContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        // Seed contract at version 2 with a pre-existing stream.
+        let stream_id = 1u64;
+        env.as_contract(&contract_id, || {
+            set_version(&env, 2);
+            let stream = storage::Stream {
+                id: stream_id,
+                sender: Address::generate(&env),
+                recipient: Address::generate(&env),
+                token: Address::generate(&env),
+                total_amount: 1_000,
+                released_amount: 0,
+                start_time: 1_000,
+                end_time: 2_000,
+                duration: 1_000,
+                last_update: 1_000,
+                status: storage::StreamStatus::Active,
+                paused_at: 0,
+                total_paused_duration: 0,
+                fee_bps: 0,
+                cliff_time: 1_500, // non-zero sentinel to verify migration resets it to 0
+            };
+            storage::set_stream(&env, stream_id, &stream);
+            storage::set_next_stream_id_for_test(&env, 2);
+
+            migrate_internal(&env, &admin).unwrap();
+
+            assert_eq!(current_version(&env), LATEST_VERSION);
+            let migrated = storage::get_stream(&env, stream_id).unwrap();
+            assert_eq!(migrated.cliff_time, 0);
+            assert_eq!(crate::release::withdrawable(&migrated, 1_500), Ok(500));
+        });
     }
 }

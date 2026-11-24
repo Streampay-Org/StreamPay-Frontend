@@ -1,11 +1,14 @@
 "use client";
 
-import React, { useCallback, useEffect, useId, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { isValidStellarPublicKey } from "../lib/stellar-address";
 import { CopyAddress } from "../components/CopyAddress";
 import { EmptyState } from "../components/EmptyState";
 import { Modal } from "../components/Modal";
+import { ResetFiltersButton } from "../components/ResetFiltersButton";
 import { useToast } from "../hooks/useToast";
+import { safeStorage } from "../lib/safeStorage";
+import { filterContacts, sortContacts, type ContactSortKey } from "./filter";
 import {
   buildExportCsv,
   buildExportJson,
@@ -53,6 +56,18 @@ export function getContactPaymentTarget(contact: Contact): ContactPaymentTarget 
 // ─── localStorage persistence ─────────────────────────────────────────────────
 
 const CONTACTS_KEY = "streampay_contacts";
+const CONTACT_SORT_KEY = "streampay-contacts-sort";
+
+const SORT_OPTIONS: { value: ContactSortKey; label: string }[] = [
+  { value: "label-asc", label: "Label A-Z" },
+  { value: "label-desc", label: "Label Z-A" },
+  { value: "recent", label: "Newest" },
+  { value: "oldest", label: "Oldest" },
+];
+
+function isContactSortKey(value: string | null): value is ContactSortKey {
+  return SORT_OPTIONS.some((option) => option.value === value);
+}
 
 // Sample address book shown on a visitor's first visit so the demo is populated.
 // Once the visitor saves, edits or deletes a contact their own list is persisted.
@@ -769,6 +784,7 @@ function ContactRow({ contact, onEdit, onDelete }: ContactRowProps) {
 export default function ContactsPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<ContactSortKey>("recent");
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Contact | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -777,17 +793,25 @@ export default function ContactsPage() {
 
   useEffect(() => {
     setContacts(loadContacts());
+    const storedSort = safeStorage.getItem(CONTACT_SORT_KEY);
+    if (isContactSortKey(storedSort)) setSort(storedSort);
   }, []);
 
-  const filtered = contacts.filter((c) => {
-    const q = search.toLowerCase();
-    return (
-      c.label.toLowerCase().includes(q) ||
-      c.address.toLowerCase().includes(q) ||
-      (c.federationAddress?.toLowerCase().includes(q) ?? false) ||
-      (c.memo?.toLowerCase().includes(q) ?? false)
-    );
-  });
+  const filtered = useMemo(
+    () =>
+      sortContacts(filterContacts(contacts, search), sort),
+    [contacts, search, sort],
+  );
+
+  const handleSortChange = (next: ContactSortKey) => {
+    setSort(next);
+    safeStorage.setItem(CONTACT_SORT_KEY, next);
+  };
+
+  const resetFilters = () => {
+    setSearch("");
+    handleSortChange("recent");
+  };
 
   const applyUpdate = (next: Contact[]) => {
     const previous = contacts;
@@ -925,6 +949,46 @@ export default function ContactsPage() {
               }}
             />
           </div>
+
+          <div>
+            <label
+              htmlFor="contacts-sort"
+              style={{
+                display: "block",
+                fontSize: "0.75rem",
+                color: "var(--muted)",
+                marginBottom: "0.25rem",
+              }}
+            >
+              Sort contacts
+            </label>
+            <select
+              id="contacts-sort"
+              aria-label="Sort contacts"
+              value={sort}
+              onChange={(event) =>
+                handleSortChange(event.target.value as ContactSortKey)
+              }
+              style={{
+                padding: "0.625rem 2rem 0.625rem 0.75rem",
+                background: "var(--panel)",
+                border: "1px solid var(--border)",
+                borderRadius: "0.5rem",
+                color: "var(--foreground)",
+              }}
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <ResetFiltersButton
+            onReset={resetFilters}
+            isVisible={search.trim() !== "" || sort !== "recent"}
+          />
 
           <ExportMenu contacts={contacts} />
           <ImportButton

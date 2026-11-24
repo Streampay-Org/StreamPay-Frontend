@@ -1,3 +1,5 @@
+import { isValidStellarPublicKey } from "../lib/stellar-address";
+
 const RECENT_RECIPIENTS_KEY = "streampay_recent_recipients";
 const MAX_RECENT = 6;
 
@@ -6,20 +8,27 @@ export interface RecentRecipient {
   addedAt: number;
 }
 
-// Demo addresses (the seeded sample streams) offered on a first visit so the
-// quick-pick rail is not empty. Skipped under Jest to keep tests deterministic.
-const DEMO_RECENT_RECIPIENTS: RecentRecipient[] = [
-  { address: "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZK7GQ", addedAt: 0 },
-  { address: "GBVZZ5QKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2ZQKXB4T2YXQXDXQ2ZQK", addedAt: 0 },
-  { address: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGYWDEAVQBMJ7WGNB55IAAQ", addedAt: 0 },
-];
+function isValidRecentRecipient(entry: unknown): entry is RecentRecipient {
+  if (typeof entry !== "object" || entry === null) return false;
+  const candidate = entry as Record<string, unknown>;
+  return (
+    typeof candidate.address === "string" &&
+    isValidStellarPublicKey(candidate.address) &&
+    typeof candidate.addedAt === "number" &&
+    Number.isFinite(candidate.addedAt)
+  );
+}
 
 export function getRecentRecipients(): RecentRecipient[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(RECENT_RECIPIENTS_KEY);
-    if (raw === null && process.env.NODE_ENV !== "test") return DEMO_RECENT_RECIPIENTS;
-    return raw ? (JSON.parse(raw) as RecentRecipient[]) : [];
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(isValidRecentRecipient)
+      .map(({ address, addedAt }) => ({ address, addedAt }));
   } catch {
     return [];
   }
@@ -27,12 +36,12 @@ export function getRecentRecipients(): RecentRecipient[] {
 
 /**
  * Prepends `address` to the recent-recipients list, deduplicating and capping
- * at MAX_RECENT entries. No-ops for empty/whitespace-only addresses.
+ * at MAX_RECENT entries. No-ops for empty or invalid Stellar public keys.
  */
 export function addRecentRecipient(address: string): void {
   if (typeof window === "undefined") return;
   const trimmed = address.trim();
-  if (!trimmed) return;
+  if (!trimmed || !isValidStellarPublicKey(trimmed)) return;
 
   const deduped = getRecentRecipients().filter((r) => r.address !== trimmed);
   const updated: RecentRecipient[] = [
@@ -40,10 +49,18 @@ export function addRecentRecipient(address: string): void {
     ...deduped,
   ].slice(0, MAX_RECENT);
 
-  localStorage.setItem(RECENT_RECIPIENTS_KEY, JSON.stringify(updated));
+  try {
+    localStorage.setItem(RECENT_RECIPIENTS_KEY, JSON.stringify(updated));
+  } catch {
+    // Ignore storage failures (e.g. private browsing or quota exceeded).
+  }
 }
 
 export function clearRecentRecipients(): void {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(RECENT_RECIPIENTS_KEY);
+  try {
+    localStorage.removeItem(RECENT_RECIPIENTS_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
 }

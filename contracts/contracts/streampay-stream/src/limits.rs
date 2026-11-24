@@ -18,11 +18,22 @@ const SENDER_COUNT_TTL_EXTEND_TO: u32 = 1_555_200; // ~3 months at 5-second ledg
 const INSTANCE_TTL_MIN_REMAINING: u32 = 120_960; // ~1 week at 5-second ledgers
 const INSTANCE_TTL_EXTEND_TO: u32 = 518_400; // ~1 month at 5-second ledgers
 
+/// Per-token maximum stream-amount cap entries live in **persistent** storage
+/// rather than instance storage because the set of tokens is unbounded; keeping
+/// unbounded per-address keys out of the singleton instance entry avoids
+/// bloating instance storage and hitting Soroban entry-size limits.
+///
+/// Uses the same 2-week look-ahead / 3-month extension cadence as
+/// `SenderStreamCount` so configured caps stay warm on every write and read.
+const MAX_AMOUNT_TTL_MIN_REMAINING: u32 = 241_920; // ~2 weeks at 5-second ledgers
+const MAX_AMOUNT_TTL_EXTEND_TO: u32 = 1_555_200; // ~3 months at 5-second ledgers
+
 #[derive(Clone)]
 #[contracttype]
 enum LimitDataKey {
     MaxStreamsPerSender,
     SenderStreamCount(Address),
+    MaxStreamAmount(Address),
 }
 
 fn ttl_target(env: &Env, extra: u32) -> u32 {
@@ -152,4 +163,67 @@ pub fn remaining_sender_capacity(env: &Env, sender: &Address) -> u64 {
     let limit = get_max_streams_per_sender(env);
     let current = get_sender_stream_count(env, sender);
     limit.saturating_sub(current)
+}
+
+fn extend_max_amount_ttl(env: &Env, token: &Address) {
+    let threshold = env
+        .ledger()
+        .sequence()
+        .saturating_add(MAX_AMOUNT_TTL_MIN_REMAINING);
+    let target = ttl_target(env, MAX_AMOUNT_TTL_EXTEND_TO);
+    env.storage().persistent().extend_ttl(
+        &LimitDataKey::MaxStreamAmount(token.clone()),
+        threshold,
+        target,
+    );
+}
+
+/// Returns the configured maximum stream `total_amount` cap for `token`, or
+/// `None` if no cap is configured (unlimited).
+///
+/// Stored in persistent storage; extends the entry's TTL on read when present.
+pub fn get_max_stream_amount(env: &Env, token: &Address) -> Option<i128> {
+    let stored: Option<i128> = env
+        .storage()
+        .persistent()
+        .get(&LimitDataKey::MaxStreamAmount(token.clone()));
+    if stored.is_some() {
+        extend_max_amount_ttl(env, token);
+    }
+    stored
+}
+
+/// Persists a per-token maximum stream `total_amount` cap in persistent
+/// storage and extends its TTL.
+pub fn set_max_stream_amount(env: &Env, token: &Address, max: i128) {
+    env.storage()
+        .persistent()
+        .set(&LimitDataKey::MaxStreamAmount(token.clone()), &max);
+    extend_max_amount_ttl(env, token);
+}
+
+/// Removes any configured maximum stream `total_amount` cap for `token`,
+/// restoring unlimited stream amounts for that token.
+pub fn clear_max_stream_amount(env: &Env, token: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&LimitDataKey::MaxStreamAmount(token.clone()));
+}
+
+/// Verifies that `total_amount` does not exceed the configured per-token
+/// maximum stream cap, if one is set.
+///
+/// Returns `Ok(())` when no cap is set or `total_amount <= cap`, and
+/// [`Error::AmountTooLarge`] when `total_amount > cap`.
+pub fn check_max_stream_amount(
+    env: &Env,
+    token: &Address,
+    total_amount: i128,
+) -> Result<(), Error> {
+    if let Some(cap) = get_max_stream_amount(env, token) {
+        if total_amount > cap {
+            return Err(Error::AmountTooLarge);
+        }
+    }
+    Ok(())
 }

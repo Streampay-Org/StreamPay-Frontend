@@ -43,30 +43,36 @@ describe("EmptyState", () => {
   it("keeps aria-labelledby pointing at the h2 (screen-reader accessible)", () => {
     const { container } = render(<EmptyState {...DEFAULT_PROPS} />);
     const section = container.querySelector("section.empty-state")!;
+    const heading = screen.getByRole("heading", { level: 2, name: DEFAULT_PROPS.title });
     const headingId = section.getAttribute("aria-labelledby");
     expect(headingId).toBeTruthy();
-    const h2 = section.querySelector("h2#" + headingId);
-    expect(h2).not.toBeNull();
-    expect(h2?.textContent).toBe(DEFAULT_PROPS.title);
+    expect(section).toHaveAttribute("aria-labelledby", heading.id);
+    expect(document.getElementById(headingId!)).toBe(heading);
   });
 
   it("uses unique semantic labels when multiple empty states render together", () => {
-    const { container } = render(
+    render(
       <>
         <EmptyState {...DEFAULT_PROPS} title="First empty state" />
         <EmptyState {...DEFAULT_PROPS} title="Second empty state" />
       </>
     );
 
-    const sections = Array.from(container.querySelectorAll("section.empty-state"));
+    const sections = screen.getAllByRole("region");
+    expect(sections).toHaveLength(2);
+
     const labelledBy = sections.map((section) => section.getAttribute("aria-labelledby"));
+    const describedBy = sections.map((section) => section.getAttribute("aria-describedby"));
 
     expect(new Set(labelledBy).size).toBe(2);
+    expect(new Set(describedBy).size).toBe(2);
     sections.forEach((section) => {
-      expect(section).toHaveAttribute("role", "region");
-      expect(section.getAttribute("aria-describedby")).toBeTruthy();
-      expect(document.getElementById(section.getAttribute("aria-labelledby")!)).not.toBeNull();
-      expect(document.getElementById(section.getAttribute("aria-describedby")!)).not.toBeNull();
+      const titleId = section.getAttribute("aria-labelledby");
+      const descriptionId = section.getAttribute("aria-describedby");
+      expect(titleId).toBeTruthy();
+      expect(descriptionId).toBeTruthy();
+      expect(document.getElementById(titleId!)).not.toBeNull();
+      expect(document.getElementById(descriptionId!)).not.toBeNull();
     });
   });
 

@@ -4,6 +4,8 @@ export interface RateLimitResult {
   remaining: number;
   resetAt: number;
   retryAfter?: number;
+  /** True when the store failed open (e.g. Redis outage) and limits could not be measured accurately. */
+  degraded?: boolean;
 }
 
 export interface RateLimitStore {
@@ -163,6 +165,9 @@ export function setRateLimitStore(store: RateLimitStore): void {
 }
 
 export function resetRateLimitStore(): void {
+  if (globalStore instanceof InMemoryRateLimitStore) {
+    globalStore.destroy();
+  }
   globalStore = null;
 }
 

@@ -15,6 +15,9 @@ const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 /** Strkey version byte for an ed25519 public key (6 << 3). */
 const ED25519_VERSION_BYTE = 6 << 3;
+/** Strkey version byte for a muxed ed25519 account (12 << 3). */
+const MUXED_ED25519_VERSION_BYTE = 12 << 3;
+const UINT64_MAX = (1n << 64n) - 1n;
 
 export function crc16Xmodem(data: Uint8Array): number {
   let crc = 0x0000;
@@ -126,4 +129,111 @@ export function encodeStellarPublicKey(rawPublicKey: Uint8Array): string {
   payload[34] = (checksum >>> 8) & 0xff;
 
   return base32Encode(payload);
+}
+
+export type DecodedMuxedAddress = {
+  account: string;
+  id: bigint;
+  rawKey: Uint8Array;
+};
+
+/**
+ * Decode a Stellar muxed account address (Strkey) into its account key and
+ * unsigned 64-bit memo ID.
+ */
+export function decodeMuxedAddress(value: string): DecodedMuxedAddress | null {
+  if (
+    typeof value !== "string" ||
+    value.length !== 69 ||
+    !/^M[A-Z2-7]{68}$/.test(value)
+  ) {
+    return null;
+  }
+
+  const decoded = base32Decode(value);
+  if (
+    !decoded ||
+    decoded.length !== 43 ||
+    base32Encode(decoded) !== value ||
+    decoded[0] !== MUXED_ED25519_VERSION_BYTE
+  ) {
+    return null;
+  }
+
+  const payload = decoded.subarray(0, 41);
+  const checksum = decoded[41] | (decoded[42] << 8);
+  if (crc16Xmodem(payload) !== checksum) {
+    return null;
+  }
+
+  let id = 0n;
+  for (let index = 33; index < 41; index += 1) {
+    id = (id << 8n) | BigInt(decoded[index]);
+  }
+
+  const rawKey = decoded.slice(1, 33);
+  return {
+    account: encodeStellarPublicKey(rawKey),
+    id,
+    rawKey,
+  };
+}
+
+/** True when `value` is a valid Stellar muxed account Strkey. */
+export function isMuxedAddress(value: string): boolean {
+  return decodeMuxedAddress(value) !== null;
+}
+
+/**
+ * Encode an ed25519 account and unsigned 64-bit ID as a muxed Strkey.
+ * Throws when the account or ID is invalid.
+ */
+export function encodeMuxedAddress(gAddress: string, id: bigint): string {
+  const rawKey = decodeStellarPublicKey(gAddress);
+  if (!rawKey) {
+    throw new Error("Invalid Stellar ed25519 public key");
+  }
+  if (typeof id !== "bigint" || id < 0n || id > UINT64_MAX) {
+    throw new RangeError("Muxed account ID must be an unsigned 64-bit integer");
+  }
+
+  const payload = new Uint8Array(43);
+  payload[0] = MUXED_ED25519_VERSION_BYTE;
+  payload.set(rawKey, 1);
+
+  let remaining = id;
+  for (let index = 40; index >= 33; index -= 1) {
+    payload[index] = Number(remaining & 0xffn);
+    remaining >>= 8n;
+  }
+
+  const checksum = crc16Xmodem(payload.subarray(0, 41));
+  payload[41] = checksum & 0xff;
+  payload[42] = (checksum >>> 8) & 0xff;
+  return base32Encode(payload);
+}
+
+export type StellarDestination =
+  | { kind: "account"; address: string }
+  | { kind: "muxed"; address: string; account: string; memoId: bigint };
+
+/** Parse a valid ed25519 account or muxed account destination. */
+export function parseStellarDestination(value: string): StellarDestination | null {
+  if (isValidStellarPublicKey(value)) {
+    return { kind: "account", address: value };
+  }
+
+  const muxed = decodeMuxedAddress(value);
+  if (!muxed) return null;
+  return {
+    kind: "muxed",
+    address: value,
+    account: muxed.account,
+    memoId: muxed.id,
+  };
+}
+
+/** True when `value` is a valid account or muxed account destination. */
+export function isValidStellarDestination(value: string): boolean {
+  return parseStellarDestination(value) !== null;
 }
