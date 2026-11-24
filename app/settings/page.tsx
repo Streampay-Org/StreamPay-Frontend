@@ -21,6 +21,7 @@ const PRIVILEGED_AUDIT_ROLES = new Set<AuditActorRole>([
   'security',
   'compliance',
 ]);
+import { TimeZoneSettings } from '../components/settings/TimeZoneSettings';
 
 interface SavedNotificationPreferences {
   prefs: NotificationPreferences;
@@ -135,6 +136,7 @@ export function SettingsPageContent({
           </div>
           <div className="settings-group__content">
             <ThemeToggle />
+            <TimeZoneSettings />
           </div>
         </section>
       ),
