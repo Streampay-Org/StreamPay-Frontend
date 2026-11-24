@@ -1,3 +1,11 @@
+import { cookies, headers } from "next/headers";
+import { getOrgReceiptTheme, getStreamOrg } from "@/app/lib/org-db";
+import { normalizeReceiptTheme } from "@/app/lib/receipt-theme";
+import {
+  DEFAULT_STREAM_TENANT_ID,
+  loadStreamForViewer,
+  TENANT_COOKIE_NAME,
+} from "@/app/lib/stream-view";
 import { makeDemoDateShifter } from "@/app/lib/demo-dates";
 import { notFound } from "next/navigation";
 import { ReceiptBuilder } from "../../../components/ReceiptBuilder";
@@ -61,9 +69,22 @@ type Props = {
 
 export default async function StreamReceiptPage({ params }: Props) {
   const { id } = await params;
-  const stream = MOCK_STREAMS[id];
+  const [headerStore, cookieStore] = await Promise.all([headers(), cookies()]);
+  const tenant = headerStore.get("x-tenant-id")?.trim()
+    || cookieStore.get(TENANT_COOKIE_NAME)?.value?.trim()
+    || DEFAULT_STREAM_TENANT_ID;
+  const demoStream = tenant === DEFAULT_STREAM_TENANT_ID && Object.hasOwn(MOCK_STREAMS, id)
+    ? MOCK_STREAMS[id]
+    : undefined;
+  const storedStream = loadStreamForViewer(id, { tenant });
+  const stream = demoStream ?? storedStream;
+  if (!stream) {
+    notFound();
+    return null;
+  }
 
-  if (!stream) notFound();
+  const themeOrgId = storedStream?.orgId ?? stream.orgId ?? getStreamOrg(id)?.id;
+  const theme = themeOrgId ? getOrgReceiptTheme(themeOrgId) : undefined;
 
   const network =
     process.env.STELLAR_NETWORK === "mainnet" ? "mainnet" : "testnet";
@@ -73,12 +94,9 @@ export default async function StreamReceiptPage({ params }: Props) {
       generatedAt={new Date().toISOString()}
       network={network}
       stream={stream}
+      theme={theme ? normalizeReceiptTheme(theme) : undefined}
     />
   );
-}
-
-export async function generateStaticParams() {
-  return Object.keys(MOCK_STREAMS).map((id) => ({ id }));
 }
 
 export function generateMetadata() {
@@ -88,5 +106,5 @@ export function generateMetadata() {
   };
 }
 
-// Re-render daily so the shifted demo timestamps stay current.
-export const revalidate = 86400;
+// Read the active theme for each receipt request.
+export const dynamic = "force-dynamic";

@@ -10,7 +10,7 @@ use soroban_sdk::{token::StellarAssetClient, Address, Env, Vec};
 use streampay_stream::{Contract, ContractClient, Milestone, StreamStatus};
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(32))]
+    #![proptest_config(ProptestConfig::with_cases(256))]
 
     /// Withdrawing any valid portion of the currently withdrawable amount must:
     ///
@@ -277,6 +277,252 @@ proptest! {
         prop_assert!(w2 >= 0 && w2 <= total_amount);
         prop_assert!(w1 <= w2);
         prop_assert_eq!(w_end, total_amount);
+    }
+
+    /// Recurring stream vesting is non-decreasing over time and never exceeds
+    /// the maximum vested amount (amount_per_cycle * total_cycles).
+    /// Test bounds: amount_per_cycle in [1_000, 100_000_000],
+    /// cycle_duration in [1, 10_000], total_cycles in [1, 50].
+    #[test]
+    fn recurring_vested_is_monotonic_and_bounded(
+        amount_per_cycle in 1_000_i128..=100_000_000_i128,
+        cycle_duration in 1_u64..=10_000_u64,
+        total_cycles in 1_u64..=50_u64,
+        timestamps in prop::collection::vec(0_u64..=1_000_000_u64, 2..=20),
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+
+        let admin = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        let token = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+
+        let total_escrow = amount_per_cycle.saturating_mul(i128::from(total_cycles));
+        StellarAssetClient::new(&env, &token)
+            .mint(&sender, &total_escrow.saturating_mul(2));
+
+        let contract_id = env.register(Contract, ());
+        let client = ContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let start_time = 100_000_u64;
+        let recurring_id = client.create_recurring_stream(
+            &sender,
+            &recipient,
+            &token,
+            &amount_per_cycle,
+            &cycle_duration,
+            &total_cycles,
+            &start_time,
+            &0u32,
+        ).unwrap();
+
+        let mut sorted_timestamps = timestamps;
+        sorted_timestamps.sort();
+
+        let mut prev_vested = 0i128;
+        for &ts in &sorted_timestamps {
+            env.ledger().set_timestamp(ts);
+            let vested = client.recurring_vested(&recurring_id).unwrap();
+
+            prop_assert!(vested >= prev_vested, "vested decreased: {} > {}", prev_vested, vested);
+            prop_assert!(vested <= amount_per_cycle.saturating_mul(i128::from(total_cycles)),
+                         "vested {} exceeds max {}", vested, amount_per_cycle.saturating_mul(i128::from(total_cycles)));
+
+            prev_vested = vested;
+        }
+    }
+
+    /// Recurring withdrawable is always <= vested and >= 0, including after
+    /// interleaved partial withdrawals.
+    /// Test bounds: amount_per_cycle in [1_000, 100_000_000],
+    /// cycle_duration in [1, 10_000], total_cycles in [1, 50].
+    #[test]
+    fn recurring_withdrawable_bounded_by_vested(
+        amount_per_cycle in 1_000_i128..=100_000_000_i128,
+        cycle_duration in 1_u64..=10_000_u64,
+        total_cycles in 1_u64..=50_u64,
+        timestamps in prop::collection::vec(0_u64..=1_000_000_u64, 2..=20),
+        withdraw_percents in prop::collection::vec(1_i128..=100_i128, 1..=5),
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+
+        let admin = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        let token = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+
+        let total_escrow = amount_per_cycle.saturating_mul(i128::from(total_cycles));
+        StellarAssetClient::new(&env, &token)
+            .mint(&sender, &total_escrow.saturating_mul(2));
+
+        let contract_id = env.register(Contract, ());
+        let client = ContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let start_time = 100_000_u64;
+        let recurring_id = client.create_recurring_stream(
+            &sender,
+            &recipient,
+            &token,
+            &amount_per_cycle,
+            &cycle_duration,
+            &total_cycles,
+            &start_time,
+            &0u32,
+        ).unwrap();
+
+        let mut sorted_timestamps = timestamps;
+        sorted_timestamps.sort();
+        let mut withdraw_iter = withdraw_percents.iter().cycle();
+
+        for (idx, &ts) in sorted_timestamps.iter().enumerate() {
+            env.ledger().set_timestamp(ts);
+
+            let vested = client.recurring_vested(&recurring_id).unwrap();
+            let withdrawable = client.recurring_withdrawable(&recurring_id).unwrap();
+
+            prop_assert!(withdrawable <= vested, "withdrawable {} > vested {}", withdrawable, vested);
+            prop_assert!(withdrawable >= 0, "withdrawable {} < 0", withdrawable);
+
+            if withdrawable > 0 && idx % 3 == 0 {
+                let percent = withdraw_iter.next().copied().unwrap_or(50);
+                let withdraw_amount = ((withdrawable * percent) / 100).max(1).min(withdrawable);
+
+                if withdraw_amount > 0 {
+                    client.withdraw_recurring(&recipient, &recurring_id, &withdraw_amount).unwrap();
+                }
+            }
+
+            let vested_after = client.recurring_vested(&recurring_id).unwrap();
+            let withdrawable_after = client.recurring_withdrawable(&recurring_id).unwrap();
+
+            prop_assert!(withdrawable_after <= vested_after, 
+                         "after withdrawal: withdrawable {} > vested {}", withdrawable_after, vested_after);
+            prop_assert!(withdrawable_after >= 0, "after withdrawal: withdrawable {} < 0", withdrawable_after);
+        }
+    }
+
+    /// Calling process_recurring_stream never makes cycles_completed go backwards
+    /// or exceed total_cycles.
+    /// Test bounds: amount_per_cycle in [1_000, 100_000_000],
+    /// cycle_duration in [1, 10_000], total_cycles in [1, 50].
+    #[test]
+    fn recurring_process_never_regresses_or_exceeds(
+        amount_per_cycle in 1_000_i128..=100_000_000_i128,
+        cycle_duration in 1_u64..=10_000_u64,
+        total_cycles in 1_u64..=50_u64,
+        timestamps in prop::collection::vec(0_u64..=1_000_000_u64, 2..=15),
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+
+        let admin = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        let token = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+
+        let total_escrow = amount_per_cycle.saturating_mul(i128::from(total_cycles));
+        StellarAssetClient::new(&env, &token)
+            .mint(&sender, &total_escrow.saturating_mul(2));
+
+        let contract_id = env.register(Contract, ());
+        let client = ContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let start_time = 100_000_u64;
+        let recurring_id = client.create_recurring_stream(
+            &sender,
+            &recipient,
+            &token,
+            &amount_per_cycle,
+            &cycle_duration,
+            &total_cycles,
+            &start_time,
+            &0u32,
+        ).unwrap();
+
+        let mut sorted_timestamps = timestamps;
+        sorted_timestamps.sort();
+
+        let mut prev_cycles = 0u64;
+        for &ts in &sorted_timestamps {
+            env.ledger().set_timestamp(ts);
+            let stream = client.process_recurring_stream(&recurring_id).unwrap();
+
+            prop_assert!(stream.cycles_completed >= prev_cycles,
+                         "cycles_completed regressed: {} < {}", stream.cycles_completed, prev_cycles);
+            prop_assert!(stream.cycles_completed <= total_cycles,
+                         "cycles_completed {} exceeds total_cycles {}", stream.cycles_completed, total_cycles);
+
+            prev_cycles = stream.cycles_completed;
+        }
+    }
+
+    /// Before start_time, recurring_vested is exactly 0.
+    /// Test bounds: amount_per_cycle in [1_000, 100_000_000],
+    /// cycle_duration in [1, 10_000], total_cycles in [1, 50].
+    #[test]
+    fn recurring_vested_is_zero_before_start_time(
+        amount_per_cycle in 1_000_i128..=100_000_000_i128,
+        cycle_duration in 1_u64..=10_000_u64,
+        total_cycles in 1_u64..=50_u64,
+        time_before_start in 1_u64..=100_000_u64,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+
+        let admin = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        let token = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+
+        let total_escrow = amount_per_cycle.saturating_mul(i128::from(total_cycles));
+        StellarAssetClient::new(&env, &token)
+            .mint(&sender, &total_escrow.saturating_mul(2));
+
+        let contract_id = env.register(Contract, ());
+        let client = ContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let start_time = 200_000_u64;
+        let recurring_id = client.create_recurring_stream(
+            &sender,
+            &recipient,
+            &token,
+            &amount_per_cycle,
+            &cycle_duration,
+            &total_cycles,
+            &start_time,
+            &0u32,
+        ).unwrap();
+
+        let check_time = start_time.saturating_sub(time_before_start);
+        env.ledger().set_timestamp(check_time);
+
+        let vested = client.recurring_vested(&recurring_id).unwrap();
+        prop_assert_eq!(vested, 0, "vested {} != 0 at time {} (before start {})", vested, check_time, start_time);
+
+        let withdrawable = client.recurring_withdrawable(&recurring_id).unwrap();
+        prop_assert_eq!(withdrawable, 0, "withdrawable {} != 0 before start_time", withdrawable);
     }
 
 }

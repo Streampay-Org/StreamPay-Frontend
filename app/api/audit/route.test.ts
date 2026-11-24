@@ -1,7 +1,7 @@
 /** @jest-environment node */
 
 import jwt from "jsonwebtoken";
-import { GET } from "./route";
+import { DELETE, GET, PATCH, POST, PUT } from "./route";
 import { getJwtSecret } from "@/app/lib/auth";
 import { auditLogStore, resetAuditLogStore } from "@/app/lib/audit-log";
 import { getRateLimitStore, InMemoryRateLimitStore, resetRateLimitStore } from "@/app/lib/rate-limit-store";
@@ -26,6 +26,22 @@ describe("GET /api/audit", () => {
       target: { account: "acct_demo_admin", id: "stream-ada", type: "stream" },
       timestamp: "2026-04-28T12:00:00.000Z",
     });
+  });
+
+  describe("unsupported methods /api/audit", () => {
+    async function expectMethodNotAllowed(handler: () => Promise<Response>) {
+      const response = await handler();
+      const body = await response.json();
+
+      expect(response.status).toBe(405);
+      expect(body.error.code).toBe("METHOD_NOT_ALLOWED");
+      expect(response.headers.get("Allow")).toBe("GET");
+    }
+
+    it("returns 405 with Allow: GET for POST", async () => expectMethodNotAllowed(POST));
+    it("returns 405 with Allow: GET for PUT", async () => expectMethodNotAllowed(PUT));
+    it("returns 405 with Allow: GET for PATCH", async () => expectMethodNotAllowed(PATCH));
+    it("returns 405 with Allow: GET for DELETE", async () => expectMethodNotAllowed(DELETE));
   });
 
   afterEach(() => {

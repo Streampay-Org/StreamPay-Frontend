@@ -1,5 +1,11 @@
-import { StreamsPageContent } from "./StreamsPageContent";
+import { StreamsDashboard } from "./StreamsDashboard";
+import { Suspense } from "react";
 
 export default function StreamsPage() {
-  return <StreamsPageContent />;
+  return <StreamsDashboard />;
+  return (
+    <Suspense fallback={null}>
+      <StreamsPageContent />
+    </Suspense>
+  );
 }
