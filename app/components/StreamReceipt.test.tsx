@@ -25,6 +25,31 @@ describe("StreamReceipt", () => {
     jest.restoreAllMocks();
   });
 
+  it("renders a themed border, literal message, and safe logo with a wordmark fallback", () => {
+    const theme = {
+      accentColor: "#a3b",
+      logoUrl: "https://images.example.test/mark.png",
+      message: "Thanks ✨ <b>partner</b>",
+    };
+    const { rerender } = render(<StreamReceipt stream={makeStream()} theme={theme} />);
+    const article = screen.getByRole("article");
+    expect(article.style.getPropertyValue("--receipt-accent")).toBe(theme.accentColor);
+    expect(screen.getByText(theme.message)).toBeInTheDocument();
+    expect(article.querySelector("b")).toBeNull();
+
+    const logo = screen.getByRole("img", { name: "Organization logo" });
+    expect(logo).toHaveAttribute("src", theme.logoUrl);
+    expect(logo).toHaveAttribute("referrerpolicy", "no-referrer");
+    fireEvent.error(logo);
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getByText("StreamPay", { exact: true })).toBeInTheDocument();
+
+    rerender(<StreamReceipt stream={makeStream()} />);
+    expect(article).toHaveClass("receipt-doc");
+    expect(article).not.toHaveAttribute("style");
+    expect(screen.queryByText(theme.message)).not.toBeInTheDocument();
+  });
+
   describe("status badges", () => {
     it.each<[StreamStatus, string]>([
       ["draft", "Draft"],

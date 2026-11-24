@@ -505,4 +505,42 @@ describe("POST /api/streams", () => {
       );
     });
   });
+
+  describe("RFC 8288 Link headers", () => {
+    it("emits rel=\"next\" and preserves filters, omits rel=\"next\" on last page, and preserves Link on 304", async () => {
+      seedStream(3);
+
+      const res1 = await GET(getRequest("?limit=2&status=draft"));
+      expect(res1.status).toBe(200);
+      const body1 = await res1.json();
+      expect(body1.data).toHaveLength(2);
+      expect(body1.meta.hasNext).toBe(true);
+      expect(body1.links.self).toBe("/api/v1/streams?limit=2&status=draft");
+
+      const link1 = res1.headers.get("Link")!;
+      expect(link1).toContain('rel="next"');
+      expect(link1).toContain("status=draft");
+      expect(link1).toContain(`cursor=${encodeURIComponent(body1.meta.nextCursor)}`);
+
+      const etag = res1.headers.get("ETag")!;
+      const res304 = await GET(
+        new Request("http://localhost/api/streams?limit=2&status=draft", {
+          headers: { "if-none-match": etag },
+        }),
+      );
+      expect(res304.status).toBe(304);
+      expect(res304.headers.get("Link")).toBe(link1);
+
+      const nextMatch = link1.match(/<([^>]+)>;\s*rel="next"/);
+      expect(nextMatch).not.toBeNull();
+      const nextQuery = nextMatch![1].slice("/api/streams".length);
+      const res2 = await GET(getRequest(nextQuery));
+      expect(res2.status).toBe(200);
+      const body2 = await res2.json();
+      expect(body2.data).toHaveLength(1);
+      expect(body2.meta.hasNext).toBe(false);
+      expect(res2.headers.get("Link")).not.toContain('rel="next"');
+      expect(res2.headers.get("Link")).toContain('rel="self"');
+    });
+  });
 });

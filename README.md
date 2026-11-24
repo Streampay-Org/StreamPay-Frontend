@@ -87,8 +87,10 @@ error envelope. Stellar and Soroban calls go through a client with caching and c
 
 - In-app overview: `/docs`
 - [docs/reference.md](docs/reference.md) - the full original reference (API versioning, lifecycle, security, webhooks, troubleshooting)
+- [docs/api/orgs.md](docs/api/orgs.md) - organisations, members and roles API
 - [docs/architecture.md](docs/architecture.md), [docs/STATE_MACHINE.md](docs/STATE_MACHINE.md), [docs/api-v2-migration.md](docs/api-v2-migration.md)
 - [docs/DEPLOYMENT-CHECKLIST.md](docs/DEPLOYMENT-CHECKLIST.md) and [docs/runbooks](docs/runbooks)
+- [docs/api/approvals.md](docs/api/approvals.md) - multi-sig approvals API
 - [CHANGELOG.md](CHANGELOG.md), [SECURITY.md](SECURITY.md)
 
 ## Deploying to Vercel

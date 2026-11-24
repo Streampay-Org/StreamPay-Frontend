@@ -214,7 +214,7 @@ export function WalletBadge({
     return (
       <WalletBadgeSkeleton
         showExtended={showExtendedSkeleton}
-        className={className}
+        className={`${styles.badge} ${className}`}
       />
     );
   }
