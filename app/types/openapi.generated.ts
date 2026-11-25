@@ -683,7 +683,7 @@ export interface paths {
         put?: never;
         /**
          * Receive an incoming webhook event
-         * @description Validates and accepts an incoming webhook event payload.
+         * @description Verifies the HMAC signature and replay window, deduplicates by event ID, and dispatches the incoming webhook event payload to a registered handler.
          */
         post: operations["receiveWebhook"];
         delete?: never;
@@ -1324,22 +1324,6 @@ export interface paths {
          * @description Replaces the StreamPolicy for an organization. Restricted to organization owners. Supports optimistic concurrency via the If-Match header and records an audit log entry.
          */
         put: operations["updateOrgPolicy"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    tags: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -2162,6 +2146,8 @@ export interface operations {
             /** @description Paginated list of activity events. */
             200: {
                 headers: {
+                    /** @description RFC 8288 pagination links (rel="next" when more pages exist, rel="self" for the current page). */
+                    Link?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2501,6 +2487,8 @@ export interface operations {
             /** @description Paginated stream list. */
             200: {
                 headers: {
+                    /** @description RFC 8288 pagination links (rel="next" when more pages exist, rel="self" for the current page). Also preserved on 304 Not Modified responses. */
+                    Link?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -3908,6 +3896,8 @@ export interface operations {
             /** @description Paginated stream list. */
             200: {
                 headers: {
+                    /** @description RFC 8288 pagination links (rel="next" when more pages exist, rel="self" for the current page). Also preserved on 304 Not Modified responses. */
+                    Link?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -4321,7 +4311,12 @@ export interface operations {
     receiveWebhook: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description HMAC-SHA256 signature header in the format `t=<timestamp>,id=<eventId>,v1=<hex>`. */
+                "x-streampay-signature": string;
+                /** @description Unix epoch timestamp in seconds used to compute the signature and enforce the replay window. */
+                "x-streampay-timestamp": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4329,26 +4324,37 @@ export interface operations {
             content: {
                 "application/json": {
                     /**
-                     * @description Payment interval.
-                     * @example month
-                     * @enum {string}
+                     * @description Webhook event type name.
+                     * @example payment.received
                      */
-                    eventType: "second" | "minute" | "hour" | "day" | "week" | "month" | "year";
+                    eventType: string;
                     /**
-                     * @description Stellar asset code (optional, defaults to XLM).
-                     * @example XLM
+                     * @description Unique event identifier used for signature verification and deduplication.
+                     * @example evt_123
                      */
-                    token?: string;
+                    eventId?: string;
                     /**
-                     * @description Optional organization that owns this stream and whose configured quota applies.
-                     * @example org-acme
+                     * Format: date-time
+                     * @description ISO-8601 event timestamp.
                      */
-                    orgId?: string;
+                    timestamp?: string;
+                    /** @description Source system that emitted the event. */
+                    source?: string;
+                    /** @description Arbitrary JSON event payload. */
+                    data?: unknown;
+                    /** @description Optional metadata key-value map. */
+                    metadata?: {
+                        [key: string]: unknown;
+                    };
+                    /** @description Optional forwarded headers. */
+                    headers?: {
+                        [key: string]: string;
+                    };
                 };
             };
         };
         responses: {
-            /** @description Webhook event accepted. */
+            /** @description Webhook event handled, or acknowledged as a duplicate. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4357,29 +4363,45 @@ export interface operations {
                     "application/json": {
                         /** @example true */
                         success: boolean;
+                        /**
+                         * @description Present and true when the eventId was already processed within the deduplication TTL.
+                         * @example true
+                         */
+                        duplicate?: boolean;
+                    };
+                };
+            };
+            /** @description Webhook event verified and accepted, but no handler is registered for its eventType. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example true */
+                        success: boolean;
+                        /** @example false */
+                        handled: boolean;
                     };
                 };
             };
             400: components["responses"]["400"];
-            413: components["responses"]["413"];
-            422: components["responses"]["422"];
-            /** @description Rate limit or configured stream quota exceeded. Retry-After is set for rate limits and monthly-volume quota rejections. */
-            429: {
+            /** @description Missing/invalid HMAC signature (`INVALID_SIGNATURE`) or timestamp outside replay window (`REPLAY_WINDOW_EXCEEDED`). */
+            401: {
                 headers: {
-                    /** @description Seconds until the client may retry. Present for rate limits and monthly-volume quota rejections. */
-                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
-                    /**
-                     * @example {
-                     *       "error": {
-                     *         "code": "QUOTA_ACTIVE_STREAMS_EXCEEDED",
-                     *         "message": "The user has 2 active streams; the configured limit is 2.",
-                     *         "request_id": "req_01HZ9ABCDEF"
-                     *       }
-                     *     }
-                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            413: components["responses"]["413"];
+            /** @description Too many requests — rate limit exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
@@ -5054,41 +5076,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                /**
-                 * @example {
-                 *       "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
-                 *       "rate": "120",
-                 *       "schedule": "month"
-                 *     }
-                 */
-                "application/json": {
-                    /**
-                     * @description Stellar public key of the recipient (56-character G… address).
-                     * @example GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG
-                     */
-                    recipient: string;
-                    /**
-                     * @description Positive decimal payment amount per schedule interval (max 7 decimal places).
-                     * @example 120
-                     */
-                    rate: string;
-                    /**
-                     * @description Payment interval.
-                     * @example month
-                     * @enum {string}
-                     */
-                    schedule: "second" | "minute" | "hour" | "day" | "week" | "month" | "year";
-                    /**
-                     * @description Stellar asset code (optional, defaults to XLM).
-                     * @example XLM
-                     */
-                    token?: string;
-                    /**
-                     * @description Optional organization that owns this stream and whose configured quota applies.
-                     * @example org-acme
-                     */
-                    orgId?: string;
-                };
+                "application/json": Record<string, never>;
             };
         };
         responses: {
@@ -5634,11 +5622,14 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            412: {
+            /** @description Optimistic concurrency conflict (If-Match ETag mismatch) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
             };
         };
     };
