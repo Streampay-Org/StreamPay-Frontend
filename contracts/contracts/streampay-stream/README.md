@@ -15,6 +15,7 @@ Linear payment streams on Stellar/Soroban.
 | `create_stream_with_cliff` | Yes | `sender` | Creates a stream with an optional `cliff_time` (`0` = no cliff, or `start_time <= cliff_time <= end_time`); vested amount is `0` before the cliff and jumps to linear accrual at/after the cliff. |
 | `create_stream` | Yes | `sender` | Creates a linear stream and escrows funds from the sender. |
 | `create_stream_with_milestones` | Yes | `sender` | Creates a stream with a stepped milestone release schedule (`ReleaseCurve::Milestones`) and escrows funds from the sender. |
+| `create_stream_with_memo` | Yes | `sender` | Creates a linear stream and stores an optional `memo` of at most 64 bytes; behaves like `create_stream` plus memo persistence and a `created_memo` event. |
 | `start_stream` | Yes | `stream.sender` | Activates a draft stream, anchoring its time bounds. |
 | `pause` | Yes | `stream.sender` | Freezes accrual for an active stream. |
 | `resume` | Yes | `stream.sender` | Resumes a paused stream, extending the end time. |
@@ -33,6 +34,7 @@ Linear payment streams on Stellar/Soroban.
 | `get_pending_recipient` | No | None | Returns the pending recipient transfer target for a stream, if any. |
 | `settle` | Yes | `stream.recipient` | Ends a stream and releases all remaining funds to recipient. |
 | `get_stream` | No | None | Returns the stream record. |
+| `get_stream_memo` | No | None | Returns the optional `Bytes` memo stored for a stream, or `null` when it has none. |
 | `withdrawable` | No | None | Returns the currently withdrawable amount. |
 | `claim_drip` | No | None | Returns the unsettled accrual (vested minus released) — a convenience alias for `withdrawable`. |
 | `stream_balance` | No | None | Returns the vested balance at the current time. |
@@ -63,6 +65,8 @@ Linear payment streams on Stellar/Soroban.
 | `get_recurring_stream` | No | None | Returns the `RecurringStream` record. |
 | `recurring_withdrawable` | No | None | Returns the currently withdrawable amount (`vested - withdrawn_amount`) for a recurring stream. |
 | `recurring_vested` | No | None | Returns the total vested amount across all completed cycles for a recurring stream. |
+| `set_min_stream_params` | Yes | `admin` | Sets the admin-configured minimum stream duration (seconds) and minimum `total_amount` (`0` disables either check). |
+| `get_min_stream_params` | No | None | Returns the configured `(min_duration, min_amount)` pair. |
 | `set_cooloff_duration` | Yes | `admin` | Sets the per-user cooloff duration (in seconds) between stream creations. |
 | `get_cooloff_duration` | No | None | Returns the current per-user cooloff duration in seconds. |
 | `get_cooloff_until` | No | None | Returns the timestamp until which a sender is blocked by cooloff. |
@@ -110,7 +114,7 @@ amount goes to the recipient.
 | :--- | :--- | :--- |
 | **Standard streams** | Resolves effective fee via `fees::resolve_stream_fee_bps` (per-stream `fee_bps` → per-token override → global default) and deducts it with `fees::apply_fee` when `fees::get_fee_collector` is set. | `Contract::withdraw`, `Contract::withdraw_to`, `execute_withdraw` (`src/lib.rs`) |
 | **Recurring streams** | Applies `fees::apply_fee(amount, stream.fee_bps)` directly using the stream's own `fee_bps` stored at `recurring::create` (does **not** fall back to token overrides or global defaults). Transfers `fee_amount` to the collector when `fees::get_fee_collector` is `Some`, otherwise pays the full `amount` to `recipient`. No fee is deducted on `recurring::cancel`. | `recurring::withdraw` (`src/recurring.rs`) |
-| **Split streams** | **No protocol fees are charged.** `multi::withdraw_split` transfers the full `amount` directly to the recipient without calling `fees::apply_fee`, and `SplitStream` carries no `fee_bps` field. | `multi::withdraw_split` (`src/multi.rs`) |
+| **Split streams** | Charges `fees::apply_fee(amount, stream.fee_bps)`. `SplitStream.fee_bps` is snapshotted from the global default when the split is created (the entrypoint takes no fee parameter), and per-token overrides are not consulted. The fee is paid to the collector only when one is configured; otherwise the full `amount` reaches the recipient. | `multi::withdraw_split` (`src/multi.rs`) |
 
 ## Split streams
 
@@ -118,6 +122,11 @@ A split stream (`SplitStream` in `src/multi.rs`) escrows a single `total_amount`
 on-chain and streams it linearly across multiple recipients according to
 integer weights.
 
+- **Shared creation guards:** `create_split_stream` applies the same guards as
+  `create_stream` — global pause, blocked-token allowlist, the per-sender active
+  stream limit, the creation cooloff, and the admin-configured minimum duration
+  and amount. A new split counts against the sender's stream limit until it
+  settles or is cancelled.
 - **Recipients & weights:** `create_split_stream` requires at least 2 recipients,
   `recipients.len() == weights.len()`, every `weight > 0`, no recipient equal to
   `sender`, and a valid token trustline for each recipient. `total_weight` is the
@@ -224,6 +233,7 @@ data     = vec-encoded payload fields
 | `resumed`   | `resume`              | `stream_id`, `sender`, `end_time`, `timestamp` |
 | `withdrawn` | `withdraw`            | `stream_id`, `recipient`, `amount`, `timestamp` |
 | `withdrawn_to` | `withdraw_to`      | `stream_id`, `recipient`, `destination`, `amount`, `timestamp` |
+| `created_memo` | `create_stream_with_memo` | `stream_id`, `memo` (`Bytes`), `timestamp` |
 | `settled`   | `withdraw` / `withdraw_to` (full) or `settle` | `stream_id`, `recipient`, `total_amount`, `timestamp` |
 | `cancelled` | `cancel_stream`       | `stream_id`, `cancelled_by`, `returned_amount`, `released_amount`, `timestamp` |
 | `rejected`  | `reject_stream`       | `stream_id`, `recipient`, `returned_amount`, `timestamp` |

@@ -151,6 +151,10 @@ describe('SOROBAN_ERROR_MAPPING', () => {
       'ContractNotFound',
       'StreamNotFound',
       'StreamAlreadyExists',
+      'AmountTooLarge',
+      'AmountTooSmall',
+      'InvalidDuration',
+      'MemoTooLong',
       'Unknown',
     ];
 
@@ -172,6 +176,10 @@ describe('SOROBAN_ERROR_MAPPING', () => {
     expect(SOROBAN_ERROR_MAPPING['ContractNotFound']).toBe('SOROBAN_CONTRACT_NOT_FOUND');
     expect(SOROBAN_ERROR_MAPPING['StreamNotFound']).toBe('SOROBAN_STREAM_NOT_FOUND');
     expect(SOROBAN_ERROR_MAPPING['StreamAlreadyExists']).toBe('SOROBAN_STREAM_ALREADY_EXISTS');
+    expect(SOROBAN_ERROR_MAPPING['AmountTooLarge']).toBe('AMOUNT_TOO_LARGE');
+    expect(SOROBAN_ERROR_MAPPING['AmountTooSmall']).toBe('AMOUNT_TOO_SMALL');
+    expect(SOROBAN_ERROR_MAPPING['InvalidDuration']).toBe('INVALID_STREAM_DURATION');
+    expect(SOROBAN_ERROR_MAPPING['MemoTooLong']).toBe('STREAM_MEMO_TOO_LONG');
     expect(SOROBAN_ERROR_MAPPING['Unknown']).toBe('SOROBAN_UNKNOWN');
   });
 });

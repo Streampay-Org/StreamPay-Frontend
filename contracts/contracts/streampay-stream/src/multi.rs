@@ -2,8 +2,8 @@ use core::cmp::{max, min};
 use soroban_sdk::{contractevent, contracttype, token, Address, Env, Vec};
 
 use crate::error::Error;
-use crate::storage;
-use crate::storage::StreamStatus;
+use crate::storage::{self, StreamStatus};
+use crate::{cooloff, events, fees, limits};
 
 // ── Data types ─────────────────────────────────────────────────────────
 
@@ -32,6 +32,11 @@ pub struct SplitStream {
     pub total_paused_duration: u64,
     pub total_weight: u64,
     pub recipients: Vec<RecipientAllocation>,
+    /// Fee in basis points charged on recipient withdrawals.
+    ///
+    /// `create_split_stream` has no `fee_bps` parameter, so the global default
+    /// in force at creation is snapshotted onto the record.
+    pub fee_bps: u32,
 }
 
 /// Index into the recipients vec — returned by find_recipient_index.
@@ -351,6 +356,8 @@ pub fn create_split_stream(
 ) -> Result<u64, Error> {
     require_not_paused(&env)?;
     sender.require_auth();
+    limits::check_sender_limit(&env, &sender)?;
+    cooloff::check_and_update_cooloff(&env, &sender)?;
 
     if total_amount <= 0 {
         return Err(Error::InvalidAmount);
@@ -405,6 +412,7 @@ pub fn create_split_stream(
     let duration = end_time
         .checked_sub(start_time)
         .ok_or(Error::InvalidTimeRange)?;
+    limits::check_min_stream_params(&env, total_amount, duration)?;
     let id = next_split_id(&env);
     let contract_address = env.current_contract_address();
 
@@ -437,9 +445,11 @@ pub fn create_split_stream(
         total_paused_duration: 0,
         total_weight,
         recipients: allocations,
+        fee_bps: fees::get_default_fee_bps(&env),
     };
 
     set_split(&env, id, &stream);
+    limits::increment_sender_stream_count(&env, &stream.sender);
     emit_created(&env, id, &stream.sender, &stream.token, total_amount, now);
 
     Ok(id)
@@ -494,6 +504,7 @@ pub fn withdraw_split(
 
     if stream.total_released == stream.total_amount {
         stream.status = StreamStatus::Settled;
+        limits::decrement_sender_stream_count(&env, &stream.sender);
     }
 
     // ── Fee split ──────────────────────────────────────────────────────────
@@ -700,6 +711,7 @@ pub fn cancel_split_stream(env: Env, stream_id: u64) -> Result<SplitStream, Erro
     stream.status = StreamStatus::Cancelled;
     stream.last_update = now;
 
+    limits::decrement_sender_stream_count(&env, &stream.sender);
     set_split(&env, stream_id, &stream);
     emit_cancelled(
         &env,

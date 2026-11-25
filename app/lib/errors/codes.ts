@@ -525,6 +525,42 @@ export const ERROR_REGISTRY: Record<ErrorCode, ErrorCodeMetadata> = {
     typeUri: `${BASE_TYPE_URI}/amount-too-large`,
   },
 
+  AMOUNT_TOO_SMALL: {
+    code: "AMOUNT_TOO_SMALL",
+    httpStatus: 422,
+    category: "validation",
+    title: "Amount Below Minimum",
+    userMessage: "The stream amount is below the minimum allowed for this contract.",
+    technicalDescription:
+      "Contract Error::AmountTooSmall (29): total_amount is below the admin-configured minimum stream amount",
+    retry: { retryable: false },
+    typeUri: `${BASE_TYPE_URI}/amount-too-small`,
+  },
+
+  INVALID_STREAM_DURATION: {
+    code: "INVALID_STREAM_DURATION",
+    httpStatus: 422,
+    category: "validation",
+    title: "Stream Duration Too Short",
+    userMessage: "The stream duration is shorter than the minimum allowed.",
+    technicalDescription:
+      "Contract Error::InvalidDuration (28): stream duration is below the admin-configured minimum",
+    retry: { retryable: false },
+    typeUri: `${BASE_TYPE_URI}/invalid-stream-duration`,
+  },
+
+  STREAM_MEMO_TOO_LONG: {
+    code: "STREAM_MEMO_TOO_LONG",
+    httpStatus: 422,
+    category: "validation",
+    title: "Stream Memo Too Long",
+    userMessage: "The stream memo must be 64 bytes or fewer.",
+    technicalDescription:
+      "Contract Error::MemoTooLong (30): stream memo exceeds the maximum length of 64 bytes",
+    retry: { retryable: false },
+    typeUri: `${BASE_TYPE_URI}/stream-memo-too-long`,
+  },
+
   SETTLEMENT_FAILED: {
     code: "SETTLEMENT_FAILED",
     httpStatus: 500,
@@ -865,6 +901,9 @@ export const BACKEND_ERROR_CODE_MAPPING: Record<string, ErrorCode> = {
   // Processing errors
   STREAM_CREATION_FAILED: "STREAM_CREATION_FAILED",
   AMOUNT_TOO_LARGE: "AMOUNT_TOO_LARGE",
+  AMOUNT_TOO_SMALL: "AMOUNT_TOO_SMALL",
+  INVALID_STREAM_DURATION: "INVALID_STREAM_DURATION",
+  STREAM_MEMO_TOO_LONG: "STREAM_MEMO_TOO_LONG",
   SETTLEMENT_FAILED: "SETTLEMENT_FAILED",
   WITHDRAWAL_FAILED: "WITHDRAWAL_FAILED",
   INTERNAL_ERROR: "INTERNAL_ERROR",
@@ -890,6 +929,9 @@ export const SOROBAN_ERROR_MAPPING: Record<string, ErrorCode> = {
   'StreamNotFound': 'SOROBAN_STREAM_NOT_FOUND',
   'StreamAlreadyExists': 'SOROBAN_STREAM_ALREADY_EXISTS',
   'AmountTooLarge': 'AMOUNT_TOO_LARGE',
+  'AmountTooSmall': 'AMOUNT_TOO_SMALL',
+  'InvalidDuration': 'INVALID_STREAM_DURATION',
+  'MemoTooLong': 'STREAM_MEMO_TOO_LONG',
   'Unknown': 'SOROBAN_UNKNOWN',
 };
 

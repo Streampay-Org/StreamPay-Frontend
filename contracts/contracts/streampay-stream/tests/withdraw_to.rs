@@ -10,10 +10,20 @@ use soroban_sdk::testutils::{
     Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke,
 };
 use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
-use soroban_sdk::{contract, contractimpl, Address, Env, IntoVal, Symbol, Val};
+use soroban_sdk::{contract, contractimpl, Address, Env, IntoVal, Symbol, TryFromVal, Val};
 use streampay_stream::{Contract, ContractClient, Error, StreamStatus};
 
 // ── Shared fixture ────────────────────────────────────────────────────────────
+
+/// Decodes the symbol at `index` of an event's topic list, if present.
+///
+/// `Val` is not `PartialEq` in Soroban SDK 23, so topics are compared as
+/// decoded [`Symbol`]s instead of raw host values.
+fn topic_symbol(env: &Env, topics: &soroban_sdk::Vec<Val>, index: u32) -> Option<Symbol> {
+    topics
+        .get(index)
+        .and_then(|value| Symbol::try_from_val(env, &value).ok())
+}
 
 struct TestFixture {
     env: Env,
@@ -119,6 +129,10 @@ fn withdraw_to_transfers_to_destination_and_emits_withdrawn_to_event() {
     let withdrawn = f.client.withdraw_to(&id, &300i128, &f.destination);
     assert_eq!(withdrawn, 300);
 
+    // `Events::all` only reports the events of the most recent invocation, so
+    // capture them before any further contract call.
+    let events = f.env.events().all();
+
     let tkn = TokenClient::new(&f.env, &f.token);
     assert_eq!(tkn.balance(&f.destination), 300);
     assert_eq!(tkn.balance(&f.recipient), 0);
@@ -130,16 +144,15 @@ fn withdraw_to_transfers_to_destination_and_emits_withdrawn_to_event() {
     assert_eq!(stream.last_update, 1_500);
 
     // Verify the emitted `("stream", "withdrawn_to")` event includes `destination`.
-    let events = f.env.events().all();
-    let withdrawn_to_topic: Val = Symbol::new(&f.env, "withdrawn_to").into_val(&f.env);
-    let stream_topic: Val = Symbol::new(&f.env, "stream").into_val(&f.env);
+    let withdrawn_to_topic = Symbol::new(&f.env, "withdrawn_to");
+    let stream_topic = Symbol::new(&f.env, "stream");
 
     let matching_count = events
         .iter()
         .filter(|e| {
             e.1.len() == 2
-                && e.1.get(0) == Some(stream_topic)
-                && e.1.get(1) == Some(withdrawn_to_topic)
+                && topic_symbol(&f.env, &e.1, 0) == Some(stream_topic.clone())
+                && topic_symbol(&f.env, &e.1, 1) == Some(withdrawn_to_topic.clone())
         })
         .count();
     assert_eq!(matching_count, 1);
@@ -303,6 +316,7 @@ fn withdraw_to_final_withdrawal_settles_stream_and_decrements_sender_count() {
     f.env.ledger().set_timestamp(2_000);
     let final_amt = f.client.withdraw_to(&id, &600i128, &f.destination);
     assert_eq!(final_amt, 600);
+    let events = f.env.events().all();
 
     let stream = f.client.get_stream(&id);
     assert_eq!(stream.status, StreamStatus::Settled);
@@ -314,17 +328,18 @@ fn withdraw_to_final_withdrawal_settles_stream_and_decrements_sender_count() {
     assert_eq!(tkn.balance(&f.contract_id), 0);
 
     // Both `withdrawn_to` and `settled` events are emitted.
-    let events = f.env.events().all();
-    let stream_topic: Val = Symbol::new(&f.env, "stream").into_val(&f.env);
-    let withdrawn_to_topic: Val = Symbol::new(&f.env, "withdrawn_to").into_val(&f.env);
-    let settled_topic: Val = Symbol::new(&f.env, "settled").into_val(&f.env);
+    let stream_topic = Symbol::new(&f.env, "stream");
+    let withdrawn_to_topic = Symbol::new(&f.env, "withdrawn_to");
+    let settled_topic = Symbol::new(&f.env, "settled");
 
     assert!(events
         .iter()
-        .any(|e| e.1.get(0) == Some(stream_topic) && e.1.get(1) == Some(withdrawn_to_topic)));
+        .any(|e| topic_symbol(&f.env, &e.1, 0) == Some(Symbol::new(&f.env, "stream"))
+            && topic_symbol(&f.env, &e.1, 1) == Some(Symbol::new(&f.env, "withdrawn_to"))));
     assert!(events
         .iter()
-        .any(|e| e.1.get(0) == Some(stream_topic) && e.1.get(1) == Some(settled_topic)));
+        .any(|e| topic_symbol(&f.env, &e.1, 0) == Some(Symbol::new(&f.env, "stream"))
+            && topic_symbol(&f.env, &e.1, 1) == Some(Symbol::new(&f.env, "settled"))));
 
     // Subsequent withdrawal on settled stream returns AlreadySettled.
     let err = f
@@ -429,20 +444,22 @@ fn withdraw_existing_behaviour_and_event_unchanged() {
 
     let amount = f.client.withdraw(&f.recipient, &id, &300i128);
     assert_eq!(amount, 300);
+    let events = f.env.events().all();
 
     let tkn = TokenClient::new(&f.env, &f.token);
     assert_eq!(tkn.balance(&f.recipient), 300);
     assert_eq!(tkn.balance(&f.destination), 0);
 
-    let events = f.env.events().all();
-    let stream_topic: Val = Symbol::new(&f.env, "stream").into_val(&f.env);
-    let withdrawn_topic: Val = Symbol::new(&f.env, "withdrawn").into_val(&f.env);
-    let withdrawn_to_topic: Val = Symbol::new(&f.env, "withdrawn_to").into_val(&f.env);
+    let stream_topic = Symbol::new(&f.env, "stream");
+    let withdrawn_topic = Symbol::new(&f.env, "withdrawn");
+    let withdrawn_to_topic = Symbol::new(&f.env, "withdrawn_to");
 
     assert!(events
         .iter()
-        .any(|e| e.1.get(0) == Some(stream_topic) && e.1.get(1) == Some(withdrawn_topic)));
+        .any(|e| topic_symbol(&f.env, &e.1, 0) == Some(Symbol::new(&f.env, "stream"))
+            && topic_symbol(&f.env, &e.1, 1) == Some(Symbol::new(&f.env, "withdrawn"))));
     assert!(!events
         .iter()
-        .any(|e| e.1.get(0) == Some(stream_topic) && e.1.get(1) == Some(withdrawn_to_topic)));
+        .any(|e| topic_symbol(&f.env, &e.1, 0) == Some(Symbol::new(&f.env, "stream"))
+            && topic_symbol(&f.env, &e.1, 1) == Some(Symbol::new(&f.env, "withdrawn_to"))));
 }

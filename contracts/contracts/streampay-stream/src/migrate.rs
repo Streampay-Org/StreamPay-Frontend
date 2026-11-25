@@ -242,10 +242,22 @@ struct LegacyStreamV2 {
 /// Records are rewritten in bounded batches of [`MIGRATION_BATCH_SIZE`].
 /// Already-migrated v3 records and missing IDs are skipped (idempotent).
 fn migrate_stream_curves_step(env: &Env) -> bool {
+    let start: u64 = env
+        .storage()
+        .instance()
+        .get(&VersionKey::MigrationCursor)
+        .unwrap_or(1);
 
+    let last = storage::peek_next_stream_id(env);
 
+    if start >= last {
+        env.storage()
+            .instance()
+            .remove(&VersionKey::MigrationCursor);
+        return true;
     }
 
+    let end = min(start.saturating_add(MIGRATION_BATCH_SIZE), last);
     let mut id = start;
     while id < end {
         let key = DataKey::Stream(id);
@@ -268,6 +280,7 @@ fn migrate_stream_curves_step(env: &Env) -> bool {
                         paused_at: legacy.paused_at,
                         total_paused_duration: legacy.total_paused_duration,
                         fee_bps: legacy.fee_bps,
+                        cliff_time: 0,
                         curve: ReleaseCurve::Linear,
                     };
                     storage::set_stream(env, id, &upgraded);
@@ -277,9 +290,18 @@ fn migrate_stream_curves_step(env: &Env) -> bool {
         id = id.saturating_add(1);
     }
 
+    if end >= last {
+        env.storage()
+            .instance()
+            .remove(&VersionKey::MigrationCursor);
+        true
+    } else {
+        env.storage()
+            .instance()
+            .set(&VersionKey::MigrationCursor, &end);
+        false
     }
 }
-
 // ── Migration engine ─────────────────────────────────────────────────────────
 
 /// Runs all pending migration steps to bring the contract's storage up
@@ -347,16 +369,13 @@ pub fn migrate_internal(env: &Env, caller: &Address) -> Result<(), Error> {
         v = 2;
     }
 
-    // Step 2 → 3: initialise `cliff_time = 0` on all existing `Stream` records
-    // so pre-existing streams remain linearly withdrawable without a cliff.
-    if v == 2 && migrate_streams_cliff_step(env) {
+    // Step 2 → 3: initialise `cliff_time = 0` on existing `Stream` records so
+    // pre-existing streams remain linearly withdrawable without a cliff, then
+    // backfill `curve: ReleaseCurve::Linear` on legacy v2 Stream records in
+    // bounded batches.
+    if v == 2 && migrate_streams_cliff_step(env) && migrate_stream_curves_step(env) {
         set_version(env, 3);
         v = 3;
-    }
-
-    // Step 2 → 3: backfill `curve: ReleaseCurve::Linear` on legacy v2 Stream
-    // records in bounded batches.
-    if v == 2 && migrate_stream_curves_step(env) {
     }
 
     // ── Future steps ───────────────────────────────────────────────────
@@ -581,7 +600,7 @@ mod tests {
         // Just verify get_stream returns NotFound for non-existent stream
         // (the contract is still functional).
         // Actually we can just verify no panic by calling a read-only view.
-        let paused = sp_client.is_paused();
+        let paused = env.as_contract(&contract_id, || storage::is_paused(&env));
         assert!(
             !paused,
             "paused flag must still be readable after migration"
@@ -617,6 +636,7 @@ mod tests {
                 total_paused_duration: 0,
                 fee_bps: 0,
                 cliff_time: 1_500, // non-zero sentinel to verify migration resets it to 0
+                curve: ReleaseCurve::Linear,
             };
             storage::set_stream(&env, stream_id, &stream);
             storage::set_next_stream_id_for_test(&env, 2);

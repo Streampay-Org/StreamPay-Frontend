@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn version_conversion_roundtrip() {
-        let versions = vec![0, 1_000_000, 1_002_003, 255_255_255];
+        let versions = [0u32, 1_000_000, 1_002_003, 255_255_255];
         for v in versions {
             let (major, minor, patch) = version_to_parts(v);
             assert_eq!(version_from_parts(major, minor, patch), v);
@@ -437,9 +437,7 @@ mod tests {
         let client = handshake_client(&env);
         let counterparty = Address::generate(&env);
 
-        let timestamp = client
-            .handshake_init(&admin, &counterparty, &1_000_000, &1_000_000)
-            .unwrap();
+        let timestamp = client.handshake_init(&admin, &counterparty, &1_000_000, &1_000_000);
 
         let state = client.get_handshake(&counterparty);
         assert!(state.is_some());
@@ -492,9 +490,8 @@ mod tests {
 
         // They support 1.0.0 to 1.5.0, we support 1.0.0 to 1.0.0
         // Should negotiate to 1.0.0
-        let negotiated = client
-            .handshake_accept(&admin, &counterparty, &1_000_000, &1_005_000)
-            .unwrap();
+        let negotiated =
+            client.handshake_accept(&admin, &counterparty, &1_000_000, &1_005_000);
 
         assert_eq!(negotiated, 1_000_000);
 
@@ -604,7 +601,7 @@ mod tests {
         client.handshake_accept(&admin, &counterparty, &1_000_000, &1_000_000);
         assert!(client.is_handshake_complete(&counterparty));
 
-        client.handshake_remove(&admin, &counterparty).unwrap();
+        client.handshake_remove(&admin, &counterparty);
         assert!(!client.is_handshake_complete(&counterparty));
     }
 

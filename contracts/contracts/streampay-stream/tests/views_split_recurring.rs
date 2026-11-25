@@ -37,6 +37,8 @@ fn setup() -> TestContext {
         .address();
 
     client.initialize(&admin);
+    // Pagination fixtures need more than the default per-sender limit.
+    client.set_max_streams_per_sender(&admin, &1_000u64);
 
     let sac = StellarAssetClient::new(&env, &token);
     sac.mint(&sender_a, &1_000_000_000);
