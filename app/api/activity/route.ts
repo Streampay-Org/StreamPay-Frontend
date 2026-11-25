@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { decodeCompositeCursor, getStore } from "@/app/lib/db";
+import { buildLinkHeader, buildUrlWithParams } from "@/app/lib/link-header";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
 import { getLimitForRoute } from "@/app/lib/rate-limit-config";
@@ -267,11 +268,31 @@ async function handleActivityGet(request: Request) {
       lagMs: activityTimeline.getLagMs(),
     });
 
-    return NextResponse.json({
+    const linkParams = {
+      limit,
+      streamId,
+      type,
+      from: fromParam,
+      to: toParam,
+      cursor,
+    };
+    const selfLink = buildUrlWithParams("/api/activity", linkParams);
+    const linkHeader = buildLinkHeader({
+      baseUrl: "/api/activity",
+      params: linkParams,
+      next: queryResult.meta.nextCursor,
+      self: true,
+    });
+
+    const response = NextResponse.json({
       data: enrichedData,
       meta: queryResult.meta,
-      links: { self: `/api/activity?limit=${limit}` },
+      links: { self: selfLink },
     });
+    if (linkHeader) {
+      response.headers.set("Link", linkHeader);
+    }
+    return response;
   });
 }
 

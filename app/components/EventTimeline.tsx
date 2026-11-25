@@ -312,10 +312,10 @@ export function EventTimeline({ events, hasMore, onLoadMore, loadingMore, networ
                         )}
                       </div>
                     </div>
-                </div>
-              </VirtualListItem>
-            );
-          })}
+                  </div>
+                </VirtualListItem>
+              );
+            })}
           </ul>
           {hasMore && onLoadMore && (
             <div className="event-panel__load-more">

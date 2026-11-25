@@ -123,10 +123,12 @@ function isHostAllowed(hostname: string, rules: AllowedHostRule[]): boolean {
  * Fail-closed: returns `false` when `RECEIPT_LOGO_ALLOWED_HOSTS` is unset
  * or empty so arbitrary third-party hosts cannot be used as tracking pixels.
  */
-export function isSafeLogoUrl(value: string | null | undefined): boolean {
-  if (typeof value !== "string" || value.trim() === "") return false;
+export function isSafeLogoUrl(
+  value: string | null | undefined,
+  rules = getAllowedLogoHosts(),
+): boolean {
+  if (typeof value !== "string" || !/^https:\/\//i.test(value.trim())) return false;
 
-  const rules = getAllowedLogoHosts();
   if (rules.length === 0) return false;
 
   try {
@@ -145,15 +147,18 @@ export function isSafeLogoUrl(value: string | null | undefined): boolean {
  * Invalid logo URLs and colours fall back to safe defaults, and the
  * message is trimmed and length-capped.
  */
-export function normalizeReceiptTheme(input: ReceiptThemeInput = {}): ReceiptTheme {
+export function normalizeReceiptTheme(
+  input: ReceiptThemeInput = {},
+  logoHosts = getAllowedLogoHosts(),
+): ReceiptTheme {
   const theme: ReceiptTheme = {
     accentColor: isValidAccentColor(input.accentColor)
       ? input.accentColor!.trim().toLowerCase()
       : DEFAULT_ACCENT_COLOR,
   };
 
-  if (isSafeLogoUrl(input.logoUrl)) {
-    theme.logoUrl = input.logoUrl!.trim();
+  if (isSafeLogoUrl(input.logoUrl, logoHosts)) {
+    theme.logoUrl = new URL(input.logoUrl!.trim()).href;
   }
 
   const message = typeof input.message === "string" ? input.message.trim() : "";
@@ -165,4 +170,28 @@ export function normalizeReceiptTheme(input: ReceiptThemeInput = {}): ReceiptThe
   }
 
   return theme;
+}
+
+export function validateReceiptTheme(
+  input: unknown,
+  logoHosts = getAllowedLogoHosts(),
+): Partial<Record<keyof ReceiptThemeInput | "body", string>> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { body: "Receipt theme must be a JSON object." };
+  }
+
+  const { accentColor, logoUrl, message } = input as Record<string, unknown>;
+  const errors: Partial<Record<keyof ReceiptThemeInput, string>> = {};
+  if (accentColor != null && (typeof accentColor !== "string" || !isValidAccentColor(accentColor))) {
+    errors.accentColor = "Enter a 3- or 6-digit hex colour, such as #1f6feb.";
+  }
+  if (logoUrl != null && (
+    typeof logoUrl !== "string" || (logoUrl.trim() && !isSafeLogoUrl(logoUrl, logoHosts))
+  )) {
+    errors.logoUrl = "Enter an HTTPS image URL from an approved host.";
+  }
+  if (message != null && (typeof message !== "string" || message.length > MAX_MESSAGE_LENGTH)) {
+    errors.message = `Enter a message of at most ${MAX_MESSAGE_LENGTH} characters.`;
+  }
+  return errors;
 }

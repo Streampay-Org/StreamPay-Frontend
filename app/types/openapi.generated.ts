@@ -273,9 +273,9 @@ export interface paths {
         /**
          * Delete a payment stream (v1, deprecated)
          * @deprecated
-         * @description Permanently deletes a stream. **Deprecated** — use `DELETE /api/v2/streams/{id}` instead.
+         * @description Soft deletes a stream and marks it deletedAt. **Deprecated** — use `DELETE /api/v2/streams/{id}` instead.
          *
-         *     A stream must be in `draft` or `ended` status before it can be deleted. Attempting to delete an `active` or `paused` stream returns 409. Cache is invalidated on success.
+         *     Only streams in `draft`, `cancelled`, or `withdrawn` with a succeeded withdrawal can be deleted. Attempting to delete an `ended` stream returns 409 `FUNDS_PENDING_WITHDRAWAL`. Deleting an `active` or `paused` stream returns 409 `STREAM_INACTIVE_STATE`. Deleting requires the actor to be the senderAddress or an organization owner (returns 403 otherwise). Already-deleted streams return 204 idempotently.
          */
         delete: operations["deleteStream"];
         options?: never;
@@ -568,7 +568,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a payment stream (v2)
-         * @description Permanently deletes a stream. The stream must be in `draft` or `ended` status; attempting to delete an `active` or `paused` stream returns 409.
+         * @description Soft deletes a stream and marks it deletedAt. Only streams in `draft`, `cancelled`, or `withdrawn` with a succeeded withdrawal can be deleted. Attempting to delete an `ended` stream returns 409 `FUNDS_PENDING_WITHDRAWAL`. Deleting an `active` or `paused` stream returns 409 `STREAM_INACTIVE_STATE`. When a verified actor is provided, deletion requires the actor to be the senderAddress or an organization owner (returns 403 otherwise). Already-deleted streams return 204 idempotently.
          */
         delete: operations["deleteStreamV2"];
         options?: never;
@@ -1273,6 +1273,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgId}/receipt-theme": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization member wallet address. Must match the bearer token when both are supplied. */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Organization identifier */
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read the organization receipt theme
+         * @description Any organization member can read the theme.
+         */
+        get: operations["getOrgReceiptTheme"];
+        /**
+         * Replace the organization receipt theme
+         * @description Only organization owners can replace the theme. Changes are recorded in the audit log.
+         */
+        put: operations["updateOrgReceiptTheme"];
+        post?: never;
+        /**
+         * Reset the organization receipt theme
+         * @description Only organization owners can reset the theme. The reset restores the default receipt and is recorded in the audit log.
+         */
+        delete: operations["resetOrgReceiptTheme"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgId}/policy": {
         parameters: {
             query?: never;
@@ -1835,6 +1869,31 @@ export interface components {
         };
         UpdateOrgPolicyRequest: {
             policy: components["schemas"]["StreamPolicy"];
+        };
+        OrgReceiptThemeInput: {
+            /** @description Three or six hex digits prefixed with #. Defaults to #1f6feb. */
+            accentColor?: string | null;
+            /** @description Absolute HTTPS URL on an approved host. Empty or null clears the logo. */
+            logoUrl?: string | null;
+            /** @description Plain-text message. The server counts UTF-16 code units. */
+            message?: string | null;
+        };
+        OrgReceiptThemeResponse: {
+            data: {
+                orgId: string;
+                theme: {
+                    accentColor: string;
+                    /** Format: uri */
+                    logoUrl?: string;
+                    message?: string;
+                } | null;
+                canEdit: boolean;
+                /** @description Comma-separated host patterns for editor validation. */
+                logoAllowedHosts: string;
+            };
+            links: {
+                self: string;
+            };
         };
         OrgPolicyResponse: {
             data: {
@@ -3146,7 +3205,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Stream deleted. No response body. */
+            /** @description Stream deleted or already deleted. No response body. */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -3171,6 +3230,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
+            403: components["responses"]["403"];
             404: components["responses"]["404"];
             409: components["responses"]["409"];
             /** @description Rate limit exceeded. */
@@ -4047,7 +4107,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Stream deleted. No response body. */
+            /** @description Stream deleted or already deleted. No response body. */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -4055,6 +4115,7 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["401"];
+            403: components["responses"]["403"];
             404: components["responses"]["404"];
             409: components["responses"]["409"];
             500: components["responses"]["500"];
@@ -5043,27 +5104,6 @@ export interface operations {
             400: components["responses"]["400"];
             401: components["responses"]["401"];
             422: components["responses"]["422"];
-            /** @description Daily creation limit or configured stream quota exceeded. Retry-After indicates when the applicable quota resets. */
-            429: {
-                headers: {
-                    /** @description Seconds until the daily limit resets at UTC midnight or monthly volume quota resets at the next UTC month. */
-                    "Retry-After"?: number;
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "error": {
-                     *         "code": "QUOTA_MONTHLY_VOLUME_EXCEEDED",
-                     *         "message": "The user has used 1000000000 of 1000000000 monthly XLM stroops.",
-                     *         "request_id": "req_01HZ9ABCDEF"
-                     *       }
-                     *     }
-                     */
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
-            };
-            500: components["responses"]["500"];
         };
     };
     getExportsHealth: {
@@ -5337,6 +5377,170 @@ export interface operations {
                 };
             };
             500: components["responses"]["500"];
+        };
+    };
+    getOrgReceiptTheme: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization member wallet address. Must match the bearer token when both are supplied. */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Organization identifier */
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current theme after the operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgReceiptThemeResponse"];
+                };
+            };
+            /** @description Organization membership or owner access is required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Organization not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    updateOrgReceiptTheme: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization member wallet address. Must match the bearer token when both are supplied. */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Organization identifier */
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrgReceiptThemeInput"];
+            };
+        };
+        responses: {
+            /** @description Current theme after the operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgReceiptThemeResponse"];
+                };
+            };
+            /** @description Malformed JSON */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Organization membership or owner access is required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Organization not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Invalid receipt theme fields */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: {
+                            /** @constant */
+                            code: "VALIDATION_ERROR";
+                            message: string;
+                            request_id: string;
+                            fields: {
+                                [key: string]: string;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+    };
+    resetOrgReceiptTheme: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization member wallet address. Must match the bearer token when both are supplied. */
+                "Actor-Wallet-Address"?: string;
+            };
+            path: {
+                /** @description Organization identifier */
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current theme after the operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgReceiptThemeResponse"];
+                };
+            };
+            /** @description Organization membership or owner access is required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Organization not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
         };
     };
     getOrgPolicy: {

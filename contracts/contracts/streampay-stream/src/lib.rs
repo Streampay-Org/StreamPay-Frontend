@@ -50,7 +50,7 @@ pub use snapshot_diff::{SnapshotDiff, StreamSnapshot};
 use soroban_sdk::contracttype;
 use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env};
 pub(crate) use storage::DataKey;
-pub use storage::{Milestone, ReleaseCurve, Stream, StreamStatus, MAX_MILESTONES};
+pub use storage::{Milestone, ReleaseCurve, Stream, StreamStatus, MAX_MILESTONES, MAX_OPERATORS};
 pub use views::{RecurringStreamPage, SplitStreamPage};
 
 /// Maximum number of stream IDs accepted in a single [`Contract::withdraw_many`] call.
@@ -1656,6 +1656,68 @@ impl Contract {
         Ok(storage::get_withdrawer_allowlist(&env, stream_id))
     }
 
+    /// Adds `operator` to the per-stream pause/resume operator list.
+    ///
+    /// Only the stream sender may manage operators. Adding an address that is
+    /// already present is a no-op (idempotent). The stream sender itself cannot
+    /// be added as an operator, and the list size is bounded by
+    /// [`storage::MAX_OPERATORS`].
+    ///
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::InvalidState`] if `operator` is the stream sender.
+    /// @custom:error [`Error::StreamLimitExceeded`] if the operator list is at capacity.
+    ///
+    /// @custom:auth Requires authorisation from the stream's `sender`.
+    pub fn set_operator(env: Env, stream_id: u64, operator: Address) -> Result<(), Error> {
+        let stream = get_existing_stream(&env, stream_id)?;
+        stream.sender.require_auth();
+        if operator == stream.sender {
+            return Err(Error::InvalidState);
+        }
+        storage::add_operator(&env, stream_id, &operator)?;
+        events::operator_set(
+            &env,
+            stream_id,
+            &stream.sender,
+            &operator,
+            env.ledger().timestamp(),
+        );
+        Ok(())
+    }
+
+    /// Removes `operator` from the per-stream pause/resume operator list.
+    ///
+    /// Only the stream sender may manage operators. Removing an address that is
+    /// not in the list is a no-op (idempotent). Removal immediately revokes the
+    /// operator's ability to pause or resume the stream.
+    ///
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    ///
+    /// @custom:auth Requires authorisation from the stream's `sender`.
+    pub fn remove_operator(env: Env, stream_id: u64, operator: Address) -> Result<(), Error> {
+        let stream = get_existing_stream(&env, stream_id)?;
+        stream.sender.require_auth();
+        storage::remove_operator(&env, stream_id, &operator);
+        events::operator_removed(
+            &env,
+            stream_id,
+            &stream.sender,
+            &operator,
+            env.ledger().timestamp(),
+        );
+        Ok(())
+    }
+
+    /// Returns the current pause/resume operator list for a stream.
+    ///
+    /// Returns an empty list if no operators have been set.
+    ///
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    pub fn get_operators(env: Env, stream_id: u64) -> Result<soroban_sdk::Vec<Address>, Error> {
+        get_existing_stream(&env, stream_id)?;
+        Ok(storage::get_operators(&env, stream_id))
+    }
+
     /// Proposes transferring a stream's recipient role to `new_recipient`.
     ///
     /// This is step 1 of the two-step recipient transfer flow. Only the
@@ -1878,6 +1940,83 @@ impl Contract {
         storage::set_stream(&env, stream_id, &stream);
 
         events::resumed(&env, stream_id, &stream.sender, stream.end_time, now);
+
+        Ok(stream)
+    }
+
+    /// Pauses an active stream on behalf of the sender or an authorized
+    /// per-stream operator.
+    ///
+    /// Succeeds if `caller` is the stream sender or is present in the stream's
+    /// operator list (configured via [`Self::set_operator`]).
+    ///
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::Unauthorized`] if `caller` is neither the sender nor an operator.
+    /// @custom:error [`Error::InvalidState`] if the stream is not `Active`.
+    ///
+    /// @custom:auth Requires authorisation from `caller`.
+    pub fn pause_as(env: Env, caller: Address, stream_id: u64) -> Result<Stream, Error> {
+        let mut stream = get_existing_stream(&env, stream_id)?;
+        withdrawer::require_pause_auth(&env, stream_id, &caller, &stream.sender)?;
+
+        if stream.status != StreamStatus::Active {
+            return Err(Error::InvalidState);
+        }
+
+        let now = env.ledger().timestamp();
+        stream.paused_at = now;
+        stream.last_update = now;
+        stream.status = StreamStatus::Paused;
+
+        storage::set_stream(&env, stream_id, &stream);
+
+        events::paused(&env, stream_id, &caller, stream.paused_at, now);
+
+        Ok(stream)
+    }
+
+    /// Resumes a previously paused stream on behalf of the sender or an
+    /// authorized per-stream operator, extending `end_time` by the paused span.
+    ///
+    /// Succeeds if `caller` is the stream sender or is present in the stream's
+    /// operator list (configured via [`Self::set_operator`]).
+    ///
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::Unauthorized`] if `caller` is neither the sender nor an operator.
+    /// @custom:error [`Error::InvalidState`] if the stream is not `Paused`.
+    /// @custom:error [`Error::InvalidTimeRange`] if time calculation overflows.
+    ///
+    /// @custom:auth Requires authorisation from `caller`.
+    pub fn resume_as(env: Env, caller: Address, stream_id: u64) -> Result<Stream, Error> {
+        let mut stream = get_existing_stream(&env, stream_id)?;
+        withdrawer::require_pause_auth(&env, stream_id, &caller, &stream.sender)?;
+
+        if stream.status != StreamStatus::Paused {
+            return Err(Error::InvalidState);
+        }
+
+        let now = env.ledger().timestamp();
+        let paused_duration = now
+            .checked_sub(stream.paused_at)
+            .ok_or(Error::InvalidTimeRange)?;
+
+        stream.total_paused_duration = stream
+            .total_paused_duration
+            .checked_add(paused_duration)
+            .ok_or(Error::InvalidTimeRange)?;
+
+        stream.end_time = stream
+            .end_time
+            .checked_add(paused_duration)
+            .ok_or(Error::InvalidTimeRange)?;
+
+        stream.last_update = now;
+        stream.status = StreamStatus::Active;
+        stream.paused_at = 0;
+
+        storage::set_stream(&env, stream_id, &stream);
+
+        events::resumed(&env, stream_id, &caller, stream.end_time, now);
 
         Ok(stream)
     }
@@ -2147,6 +2286,56 @@ impl Contract {
             recipient_payout,
             now,
         );
+
+        Ok(stream)
+    }
+
+    /// Lets the recipient decline a draft stream that was created for them.
+    ///
+    /// Only a stream still in [`StreamStatus::Draft`] can be rejected. The full
+    /// `total_amount` escrowed by `create_draft_stream` is refunded to the
+    /// sender, the stream moves to [`StreamStatus::Cancelled`] (terminal), and
+    /// the sender's active-stream count is decremented exactly as
+    /// [`Contract::cancel_stream`] does. A stream that has been started,
+    /// paused, settled, or cancelled can no longer be rejected.
+    ///
+    /// @param `stream_id` — Numeric ID of the draft stream to reject.
+    ///
+    /// @return The updated [`Stream`] record (status `Cancelled`).
+    ///
+    /// @custom:error [`Error::ContractPaused`] if the global pause flag is set.
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    /// @custom:error [`Error::InvalidState`] if the stream is not in `Draft` status
+    /// (including a second reject of an already-rejected stream).
+    ///
+    /// @custom:auth Requires authorisation from the stream's `recipient`.
+    pub fn reject_stream(env: Env, stream_id: u64) -> Result<Stream, Error> {
+        require_not_paused(&env)?;
+        let mut stream = get_existing_stream(&env, stream_id)?;
+        stream.recipient.require_auth();
+
+        if stream.status != StreamStatus::Draft {
+            return Err(Error::InvalidState);
+        }
+
+        let now = env.ledger().timestamp();
+        // A draft has never vested anything, so the whole escrow goes back.
+        let returned_amount = stream.total_amount;
+
+        #[allow(clippy::needless_borrows_for_generic_args)]
+        token::Client::new(&env, &stream.token).transfer(
+            &env.current_contract_address(),
+            &stream.sender,
+            &returned_amount,
+        );
+
+        stream.status = StreamStatus::Cancelled;
+        stream.last_update = now;
+
+        limits::decrement_sender_stream_count(&env, &stream.sender);
+        storage::set_stream(&env, stream_id, &stream);
+
+        events::rejected(&env, stream_id, &stream.recipient, returned_amount, now);
 
         Ok(stream)
     }

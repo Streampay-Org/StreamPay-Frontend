@@ -1,11 +1,32 @@
 //! # Per-entrypoint authorisation snapshots for `streampay-stream`
 //!
 //! Integration tests that verify every state-changing entrypoint enforces
-//! the correct `require_auth` guard.  Each test:
+//! the correct `require_auth` guard.
 //!
-//! 1. Sets up the contract with `mock_all_auths()` so that setup succeeds.
-//! 2. Clears all mocked auths before the entrypoint under test.
-//! 3. Asserts the entrypoint panics with `HostError: Error(Auth, InvalidAction)`.
+//! ## Snapshot categories
+//!
+//! 1. **Missing-auth snapshots** (`auth_snap_{name}`): clear all mocked auths
+//!    with `env.mock_auths(&[])` and assert the entrypoint panics with
+//!    `HostError: Error(Auth, InvalidAction)`.
+//! 2. **Positive auth-address snapshots** (split & recurring): run under
+//!    `mock_all_auths()` and assert `env.auths()` records the exact expected
+//!    signer address and contract function name.
+//! 3. **Wrong-signer snapshots** (split & recurring): mock auth for a different
+//!    address via `MockAuth` and assert auth failure (or explicit contract
+//!    rejection such as `Error::Unauthorized` / `Error::InvalidState`).
+//! 4. **Permissionless snapshots**: assert `process_recurring_stream` succeeds
+//!    with `env.mock_auths(&[])` and records no auth entries.
+//!
+//! ## Covered split & recurring entrypoints
+//!
+//! - Split: `create_split_stream` (`sender`), `withdraw_split` (`recipient`),
+//!   `amend_split_stream` (`stream.sender`), `pause_split_stream` (`stream.sender`),
+//!   `resume_split_stream` (`stream.sender`), `cancel_split_stream` (`stream.sender`).
+//! - Recurring: `create_recurring_stream` (`sender`), `process_recurring_stream`
+//!   (permissionless), `withdraw_recurring` (`recipient`),
+//!   `pause_recurring_stream` (`stream.sender`),
+//!   `resume_recurring_stream` (`stream.sender`),
+//!   `cancel_recurring_stream` (`stream.sender`).
 //!
 //! ## Running
 //!
@@ -26,9 +47,11 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
-use soroban_sdk::testutils::{Address as _, Ledger as _};
-use soroban_sdk::{token::StellarAssetClient, vec, Address, Env};
-use streampay_stream::{Contract, ContractClient};
+use soroban_sdk::testutils::{
+    Address as _, AuthorizedFunction, Ledger as _, MockAuth, MockAuthInvoke,
+};
+use soroban_sdk::{token::StellarAssetClient, vec, Address, Env, IntoVal, Symbol};
+use streampay_stream::{Contract, ContractClient, Error};
 
 // ── Shared test helpers ────────────────────────────────────────────────────────
 
@@ -370,6 +393,16 @@ fn auth_snap_start_stream() {
 
 #[test]
 #[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_reject_stream() {
+    let data = auth_setup();
+    let (client, draft_id) = make_draft(&data);
+
+    data.env.mock_auths(&[]);
+    client.reject_stream(&draft_id);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn auth_snap_add_withdrawer() {
     let data = auth_setup();
     let (client, id) = auth_with_stream(&data);
@@ -694,4 +727,608 @@ fn auth_snap_cancel_recipient_transfer() {
 
     data.env.mock_auths(&[]);
     client.cancel_recipient_transfer(&id, &data.recipient);
+}
+
+// ── Per-stream pause/resume operators ─────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_set_operator() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let operator = Address::generate(&data.env);
+
+    data.env.mock_auths(&[]);
+    client.set_operator(&id, &operator);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_remove_operator() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let operator = Address::generate(&data.env);
+    client.set_operator(&id, &operator);
+
+    data.env.mock_auths(&[]);
+    client.remove_operator(&id, &operator);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_pause_as() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let operator = Address::generate(&data.env);
+    client.set_operator(&id, &operator);
+    data.env.ledger().set_timestamp(1_600);
+
+    data.env.mock_auths(&[]);
+    client.pause_as(&operator, &id);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+fn auth_snap_resume_as() {
+    let data = auth_setup();
+    let (client, id) = auth_with_stream(&data);
+    let operator = Address::generate(&data.env);
+    client.set_operator(&id, &operator);
+    data.env.ledger().set_timestamp(1_600);
+    client.pause_as(&operator, &id);
+    data.env.ledger().set_timestamp(1_700);
+
+    data.env.mock_auths(&[]);
+    client.resume_as(&operator, &id);
+}
+
+// ── Split & recurring auth-address, permissionless, and wrong-signer snapshots ─
+
+fn make_split_stream(data: &AuthTestData) -> (ContractClient<'_>, u64) {
+    let client = auth_initialized(data);
+    let second_recipient = Address::generate(&data.env);
+    let id = client.create_split_stream(
+        &data.sender,
+        &data.token,
+        &1_000i128,
+        &1_100u64,
+        &2_100u64,
+        &vec![&data.env, data.recipient.clone(), second_recipient],
+        &vec![&data.env, 5_000u64, 5_000u64],
+    );
+    (client, id)
+}
+
+fn make_recurring_stream(data: &AuthTestData) -> (ContractClient<'_>, u64) {
+    let client = auth_initialized(data);
+    let id = client.create_recurring_stream(
+        &data.sender,
+        &data.recipient,
+        &data.token,
+        &100i128,
+        &1_000u64,
+        &10u64,
+        &1_100u64,
+        &0u32,
+    );
+    (client, id)
+}
+
+/// Asserts that `env.auths()` recorded exactly one top-level authorization
+/// for `expected_signer` invoking `expected_fn` on `contract_id`.
+fn assert_single_auth(
+    env: &Env,
+    contract_id: &Address,
+    expected_signer: &Address,
+    expected_fn: &str,
+) {
+    let auths = env.auths();
+    assert_eq!(
+        auths.len(),
+        1,
+        "expected exactly 1 auth entry for `{expected_fn}`, got {}",
+        auths.len()
+    );
+    let (signer, invocation) = &auths[0];
+    assert_eq!(
+        signer, expected_signer,
+        "unexpected signer for `{expected_fn}`"
+    );
+    match &invocation.function {
+        AuthorizedFunction::Contract((addr, fn_sym, _args)) => {
+            assert_eq!(addr, contract_id, "unexpected contract for `{expected_fn}`");
+            assert_eq!(
+                *fn_sym,
+                Symbol::new(env, expected_fn),
+                "unexpected function symbol"
+            );
+        }
+        other => panic!("expected Contract invocation for `{expected_fn}`, got {other:?}"),
+    }
+}
+
+// ── Split stream: missing auth for pause/resume ────────────────────────────────
+
+fn auth_snap_pause_split_stream() {
+    let (client, id) = make_split_stream(&data);
+
+    client.pause_split_stream(&id);
+}
+
+fn auth_snap_resume_split_stream() {
+    let (client, id) = make_split_stream(&data);
+    client.pause_split_stream(&id);
+
+    client.resume_split_stream(&id);
+}
+
+// ── Split stream: positive auth-address snapshots ──────────────────────────────
+
+fn auth_snap_create_split_stream_records_sender() {
+    let client = auth_initialized(&data);
+    let second_recipient = Address::generate(&data.env);
+
+    client.create_split_stream(
+        &data.sender,
+        &data.token,
+        &1_000i128,
+        &1_100u64,
+        &2_100u64,
+        &vec![&data.env, data.recipient.clone(), second_recipient],
+        &vec![&data.env, 5_000u64, 5_000u64],
+    );
+
+    assert_single_auth(&data.env, &client.address, &data.sender, "create_split_stream");
+}
+
+fn auth_snap_withdraw_split_records_recipient() {
+    let (client, id) = make_split_stream(&data);
+
+    client.withdraw_split(&id, &data.recipient, &100i128);
+
+    assert_single_auth(&data.env, &client.address, &data.recipient, "withdraw_split");
+}
+
+fn auth_snap_amend_split_stream_records_sender() {
+    let (client, id) = make_split_stream(&data);
+
+    client.amend_split_stream(&id, &0, &None, &None);
+
+    assert_single_auth(&data.env, &client.address, &data.sender, "amend_split_stream");
+}
+
+fn auth_snap_pause_split_stream_records_sender() {
+    let (client, id) = make_split_stream(&data);
+
+    client.pause_split_stream(&id);
+
+    assert_single_auth(&data.env, &client.address, &data.sender, "pause_split_stream");
+}
+
+fn auth_snap_resume_split_stream_records_sender() {
+    let (client, id) = make_split_stream(&data);
+    client.pause_split_stream(&id);
+
+    client.resume_split_stream(&id);
+
+    assert_single_auth(&data.env, &client.address, &data.sender, "resume_split_stream");
+}
+
+fn auth_snap_cancel_split_stream_records_sender() {
+    let (client, id) = make_split_stream(&data);
+
+    client.cancel_split_stream(&id);
+
+    assert_single_auth(&data.env, &client.address, &data.sender, "cancel_split_stream");
+}
+
+// ── Split stream: wrong-signer snapshots ───────────────────────────────────────
+
+fn auth_snap_create_split_stream_wrong_signer() {
+    let client = auth_initialized(&data);
+    let stranger = Address::generate(&data.env);
+    let second_recipient = Address::generate(&data.env);
+    let recipients = vec![&data.env, data.recipient.clone(), second_recipient];
+    let weights = vec![&data.env, 5_000u64, 5_000u64];
+
+    data.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "create_split_stream",
+            args: (
+                data.sender.clone(),
+                data.token.clone(),
+                1_000i128,
+                1_100u64,
+                2_100u64,
+                recipients.clone(),
+                weights.clone(),
+            )
+                .into_val(&data.env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.create_split_stream(
+        &data.sender,
+        &data.token,
+        &1_000i128,
+        &1_100u64,
+        &2_100u64,
+        &recipients,
+        &weights,
+    );
+}
+
+fn auth_snap_withdraw_split_wrong_signer() {
+    let (client, id) = make_split_stream(&data);
+    let stranger = Address::generate(&data.env);
+
+    data.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "withdraw_split",
+            args: (id, data.recipient.clone(), 100i128).into_val(&data.env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.withdraw_split(&id, &data.recipient, &100i128);
+}
+
+fn auth_snap_withdraw_split_unlisted_recipient_rejected() {
+    let (client, id) = make_split_stream(&data);
+    let stranger = Address::generate(&data.env);
+
+    data.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "withdraw_split",
+            args: (id, stranger.clone(), 100i128).into_val(&data.env),
+            sub_invokes: &[],
+        },
+    }]);
+    let res = client.try_withdraw_split(&id, &stranger, &100i128);
+    assert_eq!(res, Err(Ok(Error::InvalidState)));
+}
+
+fn auth_snap_amend_split_stream_wrong_signer() {
+    let (client, id) = make_split_stream(&data);
+    let stranger = Address::generate(&data.env);
+
+    data.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "amend_split_stream",
+            args: (
+                id,
+                0i128,
+                Option::<soroban_sdk::Vec<u64>>::None,
+                Option::<u64>::None,
+            )
+                .into_val(&data.env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.amend_split_stream(&id, &0, &None, &None);
+}
+
+fn auth_snap_pause_split_stream_wrong_signer() {
+    let (client, id) = make_split_stream(&data);
+    let stranger = Address::generate(&data.env);
+
+    data.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "pause_split_stream",
+            args: (id,).into_val(&data.env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.pause_split_stream(&id);
+}
+
+fn auth_snap_resume_split_stream_wrong_signer() {
+    let (client, id) = make_split_stream(&data);
+    let stranger = Address::generate(&data.env);
+    client.pause_split_stream(&id);
+
+    data.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "resume_split_stream",
+            args: (id,).into_val(&data.env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.resume_split_stream(&id);
+}
+
+fn auth_snap_cancel_split_stream_wrong_signer() {
+    let (client, id) = make_split_stream(&data);
+    let stranger = Address::generate(&data.env);
+
+    data.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "cancel_split_stream",
+            args: (id,).into_val(&data.env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.cancel_split_stream(&id);
+}
+
+fn auth_snap_cancel_split_stream_wrong_signer_after_end() {
+    let (client, id) = make_split_stream(&data);
+    let stranger = Address::generate(&data.env);
+    // Advance past end_time (2_100)
+    data.env.ledger().set_timestamp(3_000);
+
+    data.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "cancel_split_stream",
+            args: (id,).into_val(&data.env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.cancel_split_stream(&id);
+}
+
+// ── Recurring stream: permissionless & missing auth for pause/resume ───────────
+
+fn auth_snap_process_recurring_stream_is_permissionless() {
+    let (client, id) = make_recurring_stream(&data);
+    data.env.ledger().set_timestamp(1_100 + 3 * 1_000);
+
+    let updated = client.process_recurring_stream(&id);
+    assert_eq!(updated.cycles_completed, 3);
+    assert!(
+        data.env.auths().is_empty(),
+        "process_recurring_stream must not require any auth"
+    );
+}
+
+fn auth_snap_pause_recurring_stream() {
+    let (client, id) = make_recurring_stream(&data);
+
+    client.pause_recurring_stream(&id);
+}
+
+fn auth_snap_resume_recurring_stream() {
+    let (client, id) = make_recurring_stream(&data);
+    client.pause_recurring_stream(&id);
+    data.env.ledger().set_timestamp(1_200);
+
+    client.resume_recurring_stream(&id);
+}
+
+// ── Recurring stream: positive auth-address snapshots ──────────────────────────
+
+fn auth_snap_create_recurring_stream_records_sender() {
+    let client = auth_initialized(&data);
+
+    client.create_recurring_stream(
+        &data.sender,
+        &data.recipient,
+        &data.token,
+        &100i128,
+        &1_000u64,
+        &10u64,
+        &1_100u64,
+        &0u32,
+    );
+
+    assert_single_auth(
+        &data.env,
+        &client.address,
+        &data.sender,
+        "create_recurring_stream",
+    );
+}
+
+fn auth_snap_withdraw_recurring_records_recipient() {
+    let (client, id) = make_recurring_stream(&data);
+    data.env.ledger().set_timestamp(1_100 + 3 * 1_000);
+    client.process_recurring_stream(&id);
+
+    client.withdraw_recurring(&id, &data.recipient, &100i128);
+
+    assert_single_auth(
+        &data.env,
+        &client.address,
+        &data.recipient,
+        "withdraw_recurring",
+    );
+}
+
+fn auth_snap_pause_recurring_stream_records_sender() {
+    let (client, id) = make_recurring_stream(&data);
+
+    client.pause_recurring_stream(&id);
+
+    assert_single_auth(
+        &data.env,
+        &client.address,
+        &data.sender,
+        "pause_recurring_stream",
+    );
+}
+
+fn auth_snap_resume_recurring_stream_records_sender() {
+    let (client, id) = make_recurring_stream(&data);
+    client.pause_recurring_stream(&id);
+    data.env.ledger().set_timestamp(1_200);
+
+    client.resume_recurring_stream(&id);
+
+    assert_single_auth(
+        &data.env,
+        &client.address,
+        &data.sender,
+        "resume_recurring_stream",
+    );
+}
+
+fn auth_snap_cancel_recurring_stream_records_sender() {
+    let (client, id) = make_recurring_stream(&data);
+
+    client.cancel_recurring_stream(&id);
+
+    assert_single_auth(
+        &data.env,
+        &client.address,
+        &data.sender,
+        "cancel_recurring_stream",
+    );
+}
+
+// ── Recurring stream: wrong-signer snapshots ───────────────────────────────────
+
+fn auth_snap_create_recurring_stream_wrong_signer() {
+    let client = auth_initialized(&data);
+    let stranger = Address::generate(&data.env);
+
+    data.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "create_recurring_stream",
+            args: (
+                data.sender.clone(),
+                data.recipient.clone(),
+                data.token.clone(),
+                100i128,
+                1_000u64,
+                10u64,
+                1_100u64,
+                0u32,
+            )
+                .into_val(&data.env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.create_recurring_stream(
+        &data.sender,
+        &data.recipient,
+        &data.token,
+        &100i128,
+        &1_000u64,
+        &10u64,
+        &1_100u64,
+        &0u32,
+    );
+}
+
+fn auth_snap_withdraw_recurring_wrong_signer() {
+    let (client, id) = make_recurring_stream(&data);
+    let stranger = Address::generate(&data.env);
+    data.env.ledger().set_timestamp(1_100 + 3 * 1_000);
+    client.process_recurring_stream(&id);
+
+    data.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "withdraw_recurring",
+            args: (id, data.recipient.clone(), 100i128).into_val(&data.env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.withdraw_recurring(&id, &data.recipient, &100i128);
+}
+
+fn auth_snap_withdraw_recurring_non_recipient_unauthorized() {
+    let (client, id) = make_recurring_stream(&data);
+    let stranger = Address::generate(&data.env);
+    data.env.ledger().set_timestamp(1_100 + 3 * 1_000);
+    client.process_recurring_stream(&id);
+
+    data.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "withdraw_recurring",
+            args: (id, stranger.clone(), 100i128).into_val(&data.env),
+            sub_invokes: &[],
+        },
+    }]);
+    let res = client.try_withdraw_recurring(&id, &stranger, &100i128);
+    assert_eq!(res, Err(Ok(Error::Unauthorized)));
+}
+
+fn auth_snap_pause_recurring_stream_wrong_signer() {
+    let (client, id) = make_recurring_stream(&data);
+    let stranger = Address::generate(&data.env);
+
+    data.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "pause_recurring_stream",
+            args: (id,).into_val(&data.env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.pause_recurring_stream(&id);
+}
+
+fn auth_snap_resume_recurring_stream_wrong_signer() {
+    let (client, id) = make_recurring_stream(&data);
+    let stranger = Address::generate(&data.env);
+    client.pause_recurring_stream(&id);
+    data.env.ledger().set_timestamp(1_200);
+
+    data.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "resume_recurring_stream",
+            args: (id,).into_val(&data.env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.resume_recurring_stream(&id);
+}
+
+fn auth_snap_cancel_recurring_stream_wrong_signer() {
+    let (client, id) = make_recurring_stream(&data);
+    let stranger = Address::generate(&data.env);
+
+    data.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "cancel_recurring_stream",
+            args: (id,).into_val(&data.env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.cancel_recurring_stream(&id);
+}
+
+fn auth_snap_cancel_recurring_stream_wrong_signer_after_end() {
+    let (client, id) = make_recurring_stream(&data);
+    let stranger = Address::generate(&data.env);
+    // Advance past all 10 cycles and process so the stream reaches Ended.
+    data.env.ledger().set_timestamp(1_100 + 10 * 1_000);
+    client.process_recurring_stream(&id);
+
+    data.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "cancel_recurring_stream",
+            args: (id,).into_val(&data.env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.cancel_recurring_stream(&id);
 }

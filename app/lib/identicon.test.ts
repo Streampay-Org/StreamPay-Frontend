@@ -1,4 +1,4 @@
-﻿import {
+import {
   hashSeed,
   getIdenticonPaletteIndex,
   getRecipientInitials,
@@ -69,10 +69,29 @@ describe("getRecipientInitials", () => {
     expect(getRecipientInitials("Streampay")).toBe("S");
   });
 
-  it("derives initials from a Stellar public key without treating it as words", () => {
-    expect(getRecipientInitials("GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZK7G")).toBe(
-      "GA"
-    );
+  it("derives deterministic 2-char uppercase initials from a Stellar public key", () => {
+    const key = "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZK7G";
+    const initials = getRecipientInitials(key);
+    expect(initials).toMatch(/^[A-Z0-9]{2}$/);
+    expect(getRecipientInitials(key)).toBe(initials);
+  });
+
+  it("produces different initials for distinct Stellar public keys sharing the GA prefix", () => {
+    const keyA = "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3JKAKZK7G";
+    const keyB = "GAQAA5L65LSYH7CQ3VTJ7F3HHLGCL3DSLAR2Y47263D56MNNGHSQSTVY";
+    expect(getRecipientInitials(keyA)).not.toBe(getRecipientInitials(keyB));
+  });
+
+  it("trims surrounding whitespace for Stellar public keys", () => {
+    const key = "GAQAA5L65LSYH7CQ3VTJ7F3HHLGCL3DSLAR2Y47263D56MNNGHSQSTVY";
+    expect(getRecipientInitials(`  ${key}  `)).toBe(getRecipientInitials(key));
+  });
+
+  it("falls through to display-name logic for lowercase keys or keys shorter than 20 chars", () => {
+    expect(
+      getRecipientInitials("gahjjjkmokye4rvpzewztkh5fvi4pa3vl7gk2lfnubsgbv3jkakzk7g")
+    ).toBe("G");
+    expect(getRecipientInitials("GAHJJJKMOKYE4RVPZEW")).toBe("G");
   });
 
   it("falls back to '?' for empty or whitespace-only input", () => {

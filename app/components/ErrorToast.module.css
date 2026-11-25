@@ -1,0 +1,50 @@
+/* Auto-dismiss progress bar for ErrorToast (issue #2026).
+ * The countdown is driven entirely by a CSS animation so the component does
+ * not re-render while the toast is visible. Hover and focus pause the same
+ * animation, so the remaining time is genuinely frozen rather than recomputed
+ * from a wall clock. */
+
+.bar {
+  height: 0.25rem;
+  background-color: #e5e7eb;
+}
+
+.barFill {
+  height: 100%;
+  width: 100%;
+  background-color: #ef4444;
+  transform-origin: left center;
+  animation-name: errorToastCountdown;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+.barFillPaused {
+  animation-play-state: paused;
+}
+
+/* Reduced motion keeps the timed dismissal (the animation still runs) but
+ * hides the visual sweep. */
+.barFillReduced {
+  opacity: 0;
+}
+
+.root:hover .barFill,
+.root:focus-within .barFill {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .barFill {
+    opacity: 0;
+  }
+}
+
+@keyframes errorToastCountdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}

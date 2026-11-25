@@ -1,4 +1,4 @@
-﻿/**
+/**
  * identicon.ts
  *
  * Deterministic, offline identicon generation for stream recipients.
@@ -51,8 +51,10 @@ const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{19,}$/;
 /**
  * Derive up to two display initials from a recipient string.
  *
- * - Stellar public keys (`G...`) use the first character plus the first
- *   character after the key prefix, uppercased (e.g. `GAHJ...` → `GA`).
+ * - Stellar public keys (`G...`) pick two characters deterministically from
+ *   the variable body of the key (after the `G_` prefix) using `hashSeed`,
+ *   uppercased, so distinct keys sharing a `GA`/`GB` prefix get distinct
+ *   initials.
  * - Display names use the first letter of up to the first two
  *   whitespace-separated words (e.g. "Ada Creative Studio" → `AC`).
  * - Falls back to `"?"` for empty/whitespace-only input.
@@ -62,7 +64,11 @@ export function getRecipientInitials(recipient: string): string {
   if (trimmed.length === 0) return "?";
 
   if (STELLAR_PUBLIC_KEY_RE.test(trimmed)) {
-    return trimmed.slice(0, 2).toUpperCase();
+    const body = trimmed.slice(2);
+    const hash = hashSeed(trimmed);
+    const first = body[hash % body.length];
+    const second = body[Math.floor(hash / body.length) % body.length];
+    return `${first}${second}`.toUpperCase();
   }
 
   const words = trimmed.split(/\s+/).filter(Boolean);
