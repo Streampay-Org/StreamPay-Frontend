@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import type { ReceiptTheme } from "../lib/receipt-theme";
 import type { Stream } from "../types/openapi";
 import { StreamReceipt } from "./StreamReceipt";
 import { receiptCopy } from "../content/copy";
@@ -9,12 +10,14 @@ type ReceiptBuilderProps = {
   stream: Stream;
   network?: "testnet" | "mainnet";
   generatedAt?: string;
+  theme?: ReceiptTheme;
 };
 
 export function ReceiptBuilder({
   stream,
   network = "testnet",
   generatedAt,
+  theme,
 }: ReceiptBuilderProps) {
   const [note, setNote] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
@@ -91,6 +94,7 @@ export function ReceiptBuilder({
         network={network}
         note={note}
         stream={stream}
+        theme={theme}
       />
     </div>
   );

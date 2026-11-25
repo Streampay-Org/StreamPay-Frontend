@@ -41,6 +41,9 @@ pub enum StreamStatus {
 /// Maximum number of milestones allowed in a [`ReleaseCurve::Milestones`] schedule.
 pub const MAX_MILESTONES: u32 = 32;
 
+/// Maximum number of pause/resume operators allowed per stream.
+pub const MAX_OPERATORS: u32 = 16;
+
 /// A single stepped release checkpoint in a milestone schedule.
 ///
 /// Once the stream's effective timestamp reaches `time`, at least
@@ -127,6 +130,8 @@ pub(crate) enum DataKey {
     FeeBps,
     /// Per-stream withdrawer allowlist keyed by stream id (persistent storage).
     WithdrawerAllowlist(u64),
+    /// Per-stream pause/resume operator list keyed by stream id (persistent storage).
+    Operators(u64),
     /// Pending recipient address for a two-step recipient transfer (persistent storage).
     PendingRecipient(u64),
     /// Global dormant-stream grace period in seconds (instance storage; 0 = disabled).
@@ -210,6 +215,10 @@ fn extend_stream_ttl(env: &Env, stream_id: u64) {
 
 fn extend_withdrawer_allowlist_ttl(env: &Env, stream_id: u64) {
     extend_persistent_ttl(env, &DataKey::WithdrawerAllowlist(stream_id));
+}
+
+fn extend_operators_ttl(env: &Env, stream_id: u64) {
+    extend_persistent_ttl(env, &DataKey::Operators(stream_id));
 }
 
 fn extend_admin_key_ttl(env: &Env) {
@@ -543,6 +552,91 @@ pub fn clear_withdrawer_allowlist(env: &Env, stream_id: u64) {
     env.storage()
         .persistent()
         .remove(&DataKey::WithdrawerAllowlist(stream_id));
+}
+
+// ---------------------------------------------------------------------------
+// Per-stream pause/resume operators
+// ---------------------------------------------------------------------------
+
+/// Adds `operator` to the per-stream operator list for `stream_id`.
+///
+/// Idempotent: adding an address that is already in the list succeeds without
+/// duplicating the entry. Returns [`crate::error::Error::StreamLimitExceeded`]
+/// if adding a new operator would exceed [`MAX_OPERATORS`].
+pub fn add_operator(
+    env: &Env,
+    stream_id: u64,
+    operator: &Address,
+) -> Result<(), crate::error::Error> {
+    let mut operators: soroban_sdk::Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Operators(stream_id))
+        .unwrap_or(soroban_sdk::Vec::new(env));
+
+    if !operators.contains(operator) {
+        if operators.len() >= MAX_OPERATORS {
+            return Err(crate::error::Error::StreamLimitExceeded);
+        }
+        operators.push_back(operator.clone());
+    }
+
+    env.storage()
+        .persistent()
+        .set(&DataKey::Operators(stream_id), &operators);
+    extend_operators_ttl(env, stream_id);
+    Ok(())
+}
+
+/// Removes `operator` from the per-stream operator list for `stream_id`.
+///
+/// Idempotent: removing an address that is not in the list is a no-op.
+pub fn remove_operator(env: &Env, stream_id: u64, operator: &Address) {
+    let mut operators: soroban_sdk::Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Operators(stream_id))
+        .unwrap_or(soroban_sdk::Vec::new(env));
+
+    if let Some(pos) = operators.first_index_of(operator) {
+        operators.remove(pos);
+    }
+
+    env.storage()
+        .persistent()
+        .set(&DataKey::Operators(stream_id), &operators);
+    extend_operators_ttl(env, stream_id);
+}
+
+/// Returns `true` if `operator` is present in the per-stream operator list for
+/// `stream_id`.
+pub fn is_operator(env: &Env, stream_id: u64, operator: &Address) -> bool {
+    let operators: Option<soroban_sdk::Vec<Address>> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Operators(stream_id));
+    match operators {
+        Some(list) => {
+            extend_operators_ttl(env, stream_id);
+            list.contains(operator)
+        }
+        None => false,
+    }
+}
+
+/// Returns the full operator list for `stream_id` (may be empty).
+pub fn get_operators(env: &Env, stream_id: u64) -> soroban_sdk::Vec<Address> {
+    let operators: Option<soroban_sdk::Vec<Address>> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Operators(stream_id));
+    match operators {
+        Some(list) => {
+            extend_operators_ttl(env, stream_id);
+            list
+        }
+        None => soroban_sdk::Vec::new(env),
+    }
 }
 
 // ---------------------------------------------------------------------------

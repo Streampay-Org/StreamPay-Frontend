@@ -29,6 +29,7 @@ import {
   allocationSumsToTarget,
   buildMultiRecipientPayload,
 } from "@/app/lib/multi-recipient";
+import { getCsrfTokenFromCookie } from "@/lib/apiClient";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -42,33 +43,6 @@ export { MAX_RECIPIENTS } from "@/app/lib/multi-recipient";
 
 /** Endpoint the wizard submits the fan-out to. @see docs/api/multi-recipient-stream.md */
 export const MULTI_STREAM_ENDPOINT = "/api/v2/streams/multi";
-
-/** Name of the double-submit CSRF cookie/header pair enforced by `middleware.ts`. */
-const CSRF_COOKIE_NAME = "csrf-token";
-/** Production uses the `__Host-` prefixed cookie name. */
-const CSRF_HOST_COOKIE_NAME = "__Host-csrf-token";
-const CSRF_HEADER_NAME = "x-csrf-token";
-
-/**
- * Read the CSRF token minted by the middleware's CSRF cookie.
- *
- * Every state-changing `/api/*` request is rejected with 403
- * `CSRF_TOKEN_INVALID` unless the same value is echoed in the
- * `x-csrf-token` header, so the wizard must forward it.
- */
-function readCsrfToken(): string | null {
-  if (typeof document === "undefined") return null;
-
-  for (const cookieName of [CSRF_HOST_COOKIE_NAME, CSRF_COOKIE_NAME]) {
-    const match = document.cookie.match(
-      new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`),
-    );
-    const value = match?.[1];
-    if (value) return value;
-  }
-
-  return null;
-}
 
 /** Wizard steps shown in the StepIndicator. */
 const STEPS: Step[] = [
@@ -192,13 +166,13 @@ export default function MultiRecipientStreamPage() {
         recipients,
       });
 
-      const csrfToken = readCsrfToken();
+      const csrfToken = getCsrfTokenFromCookie();
 
       const response = await fetch(MULTI_STREAM_ENDPOINT, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(csrfToken ? { [CSRF_HEADER_NAME]: csrfToken } : {}),
+          ...(csrfToken ? { "x-csrf-token": csrfToken } : {}),
         },
         body: JSON.stringify(payload),
       });

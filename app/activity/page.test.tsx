@@ -5,6 +5,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { axe } from "jest-axe";
 import ActivityPage from "./page";
+import { setDisplayTimeZone } from "../lib/timezone";
 
 // Mock the ActivityTimeline component
 jest.mock("../components/ActivityTimeline", () => ({
@@ -31,6 +32,7 @@ jest.mock("../components/ActivityTimeline", () => ({
 
 describe("ActivityPage", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     jest.useFakeTimers();
     global.fetch = jest.fn(() =>
       Promise.resolve({
@@ -378,4 +380,26 @@ describe("ActivityPage", () => {
       "No activity to display.",
     );
   });
+
+  it("regroups the feed when the display time zone changes without a reload", async () => {
+          {
+            description: "Late event",
+            timestamp: "2020-01-01T20:00:00.000Z",
+          },
+        ],
+      }),
+    });
+
+
+    });
+    expect(screen.getByText("Jan 1, 2020")).toBeInTheDocument();
+
+    act(() => {
+      setDisplayTimeZone("Asia/Kolkata");
+    });
+
+    expect(screen.getByText("Jan 2, 2020")).toBeInTheDocument();
+    expect(screen.queryByText("Jan 1, 2020")).not.toBeInTheDocument();
+  });
+
 });

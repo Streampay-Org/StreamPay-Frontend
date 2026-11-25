@@ -1,0 +1,15 @@
+.themed:global(.receipt-doc) {
+  border-block-start: 0.25rem solid var(--receipt-accent);
+}
+
+.logo {
+  display: block;
+  max-inline-size: min(9rem, 100%);
+  max-block-size: 3rem;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.message {
+  overflow-wrap: anywhere;
+}

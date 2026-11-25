@@ -23,6 +23,38 @@ The following fields are identified as PII and are subject to retention and dele
 - **PII Scrubbing**: All PII fields are permanently scrubbed from the database after a deletion request is processed.
 - **Backups**: Backup rotation follows the primary database scrubbing (PII is aged out of backups according to our standard backup lifecycle).
 
+### Retention Purge Job
+
+`POST /api/internal/retention/purge` is an internal job that enforces the
+seven-year window for streams that were never deleted by a data subject
+request. It is signed with internal-service auth and only `ops-automation` may
+call it.
+
+- A stream is eligible when its `createdAt` is **strictly older** than seven
+  years. A stream created exactly seven years ago is kept for one more run.
+- For every eligible stream the job clears `email`, `label`, `memo` and
+  `partnerId`. Stream ID, recipient, rate, status, amounts and timestamps are
+  kept so accounting and audit history stay intact.
+- Streams whose `createdAt` cannot be parsed are never purged; they are reported
+  through `scanned` only.
+- The body accepts `{ "dryRun": true }` to report what would be purged without
+  mutating anything, and `{ "limit": 100 }` (1–500) to bound a run. The default
+  limit is 100.
+- Each purged stream appends one `retention.purge` audit event with actor
+  `internal-service` and the caller's request id. Dry runs write no audit
+  events.
+- Re-running is idempotent: streams that no longer hold PII are counted as
+  `alreadyScrubbed` and are not touched or re-audited.
+
+Schedule the job at least daily, for example:
+
+```bash
+curl -X POST https://app.streampay.example/api/internal/retention/purge \
+  -H "x-streampay-service-name: ops-automation" \
+  # ...plus the signed internal-auth headers
+  -d '{"limit":500}'
+```
+
 ## DSR Fulfillment (Account Deletion)
 
 ### API Endpoint

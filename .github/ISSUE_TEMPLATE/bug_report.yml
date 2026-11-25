@@ -1,0 +1,85 @@
+name: Bug Report
+description: Report a bug in StreamPay Frontend. Please review CONTRIBUTING.md before filing.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please review [CONTRIBUTING.md](https://github.com/Streampay-Org/StreamPay-Frontend/blob/main/CONTRIBUTING.md#reporting-issues) for our issue-reporting guidelines.
+        **Do not** report security vulnerabilities here—see [SECURITY.md](https://github.com/Streampay-Org/StreamPay-Frontend/blob/main/SECURITY.md) instead.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: A clear and concise description of the bug.
+      placeholder: Briefly describe what went wrong.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the codebase does this bug affect?
+      options:
+        - frontend
+        - API route
+        - contracts
+        - CI
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro-steps
+    attributes:
+      label: Steps to Reproduce
+      description: Provide step-by-step instructions (and a minimal repro where practical) so maintainers can reproduce the issue.
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. Observe error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-vs-actual
+    attributes:
+      label: Expected vs. Actual Behavior
+      description: Describe what you expected to happen and what actually happened.
+      placeholder: |
+        **Expected:**
+        ...
+
+        **Actual:**
+        ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Provide your Node version, browser/OS, and network (testnet or mainnet).
+      placeholder: |
+        - Node version: e.g. v20.x
+        - Browser / OS: e.g. Chrome 124 on macOS 14
+        - Network: testnet / mainnet
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs-screenshots
+    attributes:
+      label: Logs / Screenshots
+      description: Paste any relevant console output, stack traces, or drag-and-drop screenshots.
+      placeholder: Paste logs or screenshots here (redact any sensitive values).
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: no-secrets
+    attributes:
+      label: Security & Privacy Check
+      options:
+        - label: I confirm that I have not pasted any secrets, private keys, API tokens, or sensitive credentials in this report.
+          required: true
