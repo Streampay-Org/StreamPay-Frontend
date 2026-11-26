@@ -8,6 +8,8 @@
  * in tests, API routes, and pure-logic modules without any framework coupling.
  */
 
+import type { ReceiptTheme } from "./receipt-theme";
+
 // ─── Roles ───────────────────────────────────────────────────────────────────
 
 /**
@@ -113,6 +115,7 @@ export type OrgRecord = {
    *   DELETE /api/orgs/:orgId/token-allowlist/:token
    */
   tokenAllowlist?: string[];
+  receiptTheme?: ReceiptTheme;
   /** ISO-8601 UTC */
   createdAt: string;
   /** ISO-8601 UTC */

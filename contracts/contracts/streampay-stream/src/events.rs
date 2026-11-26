@@ -11,8 +11,8 @@ use soroban_sdk::{contractevent, symbol_short, Address, BytesN, Env, Symbol};
 /// Emitted when a new stream is created (topic: `"stream"`, sub-topic: `"created"`).
 ///
 /// Contains the stream's ID, sender, recipient, token address, total amount,
-/// per-stream fee (in basis points), stream duration in seconds, and the
-/// ledger timestamp at creation.
+/// per-stream fee (in basis points), stream duration in seconds, optional
+/// cliff timestamp (`0` = no cliff), and the ledger timestamp at creation.
 #[contractevent(topics = ["stream", "created"], data_format = "vec")]
 pub struct StreamCreated {
     pub stream_id: u64,
@@ -22,6 +22,7 @@ pub struct StreamCreated {
     pub total_amount: i128,
     pub fee_bps: u32,
     pub duration: u64,
+    pub cliff_time: u64,
     pub timestamp: u64,
 }
 
@@ -111,6 +112,19 @@ pub struct StreamCancelled {
     pub timestamp: u64,
 }
 
+/// Emitted when a recipient rejects a draft stream (topic: `"stream"`,
+/// sub-topic: `"rejected"`).
+///
+/// Contains the stream ID, the recipient who rejected it, the full escrow
+/// amount returned to the sender, and the ledger timestamp.
+#[contractevent(topics = ["stream", "rejected"], data_format = "vec")]
+pub struct StreamRejected {
+    pub stream_id: u64,
+    pub recipient: Address,
+    pub returned_amount: i128,
+    pub timestamp: u64,
+}
+
 /// Emitted when a stream is amended (topic: `"stream"`, sub-topic: `"amended"`).
 ///
 /// Contains the stream ID, who amended it, the new rate per second, the new
@@ -151,6 +165,43 @@ pub struct DeprecatedEntrypoint {
     pub timestamp: u64,
 }
 
+#[allow(clippy::too_many_arguments)]
+/// Emitted when a stream's current recipient proposes transferring the stream
+/// to a new recipient (topic: `"stream"`, sub-topic: `"recipient_transfer_proposed"`).
+#[contractevent(topics = ["stream", "recipient_transfer_proposed"], data_format = "vec")]
+pub struct RecipientTransferProposed {
+    pub stream_id: u64,
+    pub old_recipient: Address,
+    pub new_recipient: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when the proposed recipient accepts a recipient transfer
+/// (topic: `"stream"`, sub-topic: `"recipient_transfer_accepted"`).
+#[contractevent(topics = ["stream", "recipient_transfer_accepted"], data_format = "vec")]
+pub struct RecipientTransferAccepted {
+    pub stream_id: u64,
+    pub old_recipient: Address,
+    pub new_recipient: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when a pending recipient transfer is cancelled by the current
+/// recipient or the stream sender (topic: `"stream"`, sub-topic: `"recipient_transfer_cancelled"`).
+#[contractevent(topics = ["stream", "recipient_transfer_cancelled"], data_format = "vec")]
+pub struct RecipientTransferCancelled {
+    pub stream_id: u64,
+    pub old_recipient: Address,
+    pub new_recipient: Address,
+    pub timestamp: u64,
+}
+
+}
+
+}
+
+}
+
 pub fn created(
     env: &Env,
     stream_id: u64,
@@ -160,6 +211,7 @@ pub fn created(
     total_amount: i128,
     fee_bps: u32,
     duration: u64,
+    cliff_time: u64,
     timestamp: u64,
 ) {
     StreamCreated {
@@ -170,6 +222,7 @@ pub fn created(
         total_amount,
         fee_bps,
         duration,
+        cliff_time,
         timestamp,
     }
     .publish(env);
@@ -271,6 +324,23 @@ pub fn cancelled(
     .publish(env);
 }
 
+/// Publishes a [`StreamRejected`] event.
+pub fn rejected(
+    env: &Env,
+    stream_id: u64,
+    recipient: &Address,
+    returned_amount: i128,
+    timestamp: u64,
+) {
+    StreamRejected {
+        stream_id,
+        recipient: recipient.clone(),
+        returned_amount,
+        timestamp,
+    }
+    .publish(env);
+}
+
 /// Publishes a [`StreamAmended`] event.
 pub fn amended(
     env: &Env,
@@ -306,6 +376,57 @@ pub fn deprecated_entrypoint(env: &Env, caller: &Address, entrypoint: Symbol, ti
     DeprecatedEntrypoint {
         caller: caller.clone(),
         entrypoint,
+        timestamp,
+    }
+    .publish(env);
+}
+
+/// Publishes a [`RecipientTransferProposed`] event.
+pub fn recipient_transfer_proposed(
+    env: &Env,
+    stream_id: u64,
+    old_recipient: &Address,
+    new_recipient: &Address,
+    timestamp: u64,
+) {
+    RecipientTransferProposed {
+        stream_id,
+        old_recipient: old_recipient.clone(),
+        new_recipient: new_recipient.clone(),
+        timestamp,
+    }
+    .publish(env);
+}
+
+/// Publishes a [`RecipientTransferAccepted`] event.
+pub fn recipient_transfer_accepted(
+    env: &Env,
+    stream_id: u64,
+    old_recipient: &Address,
+    new_recipient: &Address,
+    timestamp: u64,
+) {
+    RecipientTransferAccepted {
+        stream_id,
+        old_recipient: old_recipient.clone(),
+        new_recipient: new_recipient.clone(),
+        timestamp,
+    }
+    .publish(env);
+}
+
+/// Publishes a [`RecipientTransferCancelled`] event.
+pub fn recipient_transfer_cancelled(
+    env: &Env,
+    stream_id: u64,
+    old_recipient: &Address,
+    new_recipient: &Address,
+    timestamp: u64,
+) {
+    RecipientTransferCancelled {
+        stream_id,
+        old_recipient: old_recipient.clone(),
+        new_recipient: new_recipient.clone(),
         timestamp,
     }
     .publish(env);
@@ -472,4 +593,110 @@ pub fn fees_swept(
             timestamp,
         ),
     );
+}
+
+/// Emitted when the admin updates the dormant-stream grace period via
+/// [`Contract::set_dormancy_grace`].
+#[contractevent(topics = ["stream", "dorm_grc"], data_format = "vec")]
+pub struct DormancyGraceSet {
+    pub admin: Address,
+    pub seconds: u64,
+    pub timestamp: u64,
+}
+
+/// Emitted when a stream sender sweeps unclaimed vested funds from a dormant
+/// stream via [`Contract::sweep_dormant_stream`].
+#[contractevent(topics = ["stream", "dorm_swp"], data_format = "vec")]
+pub struct DormantSwept {
+    pub stream_id: u64,
+    pub sender: Address,
+    pub gross_amount: i128,
+    pub net_amount: i128,
+    pub fee_amount: i128,
+    pub timestamp: u64,
+}
+
+/// Emitted when a pause/resume operator is added to a stream
+/// (topic: `"stream"`, sub-topic: `"operator_set"`).
+#[contractevent(topics = ["stream", "operator_set"], data_format = "vec")]
+pub struct OperatorSet {
+    pub stream_id: u64,
+    pub sender: Address,
+    pub operator: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when a pause/resume operator is removed from a stream
+/// (topic: `"stream"`, sub-topic: `"operator_removed"`).
+#[contractevent(topics = ["stream", "operator_removed"], data_format = "vec")]
+pub struct OperatorRemoved {
+    pub stream_id: u64,
+    pub sender: Address,
+    pub operator: Address,
+    pub timestamp: u64,
+}
+
+/// Publishes a [`DormancyGraceSet`] event.
+pub fn dormancy_grace_set(env: &Env, admin: &Address, seconds: u64, timestamp: u64) {
+    DormancyGraceSet {
+        admin: admin.clone(),
+        seconds,
+        timestamp,
+    }
+    .publish(env);
+}
+
+/// Publishes a [`DormantSwept`] event.
+pub fn dormant_swept(
+    env: &Env,
+    stream_id: u64,
+    sender: &Address,
+    gross_amount: i128,
+    net_amount: i128,
+    fee_amount: i128,
+    timestamp: u64,
+) {
+    DormantSwept {
+        stream_id,
+        sender: sender.clone(),
+        gross_amount,
+        net_amount,
+        fee_amount,
+        timestamp,
+    }
+    .publish(env);
+}
+
+/// Publishes an [`OperatorSet`] event.
+pub fn operator_set(
+    env: &Env,
+    stream_id: u64,
+    sender: &Address,
+    operator: &Address,
+    timestamp: u64,
+) {
+    OperatorSet {
+        stream_id,
+        sender: sender.clone(),
+        operator: operator.clone(),
+        timestamp,
+    }
+    .publish(env);
+}
+
+/// Publishes an [`OperatorRemoved`] event.
+pub fn operator_removed(
+    env: &Env,
+    stream_id: u64,
+    sender: &Address,
+    operator: &Address,
+    timestamp: u64,
+) {
+    OperatorRemoved {
+        stream_id,
+        sender: sender.clone(),
+        operator: operator.clone(),
+        timestamp,
+    }
+    .publish(env);
 }

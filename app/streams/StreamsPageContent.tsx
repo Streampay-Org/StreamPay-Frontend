@@ -11,8 +11,13 @@
  */
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { StreamRow, type StreamRowData } from "../components/StreamRow";
+import {
+  CompareStreamsModal,
+  type CompareStream,
+} from "../components/CompareStreamsModal";
 import { Skeleton } from "../components/Skeleton";
 import { PageError } from "../components/PageError";
 import { EmptyState } from "../components/EmptyState";
@@ -23,11 +28,62 @@ import {
   type SortOption,
 } from "../components/SortDropdown";
 import { TagChips } from "../components/TagChips";
+import { ResetFiltersButton } from "../components/ResetFiltersButton";
 import { safeStorage } from "../lib/safeStorage";
 import { mockStreams } from "./fixtures";
 import { sortStreams } from "./sortStreams";
+import { useRovingGrid } from "./useRovingGrid";
+import { STREAM_STATUSES, isStreamStatus, useStreamsQuery } from "./useStreamsQuery";
+import filterStyles from "./StreamsFilters.module.css";
 
 const SORT_STORAGE_KEY = "streampay-streams-sort";
+
+function extractAssetUnit(rate: string): string {
+  const match = rate.match(/[0-9.,]+\s+([A-Za-z0-9]+)/);
+  return match ? match[1] : "";
+}
+
+export function toCompareStream(stream: StreamRowData): CompareStream {
+  const unit = extractAssetUnit(stream.rate);
+  const unitSuffix = unit ? ` ${unit}` : "";
+
+  let balance = "—";
+  if (
+    typeof stream.totalAmount === "number" &&
+    typeof stream.accruedAmount === "number"
+  ) {
+    const remaining = Math.max(0, stream.totalAmount - stream.accruedAmount);
+    balance = `${remaining.toLocaleString()}${unitSuffix} remaining`;
+  } else if (typeof stream.accruedAmount === "number") {
+    balance = `${stream.accruedAmount.toLocaleString()}${unitSuffix} accrued`;
+  } else if (typeof stream.totalAmount === "number") {
+    balance = `${stream.totalAmount.toLocaleString()}${unitSuffix} total`;
+  }
+
+  let runway = stream.schedule || "—";
+  if (stream.endsAt) {
+    const endMs = new Date(stream.endsAt).getTime();
+    if (!Number.isNaN(endMs)) {
+      const diffMs = endMs - Date.now();
+      if (diffMs <= 0) {
+        runway = "Ended";
+      } else {
+        const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+        runway = `${days} day${days === 1 ? "" : "s"} remaining`;
+      }
+    }
+  }
+
+  return {
+    id: stream.id,
+    recipient: stream.recipient,
+    rate: stream.rate,
+    runway,
+    balance,
+    status: stream.status,
+    createdAt: stream.startedAt ?? "",
+  };
+}
 
 export type StreamsViewState = "loading" | "populated" | "empty" | "error";
 export type DensityMode = "comfortable" | "compact";
@@ -60,6 +116,7 @@ const streamListCopy = {
   populatedCount: (n: number) => `${n} active record${n === 1 ? "" : "s"}`,
   primaryCta: "Create Stream",
   exportCta: "Export History",
+  importCta: "Import CSV",
 } as const;
 
 type StreamsPageContentProps = {
@@ -110,6 +167,7 @@ function StreamListSkeleton({ count = 3 }: { count?: number }) {
             key={i}
             data-testid="stream-row-skeleton"
             className="stream-row stream-row--skeleton"
+            aria-hidden="true"
             /* Stagger the skeleton shimmer enter to mirror the cascade */
             style={{ animationDelay: `${i * 80}ms` }}
           >
@@ -164,24 +222,40 @@ export function StreamsPageContent({
     }
   };
 
-  /* ── Sort dropdown (persists via safeStorage) ── */
-  const [sort, setSort] = useState<SortOption>(initialSort ?? "newest");
+  /* ── URL-backed filter state (issue #2031) ── */
+  const {
+    tag: selectedTag,
+    status: statusFilter,
+    sort: urlSort,
+    hasSortParam,
+    searchValue,
+    setSearch,
+    setTag,
+    setStatus,
+    setSort: setUrlSort,
+    clearFilters,
+  } = useStreamsQuery();
 
-  /* Sync from safeStorage after hydration (skipped when initialSort is provided) */
+  /* ── Sort dropdown (persists via safeStorage, mirrors to the URL) ── */
+  const [sort, setSort] = useState<SortOption>(initialSort ?? urlSort);
+
+  /* Sync from safeStorage after hydration (skipped when initialSort or a URL
+   * sort is provided — the URL always wins for shared links). */
   useEffect(() => {
-    if (initialSort !== undefined) return;
+    if (initialSort !== undefined || hasSortParam) return;
     const stored = safeStorage.getItem(SORT_STORAGE_KEY);
     if (isSortOption(stored)) {
       setSort(stored);
     }
-  }, [initialSort]);
+  }, [initialSort, hasSortParam]);
 
   const handleSortChange = (next: SortOption) => {
     setSort(next);
     safeStorage.setItem(SORT_STORAGE_KEY, next);
+    setUrlSort(next);
   };
 
-  /* ── Tag filter ── */
+  /* ── Filters ── */
   const allTags = useMemo(
     () =>
       Array.from(
@@ -189,20 +263,86 @@ export function StreamsPageContent({
       ),
     [streams],
   );
-  const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
-  const filteredStreams = useMemo(
-    () =>
-      selectedTag
-        ? streams.filter((s) => s.tags?.includes(selectedTag))
-        : streams,
-    [streams, selectedTag],
-  );
+  /* An unknown `tag` in the URL (e.g. a stale shared link) is ignored rather
+   * than emptying the list — the user sees the unfiltered list instead. */
+  const effectiveTag =
+    selectedTag && allTags.includes(selectedTag) ? selectedTag : null;
+  /* Filter on the local input so results update while the URL write is
+   * still debouncing. */
+  const normalisedQuery = searchValue.trim().toLowerCase();
+
+  const filteredStreams = useMemo(() => {
+    let result = streams;
+
+    if (effectiveTag) {
+      result = result.filter((s) => s.tags?.includes(effectiveTag));
+    }
+    if (statusFilter) {
+      result = result.filter((s) => s.status === statusFilter);
+    }
+    if (normalisedQuery) {
+      result = result.filter((s) =>
+        [s.recipient, s.schedule, s.id, ...(s.tags ?? [])]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalisedQuery),
+      );
+    }
+
+    return result;
+  }, [streams, effectiveTag, statusFilter, normalisedQuery]);
 
   const sortedStreams = useMemo(
     () => sortStreams(filteredStreams, sort),
     [filteredStreams, sort],
   );
+
+  /* ── Compare selection state (max 2) ── */
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isCompareOpen, setIsCompareOpen] = useState(false);
+  const compareButtonRef = useRef<HTMLButtonElement>(null);
+
+  const filteredIdsKey = useMemo(
+    () => filteredStreams.map((s) => s.id).join(","),
+    [filteredStreams],
+  );
+
+  // Clear selection whenever the filtered list changes so hidden streams cannot stay selected.
+  useEffect(() => {
+    setSelectedIds([]);
+    setIsCompareOpen(false);
+  }, [filteredIdsKey]);
+
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((item) => item !== id);
+      }
+      if (prev.length >= 2) {
+        return prev;
+      }
+      return [...prev, id];
+    });
+  };
+
+  const selectedStreams = useMemo(
+    () =>
+      selectedIds
+        .map((id) => filteredStreams.find((s) => s.id === id))
+        .filter((s): s is StreamRowData => s !== undefined),
+    [selectedIds, filteredStreams],
+  );
+
+  const handleCloseCompare = () => {
+    setIsCompareOpen(false);
+    compareButtonRef.current?.focus();
+  };
+
+  const handleClearFilters = () => {
+    clearFilters();
+    onClearFilters?.();
+  };
 
   /* ── Derived view state ── */
   const isLoading = state === "loading";
@@ -213,7 +353,16 @@ export function StreamsPageContent({
   const isFilteredEmpty = emptyStateVariant === "filtered" && streams.length === 0 && !isEmpty;
   const isPopulated = !isLoading && !isError && !isEmpty;
 
+  const hasActiveFilters = Boolean(effectiveTag || statusFilter || normalisedQuery);
+  const hasNoMatches = isPopulated && hasActiveFilters && filteredStreams.length === 0;
+  const showFilteredEmpty = isFilteredEmpty || hasNoMatches;
+
   const populatedCount = streamListCopy.populatedCount(streams.length);
+  const rowIds = sortedStreams.map((stream) => stream.id);
+  const { gridProps, getCellProps, registerCell } = useRovingGrid({
+    rowIds,
+    columnCount: 4,
+  });
 
   /* ── Toolbar visibility ── */
   const showToolbar = isPopulated;
@@ -236,6 +385,9 @@ export function StreamsPageContent({
             alignItems: "center",
           }}
         >
+          <Link className="button button--secondary" href="/streams/import">
+            {streamListCopy.importCta}
+          </Link>
           <button className="button button--secondary" type="button">
             {streamListCopy.exportCta}
           </button>
@@ -262,7 +414,7 @@ export function StreamsPageContent({
               </p>
             </div>
 
-            {/* Sort dropdown + Density toggle — only shown when the list is populated */}
+            {/* Compare + Sort dropdown + Density toggle — only shown when the list is populated */}
             {showToolbar && (
               <div
                 style={{
@@ -272,6 +424,17 @@ export function StreamsPageContent({
                   flexWrap: "wrap",
                 }}
               >
+                <button
+                  ref={compareButtonRef}
+                  type="button"
+                  className="button button--secondary"
+                  disabled={selectedIds.length !== 2}
+                  onClick={() => setIsCompareOpen(true)}
+                >
+                  {selectedIds.length > 0
+                    ? `Compare (${selectedIds.length}/2)`
+                    : "Compare"}
+                </button>
                 <SortDropdown value={sort} onChange={handleSortChange} />
                 <DensityToggle value={density} onChange={handleDensityChange} />
               </div>
@@ -284,12 +447,56 @@ export function StreamsPageContent({
           )}
         </div>
 
+        {/* Search + status filters — mirrored into the URL */}
+        {isPopulated && (
+          <div className={filterStyles.filters}>
+            <label className={filterStyles.search} htmlFor="streams-search">
+              <span className="sr-only">Search streams</span>
+              <input
+                id="streams-search"
+                type="search"
+                aria-label="Search streams"
+                className={`${filterStyles.control} ${filterStyles.search}`}
+                placeholder="Search recipient, tag, or ID"
+                value={searchValue}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </label>
+
+            <label className={filterStyles.status} htmlFor="streams-status">
+              <span className="sr-only">Filter by status</span>
+              <select
+                id="streams-status"
+                aria-label="Filter by status"
+                className={`${filterStyles.control} ${filterStyles.status}`}
+                value={statusFilter ?? ""}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setStatus(isStreamStatus(value) ? value : null);
+                }}
+              >
+                <option value="">All statuses</option>
+                {STREAM_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <ResetFiltersButton
+              onReset={handleClearFilters}
+              isVisible={hasActiveFilters}
+            />
+          </div>
+        )}
+
         {/* Tag-chip filter bar — only shown when streams carry tags */}
         {isPopulated && allTags.length > 0 && (
           <TagChips
             tags={allTags}
-            selectedTag={selectedTag}
-            onTagClick={setSelectedTag}
+            selectedTag={effectiveTag}
+            onTagClick={setTag}
           />
         )}
 
@@ -302,30 +509,30 @@ export function StreamsPageContent({
             message={errorMessage}
             onRetry={onRetry}
           />
-        ) : isEmpty || isFilteredEmpty ? (
+        ) : isEmpty || showFilteredEmpty ? (
           <EmptyState
             eyebrow={
-              isFilteredEmpty
+              showFilteredEmpty
                 ? streamListCopy.filtered.eyebrow
                 : streamListCopy.empty.eyebrow
             }
             title={
-              isFilteredEmpty
+              showFilteredEmpty
                 ? streamListCopy.filtered.title
                 : streamListCopy.empty.title
             }
             description={
-              isFilteredEmpty
+              showFilteredEmpty
                 ? streamListCopy.filtered.description
                 : streamListCopy.empty.description
             }
             actionLabel={
-              isFilteredEmpty
+              showFilteredEmpty
                 ? streamListCopy.filtered.actionLabel
                 : streamListCopy.empty.actionLabel
             }
-            onAction={isFilteredEmpty ? onClearFilters : onRetryAction}
-            guidanceSteps={isFilteredEmpty ? undefined : [...streamListCopy.empty.guidanceSteps]}
+            onAction={showFilteredEmpty ? handleClearFilters : onRetryAction}
+            guidanceSteps={showFilteredEmpty ? undefined : [...streamListCopy.empty.guidanceSteps]}
           />
         ) : (
           /*
@@ -338,26 +545,87 @@ export function StreamsPageContent({
           <section
             aria-label="Streams list"
             className={`stream-list${density === "compact" ? " stream-list--compact" : ""}`}
+            {...gridProps}
           >
-            {sortedStreams.map((stream, index) => (
-              <div
-                key={stream.id}
-                className="stream-cascade-item"
-                style={
-                  /* Index is passed via a CSS custom property so the
-                     animation-delay calculation stays in CSS-land.     */
-                  { "--cascade-index": index } as React.CSSProperties
-                }
-              >
-                <StreamRow
-                  stream={stream}
-                  density={density === "compact" ? "compact" : "cozy"}
-                />
-              </div>
-            ))}
+            <div className="stream-grid__header sr-only" role="row" aria-rowindex={1}>
+              {["Recipient", "Rate and status", "Progress", "Actions"].map(
+                (label, index) => (
+                  <div key={label} role="columnheader" aria-colindex={index + 1}>
+                    {label}
+                  </div>
+                ),
+              )}
+            </div>
+            {sortedStreams.map((stream, index) => {
+              const isSelected = selectedIds.includes(stream.id);
+              const isSelectionDisabled = !isSelected && selectedIds.length >= 2;
+              return (
+                <div
+                  key={stream.id}
+                  className="stream-cascade-item"
+                  role="presentation"
+                  style={
+                    /* Index is passed via a CSS custom property so the
+                       animation-delay calculation stays in CSS-land.     */
+                    {
+                      "--cascade-index": index,
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: "0.75rem",
+                    } as React.CSSProperties
+                  }
+                >
+                  <label
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      minWidth: "2.75rem",
+                      minHeight: "2.75rem",
+                      cursor: isSelectionDisabled ? "not-allowed" : "pointer",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      disabled={isSelectionDisabled}
+                      onChange={() => handleToggleSelect(stream.id)}
+                      aria-label={`Select stream for comparison: ${stream.recipient}`}
+                      style={{
+                        width: "1.125rem",
+                        height: "1.125rem",
+                        cursor: isSelectionDisabled ? "not-allowed" : "pointer",
+                      }}
+                    />
+                  </label>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <StreamRow
+                      stream={stream}
+                      density={density === "compact" ? "compact" : "cozy"}
+                      gridMode
+                      rowIndex={index + 2}
+                      gridCellProps={(columnIndex) => ({
+                        ...getCellProps(index, columnIndex),
+                        ref: (element) => registerCell(index, columnIndex, element),
+                      })}
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </section>
         )}
       </section>
+
+      {selectedStreams.length === 2 && (
+        <CompareStreamsModal
+          isOpen={isCompareOpen}
+          onClose={handleCloseCompare}
+          streamA={toCompareStream(selectedStreams[0]!)}
+          streamB={toCompareStream(selectedStreams[1]!)}
+        />
+      )}
     </main>
   );
 }

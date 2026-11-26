@@ -269,7 +269,7 @@
 
 /* The skeleton wrapper reuses the same .badge base so dimensions,
    padding, radius, and border are identical to the real badge. */
-:global(.wallet-badge-skeleton) {
+.badge:global(.wallet-badge-skeleton) {
   display: inline-flex;
   align-items: center;
   gap: var(--wb-gap, var(--space-2));
@@ -284,34 +284,34 @@
   user-select: none;
 }
 
-:global(.wallet-badge-skeleton__dot),
-:global(.wallet-badge-skeleton__label),
-:global(.wallet-badge-skeleton__network),
-:global(.wallet-badge-skeleton__balance) {
+.badge:global(.wallet-badge-skeleton) :global(.wallet-badge-skeleton__dot),
+.badge:global(.wallet-badge-skeleton) :global(.wallet-badge-skeleton__label),
+.badge:global(.wallet-badge-skeleton) :global(.wallet-badge-skeleton__network),
+.badge:global(.wallet-badge-skeleton) :global(.wallet-badge-skeleton__balance) {
   display: inline-block;
   flex-shrink: 0;
 }
 
 /* Responsive: mirror the real badge breakpoints */
 @media (max-width: 29.9375rem) {
-  :global(.wallet-badge-skeleton) {
+  .badge:global(.wallet-badge-skeleton) {
     padding: var(--space-1) var(--space-3);
     gap: var(--space-1);
   }
 
   /* Hide network + balance slots on narrow screens, matching the real badge */
-  :global(.wallet-badge-skeleton__network),
-  :global(.wallet-badge-skeleton__balance) {
+  .badge:global(.wallet-badge-skeleton) :global(.wallet-badge-skeleton__network),
+  .badge:global(.wallet-badge-skeleton) :global(.wallet-badge-skeleton__balance) {
     display: none;
   }
 
-  :global(.wallet-badge-skeleton__label) {
+  .badge:global(.wallet-badge-skeleton) :global(.wallet-badge-skeleton__label) {
     width: 72px !important;
   }
 }
 
 @media (min-width: 64rem) {
-  :global(.wallet-badge-skeleton) {
+  .badge:global(.wallet-badge-skeleton) {
     padding: var(--space-2) var(--space-4);
     gap: var(--space-2);
   }
@@ -319,10 +319,10 @@
 
 /* Suppress animation for users who prefer reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  :global(.wallet-badge-skeleton__dot),
-  :global(.wallet-badge-skeleton__label),
-  :global(.wallet-badge-skeleton__network),
-  :global(.wallet-badge-skeleton__balance) {
+  .badge:global(.wallet-badge-skeleton) :global(.wallet-badge-skeleton__dot),
+  .badge:global(.wallet-badge-skeleton) :global(.wallet-badge-skeleton__label),
+  .badge:global(.wallet-badge-skeleton) :global(.wallet-badge-skeleton__network),
+  .badge:global(.wallet-badge-skeleton) :global(.wallet-badge-skeleton__balance) {
     animation: none !important;
   }
 }

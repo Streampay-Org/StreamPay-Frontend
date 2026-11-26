@@ -67,3 +67,31 @@ Access events contain no PEI: neither the request body nor recipient addresses a
 - Timeouts produced by `withRouteTimeout` emit a single event with `errorCode: "GATEWAY_TIMEOUT"`; the
   wrapper does not emit a duplicate.
 - Logging is non-blocking: the hot path never awaits the access logger.
+
+## Metrics and the Grafana dashboard
+
+Prometheus metrics are served from `GET /api/metrics` (bearer token from
+`METRICS_AUTH_TOKEN`; the route returns `503` when the token is unset). The
+frontend owns two metric sources:
+
+- the shared `prom-client` registry in `src/metrics/registry.ts`
+  (`api_streams_*`, `webhook_*`, `export_*`, `wallet_auth_*`, `settle_job_*`,
+  `http_request_duration_seconds`, `rate_limit_store_unavailable_total`, and
+  the Node.js default metrics); and
+- the hand-rendered counters in `app/api/metrics/route.ts`
+  (`streampay_requests_total`, `streampay_rate_limit_throttled_total`, and the
+  `streampay_metrics_up` gauge).
+
+### Grafana dashboard
+
+`operations/grafana/streampay.json` is a Grafana 10+ dashboard covering request
+rate, throttles, p95 latency, 5xx ratios, webhook delivery outcomes, export,
+reconciliation, wallet auth, settlement jobs, and metrics-exporter health. It
+templates the datasource as `DS_PROMETHEUS`, so the same JSON works across
+environments without edits. Import and scrape instructions are in
+[`operations/grafana/README.md`](../operations/grafana/README.md).
+
+`operations/grafana/dashboard.test.ts` derives the allowed metric names from
+the registry and metrics route and fails if a panel references a metric that
+the code does not define. When adding a metric, add the panel in the same
+change.

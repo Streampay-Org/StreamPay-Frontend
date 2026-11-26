@@ -27,9 +27,12 @@ no combination of stream id and client key can collide with another pair.
    instead of the original response.
 3. **A different body is a conflict.** The same key with a different request
    body is answered with `409 IdempotencyKeyReused`.
-4. **A missing or malformed key is rejected.** A missing key returns
-   `400 IdempotencyKeyRequired`; a key that is not 1-255 printable ASCII
-   characters returns `400 IdempotencyKeyInvalid`.
+4. **A missing or malformed key is rejected.** `Idempotency-Key` must be
+   1–255 printable ASCII characters (`0x21`–`0x7E`, no spaces, control
+   characters, or non-ASCII). A missing key returns `400` with
+   `{ "error": { "code": "IDEMPOTENCY_KEY_REQUIRED", "message": "...", "request_id": "..." } }`;
+   an empty, overlong (> 255 characters), or invalid-character key returns `400`
+   with `{ "error": { "code": "IDEMPOTENCY_KEY_INVALID", "message": "...", "request_id": "..." } }`.
 
 ## Responses
 

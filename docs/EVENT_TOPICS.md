@@ -2,7 +2,9 @@
 
 This document catalogs the events emitted by the StreamPay smart contracts.
 
-All events use a two-topic scheme: `("stream", "<event>")` or `("StreamPay", "<event>")`.
+All events use a two-topic scheme: `(primary topic, sub-topic)`. The primary
+topic identifies the event family and is `"stream"`, `"StreamPay"`, or
+`"recurring"`.
 Events are emitted AFTER successful state mutation and any token transfer. Failed calls do not emit events.
 
 ## Stream Events
@@ -39,7 +41,8 @@ Events are emitted AFTER successful state mutation and any token transfer. Faile
 | `"stream"` | `"set_max_a"` | Emitted when the per-token maximum stream amount cap is set or cleared (`0` indicates cleared). |
 | `"stream"` | `"set_fee_c"` | Emitted when the fee collector address is updated. |
 | `"stream"` | `"set_dfee"` | Emitted when the global default fee bps is updated. |
-| `"stream"` | `"fee"` | Emitted for every withdrawal that incurs a non-zero fee. |
+| `"stream"` | `"fee"` | Emitted for every single-stream (`withdraw`, `withdraw_to`) or split-stream (`withdraw_split`) withdrawal that incurs a non-zero fee when a fee collector is configured. |
+| `"stream"` | `"cooloff"` | Emitted when an admin updates the cool-off window. |
 | `"stream"` | `"swept"` | Emitted when the admin successfully sweeps accumulated protocol fees. |
 | `"stream"` | `"deprecated_entrypoint"` | Emitted when a legacy/deprecated contract entrypoint is invoked. |
 
@@ -48,5 +51,22 @@ Events are emitted AFTER successful state mutation and any token transfer. Faile
 | Primary Topic | Sub-topic | Description |
 | --- | --- | --- |
 | `"StreamPay"` | `"upgraded"` | Emitted when the contract is upgraded. |
+
+## Multi-Recipient Events
+
+| Primary Topic | Sub-topic | Description |
+| --- | --- | --- |
+| `"stream"` | `"split_cr"` | Emitted when a multi-recipient stream group is created. |
+| `"stream"` | `"split_wd"` | Emitted when a recipient withdraws from a split stream. |
+| `"stream"` | `"split_ca"` | Emitted when a multi-recipient stream group is cancelled. |
+
+## Recurring Events
+
+| Primary Topic | Sub-topic | Description |
+| --- | --- | --- |
+| `"recurring"` | `"created"` | Emitted when a recurring payment schedule is created. |
+| `"recurring"` | `"processed"` | Emitted when a scheduled recurring payment is processed. |
+| `"recurring"` | `"withdrawn"` | Emitted when a recipient withdraws from a recurring stream. |
+| `"recurring"` | `"cancelled"` | Emitted when a recurring payment schedule is cancelled. |
 
 For detailed data payloads of each event, refer to the `events.rs` module in the smart contract source code.

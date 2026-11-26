@@ -6,6 +6,7 @@ import type { Stream, StreamStatus } from "../../types/openapi";
 import { StatusBadge } from "../../components/StatusBadge";
 import { NetworkBadge } from "../../components/NetworkBadge";
 import { PaymentTimeline } from "../../components/PaymentTimeline";
+import { StreamEndedCard } from "../../components/StreamEndedCard";
 import { ErrorToast } from "../../components/ErrorToast";
 import { ConfirmCancel } from "../../components/ConfirmCancel";
 import { CancelStreamModal } from "../../components/CancelStreamModal";
@@ -96,8 +97,10 @@ export function StreamDetailClient({
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
   const [statusTone, setStatusTone] = useState<StatusTone>("success");
+  const [isEndedCardDismissed, setIsEndedCardDismissed] = useState(false);
   const inFlightRef = useRef(false);
   const statusRef = useRef<HTMLDivElement>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
 
   const actionSummary = STREAM_ACTION_SUMMARY[current.id] ?? {
     amountLabel: current.rate,
@@ -125,6 +128,21 @@ export function StreamDetailClient({
         current.status === "cancelled" ||
         current.status === "ended" ||
         current.status === "withdrawn"));
+
+  const isTerminalStatus =
+    current.status === "ended" ||
+    current.status === "withdrawn" ||
+    current.status === "cancelled";
+  const parsedEndedAt = current.updatedAt ? new Date(current.updatedAt) : undefined;
+  const endedAt =
+    parsedEndedAt && !Number.isNaN(parsedEndedAt.getTime())
+      ? parsedEndedAt
+      : undefined;
+
+  const handleViewTimeline = () => {
+    timelineRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    timelineRef.current?.focus();
+  };
 
   // The status region must exist before its text changes so assistive tech
   // announces the update, then receive focus so sighted keyboard users land on
@@ -347,6 +365,19 @@ export function StreamDetailClient({
         </div>
       </section>
 
+      {/* Stream Ended Summary Card */}
+      {isTerminalStatus && !isEndedCardDismissed && (
+        <StreamEndedCard
+          streamName={current.label || current.recipient}
+          amount={current.totalAmount ?? current.rate}
+          currency={current.token}
+          endedAt={endedAt}
+          onDismiss={() => setIsEndedCardDismissed(true)}
+          onViewDetails={handleViewTimeline}
+          className="mb-6"
+        />
+      )}
+
       {/* Main Grid Layout */}
       <div className="detail-grid">
         {/* Left Column: Stream Details & Next-Action Panel */}
@@ -501,15 +532,22 @@ export function StreamDetailClient({
                 {isProcessing ? "Processing..." : nextAction}
               </button>
 
-              {canAmend(current.status) && (
+              {(current.status === "active" || current.status === "paused") && (
                 <button
                   className="button button--secondary detail-action-btn"
                   type="button"
+                  onClick={() => void beginAction("settle")}
+                  disabled={isProcessing || mutationsDisabled}
+                >
+                  Settle Stream
+                </button>
+              )}
+
+              {canAmend(current.status) && (
                   onClick={() => setIsAmendOpen(true)}
                   disabled={amendDisabled}
                 >
                   Amend
-                </button>
               )}
 
               <Link
@@ -575,7 +613,12 @@ export function StreamDetailClient({
         </div>
 
         {/* Right Column: Payment Timeline */}
-        <div className="detail-right-col">
+        <div
+          ref={timelineRef}
+          tabIndex={-1}
+          className="detail-right-col"
+          data-testid="payment-timeline-section"
+        >
           <PaymentTimeline stream={current} />
         </div>
       </div>

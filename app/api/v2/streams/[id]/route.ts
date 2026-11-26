@@ -1,11 +1,29 @@
 import { NextResponse } from "next/server";
 import { getStore } from "@/app/lib/db";
 import { getCorrelationContext } from "@/app/lib/logger";
+import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
+import { getLimitForRoute } from "@/app/lib/rate-limit-config";
+import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { ProjectionError, toV2Stream, dbStreamToV1 } from "@/app/lib/api-version";
+import { deleteStream } from "@/app/lib/stream-delete";
+import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { inferStreamChangeAction, publishStreamChange } from "@/app/lib/stream-publish";
 import type { Stream } from "@/app/types/openapi";
 
 type Context = { params: Promise<{ id: string }> };
+
+async function enforceRateLimit(request: Request, method: "GET" | "DELETE") {
+  const url = new URL(request.url);
+  const limitType = getLimitForRoute(method, url.pathname);
+  const identity = getClientIdentity(request);
+  const result = await checkRateLimit(identity, limitType);
+  if (!result.allowed) {
+    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
+    return rateLimitResponse(result.retryAfter!);
+  }
+  recordRequest(url.pathname);
+  return null;
+}
 
 function errorResponse(code: string, message: string, status: number) {
   const requestId = getCorrelationContext()?.request_id ?? `req-${crypto.randomUUID()}`;
@@ -14,10 +32,13 @@ function errorResponse(code: string, message: string, status: number) {
 
 /** GET /api/v2/streams/:id — single stream in v2 shape. */
 export async function GET(request: Request, { params }: Context) {
+  const rateLimited = await enforceRateLimit(request, "GET");
+  if (rateLimited) return rateLimited;
+
   const { streamRepository } = getStore();
   const { id } = await params;
   const stream = streamRepository.streams.get(id);
-  if (!stream) {
+  if (!stream || (stream as any).deletedAt) {
     return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
   }
 
@@ -63,21 +84,26 @@ export async function GET(request: Request, { params }: Context) {
 }
 
 /** DELETE /api/v2/streams/:id */
-export async function DELETE(_request: Request, { params }: Context) {
-  const { streamRepository } = getStore();
+export async function DELETE(request: Request, { params }: Context) {
+  const rateLimited = await enforceRateLimit(request, "DELETE");
+  if (rateLimited) return rateLimited;
+
   const { id } = await params;
-  const stream = streamRepository.streams.get(id);
-  if (!stream) {
-    return errorResponse("STREAM_NOT_FOUND", `Stream '${id}' not found`, 404);
+  const authActor = tryAuthenticateRequest(request);
+  const actorWalletHeader =
+    request.headers.get("Actor-Wallet-Address") ||
+    request.headers.get("actor-wallet-address") ||
+    request.headers.get("x-streampay-actor-id") ||
+    null;
+
+  const actor = authActor || (actorWalletHeader ? { walletAddress: actorWalletHeader } : null);
+  const tenant = request.headers.get("x-tenant-id")?.trim() || null;
+
+  const result = await deleteStream(id, actor, tenant, request);
+  if (!result.success) {
+    return errorResponse(result.code, result.message, result.status);
   }
-  if (stream.status === "active" || stream.status === "paused") {
-    return errorResponse(
-      "STREAM_INACTIVE_STATE",
-      "Cannot delete an active or paused stream. Stop it first.",
-      409,
-    );
-  }
-  streamRepository.streams.delete(id);
+
   return new NextResponse(null, { status: 204 });
 }
 

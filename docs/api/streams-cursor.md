@@ -57,3 +57,18 @@ value they received.
 | Legacy cursor for a deleted stream | `422` | `INVALID_CURSOR` |
 | `limit` is not an integer in `[1, 100]` | `422` | `VALIDATION_ERROR` (v1), `INVALID_LIMIT` (v2) |
 | `status` is not a known stream status | `422` | `VALIDATION_ERROR` (v1), `INVALID_STATUS` (v2) |
+
+## RFC 8288 `Link` header
+
+Cursor-paginated list endpoints (`GET /api/streams`, `GET /api/v2/streams`, and `GET /api/activity`) emit a standards-based RFC 8288 `Link` response header so generic HTTP clients can traverse pages without parsing the JSON body:
+
+```http
+Link: </api/v2/streams?limit=20&status=active&cursor=MjAyNi0wMS0wMVQwMDowMDowMC4wMDBafHN0cmVhbS0x>; rel="next", </api/v2/streams?limit=20&status=active>; rel="self"
+```
+
+- `rel="next"` is included whenever another page is available (`meta.hasNext === true`) and omitted on the final page.
+- `rel="self"` echoes the current page URI with all active query parameters preserved (including `limit`, filters such as `status`, and the current `cursor` if supplied).
+- `rel="prev"` is intentionally omitted because the underlying keyset cursor `(createdAt, id)` is forward-only.
+- Cursors are URL-encoded in the link target URI, and all other query parameters are preserved.
+- On `GET /api/streams` and `GET /api/v2/streams`, the `Link` header is preserved on `304 Not Modified` responses alongside `ETag`.
+- `Link` is listed in `Access-Control-Expose-Headers` so browser clients can read it on cross-origin responses.

@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
-import { getStore } from "@/app/lib/db";
 import { requireInternalServiceAuth } from "@/app/lib/internal-service-auth";
-import { ReconciliationService } from "@/scripts/reconciliation/reconcile";
-import { dbClient } from "@/lib/dbClient";
-import { onChainClient } from "@/lib/onChainClient";
+import { computeStreamDiff } from "@/app/lib/reconciliation-diff";
 import { logger } from "@/app/lib/logger";
-import type { DbStream } from "@/scripts/reconciliation/types";
-import type { OnChainStream } from "@/types";
 
 /**
  * GET /api/internal/reconciliation/diff/:id
@@ -71,72 +66,10 @@ export async function GET(
     key_id: identity.keyId,
   });
 
-  // Build the DB stream record from the repository store and the mock DB client
-  const { streamRepository } = getStore();
-  const dbStreamsList: DbStream[] = [];
-
-  // Try to load from the DB client (handles both legacy call signatures)
-  try {
-    const clientStreams = await (dbClient as typeof dbClient & {
-      getStreams: (...args: unknown[]) => Promise<DbStream[]>;
-    }).getStreams("default", 100, 0);
-    dbStreamsList.push(...clientStreams);
-  } catch {
-    try {
-      const legacyStreams = await (dbClient as typeof dbClient & {
-        getStreams: (...args: unknown[]) => Promise<DbStream[]>;
-      }).getStreams(100, 0);
-      dbStreamsList.push(...legacyStreams);
-    } catch {
-      // Rely on repository-backed streams below
-    }
-  }
-
-  // Merge repository streams not already present
-  for (const s of streamRepository.streams.values()) {
-    if (!dbStreamsList.some((x) => x.id === s.id)) {
-      dbStreamsList.push({
-        id: s.id,
-        recipient_address: s.recipient || "unknown",
-        total_amount: s.vestedAmount || "1000000000",
-        released_amount: s.releasedAmount || "0",
-        status: s.status.toUpperCase(),
-        last_sync_ledger: 0,
-      });
-    }
-  }
-
-  // Attempt to fetch the on-chain record; fetchStream throws SorobanError when
-  // the stream is absent on-chain, so we treat that as null (not found).
-  let onChainFallback: OnChainStream | null = null;
-  try {
-    onChainFallback = await onChainClient.fetchStream('testnet', streamId);
-  } catch {
-    // Stream not found on-chain — reconciliation will surface a presence diff
-  }
-
-  // Seed from on-chain data if the stream is missing from the DB list.
-  // For stream_2 we preserve the known DB mismatch (released_amount differs
-  // from on-chain) so the diff is correctly surfaced — matching the seeding
-  // logic in POST /api/internal/reconciliation.
-  if (onChainFallback && !dbStreamsList.some((x) => x.id === streamId)) {
-    dbStreamsList.push({
-      id: onChainFallback.id,
-      recipient_address: onChainFallback.recipient_address,
-      total_amount: onChainFallback.total_amount.toString(),
-      released_amount:
-        onChainFallback.id === "stream_2"
-          ? "1000000000"
-          : onChainFallback.released_amount.toString(),
-      status: onChainFallback.status.toUpperCase(),
-      last_sync_ledger: 0,
-    });
-  }
-
-  const dbRecord = dbStreamsList.find((x) => x.id === streamId);
+  const diff = await computeStreamDiff(streamId);
 
   // Return 404 if the stream is unknown to both DB and on-chain
-  if (!dbRecord) {
+  if (!diff) {
     logger.warn("reconciliation.diff stream not found", { stream_id: streamId });
     return createErrorResponse(
       "STREAM_NOT_FOUND",
@@ -145,66 +78,18 @@ export async function GET(
     );
   }
 
-  // Run a focused single-stream reconciliation to produce the diff
-  const reconciliationService = new ReconciliationService({
-    tolerance: BigInt(process.env.RECONCILE_TOLERANCE || "0"),
-  });
-
-  const report = await reconciliationService.runReconciliation({
-    streamId,
-    dryRun: true,
-    dbStreams: dbStreamsList,
-  });
-
-  // Normalise bigint values to strings for JSON serialisation
-  const diffs = report.mismatches.map((m) => ({
-    field: m.field,
-    dbValue: typeof m.dbValue === "bigint" ? m.dbValue.toString() : m.dbValue,
-    onChainValue:
-      typeof m.onChainValue === "bigint"
-        ? m.onChainValue.toString()
-        : m.onChainValue,
-    toleranceApplied: m.toleranceApplied,
-  }));
-
-  // Snapshot of the DB record as returned (bigint-safe)
-  const dbSnapshot = {
-    id: dbRecord.id,
-    recipient_address: dbRecord.recipient_address,
-    total_amount: dbRecord.total_amount,
-    released_amount: dbRecord.released_amount,
-    status: dbRecord.status,
-    last_sync_ledger: dbRecord.last_sync_ledger,
-  };
-
-  // Snapshot of the on-chain record (may be null if missing on-chain)
-  const onChainSnapshot = onChainFallback
-    ? {
-        id: onChainFallback.id,
-        recipient_address: onChainFallback.recipient_address,
-        total_amount: onChainFallback.total_amount.toString(),
-        released_amount: onChainFallback.released_amount.toString(),
-        status: onChainFallback.status,
-      }
-    : null;
-
   logger.info("reconciliation.diff completed", {
     stream_id: streamId,
-    in_sync: diffs.length === 0,
-    diff_count: diffs.length,
+    in_sync: diff.inSync,
+    diff_count: diff.diffs.length,
   });
 
   return NextResponse.json(
     {
       data: {
-        streamId,
-        checkedAt: new Date().toISOString(),
+        ...diff,
         dryRun: true,
         mode: "DRY_RUN",
-        inSync: diffs.length === 0,
-        diffs,
-        db: dbSnapshot,
-        onChain: onChainSnapshot,
       },
       meta: {
         auth: {

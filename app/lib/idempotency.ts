@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
-import { logger } from "@/app/lib/logger";
+import { getCorrelationContext, logger } from "@/app/lib/logger";
 import { IDEMPOTENCY_TTL_MS } from "@/app/lib/db";
 import { db } from "@/app/lib/db";
 import { RedisIdempotencyStore } from "@/app/lib/idempotency-store-redis";
@@ -135,10 +135,83 @@ export const amendStore = createNamespacedStore("amend");
 export const settleStore = createIdempotencyStore("settle");
 export const withdrawStore = createIdempotencyStore("withdraw");
 
+export type IdempotencyKeyValidationErrorReason =
+  | "missing"
+  | "empty"
+  | "too_long"
+  | "invalid_chars";
+
+export type IdempotencyKeyValidationResult =
+  | { ok: true; key: string }
+  | { ok: false; reason: IdempotencyKeyValidationErrorReason };
+
+export const IDEMPOTENCY_KEY_MAX_LENGTH = 255;
+
 // Validate idempotency key: printable ASCII, 1-255 characters.
 // We disallow control characters and Unicode; spaces are not allowed to avoid
 // ambiguity in transport and trimming behaviour.
-const IDEMPOTENCY_KEY_RE = /^[\x21-\x7E]{1,255}$/;
+const IDEMPOTENCY_KEY_CHARS_RE = /^[\x21-\x7E]+$/;
+
+/**
+ * Validates an `Idempotency-Key` header value.
+ *
+ * Accepted keys are 1-255 printable ASCII characters (`0x21`-`0x7E`),
+ * disallowing spaces, control characters, and non-ASCII characters.
+ */
+export function validateIdempotencyKey(key: unknown): IdempotencyKeyValidationResult {
+  if (key === null || key === undefined) {
+    return { ok: false, reason: "missing" };
+  }
+  if (typeof key !== "string") {
+    return { ok: false, reason: "invalid_chars" };
+  }
+  if (key.length === 0) {
+    return { ok: false, reason: "empty" };
+  }
+  if (key.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
+    return { ok: false, reason: "too_long" };
+  }
+  if (!IDEMPOTENCY_KEY_CHARS_RE.test(key)) {
+    return { ok: false, reason: "invalid_chars" };
+  }
+  return { ok: true, key };
+}
+
+/**
+ * Builds the standard 400 error envelope for a failed `Idempotency-Key` check.
+ */
+export function idempotencyKeyErrorResponse(
+  reason: IdempotencyKeyValidationErrorReason,
+): NextResponse {
+  const code =
+    reason === "missing" ? "IDEMPOTENCY_KEY_REQUIRED" : "IDEMPOTENCY_KEY_INVALID";
+  let message: string;
+  switch (reason) {
+    case "missing":
+      message = "Idempotency-Key header is required for mutating operations";
+      break;
+    case "empty":
+      message = "Idempotency-Key must not be empty";
+      break;
+    case "too_long":
+      message = `Idempotency-Key must be at most ${IDEMPOTENCY_KEY_MAX_LENGTH} characters`;
+      break;
+    case "invalid_chars":
+      message =
+        "Idempotency-Key must contain only printable ASCII characters (0x21-0x7E) with no spaces or control characters";
+      break;
+  }
+  return NextResponse.json(
+    {
+      error: {
+        code,
+        message,
+        request_id: getCorrelationContext()?.request_id,
+      },
+    },
+    { status: 400 },
+  );
+}
 
 function makeHash(input: string) {
   return createHash("sha256").update(input).digest("hex");
@@ -163,15 +236,12 @@ export async function withIdempotency(
   handler: () => Promise<NextResponse>,
   scope: IdempotencyScope
 ): Promise<NextResponse> {
-  const key = request.headers?.get?.("Idempotency-Key");
-
-  if (!key) {
-    return NextResponse.json({ error: "IdempotencyKeyRequired", message: "Idempotency-Key header is required for mutating operations" }, { status: 400 });
+  const rawKey = request.headers?.get?.("Idempotency-Key");
+  const validation = validateIdempotencyKey(rawKey);
+  if (!validation.ok) {
+    return idempotencyKeyErrorResponse(validation.reason);
   }
-
-  if (typeof key !== "string" || !IDEMPOTENCY_KEY_RE.test(key)) {
-    return NextResponse.json({ error: "IdempotencyKeyInvalid", message: "Idempotency-Key is invalid" }, { status: 400 });
-  }
+  const key = validation.key;
 
   // Read and normalise the request body. Hash body separately to avoid creating
   // a fingerprint that leaks or scales poorly for large payloads.

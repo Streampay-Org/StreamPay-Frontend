@@ -1,0 +1,51 @@
+# Git
+.git
+.gitignore
+
+# Node
+node_modules
+npm-debug.log*
+
+# Next.js build output
+.next
+out
+
+# Source directories not needed in the image
+contracts
+tests
+__tests__
+docs
+design
+spike
+coverage
+
+# Local env files
+.env
+.env.*
+!.env.example
+
+# Test and config files
+*.test.ts
+*.test.tsx
+*.test.js
+*.test.mjs
+*.spec.ts
+*.spec.tsx
+jest.config.*
+vitest.config.*
+playwright.config.*
+container-hardening.test.ts
+
+# Dev tooling
+.eslintrc*
+eslint.config.*
+.prettierrc*
+.editorconfig
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db

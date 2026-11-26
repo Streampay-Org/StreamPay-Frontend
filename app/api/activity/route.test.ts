@@ -450,6 +450,146 @@ describe("GET /api/activity", () => {
     });
   });
 
+  describe("date range filtering", () => {
+    const ids = (body: { data: ActivityEvent[] }) =>
+      body.data.map((event) => event.id);
+
+    it("returns only events inside an inclusive date-only range", async () => {
+      const res = await GET(
+        authRequest("http://localhost/api/activity?from=2026-04-10&to=2026-04-28"),
+      );
+      const body = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(ids(body)).toEqual(["evt-1", "evt-2", "evt-3", "evt-4"]);
+      expect(body.meta.total).toBe(4);
+    });
+
+    it("supports a same-day range", async () => {
+      const res = await GET(
+        authRequest("http://localhost/api/activity?from=2026-04-28&to=2026-04-28"),
+      );
+      const body = await res.json();
+
+      expect(ids(body)).toEqual(["evt-1"]);
+      expect(body.meta.total).toBe(1);
+    });
+
+    it("supports a from-only bound", async () => {
+      const res = await GET(
+        authRequest("http://localhost/api/activity?from=2026-04-15"),
+      );
+      const body = await res.json();
+
+      expect(ids(body)).toEqual(["evt-1", "evt-2", "evt-3"]);
+    });
+
+    it("supports a to-only bound", async () => {
+      const res = await GET(
+        authRequest("http://localhost/api/activity?to=2026-04-10"),
+      );
+      const body = await res.json();
+
+      expect(ids(body)).toEqual(["evt-4", "evt-5", "evt-6"]);
+    });
+
+    it("treats datetime bounds as inclusive", async () => {
+      const res = await GET(
+        authRequest(
+          "http://localhost/api/activity?from=2026-04-27T20:00:00Z&to=2026-04-28T09:00:00Z",
+        ),
+      );
+      const body = await res.json();
+
+      expect(ids(body)).toEqual(["evt-1", "evt-2"]);
+    });
+
+    it("treats a date-only to bound as the end of the UTC day", async () => {
+      seedActivity([
+        { id: "start-of-day", type: "stream.created", streamId: "stream-ada", timestamp: "2026-04-10T00:00:00Z", description: "Start." },
+        { id: "end-of-day", type: "stream.created", streamId: "stream-ada", timestamp: "2026-04-10T23:59:59.999Z", description: "End." },
+        { id: "next-day", type: "stream.created", streamId: "stream-ada", timestamp: "2026-04-11T00:00:00Z", description: "Next day." },
+      ]);
+
+      const res = await GET(
+        authRequest("http://localhost/api/activity?from=2026-04-10&to=2026-04-10"),
+      );
+      const body = await res.json();
+
+      expect(ids(body)).toEqual(["end-of-day", "start-of-day"]);
+    });
+
+    it("combines with type filtering", async () => {
+      const res = await GET(
+        authRequest(
+          "http://localhost/api/activity?from=2026-04-10&to=2026-04-28&type=stream.created",
+        ),
+      );
+      const body = await res.json();
+
+      expect(ids(body)).toEqual(["evt-2", "evt-4"]);
+      expect(body.meta.total).toBe(2);
+    });
+
+    it("keeps pagination metadata on the date-filtered set", async () => {
+      const first = await GET(
+        authRequest("http://localhost/api/activity?from=2026-04-10&to=2026-04-28&limit=2"),
+      );
+      const firstBody = await first.json();
+
+      expect(ids(firstBody)).toEqual(["evt-1", "evt-2"]);
+      expect(firstBody.meta.total).toBe(4);
+      expect(firstBody.meta.hasNext).toBe(true);
+
+      const second = await GET(
+        authRequest(
+          `http://localhost/api/activity?from=2026-04-10&to=2026-04-28&limit=2&cursor=${encodeURIComponent(firstBody.meta.nextCursor)}`,
+        ),
+      );
+      const secondBody = await second.json();
+
+      expect(ids(secondBody)).toEqual(["evt-3", "evt-4"]);
+      expect(secondBody.meta.total).toBe(4);
+      expect(secondBody.meta.hasNext).toBe(false);
+    });
+
+    it("returns an empty page when the range excludes every event", async () => {
+      const res = await GET(
+        authRequest("http://localhost/api/activity?from=2026-05-01&to=2026-05-31"),
+      );
+      const body = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(body.data).toHaveLength(0);
+      expect(body.meta.total).toBe(0);
+    });
+
+    it.each(["not-a-date", "2026-02-30", "2026-13-01", ""])(
+      "rejects an unparseable from value %p with 422 INVALID_DATE_RANGE",
+      async (from) => {
+        const res = await GET(
+          authRequest(
+            `http://localhost/api/activity?from=${encodeURIComponent(from)}`,
+          ),
+        );
+
+        expect(res.status).toBe(422);
+        const body = await res.json();
+        expect(body.error.code).toBe("INVALID_DATE_RANGE");
+        expect(body.data).toBeUndefined();
+      },
+    );
+
+    it("rejects an inverted range with 422 INVALID_DATE_RANGE", async () => {
+      const res = await GET(
+        authRequest("http://localhost/api/activity?from=2026-05-01&to=2026-04-01"),
+      );
+
+      expect(res.status).toBe(422);
+      expect((await res.json()).error.code).toBe("INVALID_DATE_RANGE");
+    });
+  });
+
   describe("deleted streams", () => {
     it("keeps caller A's deleted stream event visible with isDeleted true", async () => {
       seedActivity([
@@ -594,6 +734,39 @@ describe("GET /api/activity", () => {
 
       expect(limited).toBe(true);
       expect(retryAfter).not.toBeNull();
+    });
+  });
+
+  describe("RFC 8288 Link headers", () => {
+    it("emits rel=\"next\" with preserved filters and omits rel=\"next\" on the last page", async () => {
+      seedStreams();
+      seedActivity(makeEvents(5, "link", "stream-ada"));
+
+      const res1 = await GET(
+        authRequest("http://localhost/api/activity?limit=3&streamId=stream-ada&type=stream.created"),
+      );
+      expect(res1.status).toBe(200);
+      const body1 = await res1.json();
+      expect(body1.meta.hasNext).toBe(true);
+      expect(body1.links.self).toBe(
+        "/api/activity?limit=3&streamId=stream-ada&type=stream.created",
+      );
+
+      const link1 = res1.headers.get("Link")!;
+      expect(link1).toContain('rel="next"');
+      expect(link1).toContain("streamId=stream-ada");
+      expect(link1).toContain("type=stream.created");
+      expect(link1).toContain(`cursor=${encodeURIComponent(body1.meta.nextCursor)}`);
+
+      const nextMatch = link1.match(/<([^>]+)>;\s*rel="next"/);
+      expect(nextMatch).not.toBeNull();
+      const res2 = await GET(authRequest(`http://localhost${nextMatch![1]}`));
+      expect(res2.status).toBe(200);
+      const body2 = await res2.json();
+      expect(body2.data).toHaveLength(2);
+      expect(body2.meta.hasNext).toBe(false);
+      expect(res2.headers.get("Link")).not.toContain('rel="next"');
+      expect(res2.headers.get("Link")).toContain('rel="self"');
     });
   });
 });

@@ -167,7 +167,7 @@ describe("Stream Details Route - GET /api/streams/:id and mutations", () => {
       // POST updates stream and invalidates cache
       const reqPOST = new Request(`http://localhost/api/streams/${streamId}`, {
         method: "POST",
-        headers: { "x-tenant-id": tenantId, "Content-Type": "application/json" },
+        headers: { "x-tenant-id": tenantId, "Content-Type": "application/json", "If-Match": "*" },
         body: JSON.stringify({ label: "Updated Label" }),
       });
       const resPOST = await POST(reqPOST, { params: Promise.resolve({ id: streamId }) });
@@ -179,14 +179,19 @@ describe("Stream Details Route - GET /api/streams/:id and mutations", () => {
       liveCache.set(tenantId, streamId, stream, "testnet");
 
       // DELETE deletes stream and invalidates cache
-      // Make stream deletable (not active/paused)
-      const nonActiveStream = { ...stream, status: "ended" as const };
-      db.streams.set(streamId, nonActiveStream);
-      liveCache.set(tenantId, streamId, nonActiveStream, "testnet");
+      // Make stream deletable: draft or cancelled or withdrawn with succeeded withdrawal
+      const sender = "GD7H...3J4K";
+      const deletableStream = {
+        ...stream,
+        status: "draft" as const,
+        senderAddress: sender,
+      };
+      db.streams.set(streamId, deletableStream);
+      liveCache.set(tenantId, streamId, deletableStream, "testnet");
 
       const reqDELETE = new Request(`http://localhost/api/streams/${streamId}`, {
         method: "DELETE",
-        headers: { "x-tenant-id": tenantId },
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
       });
       const resDELETE = await DELETE(reqDELETE, { params: Promise.resolve({ id: streamId }) });
       expect(resDELETE.status).toBe(204);
@@ -218,7 +223,7 @@ describe("Stream Details Route - GET /api/streams/:id and mutations", () => {
   it("handles malformed JSON body in POST", async () => {
     const reqPOST = new Request(`http://localhost/api/streams/${streamId}`, {
       method: "POST",
-      headers: { "x-tenant-id": tenantId, "Content-Type": "application/json" },
+      headers: { "x-tenant-id": tenantId, "Content-Type": "application/json", "If-Match": "*" },
       body: "invalid-json",
     });
     const resPOST = await POST(reqPOST, { params: Promise.resolve({ id: streamId }) });
@@ -436,14 +441,17 @@ describe("Stream Details Route - GET /api/streams/:id ETag + 304 short-circuit",
 
     const req = new Request(`http://localhost/api/streams/${streamId}`, {
       method: "POST",
-      headers: { "x-tenant-id": tenantId, "Content-Type": "application/json" },
+      headers: { "x-tenant-id": tenantId, "Content-Type": "application/json", "If-Match": before },
       body: JSON.stringify({ label: "Renamed Stream" }),
     });
     const post = await POST(req, { params: Promise.resolve({ id: streamId }) });
     expect(post.status).toBe(200);
+    expect(post.headers.get("ETag")).toBeTruthy();
+    expect(post.headers.get("ETag")).not.toBe(before);
 
     const after = await getEtag(streamId, tenantId);
     expect(after).not.toBe(before);
+    expect(post.headers.get("ETag")).toBe(after);
   });
 
   it("replays the same ETag for two back-to-back GETs of the same resource", async () => {
@@ -493,6 +501,281 @@ describe("Stream Details Route - GET /api/streams/:id ETag + 304 short-circuit",
     expect(res.headers.get("Cache-Control")).toBeNull();
   });
 
+  describe("Stream Deletion Guards and Audit (Test Plan)", () => {
+    const sender = "GSENDER_STREAM_OWNER_12345";
+    const nonSender = "GSTRANGER_NON_OWNER_99999";
+    const orgOwner = "GOWNER7MG6ZKKIFPWFNVJBXVPUMTYV5ANT2O2ZWL7GSDZWNRW"; // from org-acme seed
+
+    it("1. Delete an ended stream with withdrawal.state: 'pending' -> 409 FUNDS_PENDING_WITHDRAWAL", async () => {
+      const targetId = "stream-ended-pending";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: tenantId,
+        senderAddress: sender,
+        recipient: "GRECIPIENT",
+        status: "ended",
+        withdrawal: { state: "pending", requestedAt: new Date().toISOString(), lastCheckedAt: new Date().toISOString(), attempts: 1 },
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      const req = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+      });
+      const res = await DELETE(req, { params: Promise.resolve({ id: targetId }) });
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.error.code).toBe("FUNDS_PENDING_WITHDRAWAL");
+    });
+
+    it("2. Delete draft as the sender -> 204; GET -> 404; not in the list", async () => {
+      const targetId = "stream-draft-sender";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: tenantId,
+        senderAddress: sender,
+        recipient: "GRECIPIENT",
+        status: "draft",
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      const req = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+      });
+      const res = await DELETE(req, { params: Promise.resolve({ id: targetId }) });
+      expect(res.status).toBe(204);
+
+      // GET -> 404
+      const getReq = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "GET",
+        headers: { "x-tenant-id": tenantId },
+      });
+      const getRes = await GET(getReq, { params: Promise.resolve({ id: targetId }) });
+      expect(getRes.status).toBe(404);
+
+      // Check streamRepository list or findOne excludes it
+      expect(db.streams.findOne(tenantId, targetId)).toBeNull();
+
+      // Check GET /api/streams list excludes soft-deleted stream before pagination
+      const { GET: listGET } = await import("../route");
+      const listRes = await listGET(
+        new Request(`http://localhost/api/streams?limit=50`, {
+          method: "GET",
+          headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+        })
+      );
+      expect(listRes.status).toBe(200);
+      const listBody = await listRes.json();
+      expect(listBody.data.some((s: any) => s.id === targetId)).toBe(false);
+    });
+
+    it("3. Delete draft as a non-sender -> 403", async () => {
+      const targetId = "stream-draft-non-sender";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: tenantId,
+        senderAddress: sender,
+        recipient: "GRECIPIENT",
+        status: "draft",
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      const req = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": nonSender },
+      });
+      const res = await DELETE(req, { params: Promise.resolve({ id: targetId }) });
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.code).toBe("FORBIDDEN");
+    });
+
+    it("4. Delete withdrawn with a succeeded withdrawal -> 204", async () => {
+      const targetId = "stream-withdrawn-succeeded";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: tenantId,
+        senderAddress: sender,
+        recipient: "GRECIPIENT",
+        status: "withdrawn",
+        withdrawal: { state: "succeeded", requestedAt: new Date().toISOString(), lastCheckedAt: new Date().toISOString(), attempts: 1 },
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      const req = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+      });
+      const res = await DELETE(req, { params: Promise.resolve({ id: targetId }) });
+      expect(res.status).toBe(204);
+    });
+
+    it("5. Delete twice -> 204 then 204", async () => {
+      const targetId = "stream-delete-twice";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: tenantId,
+        senderAddress: sender,
+        recipient: "GRECIPIENT",
+        status: "cancelled",
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      const req1 = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+      });
+      const res1 = await DELETE(req1, { params: Promise.resolve({ id: targetId }) });
+      expect(res1.status).toBe(204);
+
+      const req2 = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+      });
+      const res2 = await DELETE(req2, { params: Promise.resolve({ id: targetId }) });
+      expect(res2.status).toBe(204);
+    });
+
+    it("6. Delete an unknown id -> 404", async () => {
+      const req = new Request(`http://localhost/api/streams/non-existent-stream-999`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+      });
+      const res = await DELETE(req, { params: Promise.resolve({ id: "non-existent-stream-999" }) });
+      expect(res.status).toBe(404);
+    });
+
+    it("7. Audit: One stream.delete record with a before snapshot", async () => {
+      const { auditLogStore, resetAuditLogStore } = await import("@/app/lib/audit-log");
+      resetAuditLogStore();
+
+      const targetId = "stream-audit-check";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: tenantId,
+        senderAddress: sender,
+        recipient: "GRECIPIENT",
+        status: "draft",
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      const req = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: {
+          "x-tenant-id": tenantId,
+          "Actor-Wallet-Address": sender,
+          "x-request-id": "req-delete-audit-test",
+        },
+      });
+      const res = await DELETE(req, { params: Promise.resolve({ id: targetId }) });
+      expect(res.status).toBe(204);
+
+      const entries = auditLogStore.list({ requestId: "req-delete-audit-test" });
+      expect(entries.length).toBe(1);
+      expect(entries[0].action).toBe("stream.delete");
+      expect(entries[0].before).toBeDefined();
+      expect((entries[0].before as any).id).toBe(targetId);
+      expect((entries[0].before as any).status).toBe("draft");
+      expect((entries[0].before as any).deletedAt).toBeUndefined();
+    });
+
+    it("8. GET with a stale If-None-Match after delete -> 404, not 304", async () => {
+      const targetId = "stream-stale-etag";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: tenantId,
+        senderAddress: sender,
+        recipient: "GRECIPIENT",
+        status: "draft",
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      // Initial GET to get tag
+      const initialRes = await GET(
+        new Request(`http://localhost/api/streams/${targetId}`, {
+          method: "GET",
+          headers: { "x-tenant-id": tenantId },
+        }),
+        { params: Promise.resolve({ id: targetId }) }
+      );
+      expect(initialRes.status).toBe(200);
+      const tag = initialRes.headers.get("ETag")!;
+
+      // DELETE
+      const delRes = await DELETE(
+        new Request(`http://localhost/api/streams/${targetId}`, {
+          method: "DELETE",
+          headers: { "x-tenant-id": tenantId, "Actor-Wallet-Address": sender },
+        }),
+        { params: Promise.resolve({ id: targetId }) }
+      );
+      expect(delRes.status).toBe(204);
+
+      // Replay with If-None-Match
+      const replayRes = await GET(
+        new Request(`http://localhost/api/streams/${targetId}`, {
+          method: "GET",
+          headers: { "x-tenant-id": tenantId, "If-None-Match": tag },
+        }),
+        { params: Promise.resolve({ id: targetId }) }
+      );
+      expect(replayRes.status).toBe(404);
+      expect(replayRes.status).not.toBe(304);
+    });
+
+    it("allows deletion by an organization owner", async () => {
+      const targetId = "stream-org-owner-del";
+      db.streams.set(targetId, {
+        id: targetId,
+        tenant: "org-acme",
+        senderAddress: "SOME_OTHER_SENDER",
+        recipient: "GRECIPIENT",
+        status: "draft",
+        rate: "10 XLM",
+        schedule: "month",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        token: "XLM",
+      } as any);
+
+      const req = new Request(`http://localhost/api/streams/${targetId}`, {
+        method: "DELETE",
+        headers: { "x-tenant-id": "org-acme", "Actor-Wallet-Address": orgOwner },
+      });
+      const res = await DELETE(req, { params: Promise.resolve({ id: targetId }) });
+      expect(res.status).toBe(204);
+    });
+  });
+
   async function getEtag(id: string, tenant: string): Promise<string> {
     const res = await GET(
       new Request(`http://localhost/api/streams/${id}`, {
@@ -504,4 +787,218 @@ describe("Stream Details Route - GET /api/streams/:id ETag + 304 short-circuit",
     expect(res.status).toBe(200);
     return res.headers.get("ETag") as string;
   }
+});
+
+describe("Stream Details Route - POST /api/streams/:id If-Match optimistic concurrency", () => {
+  const streamId = "stream-ada";
+  const tenantId = "org-acme";
+
+  beforeEach(() => {
+    resetDb();
+    resetRateLimitStore();
+    delete process.env.STREAMPAY_REQUIRE_IF_MATCH;
+    process.env.STREAMPAY_CACHE_DISABLED = "true";
+
+    const stream = db.streams.get(streamId);
+    if (stream) {
+      (stream as any).tenant = tenantId;
+      db.streams.set(streamId, stream);
+    }
+  });
+
+  afterEach(() => {
+    delete process.env.STREAMPAY_REQUIRE_IF_MATCH;
+  });
+
+  async function fetchCurrentEtag(id = streamId, tenant = tenantId): Promise<string> {
+    const res = await GET(
+      new Request(`http://localhost/api/streams/${id}`, {
+        method: "GET",
+        headers: { "x-tenant-id": tenant },
+      }),
+      { params: Promise.resolve({ id }) }
+    );
+    expect(res.status).toBe(200);
+    return res.headers.get("ETag") as string;
+  }
+
+  it("returns 428 PRECONDITION_REQUIRED when If-Match is missing and does not modify stream", async () => {
+    const before = { ...db.streams.get(streamId) };
+    const req = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: { "x-tenant-id": tenantId, "Content-Type": "application/json" },
+      body: JSON.stringify({ rate: "999" }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: streamId }) });
+    expect(res.status).toBe(428);
+    const body = await res.json();
+    expect(body.error.code).toBe("PRECONDITION_REQUIRED");
+    expect(body.error.message).toBeTruthy();
+    expect(db.streams.get(streamId)).toEqual(before);
+  });
+
+  it("allows missing If-Match when STREAMPAY_REQUIRE_IF_MATCH=false, but still rejects stale If-Match", async () => {
+    process.env.STREAMPAY_REQUIRE_IF_MATCH = "false";
+
+    const reqNoHeader = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: { "x-tenant-id": tenantId, "Content-Type": "application/json" },
+      body: JSON.stringify({ rate: "250" }),
+    });
+    const resOk = await POST(reqNoHeader, { params: Promise.resolve({ id: streamId }) });
+    expect(resOk.status).toBe(200);
+    expect(resOk.headers.get("ETag")).toMatch(/^"[0-9a-f]{64}"$/);
+
+    const reqStale = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": '"stale-tag"',
+      },
+      body: JSON.stringify({ rate: "300" }),
+    });
+    const resStale = await POST(reqStale, { params: Promise.resolve({ id: streamId }) });
+    expect(resStale.status).toBe(412);
+  });
+
+  it("returns 412 PRECONDITION_FAILED with current ETag when If-Match is stale and does not modify stream", async () => {
+    const currentEtag = await fetchCurrentEtag();
+    const before = { ...db.streams.get(streamId) };
+
+    const req = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": '"0000000000000000000000000000000000000000000000000000000000000000"',
+      },
+      body: JSON.stringify({ rate: "999" }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: streamId }) });
+    expect(res.status).toBe(412);
+    expect(res.headers.get("ETag")).toBe(currentEtag);
+    const body = await res.json();
+    expect(body.error.code).toBe("PRECONDITION_FAILED");
+    expect(body.error.message).toBeTruthy();
+    expect(db.streams.get(streamId)).toEqual(before);
+  });
+
+  it("rejects weak ETag (W/) in If-Match with 412 per RFC 9110 strong comparison", async () => {
+    const currentEtag = await fetchCurrentEtag();
+    const before = { ...db.streams.get(streamId) };
+
+    const req = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": `W/${currentEtag}`,
+      },
+      body: JSON.stringify({ rate: "999" }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: streamId }) });
+    expect(res.status).toBe(412);
+    expect(res.headers.get("ETag")).toBe(currentEtag);
+    expect(db.streams.get(streamId)).toEqual(before);
+  });
+
+  it("accepts matching strong ETag in a multi-tag If-Match list and returns a fresh ETag", async () => {
+    const currentEtag = await fetchCurrentEtag();
+
+    const req = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": `"other-tag", ${currentEtag}, W/"weak-tag"`,
+      },
+      body: JSON.stringify({ rate: "321" }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: streamId }) });
+    expect(res.status).toBe(200);
+    const newEtag = res.headers.get("ETag");
+    expect(newEtag).toMatch(/^"[0-9a-f]{64}"$/);
+    expect(newEtag).not.toBe(currentEtag);
+  });
+
+  it("accepts wildcard If-Match: * and returns a fresh ETag", async () => {
+    const currentEtag = await fetchCurrentEtag();
+
+    const req = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": "*",
+      },
+      body: JSON.stringify({ rate: "456" }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: streamId }) });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("ETag")).not.toBe(currentEtag);
+  });
+
+  it("returns 412 when the stream is mutated by a lifecycle action between GET and POST", async () => {
+    const initialEtag = await fetchCurrentEtag();
+
+    // Simulate a lifecycle mutation (e.g. pause) changing the stream in DB
+    const stream = db.streams.get(streamId)!;
+    db.streams.set(streamId, {
+      ...stream,
+      status: "paused",
+      updatedAt: "2099-01-01T00:00:00.000Z",
+    });
+
+    const req = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": initialEtag,
+      },
+      body: JSON.stringify({ rate: "777" }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: streamId }) });
+    expect(res.status).toBe(412);
+    expect(res.headers.get("ETag")).not.toBe(initialEtag);
+  });
+
+  it("serializes two concurrent writers with the same ETag: one gets 200, one gets 412", async () => {
+    const initialEtag = await fetchCurrentEtag();
+
+    const req1 = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": initialEtag,
+      },
+      body: JSON.stringify({ rate: "111" }),
+    });
+    const req2 = new Request(`http://localhost/api/streams/${streamId}`, {
+      method: "POST",
+      headers: {
+        "x-tenant-id": tenantId,
+        "Content-Type": "application/json",
+        "If-Match": initialEtag,
+      },
+      body: JSON.stringify({ rate: "222" }),
+    });
+
+    const [res1, res2] = await Promise.all([
+      POST(req1, { params: Promise.resolve({ id: streamId }) }),
+      POST(req2, { params: Promise.resolve({ id: streamId }) }),
+    ]);
+
+    const statuses = [res1.status, res2.status].sort((a, b) => a - b);
+    expect(statuses).toEqual([200, 412]);
+
+    const winner = res1.status === 200 ? res1 : res2;
+    const loser = res1.status === 412 ? res1 : res2;
+    const winnerEtag = winner.headers.get("ETag");
+    expect(winnerEtag).toBeTruthy();
+    expect(winnerEtag).not.toBe(initialEtag);
+    expect(loser.headers.get("ETag")).toBe(winnerEtag);
+  });
 });

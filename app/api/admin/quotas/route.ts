@@ -57,20 +57,25 @@ export async function POST(request: Request) {
       422,
     );
   }
-  if (maxActiveStreams !== undefined && (typeof maxActiveStreams !== "number" || maxActiveStreams < 0)) {
+  if (
+    maxActiveStreams !== undefined &&
+    (typeof maxActiveStreams !== "number" || !Number.isFinite(maxActiveStreams) || maxActiveStreams < 0)
+  ) {
     return err(
       "VALIDATION_ERROR",
-      "maxActiveStreams must be a non-negative number",
+      "maxActiveStreams must be a finite non-negative number",
       422,
     );
   }
   if (
     maxMonthlyVolumeStroops !== undefined &&
-    (typeof maxMonthlyVolumeStroops !== "number" || maxMonthlyVolumeStroops < 0)
+    (typeof maxMonthlyVolumeStroops !== "number" ||
+      !Number.isFinite(maxMonthlyVolumeStroops) ||
+      maxMonthlyVolumeStroops < 0)
   ) {
     return err(
       "VALIDATION_ERROR",
-      "maxMonthlyVolumeStroops must be a non-negative number",
+      "maxMonthlyVolumeStroops must be a finite non-negative number",
       422,
     );
   }

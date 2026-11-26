@@ -3,10 +3,21 @@ import { requireAuditLogAccess } from "@/app/lib/auth";
 import { AUDIT_LOG_RETENTION_DAYS, auditLogStore } from "@/app/lib/audit-log";
 import type { AuditActorRole, AuditListFilters } from "@/app/types/audit";
 import { AuditResponseSchema, type AuditResponseDTO } from "@/app/lib/dtos/audit.dto";
+import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
+import { getLimitForRoute } from "@/app/lib/rate-limit-config";
+import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 import { withRouteTimeout } from "@/src/middleware/timeout";
 
-function createErrorResponse(code: string, message: string, status: number) {
-  return NextResponse.json({ error: { code, message, request_id: "mock-request-id" } }, { status });
+function createErrorResponse(
+  code: string,
+  message: string,
+  status: number,
+  headers: Record<string, string> = {},
+) {
+  return NextResponse.json(
+    { error: { code, message, request_id: "mock-request-id" } },
+    { status, headers },
+  );
 }
 
 function parseLimit(value: string | null): number {
@@ -28,6 +39,8 @@ function buildFilters(request: Request): AuditListFilters {
     role: searchParams.get("role") as AuditActorRole | null,
     targetId: searchParams.get("targetId"),
     cursor: searchParams.get("cursor"),
+    startDate: searchParams.get("startDate"),
+    endDate: searchParams.get("endDate"),
   };
 }
 
@@ -39,6 +52,17 @@ async function handleAuditGet(request: Request) {
   if (actor instanceof NextResponse) {
     return actor;
   }
+
+  const url = new URL(request.url);
+  const limitPath = exportFormat === "ndjson" ? "/api/audit/export" : url.pathname;
+  const limitType = getLimitForRoute("GET", limitPath);
+  const identity = getClientIdentity(request);
+  const rateLimitResult = await checkRateLimit(identity, limitType);
+  if (!rateLimitResult.allowed) {
+    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
+    return rateLimitResponse(rateLimitResult.retryAfter!);
+  }
+  recordRequest(url.pathname);
 
   const filters = buildFilters(request);
   if (exportFormat && exportFormat !== "ndjson") {
@@ -96,17 +120,25 @@ export async function GET(request: Request) {
 }
 
 export async function POST() {
-  return createErrorResponse("METHOD_NOT_ALLOWED", "Audit log is append-only and cannot be created via API", 405);
+  return createErrorResponse("METHOD_NOT_ALLOWED", "Audit log is append-only and cannot be created via API", 405, {
+    Allow: "GET",
+  });
 }
 
 export async function PUT() {
-  return createErrorResponse("METHOD_NOT_ALLOWED", "Audit log is append-only and cannot be updated", 405);
+  return createErrorResponse("METHOD_NOT_ALLOWED", "Audit log is append-only and cannot be updated", 405, {
+    Allow: "GET",
+  });
 }
 
 export async function PATCH() {
-  return createErrorResponse("METHOD_NOT_ALLOWED", "Audit log is append-only and cannot be updated", 405);
+  return createErrorResponse("METHOD_NOT_ALLOWED", "Audit log is append-only and cannot be updated", 405, {
+    Allow: "GET",
+  });
 }
 
 export async function DELETE() {
-  return createErrorResponse("METHOD_NOT_ALLOWED", "Audit log is append-only and cannot be deleted", 405);
+  return createErrorResponse("METHOD_NOT_ALLOWED", "Audit log is append-only and cannot be deleted", 405, {
+    Allow: "GET",
+  });
 }

@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import { POST } from "./route";
+import { GET, POST } from "./route";
 import { db, resetDb } from "@/app/lib/db";
 import { resetRateLimitStore } from "@/app/lib/rate-limit-store";
 import { resetOrgQuotaStore } from "@/app/lib/org-quota-store";
@@ -44,6 +44,30 @@ describe("POST /api/v2/streams — Idempotency", () => {
     resetDb();
     resetRateLimitStore();
     resetOrgQuotaStore();
+  });
+
+  afterEach(() => {
+    resetRateLimitStore();
+  });
+
+  it("returns the standard rate-limit response after the read bucket is exhausted", async () => {
+    const request = new Request("http://localhost/api/v2/streams");
+
+    for (let index = 0; index < 60; index += 1) {
+      expect((await GET(request)).status).toBe(200);
+    }
+
+    const limited = await GET(request);
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("Retry-After")).toBeTruthy();
+    expect(await limited.json()).toMatchObject({
+      error: {
+        code: "rate_limit_exceeded",
+        message: "Rate limit exceeded. Please try again later.",
+        request_id: expect.any(String),
+      },
+    });
+
   });
 
   it("creates a stream without idempotency key (happy path)", async () => {

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { Tabs, TabDefinition } from '../components/Tabs';
 import { Modal } from '../components/Modal';
+import { ReceiptThemeEditor, type ReceiptThemeEditorHandle } from '../components/settings/ReceiptThemeEditor';
 import {
   NotificationSettings,
   NotificationSettingsHandle,
@@ -12,6 +13,16 @@ import {
 } from '../components/settings/NotificationSettings';
 import { QuietHoursConfig } from '../lib/quiet-hours';
 import { useUnsavedChangesGuard } from '../hooks/useUnsavedChangesGuard';
+import type { AuditActorRole } from '../types/audit';
+
+const PRIVILEGED_AUDIT_ROLES = new Set<AuditActorRole>([
+  'support',
+  'admin',
+  'finance',
+  'security',
+  'compliance',
+]);
+import { TimeZoneSettings } from '../components/settings/TimeZoneSettings';
 
 interface SavedNotificationPreferences {
   prefs: NotificationPreferences;
@@ -22,21 +33,29 @@ export interface SettingsPageContentProps {
   onSaveNotifications?: (
     saved: SavedNotificationPreferences
   ) => Promise<void> | void;
+  userRole?: AuditActorRole;
 }
 
 const defaultSaveNotifications = async () => {};
 
 export function SettingsPageContent({
   onSaveNotifications = defaultSaveNotifications,
+  userRole,
 }: SettingsPageContentProps) {
   const [activeTab, setActiveTab] = useState<string>('appearance');
   const [notificationsDirty, setNotificationsDirty] = useState(false);
+  const [receiptsDirty, setReceiptsDirty] = useState(false);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [isSavingFromDialog, setIsSavingFromDialog] = useState(false);
   const [restoreFocusTarget, setRestoreFocusTarget] =
     useState<HTMLElement | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
+  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const receiptsActive = activeTab === 'receipts';
+  const isDirty = receiptsActive ? receiptsDirty : notificationsDirty;
+  const receiptThemeRef = useRef<ReceiptThemeEditorHandle>(null);
   const notificationSettingsRef = useRef<NotificationSettingsHandle>(null);
   const pendingConfirmationRef = useRef<
     ((allowed: boolean) => void) | null
@@ -63,7 +82,7 @@ export function SettingsPageContent({
   }, []);
 
   const { confirmNavigation } = useUnsavedChangesGuard({
-    isDirty: notificationsDirty,
+    isDirty,
     onConfirm: requestConfirmation,
   });
 
@@ -82,34 +101,39 @@ export function SettingsPageContent({
   const handleDiscard = useCallback(() => {
     // The user explicitly chose to leave; clear the guard so the incoming tab
     // change is not blocked and a later visit starts from a clean form.
-    setNotificationsDirty(false);
+    if (receiptsActive) setReceiptsDirty(false);
+    else setNotificationsDirty(false);
     settleConfirmation(true);
-  }, [settleConfirmation]);
+  }, [receiptsActive, settleConfirmation]);
 
   const handleSaveAndLeave = useCallback(async () => {
     setConfirmError(null);
     setIsSavingFromDialog(true);
-    const saved = (await notificationSettingsRef.current?.save()) ?? false;
+    const form = receiptsActive ? receiptThemeRef.current : notificationSettingsRef.current;
+    const saved = await form?.save();
     setIsSavingFromDialog(false);
 
     if (saved) {
       // The child reports this too, but it may unmount as part of the pending
       // tab change before its effect runs, so clear the guard here as well.
-      setNotificationsDirty(false);
+      if (receiptsActive) setReceiptsDirty(false);
+      else setNotificationsDirty(false);
       settleConfirmation(true);
     } else {
       setConfirmError(
-        'We could not save your notification preferences. Please try again.'
+        receiptsActive
+          ? 'We could not save your receipt theme. Check the theme fields and try again.'
+          : 'We could not save your notification preferences. Please try again.'
       );
     }
-  }, [settleConfirmation]);
+  }, [receiptsActive, settleConfirmation]);
 
   const handleBeforeTabChange = useCallback(
     (nextTabId: string, origin?: HTMLElement) => {
-      if (!notificationsDirty || nextTabId === activeTab) return true;
+      if (!isDirty || nextTabId === activeTab) return true;
       return confirmNavigation(origin);
     },
-    [activeTab, confirmNavigation, notificationsDirty]
+    [activeTab, confirmNavigation, isDirty]
   );
 
   const settingsTabs: TabDefinition[] = [
@@ -124,6 +148,7 @@ export function SettingsPageContent({
           </div>
           <div className="settings-group__content">
             <ThemeToggle />
+            <TimeZoneSettings />
           </div>
         </section>
       ),
@@ -149,6 +174,62 @@ export function SettingsPageContent({
         </section>
       ),
     },
+    {
+      id: 'privacy',
+      label: 'Privacy',
+      content: (
+        <section className="settings-group">
+          <div className="settings-group__header">
+            <h2 className="settings-group__title">Privacy</h2>
+            <p className="settings-group__description">
+              Manage your personal data and submit a Data Subject Request (DSR)
+              for account deletion.
+            </p>
+          </div>
+          <div className="settings-group__content" style={{ marginTop: '1rem' }}>
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              <div>
+                <h3>What is deleted</h3>
+                <p>
+                  All personally identifiable information (PII) — including your
+                  user record (wallet address, email, display name) and stream
+                  PII (email, label, memo, partner ID) — is permanently scrubbed
+                  within 30 days.
+                </p>
+              </div>
+              <div>
+                <h3>What is retained</h3>
+                <p>
+                  De-identified aggregate stream records (Stream IDs, amounts,
+                  status, timestamps) are retained for 7 years to satisfy legal
+                  and audit requirements. On-chain transaction data is immutable
+                  and cannot be removed.
+                </p>
+              </div>
+              <div style={{ marginTop: '0.5rem' }}>
+                <button
+                  ref={deleteTriggerRef}
+                  type="button"
+                  className="button button--danger"
+                  onClick={() => setIsDeleteDialogOpen(true)}
+                >
+                  Request account deletion
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      ),
+    },
+    {
+      id: 'receipts',
+      label: 'Receipts',
+            <h2 className="settings-group__title">Organization receipt themes</h2>
+          <div className="settings-group__content">
+            <ReceiptThemeEditor ref={receiptThemeRef} onDirtyChange={setReceiptsDirty}
+              confirmNavigation={confirmNavigation} />
+      ),
+    },
   ];
 
   return (
@@ -160,8 +241,12 @@ export function SettingsPageContent({
           <p className="page-hero__description">
             Manage your account preferences and appearance settings.
           </p>
-          <nav aria-label="More settings">
+          <nav aria-label="More settings" style={{ display: 'flex', gap: '1rem' }}>
             <Link href="/settings/webhooks">Webhook console</Link>
+            <Link href="/exports">Data exports</Link>
+            {userRole && PRIVILEGED_AUDIT_ROLES.has(userRole) && (
+              <Link href="/audit">Audit log</Link>
+            )}
           </nav>
         </div>
       </header>
@@ -178,12 +263,13 @@ export function SettingsPageContent({
       <Modal
         isOpen={isConfirmOpen}
         onClose={handleCancel}
-        title="You have unsaved notification changes"
+        title={receiptsActive ? "You have unsaved receipt changes" : "You have unsaved notification changes"}
         restoreFocusTarget={restoreFocusTarget}
       >
         <p>
-          Your notification preference changes have not been saved. Save them
-          before leaving, discard them, or cancel to keep editing.
+          {receiptsActive
+            ? 'Save your receipt theme before leaving, discard your edits, or cancel to keep editing.'
+            : 'Your notification preference changes have not been saved. Save them before leaving, discard them, or cancel to keep editing.'}
         </p>
 
         {confirmError && (
@@ -225,6 +311,13 @@ export function SettingsPageContent({
           </button>
         </div>
       </Modal>
+
+      <DeleteAccountDialog
+        isOpen={isDeleteDialogOpen}
+        onClose={() => setIsDeleteDialogOpen(false)}
+        restoreFocusTarget={deleteTriggerRef}
+        getAuthToken={getAuthToken}
+      />
     </main>
   );
 }

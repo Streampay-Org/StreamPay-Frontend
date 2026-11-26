@@ -1,0 +1,32 @@
+# cargo-audit configuration for the StreamPay Soroban contracts workspace.
+#
+# This file is consumed by `cargo audit` when scanning the contracts workspace
+# for known vulnerabilities in the dependency tree.
+#
+# Ignored advisories must each include a comment explaining:
+#   - the advisory ID,
+#   - the affected crate and version,
+#   - why the advisory is accepted (e.g. transitive dependency with no fix,
+#     not exploitable in the contract's deployment context),
+#   - the date the ignore was added (so it can be re-evaluated periodically).
+#
+# Review the ignore list after each `cargo audit` release and after any
+# workspace dependency update.
+
+[advisories]
+# No advisories are currently ignored. When an advisory is accepted, add it
+# here in the following format:
+#
+# ignore = [
+#   # RUSTSEC-2024-XXXX
+#   # Crate: some-crate v0.x.y (transitive dep via soroban-sdk)
+#   # Reason: No patched version available; not exploitable in the
+#   #         contract's no_std + wasm32v1-none target.
+#   # Ignored: 2026-04-28
+#   "RUSTSEC-2024-XXXX",
+# ]
+ignore = []
+
+# Informational advisories (warnings, not failures) for unmaintained crates.
+# These do not cause `cargo audit` to exit non-zero unless --deny is used.
+informational_warnings = ["unmaintained", "unsound"]

@@ -1221,6 +1221,8 @@
         ]
       },
       "StreamPolicy": {
+        "type": "object",
+        "required": [
           "policyVersion",
           "canStart",
           "canPause",
@@ -1230,8 +1232,10 @@
           "canWithdraw",
           "requireApprovals"
         ],
+        "properties": {
           "policyVersion": {
             "type": "integer",
+            "enum": [
               1
             ]
           },
@@ -1273,6 +1277,7 @@
           },
           "requireApprovals": {
             "type": "integer",
+            "enum": [
               1,
               2
             ]
@@ -1280,17 +1285,118 @@
         }
       },
       "UpdateOrgPolicyRequest": {
+        "type": "object",
+        "required": [
           "policy"
         ],
+        "properties": {
           "policy": {
             "$ref": "#/components/schemas/StreamPolicy"
           }
         }
       },
-      "OrgPolicyResponse": {
+      "OrgReceiptThemeInput": {
+        "type": "object",
+        "properties": {
+          "accentColor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Three or six hex digits prefixed with #. Defaults to #1f6feb."
+          },
+          "logoUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absolute HTTPS URL on an approved host. Empty or null clears the logo."
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 140,
+            "description": "Plain-text message. The server counts UTF-16 code units."
+          }
+        }
+      },
+      "OrgReceiptThemeResponse": {
+        "type": "object",
+        "required": [
           "data",
           "links"
         ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "orgId",
+              "theme",
+              "canEdit",
+              "logoAllowedHosts"
+            ],
+            "properties": {
+              "orgId": {
+                "type": "string"
+              },
+              "theme": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "accentColor"
+                    ],
+                    "properties": {
+                      "accentColor": {
+                        "type": "string",
+                        "pattern": "^#(?:[a-f0-9]{3}|[a-f0-9]{6})$"
+                      },
+                      "logoUrl": {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      "message": {
+                        "type": "string",
+                        "maxLength": 140
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "canEdit": {
+                "type": "boolean"
+              },
+              "logoAllowedHosts": {
+                "type": "string",
+                "description": "Comma-separated host patterns for editor validation."
+              }
+            }
+          },
+          "links": {
+            "type": "object",
+            "required": [
+              "self"
+            ],
+            "properties": {
+              "self": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "OrgPolicyResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "links"
+        ],
+        "properties": {
           "data": {
             "type": "object",
             "required": [
@@ -1585,7 +1691,7 @@
       "get": {
         "operationId": "listActivity",
         "summary": "List activity events",
-        "description": "Returns a paginated, cursor-based list of activity events for the authenticated caller. Only events for streams the caller sends or receives, plus the caller's own wallet events, are returned. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId and event type.",
+        "description": "Returns a paginated, cursor-based list of activity events for the authenticated caller. Only events for streams the caller sends or receives, plus the caller's own wallet events, are returned. Events are sorted by (timestamp desc, id desc) for stable ordering. Supports filtering by streamId, event type, and an inclusive from/to date range.",
         "tags": [
           "Activity"
         ],
@@ -1629,11 +1735,54 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Inclusive lower bound for event timestamps. Accepts an ISO date (YYYY-MM-DD, treated as 00:00:00 UTC) or an ISO datetime.",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              ]
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Inclusive upper bound for event timestamps. Accepts an ISO date (YYYY-MM-DD, treated as 23:59:59.999 UTC) or an ISO datetime.",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              ]
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "Paginated list of activity events.",
+            "headers": {
+              "Link": {
+                "description": "RFC 8288 pagination links (rel=\"next\" when more pages exist, rel=\"self\" for the current page).",
+                "schema": {
+                  "type": "string",
+                  "example": "</api/activity?limit=20&cursor=MjAyNi0wNC0yOFQwOTowMDowMFp8ZXZ0LTE%3D>; rel=\"next\", </api/activity?limit=20>; rel=\"self\""
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -1677,7 +1826,7 @@
             }
           },
           "422": {
-            "description": "Unprocessable entity — invalid limit (INVALID_LIMIT), type, streamId, or cursor.",
+            "description": "Unprocessable entity — invalid limit (INVALID_LIMIT), type, streamId, cursor, or date range (INVALID_DATE_RANGE).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1811,7 +1960,7 @@
             "schema": {
               "type": "string",
               "pattern": "^G[A-Z2-7]{55}$",
-              "example": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG"
+              "example": "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ"
             }
           }
         ],
@@ -2004,6 +2153,7 @@
                     "summary": "Successful token issuance",
                     "value": {
                       "token": "tok_R0FCQzEyMzQ1Njc4OTA",
+                      "token_type": "Bearer",
                       "expires_at": "2024-01-16T10:00:00.000Z"
                     }
                   }
@@ -2280,6 +2430,15 @@
         "responses": {
           "200": {
             "description": "Paginated stream list.",
+            "headers": {
+              "Link": {
+                "description": "RFC 8288 pagination links (rel=\"next\" when more pages exist, rel=\"self\" for the current page). Also preserved on 304 Not Modified responses.",
+                "schema": {
+                  "type": "string",
+                  "example": "</api/streams?limit=20&cursor=MjAyNi0wMS0wMVQwMDowMDowMC4wMDBafHN0cmVhbS0x>; rel=\"next\", </api/streams?limit=20>; rel=\"self\""
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -2579,9 +2738,6 @@
                         "self": "/api/v1/streams/stream-abc12345"
                       }
                     }
-                  },
-                  "links": {
-                    "self": "/api/v1/streams/stream-abc12345"
                   }
                 }
               }
@@ -3644,10 +3800,22 @@
       "post": {
         "operationId": "updateStream",
         "summary": "Update a payment stream (v1, deprecated)",
-        "description": "Partially updates a stream by merging the request body fields. **Deprecated** — there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.\n\nThe `updatedAt` field is always refreshed. Cache is invalidated on success.",
+        "description": "Partially updates a stream by merging the request body fields. **Deprecated** — there is no direct v2 equivalent; update streams via their lifecycle action sub-routes.\n\nRequires an `If-Match` header carrying the stream's current strong `ETag` (or `*`) for optimistic concurrency control. Returns `428 Precondition Required` when missing (unless relaxed via `STREAMPAY_REQUIRE_IF_MATCH=false`) and `412 Precondition Failed` (with the current `ETag` header) when stale. The `updatedAt` field is always refreshed and cache is invalidated on success.",
         "deprecated": true,
         "tags": [
           "Streams v1"
+        ],
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "Strong ETag from the latest `GET /api/streams/{id}` response (or `*`). Compared using RFC 9110 strong comparison; weak (`W/`) tags never match.",
+            "schema": {
+              "type": "string",
+              "example": "\"5f9c1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab\""
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -3691,6 +3859,15 @@
         "responses": {
           "200": {
             "description": "Stream updated.",
+            "headers": {
+              "ETag": {
+                "description": "Fresh strong entity-tag computed for the updated stream.",
+                "schema": {
+                  "type": "string",
+                  "example": "\"a1b2c3d4e5f6...\""
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -3776,6 +3953,49 @@
           "404": {
             "$ref": "#/components/responses/404"
           },
+          "412": {
+            "description": "Precondition failed — the `If-Match` ETag does not match the current stream state.",
+            "headers": {
+              "ETag": {
+                "description": "Current strong entity-tag of the stream.",
+                "schema": {
+                  "type": "string",
+                  "example": "\"5f9c1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab\""
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "PRECONDITION_FAILED",
+                    "message": "Stream has been modified since the provided ETag; re-fetch and retry",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition required — `If-Match` header is missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "PRECONDITION_REQUIRED",
+                    "message": "If-Match header with the current stream ETag is required for updates",
+                    "request_id": "req_01HZ9ABCDEF"
+                  }
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limit exceeded.",
             "content": {
@@ -3801,14 +4021,14 @@
       "delete": {
         "operationId": "deleteStream",
         "summary": "Delete a payment stream (v1, deprecated)",
-        "description": "Permanently deletes a stream. **Deprecated** — use `DELETE /api/v2/streams/{id}` instead.\n\nA stream must be in `draft` or `ended` status before it can be deleted. Attempting to delete an `active` or `paused` stream returns 409. Cache is invalidated on success.",
+        "description": "Soft deletes a stream and marks it deletedAt. **Deprecated** \u2014 use `DELETE /api/v2/streams/{id}` instead.\n\nOnly streams in `draft`, `cancelled`, or `withdrawn` with a succeeded withdrawal can be deleted. Attempting to delete an `ended` stream returns 409 `FUNDS_PENDING_WITHDRAWAL`. Deleting an `active` or `paused` stream returns 409 `STREAM_INACTIVE_STATE`. Deleting requires the actor to be the senderAddress or an organization owner (returns 403 otherwise). Already-deleted streams return 204 idempotently.",
         "deprecated": true,
         "tags": [
           "Streams v1"
         ],
         "responses": {
           "204": {
-            "description": "Stream deleted. No response body."
+            "description": "Stream deleted or already deleted. No response body."
           },
           "400": {
             "description": "Missing or empty `x-tenant-id` header.",
@@ -3826,6 +4046,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
           },
           "404": {
             "$ref": "#/components/responses/404"
@@ -5016,9 +5239,56 @@
             "bearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "description": "Maximum number of streams to return per page."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque pagination cursor returned by a previous page."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "active",
+                "paused",
+                "ended"
+              ]
+            },
+            "description": "Filter streams by lifecycle status."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Paginated stream list.",
+            "headers": {
+              "Link": {
+                "description": "RFC 8288 pagination links (rel=\"next\" when more pages exist, rel=\"self\" for the current page). Also preserved on 304 Not Modified responses.",
+                "schema": {
+                  "type": "string",
+                  "example": "</api/v2/streams?limit=20&cursor=MjAyNi0wMS0wMVQwMDowMDowMC4wMDBafHN0cmVhbS0x>; rel=\"next\", </api/v2/streams?limit=20>; rel=\"self\""
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -5075,8 +5345,9 @@
                           "allowed_actions": [],
                           "created_at": "2024-01-15T10:00:00.000Z",
                           "settlement": {
+                            "tx_hash": "c3f8a12e4b76",
                             "settled_at": "2024-02-01T12:00:00.000Z",
-                            "amount": "360 XLM",
+                            "amount": "3600000000",
                             "currency": "XLM"
                           }
                         }
@@ -5094,7 +5365,42 @@
                   "empty-list": {
                     "summary": "No streams for this user",
                     "value": {
-                      "streams": []
+                      "streams": [],
+                      "meta": {
+                        "hasNext": false,
+                        "nextCursor": null,
+                        "total": 0
+                      },
+                      "links": {
+                        "self": "/api/v2/streams?limit=20"
+                      }
+                    }
+                  },
+                  "paginated-first-page": {
+                    "summary": "First page with more results available",
+                    "value": {
+                      "streams": [
+                        {
+                          "id": "stream_lf3k9z",
+                          "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                          "rate": "120 XLM/month",
+                          "status": "active",
+                          "allowed_actions": [
+                            "pause",
+                            "stop"
+                          ],
+                          "created_at": "2024-01-15T10:00:00.000Z",
+                          "settlement": null
+                        }
+                      ],
+                      "meta": {
+                        "hasNext": true,
+                        "nextCursor": "eyJpZCI6InN0cmVhbV9sZjNrOXoifQ==",
+                        "total": 25
+                      },
+                      "links": {
+                        "self": "/api/v2/streams?limit=1"
+                      }
                     }
                   }
                 }
@@ -5112,6 +5418,7 @@
       "post": {
         "operationId": "createStreamV2",
         "summary": "Create a payment stream (v2)",
+        "description": "Creates a v2 payment stream for the authenticated sender and returns its initial representation.",
         "tags": [
           "Streams"
         ],
@@ -5193,16 +5500,35 @@
                 "schema": {
                   "$ref": "#/components/schemas/StreamV2"
                 },
-                "example": {
-                  "id": "stream_lf3k9z",
-                  "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
-                  "rate": "120 XLM/month",
-                  "status": "draft",
-                  "allowed_actions": [
-                    "start"
-                  ],
-                  "created_at": "2024-01-15T10:00:00.000Z",
-                  "settlement": null
+                "examples": {
+                  "draft-xlm": {
+                    "summary": "Created draft stream in XLM",
+                    "value": {
+                      "id": "stream_lf3k9z",
+                      "recipient": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFG",
+                      "rate": "120 XLM/month",
+                      "status": "draft",
+                      "allowed_actions": [
+                        "start"
+                      ],
+                      "created_at": "2024-01-15T10:00:00.000Z",
+                      "settlement": null
+                    }
+                  },
+                  "draft-usdc": {
+                    "summary": "Created draft stream in USDC",
+                    "value": {
+                      "id": "stream_usdc01",
+                      "recipient": "GDEF1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFGH",
+                      "rate": "500 USDC/week",
+                      "status": "draft",
+                      "allowed_actions": [
+                        "start"
+                      ],
+                      "created_at": "2024-01-15T10:00:00.000Z",
+                      "settlement": null
+                    }
+                  }
                 }
               }
             }
@@ -5497,8 +5823,9 @@
                         "allowed_actions": [],
                         "created_at": "2024-01-15T10:00:00.000Z",
                         "settlement": {
+                          "tx_hash": "c3f8a12e4b76",
                           "settled_at": "2024-02-01T12:00:00.000Z",
-                          "amount": "360 XLM",
+                          "amount": "3600000000",
                           "currency": "XLM"
                         }
                       },
@@ -5525,7 +5852,7 @@
       "delete": {
         "operationId": "deleteStreamV2",
         "summary": "Delete a payment stream (v2)",
-        "description": "Permanently deletes a stream. The stream must be in `draft` or `ended` status; attempting to delete an `active` or `paused` stream returns 409.",
+        "description": "Soft deletes a stream and marks it deletedAt. Only streams in `draft`, `cancelled`, or `withdrawn` with a succeeded withdrawal can be deleted. Attempting to delete an `ended` stream returns 409 `FUNDS_PENDING_WITHDRAWAL`. Deleting an `active` or `paused` stream returns 409 `STREAM_INACTIVE_STATE`. When a verified actor is provided, deletion requires the actor to be the senderAddress or an organization owner (returns 403 otherwise). Already-deleted streams return 204 idempotently.",
         "tags": [
           "Streams"
         ],
@@ -5536,10 +5863,13 @@
         ],
         "responses": {
           "204": {
-            "description": "Stream deleted. No response body."
+            "description": "Stream deleted or already deleted. No response body."
           },
           "401": {
             "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
           },
           "404": {
             "$ref": "#/components/responses/404"
@@ -5882,8 +6212,9 @@
                       "allowed_actions": [],
                       "created_at": "2024-01-15T10:00:00.000Z",
                       "settlement": {
+                        "tx_hash": "c3f8a12e4b76",
                         "settled_at": "2024-02-01T12:00:00.000Z",
-                        "amount": "360 XLM",
+                        "amount": "3600000000",
                         "currency": "XLM"
                       }
                     }
@@ -5898,8 +6229,9 @@
                       "allowed_actions": [],
                       "created_at": "2024-01-20T09:00:00.000Z",
                       "settlement": {
+                        "tx_hash": "a9d2c17e5f43",
                         "settled_at": "2024-01-20T09:05:00.000Z",
-                        "amount": "0 XLM",
+                        "amount": "0",
                         "currency": "XLM"
                       }
                     }
@@ -5990,10 +6322,30 @@
       "post": {
         "operationId": "receiveWebhook",
         "summary": "Receive an incoming webhook event",
-        "description": "Validates and accepts an incoming webhook event payload.",
+        "description": "Verifies the HMAC signature and replay window, deduplicates by event ID, and dispatches the incoming webhook event payload to a registered handler.",
         "security": [],
         "tags": [
           "Webhooks"
+        ],
+        "parameters": [
+          {
+            "name": "x-streampay-signature",
+            "in": "header",
+            "required": true,
+            "description": "HMAC-SHA256 signature header in the format `t=<timestamp>,id=<eventId>,v1=<hex>`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-streampay-timestamp",
+            "in": "header",
+            "required": true,
+            "description": "Unix epoch timestamp in seconds used to compute the signature and enforce the replay window.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -6007,7 +6359,37 @@
                 "properties": {
                   "eventType": {
                     "type": "string",
+                    "description": "Webhook event type name.",
                     "example": "payment.received"
+                  },
+                  "eventId": {
+                    "type": "string",
+                    "description": "Unique event identifier used for signature verification and deduplication.",
+                    "example": "evt_123"
+                  },
+                  "timestamp": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "ISO-8601 event timestamp."
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": "Source system that emitted the event."
+                  },
+                  "data": {
+                    "description": "Arbitrary JSON event payload."
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Optional metadata key-value map."
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Optional forwarded headers."
                   }
                 }
               }
@@ -6016,7 +6398,7 @@
         },
         "responses": {
           "200": {
-            "description": "Webhook event accepted.",
+            "description": "Webhook event handled, or acknowledged as a duplicate.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6028,6 +6410,35 @@
                     "success": {
                       "type": "boolean",
                       "example": true
+                    },
+                    "duplicate": {
+                      "type": "boolean",
+                      "description": "Present and true when the eventId was already processed within the deduplication TTL.",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Webhook event verified and accepted, but no handler is registered for its eventType.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "handled"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "handled": {
+                      "type": "boolean",
+                      "example": false
                     }
                   }
                 }
@@ -6036,6 +6447,16 @@
           },
           "400": {
             "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "description": "Missing/invalid HMAC signature (`INVALID_SIGNATURE`) or timestamp outside replay window (`REPLAY_WINDOW_EXCEEDED`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "413": {
             "$ref": "#/components/responses/413"
@@ -6060,8 +6481,7 @@
       "post": {
         "operationId": "receiveDlqWebhook",
         "summary": "Receive a dead-letter-queue webhook event",
-        "description": "Accepts failed webhook events for reprocessing. No authentication required (secured at the network/gateway level).",
-        "security": [],
+        "description": "Accepts failed webhook events for reprocessing. Requires internal-service HMAC auth or an admin JWT. Structured `{ endpoint, event }` payloads are validated and enqueued idempotently into the outbox (202); legacy unstructured objects receive a 200 acknowledgement.",
         "tags": [
           "Webhooks"
         ],
@@ -6071,7 +6491,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "Arbitrary webhook event payload.",
+                "description": "Structured `{ endpoint, event }` payload for outbox reprocessing, or a legacy generic JSON object.",
                 "example": {
                   "event": "payment.failed",
                   "id": "evt_001"
@@ -6082,7 +6502,7 @@
         },
         "responses": {
           "200": {
-            "description": "Event accepted.",
+            "description": "Legacy unstructured event accepted.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6100,8 +6520,47 @@
               }
             }
           },
+          "202": {
+            "description": "Structured event enqueued (or deduplicated) in the outbox.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "received",
+                    "enqueued",
+                    "outboxId",
+                    "duplicate"
+                  ],
+                  "properties": {
+                    "received": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "enqueued": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "outboxId": {
+                      "type": "string"
+                    },
+                    "duplicate": {
+                      "type": "boolean",
+                      "example": false
+                    }
+                  }
+                }
+              }
+            }
+          },
           "400": {
             "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "422": {
+            "description": "Malformed structured payload or disallowed endpoint URL."
           },
           "500": {
             "$ref": "#/components/responses/500"
@@ -6113,6 +6572,7 @@
       "get": {
         "operationId": "listWebhookDeliveries",
         "summary": "List webhook delivery attempts",
+        "description": "Lists webhook delivery attempts with pagination for the authenticated caller.",
         "security": [],
         "tags": [
           "Webhooks"
@@ -6379,6 +6839,7 @@
                         "failed": 2,
                         "pending": 0,
                         "dlq": 0,
+                        "stale": 0,
                         "success_rate_pct": 99.87
                       }
                     }
@@ -6400,7 +6861,8 @@
                         "failed": 8,
                         "pending": 2,
                         "dlq": 3,
-                        "success_rate_pct": 99.33
+                        "stale": 1,
+                        "success_rate_pct": 99.27
                       }
                     }
                   },
@@ -6421,7 +6883,8 @@
                         "failed": 50,
                         "pending": 30,
                         "dlq": 15,
-                        "success_rate_pct": 60
+                        "stale": 5,
+                        "success_rate_pct": 64.86
                       }
                     }
                   }
@@ -7185,6 +7648,9 @@
           },
           "401": {
             "$ref": "#/components/responses/401"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
           }
         }
       }
@@ -7632,10 +8098,230 @@
         }
       }
     },
+    "/api/orgs/{orgId}/receipt-theme": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "orgId",
+          "required": true,
+          "description": "Organization identifier",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "in": "header",
+          "name": "Actor-Wallet-Address",
+          "required": false,
+          "description": "Organization member wallet address. Must match the bearer token when both are supplied.",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Read the organization receipt theme",
+        "description": "Any organization member can read the theme.",
+        "operationId": "getOrgReceiptTheme",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+            {
+              "bearerAuth": []
+            }
+          ],
+        "responses": {
+          "200": {
+            "description": "Current theme after the operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgReceiptThemeResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Organization membership or owner access is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace the organization receipt theme",
+        "description": "Only organization owners can replace the theme. Changes are recorded in the audit log.",
+        "operationId": "updateOrgReceiptTheme",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+            {
+              "bearerAuth": []
+            }
+          ],
+        "responses": {
+          "200": {
+            "description": "Current theme after the operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgReceiptThemeResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Organization membership or owner access is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid receipt theme fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message",
+                        "request_id",
+                        "fields"
+                      ],
+                      "properties": {
+                        "code": {
+                          "const": "VALIDATION_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgReceiptThemeInput"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Reset the organization receipt theme",
+        "description": "Only organization owners can reset the theme. The reset restores the default receipt and is recorded in the audit log.",
+        "operationId": "resetOrgReceiptTheme",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+            {
+              "bearerAuth": []
+            }
+          ],
+        "responses": {
+          "200": {
+            "description": "Current theme after the operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgReceiptThemeResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Organization membership or owner access is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/orgs/{orgId}/policy": {
+      "get": {
         "summary": "Get organization stream policy",
         "description": "Returns the current StreamPolicy for the specified organization along with a strong ETag header.",
         "operationId": "getOrgPolicy",
+        "tags": [
           "Organizations"
         ],
         "parameters": [
@@ -7649,20 +8335,31 @@
             "description": "Organization identifier"
           }
         ],
+        "responses": {
+          "200": {
             "description": "Organization stream policy",
             "headers": {
               "ETag": {
                 "description": "Strong entity tag for optimistic concurrency control",
+                "schema": {
                   "type": "string"
                 }
               }
             },
+            "content": {
+              "application/json": {
+                "schema": {
                   "$ref": "#/components/schemas/OrgPolicyResponse"
                 }
               }
             }
           },
+          "404": {
             "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -7673,6 +8370,7 @@
         "summary": "Replace organization stream policy",
         "description": "Replaces the StreamPolicy for an organization. Restricted to organization owners. Supports optimistic concurrency via the If-Match header and records an audit log entry.",
         "operationId": "updateOrgPolicy",
+        "tags": [
           "Organizations"
         ],
         "parameters": [
@@ -7696,6 +8394,7 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -7704,14 +8403,20 @@
             }
           }
         },
+        "responses": {
+          "200": {
             "description": "Updated organization stream policy",
             "headers": {
               "ETag": {
                 "description": "Updated strong entity tag",
+                "schema": {
                   "type": "string"
                 }
               }
             },
+            "content": {
+              "application/json": {
+                "schema": {
                   "$ref": "#/components/schemas/OrgPolicyResponse"
                 }
               }
@@ -7719,21 +8424,40 @@
           },
           "400": {
             "description": "Invalid policy payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
           },
+          "403": {
             "description": "Caller is not an authenticated owner of the organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
           },
+          "404": {
             "description": "Organization not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
           },
+          "409": {
             "description": "Optimistic concurrency conflict (If-Match ETag mismatch)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -7770,6 +8494,10 @@
     {
       "name": "Notifications",
       "description": "User notification channel and event preferences"
+    },
+    {
+      "name": "Organizations",
+      "description": "Organization membership and stream policy"
     },
     {
       "name": "Streams",

@@ -372,3 +372,69 @@ npm audit
 **Last Updated**: 2026-04-28  
 **Maintained By**: Security Team  
 **Review Cycle**: Quarterly or after major incidents
+
+---
+
+## Rust Contract Dependency Auditing (cargo-audit)
+
+The `contracts/` workspace (Soroban smart contracts) uses [`cargo-audit`](https://github.com/rustsec/cargo-audit)
+to scan `contracts/Cargo.lock` against the [RustSec Advisory Database](https://rustsec.org/advisories/).
+
+### Configuration
+
+- **Config file**: `contracts/.cargo/audit.toml`
+- **Lock file**: `contracts/Cargo.lock`
+- The `audit.toml` `[advisories] ignore` list contains accepted (non-fixable)
+  advisory IDs, each with a comment explaining why it is ignored.
+
+### Running locally
+
+```bash
+cargo install cargo-audit
+cd contracts && cargo audit
+```
+
+To audit against the workspace lockfile directly:
+
+```bash
+cargo audit --file contracts/Cargo.lock --deny warnings
+```
+
+### Triage steps for a new advisory
+
+1. **Read the advisory** at `https://rustsec.org/advisories/<ID>.html` to
+   understand the severity and affected versions.
+2. **Check if a fix exists** — `cargo update -p <crate>` may pull a patched
+   version. Verify with `cargo audit` again.
+3. **If no fix is available** (transitive dependency, `no_std` target, not
+   exploitable in the contract's deployment context):
+   - Add the advisory ID to `contracts/.cargo/audit.toml` under
+     `[advisories] ignore = [...]`.
+   - Include a comment with the advisory ID, affected crate/version, reason
+     for acceptance, and the date it was added.
+   - Re-run `cargo audit` to confirm it passes.
+4. **If a fix is available and the crate is directly managed**:
+   - Update the dependency in `contracts/Cargo.toml` or the relevant
+     `contracts/*/Cargo.toml`.
+   - Run `cargo update -p <crate>` and `cargo audit` to verify.
+   - Commit the updated `Cargo.lock`.
+
+### CI job
+
+The maintainer applies `.github/workflows/cargo-audit.yml` which:
+- Triggers on changes to `contracts/Cargo.lock`, `contracts/**/Cargo.toml`,
+  and on a weekly schedule.
+- Runs `cargo audit --file contracts/Cargo.lock --deny warnings`.
+- Uses the same cargo cache key (`hashFiles('contracts/Cargo.lock')`) as the
+  existing `clippy.yml`, `gas.yml`, `wasm-size.yml`, and `smoke.yml` workflows.
+
+### Ignore-list policy
+
+Ignored advisories are re-evaluated:
+- After each `cargo-audit` release (new checks for past advisories).
+- After any workspace dependency update.
+- During the quarterly security review cycle.
+
+An ignore entry is **never permanent** — each one must include a date so it
+can be re-checked. Stale ignores (older than 6 months) should be revisited and
+either resolved or re-confirmed with an updated reason.

@@ -61,6 +61,7 @@ const config = [
     ignores: [
       ".next/**",
       ".dist/**",
+      "lib/sdk/dist/**",
       "node_modules/**",
       "coverage/**",
       "eslint.config.mjs",

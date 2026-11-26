@@ -86,6 +86,71 @@ return {0, 0, nowMs + msUntilToken}
 `;
 
 // ---------------------------------------------------------------------------
+// Sliding-window-counter Lua script
+//
+// KEYS[1]  = hash key for this bucket   (e.g. streampay:rl:v2:read:1.2.3.4)
+// ARGV[1]  = limit                      (integer, max requests per window)
+// ARGV[2]  = windowMs                   (integer, window length in ms)
+// ARGV[3]  = nowMs                      (integer, current epoch ms from caller)
+// ARGV[4]  = ttlSeconds                 (integer, 2×window, for EXPIRE)
+//
+// Returns an array: { allowed, remaining, resetAtMs }
+//   allowed    = 1 (allow) or 0 (deny)
+//   remaining  = integer requests left after this call
+//   resetAtMs  = epoch-ms when the oldest request in the window expires
+// ---------------------------------------------------------------------------
+const SLIDING_WINDOW_LUA = `
+local key       = KEYS[1]
+local limit     = tonumber(ARGV[1])
+local windowMs  = tonumber(ARGV[2])
+local nowMs     = tonumber(ARGV[3])
+local ttl       = tonumber(ARGV[4])
+
+local data      = redis.call("HMGET", key, "currentCount", "prevCount", "windowStart")
+local currentCount = tonumber(data[1])
+local prevCount    = tonumber(data[2])
+local windowStart  = tonumber(data[3])
+
+if currentCount == nil then
+  -- First request
+  redis.call("HMSET", key, "currentCount", 1, "prevCount", 0, "windowStart", nowMs)
+  redis.call("EXPIRE", key, ttl)
+  return {1, limit - 1, nowMs + windowMs}
+end
+
+-- Check if we've moved into a new window
+local elapsed = nowMs - windowStart
+if elapsed >= windowMs then
+  if elapsed >= 2 * windowMs then
+    prevCount = 0
+    currentCount = 0
+  else
+    prevCount = currentCount
+    currentCount = 0
+  end
+  windowStart = windowStart + (elapsed % windowMs)
+end
+
+-- Compute weighted count
+local elapsedInCurrent = nowMs - windowStart
+local weightPrev = math.max(0, 1 - elapsedInCurrent / windowMs)
+local weightedCount = prevCount * weightPrev + currentCount
+
+if weightedCount < limit then
+  currentCount = currentCount + 1
+  local remaining = math.max(0, math.floor(limit - weightedCount - 1))
+  redis.call("HMSET", key, "currentCount", currentCount, "prevCount", prevCount, "windowStart", windowStart)
+  redis.call("EXPIRE", key, ttl)
+  return {1, remaining, windowStart + windowMs}
+end
+
+-- Rate limited
+redis.call("HMSET", key, "currentCount", currentCount, "prevCount", prevCount, "windowStart", windowStart)
+redis.call("EXPIRE", key, ttl)
+return {0, 0, windowStart + windowMs}
+`;
+
+// ---------------------------------------------------------------------------
 // Shadow (local fallback) bucket
 // ---------------------------------------------------------------------------
 
@@ -177,15 +242,18 @@ async function redisEval(
   token: string,
   keys: string[],
   args: (string | number)[],
-  _nowFn: () => number
+  _nowFn: () => number,
+  algorithm: "token-bucket" | "sliding-window" = "token-bucket"
 ): Promise<[number, number, number]> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REDIS_TIMEOUT_MS);
 
+  const luaScript = algorithm === "sliding-window" ? SLIDING_WINDOW_LUA : TOKEN_BUCKET_LUA;
+
   const body = JSON.stringify([
     [
       "EVAL",
-      TOKEN_BUCKET_LUA,
+      luaScript,
       String(keys.length),
       ...keys,
       ...args.map(String),
@@ -269,6 +337,9 @@ export class RedisRateLimitStore implements RateLimitStore {
     const now = this.nowFn();
     const key = `${KEY_PREFIX}${identifier}`;
     const ttlSeconds = Math.ceil((2 * windowMs) / 1000);
+    const algorithm = process.env.RATE_LIMIT_ALGORITHM === "sliding-window"
+      ? "sliding-window" as const
+      : "token-bucket" as const;
 
     try {
       const [allowed, remaining, resetAtMs] = await redisEval(
@@ -276,7 +347,8 @@ export class RedisRateLimitStore implements RateLimitStore {
         this.redisToken,
         [key],
         [limit, windowMs, now, ttlSeconds],
-        this.nowFn
+        this.nowFn,
+        algorithm
       );
 
       if (allowed === 1) {

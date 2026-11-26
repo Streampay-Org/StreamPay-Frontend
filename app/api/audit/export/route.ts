@@ -38,6 +38,9 @@ import type {
 } from "@/app/types/audit";
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
+import { checkRateLimit, getClientIdentity, rateLimitResponse } from "@/app/lib/rate-limit";
+import { getLimitForRoute } from "@/app/lib/rate-limit-config";
+import { recordRequest, recordThrottle } from "@/app/lib/rate-limit-metrics";
 
 const DEFAULT_LIMIT = 250;
 const MAX_LIMIT = 250;
@@ -194,6 +197,17 @@ function resolveFormat(request: Request): ExportFormat {
     return accept.includes("text/csv") ? "csv" : "ndjson";
   }
 
+  const url = new URL(request.url);
+  const limitType = getLimitForRoute("GET", url.pathname);
+  const identity = getClientIdentity(request);
+  const rateLimitResult = await checkRateLimit(identity, limitType);
+  if (!rateLimitResult.allowed) {
+    recordThrottle(url.pathname, limitType, identity.type, identity.displayValue);
+    return rateLimitResponse(rateLimitResult.retryAfter!);
+  }
+  recordRequest(url.pathname);
+
+  const filters = buildFilters(request);
   if (requested === "ndjson" || requested === "csv") {
     return requested;
   }

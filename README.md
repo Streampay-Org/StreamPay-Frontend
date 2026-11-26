@@ -53,6 +53,7 @@ inventory with comments is in [`.env.example`](.env.example).
 | `ALLOWED_ORIGINS` | yes | Comma-separated CORS allow-list (no `*` in production). |
 | `DATABASE_URL` | no | Postgres connection string. Without it the API uses seeded in-memory data. |
 | `HORIZON_URL` / `SOROBAN_RPC_URL` | no | Stellar endpoints (testnet defaults). |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | no | Configure all three to enable web push; otherwise push endpoints return 503. Generate keys with `npx web-push generate-vapid-keys` and keep the private key secret. |
 | `WEBHOOK_SECRET`, `METRICS_AUTH_TOKEN`, `FEE_BUMP_SECRET_KEY`, ... | no | Feature specific, see `.env.example`. |
 
 ## Scripts
@@ -86,9 +87,12 @@ error envelope. Stellar and Soroban calls go through a client with caching and c
 ## Documentation
 
 - In-app overview: `/docs`
+- [docs/README.md](docs/README.md) - index of every documentation page, grouped by area
 - [docs/reference.md](docs/reference.md) - the full original reference (API versioning, lifecycle, security, webhooks, troubleshooting)
+- [docs/api/orgs.md](docs/api/orgs.md) - organisations, members and roles API
 - [docs/architecture.md](docs/architecture.md), [docs/STATE_MACHINE.md](docs/STATE_MACHINE.md), [docs/api-v2-migration.md](docs/api-v2-migration.md)
 - [docs/DEPLOYMENT-CHECKLIST.md](docs/DEPLOYMENT-CHECKLIST.md) and [docs/runbooks](docs/runbooks)
+- [docs/api/approvals.md](docs/api/approvals.md) - multi-sig approvals API
 - [CHANGELOG.md](CHANGELOG.md), [SECURITY.md](SECURITY.md)
 
 ## Deploying to Vercel

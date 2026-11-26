@@ -374,6 +374,100 @@ describe("StreamDetailClient", () => {
     expect(window.alert).not.toHaveBeenCalled();
   });
 
+  describe("StreamEndedCard visibility and interactions", () => {
+    it.each(["ended", "withdrawn", "cancelled"] as const)(
+      "renders StreamEndedCard for %s status",
+      (status) => {
+        render(
+          React.createElement(StreamDetailClient, {
+            stream: { ...endedStream, status },
+          }),
+        );
+
+        expect(screen.getByRole("heading", { name: /stream ended/i })).toBeInTheDocument();
+        expect(screen.getByText(/Yusuf QA Partnership/i)).toBeInTheDocument();
+      },
+    );
+
+    it.each(["active", "paused", "draft"] as const)(
+      "does not render StreamEndedCard for %s status",
+      (status) => {
+        render(
+          React.createElement(StreamDetailClient, {
+            stream: { ...activeStream, status },
+          }),
+        );
+
+        expect(screen.queryByRole("heading", { name: /stream ended/i })).not.toBeInTheDocument();
+      },
+    );
+
+    it("hides StreamEndedCard when Dismiss is clicked", () => {
+      render(React.createElement(StreamDetailClient, { stream: endedStream }));
+
+      expect(screen.getByRole("heading", { name: /stream ended/i })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /dismiss notification/i }));
+
+      expect(screen.queryByRole("heading", { name: /stream ended/i })).not.toBeInTheDocument();
+    });
+
+    it("scrolls to and focuses the payment timeline when View Details is clicked", () => {
+      const scrollIntoViewMock = jest.fn();
+      render(React.createElement(StreamDetailClient, { stream: endedStream }));
+
+      const timeline = screen.getByTestId("payment-timeline-section");
+      timeline.scrollIntoView = scrollIntoViewMock;
+
+      fireEvent.click(screen.getByRole("button", { name: /view stream details/i }));
+
+      expect(scrollIntoViewMock).toHaveBeenCalledWith({
+        behavior: "smooth",
+        block: "start",
+      });
+      expect(timeline).toHaveFocus();
+    });
+
+    it("falls back to recipient when label is missing and handles missing updatedAt", () => {
+      const streamWithoutLabelOrUpdatedAt: Stream = {
+        ...endedStream,
+        label: undefined,
+        updatedAt: "",
+      };
+
+      render(
+        React.createElement(StreamDetailClient, {
+          stream: streamWithoutLabelOrUpdatedAt,
+        }),
+      );
+
+      expect(screen.getByRole("heading", { name: /stream ended/i })).toBeInTheDocument();
+      expect(
+        screen.getByText((content, element) => {
+          return (
+            element?.tagName.toLowerCase() === "strong" &&
+            content === endedStream.recipient
+          );
+        }),
+      ).toBeInTheDocument();
+    });
+
+    it("shows StreamEndedCard when stream transitions from active to cancelled after an action", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: cancelledStream() }));
+
+      render(React.createElement(StreamDetailClient, { stream: activeStream }));
+
+      expect(screen.queryByRole("heading", { name: /stream ended/i })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /cancel stream/i }));
+      fireEvent.click(screen.getByRole("button", { name: /confirm cancellation/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /stream ended/i })).toBeInTheDocument();
+      });
+    });
+  });
+
   it("opens AmendStreamModal and updates stream state on successful amend", async () => {
     const amended: Stream = {
       ...activeStream,
