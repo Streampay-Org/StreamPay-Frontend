@@ -338,6 +338,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/streams/{id}/receipt/pdf": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Tenant context used when checking stream visibility. Defaults to the caller's default tenant. */
+                "x-tenant-id"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Download a stream receipt as PDF
+         * @description Returns a deterministic PDF receipt for an authenticated stream participant. Use anonymous=true to mask addresses and remove PII. Theme parameters are validated and unsafe values fall back to defaults.
+         */
+        get: operations["getStreamReceiptPdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/streams/{id}/stop": {
         parameters: {
             query?: never;
@@ -657,7 +683,7 @@ export interface paths {
         put?: never;
         /**
          * Receive an incoming webhook event
-         * @description Validates and accepts an incoming webhook event payload.
+         * @description Verifies the HMAC signature and replay window, deduplicates by event ID, and dispatches the incoming webhook event payload to a registered handler.
          */
         post: operations["receiveWebhook"];
         delete?: never;
@@ -2120,6 +2146,8 @@ export interface operations {
             /** @description Paginated list of activity events. */
             200: {
                 headers: {
+                    /** @description RFC 8288 pagination links (rel="next" when more pages exist, rel="self" for the current page). */
+                    Link?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2459,6 +2487,8 @@ export interface operations {
             /** @description Paginated stream list. */
             200: {
                 headers: {
+                    /** @description RFC 8288 pagination links (rel="next" when more pages exist, rel="self" for the current page). Also preserved on 304 Not Modified responses. */
+                    Link?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -3333,6 +3363,59 @@ export interface operations {
             500: components["responses"]["500"];
         };
     };
+    getStreamReceiptPdf: {
+        parameters: {
+            query?: {
+                /** @description Mask party addresses and omit PII from the receipt. */
+                anonymous?: boolean;
+                /** @description Optional HTTPS logo URL. Only allowlisted hosts are accepted. */
+                logoUrl?: string;
+                /** @description Optional 3- or 6-digit hexadecimal accent color. */
+                accentColor?: string;
+                /** @description Optional short receipt message. */
+                message?: string;
+            };
+            header?: {
+                /** @description Tenant context used when checking stream visibility. Defaults to the caller's default tenant. */
+                "x-tenant-id"?: string;
+            };
+            path: {
+                /** @description Stream identifier. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Receipt PDF. */
+            200: {
+                headers: {
+                    /** @description Strong validator for this PDF representation. */
+                    ETag?: string;
+                    /** @description Private cache policy for the receipt. */
+                    "Cache-Control"?: string;
+                    /** @description Download filename. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            /** @description The cached PDF representation is still current. */
+            304: {
+                headers: {
+                    ETag?: string;
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["401"];
+            404: components["responses"]["404"];
+            500: components["responses"]["500"];
+        };
+    };
     stopStream: {
         parameters: {
             query?: never;
@@ -3813,6 +3896,8 @@ export interface operations {
             /** @description Paginated stream list. */
             200: {
                 headers: {
+                    /** @description RFC 8288 pagination links (rel="next" when more pages exist, rel="self" for the current page). Also preserved on 304 Not Modified responses. */
+                    Link?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -4226,20 +4311,50 @@ export interface operations {
     receiveWebhook: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description HMAC-SHA256 signature header in the format `t=<timestamp>,id=<eventId>,v1=<hex>`. */
+                "x-streampay-signature": string;
+                /** @description Unix epoch timestamp in seconds used to compute the signature and enforce the replay window. */
+                "x-streampay-timestamp": string;
+            };
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
                 "application/json": {
-                    /** @example payment.received */
+                    /**
+                     * @description Webhook event type name.
+                     * @example payment.received
+                     */
                     eventType: string;
+                    /**
+                     * @description Unique event identifier used for signature verification and deduplication.
+                     * @example evt_123
+                     */
+                    eventId?: string;
+                    /**
+                     * Format: date-time
+                     * @description ISO-8601 event timestamp.
+                     */
+                    timestamp?: string;
+                    /** @description Source system that emitted the event. */
+                    source?: string;
+                    /** @description Arbitrary JSON event payload. */
+                    data?: unknown;
+                    /** @description Optional metadata key-value map. */
+                    metadata?: {
+                        [key: string]: unknown;
+                    };
+                    /** @description Optional forwarded headers. */
+                    headers?: {
+                        [key: string]: string;
+                    };
                 };
             };
         };
         responses: {
-            /** @description Webhook event accepted. */
+            /** @description Webhook event handled, or acknowledged as a duplicate. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4248,10 +4363,38 @@ export interface operations {
                     "application/json": {
                         /** @example true */
                         success: boolean;
+                        /**
+                         * @description Present and true when the eventId was already processed within the deduplication TTL.
+                         * @example true
+                         */
+                        duplicate?: boolean;
+                    };
+                };
+            };
+            /** @description Webhook event verified and accepted, but no handler is registered for its eventType. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example true */
+                        success: boolean;
+                        /** @example false */
+                        handled: boolean;
                     };
                 };
             };
             400: components["responses"]["400"];
+            /** @description Missing/invalid HMAC signature (`INVALID_SIGNATURE`) or timestamp outside replay window (`REPLAY_WINDOW_EXCEEDED`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             413: components["responses"]["413"];
             /** @description Too many requests — rate limit exceeded. */
             429: {

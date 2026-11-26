@@ -4309,6 +4309,132 @@
         }
       }
     },
+    "/api/streams/{id}/receipt/pdf": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Stream identifier.",
+          "schema": {
+            "type": "string",
+            "example": "stream-abc12345"
+          }
+        },
+        {
+          "name": "x-tenant-id",
+          "in": "header",
+          "required": false,
+          "description": "Tenant context used when checking stream visibility. Defaults to the caller's default tenant.",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getStreamReceiptPdf",
+        "summary": "Download a stream receipt as PDF",
+        "description": "Returns a deterministic PDF receipt for an authenticated stream participant. Use anonymous=true to mask addresses and remove PII. Theme parameters are validated and unsafe values fall back to defaults.",
+        "tags": [
+          "Streams"
+        ],
+        "parameters": [
+          {
+            "name": "anonymous",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Mask party addresses and omit PII from the receipt."
+          },
+          {
+            "name": "logoUrl",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "Optional HTTPS logo URL. Only allowlisted hosts are accepted."
+          },
+          {
+            "name": "accentColor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
+            },
+            "description": "Optional 3- or 6-digit hexadecimal accent color."
+          },
+          {
+            "name": "message",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 140
+            },
+            "description": "Optional short receipt message."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Receipt PDF.",
+            "headers": {
+              "ETag": {
+                "description": "Strong validator for this PDF representation.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Private cache policy for the receipt.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "Download filename.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The cached PDF representation is still current.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
     "/api/streams/{id}/stop": {
       "parameters": [
         {
