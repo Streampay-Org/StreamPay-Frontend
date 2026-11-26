@@ -1,0 +1,98 @@
+import {
+  recordOrgQuotaRejection,
+  getOrgQuotaMetrics,
+  resetOrgQuotaMetrics,
+} from "@/app/lib/org-quota-metrics";
+
+describe("org-quota-metrics", () => {
+  let warnSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    resetOrgQuotaMetrics();
+    warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    warnSpy.mockRestore();
+  });
+
+  it("increments counters per org independently", () => {
+    recordOrgQuotaRejection("org-a");
+    recordOrgQuotaRejection("org-a");
+    recordOrgQuotaRejection("org-b");
+
+    const { rejections } = getOrgQuotaMetrics();
+    expect(rejections).toEqual({ "org-a": 2, "org-b": 1 });
+  });
+
+  it("emits a structured JSON log line with event, orgId and ISO timestamp", () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-01-15T10:00:00.000Z"));
+
+    recordOrgQuotaRejection("org-a");
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const line = JSON.parse(warnSpy.mock.calls[0][0] as string);
+    expect(line.event).toBe("org_daily_quota_exceeded");
+    expect(line.orgId).toBe("org-a");
+    expect(line.timestamp).toBe("2026-01-15T10:00:00.000Z");
+  });
+
+  it("caps the ring buffer at 100 and keeps the newest entries in order", () => {
+    for (let i = 0; i < 105; i++) {
+      recordOrgQuotaRejection(`org-${i}`);
+    }
+
+    const { recentRejections } = getOrgQuotaMetrics();
+    expect(recentRejections).toHaveLength(100);
+    expect(recentRejections[0].orgId).toBe("org-5");
+    expect(recentRejections[99].orgId).toBe("org-104");
+    expect(recentRejections.map((e) => e.orgId)).toEqual(
+      Array.from({ length: 100 }, (_, i) => `org-${i + 5}`),
+    );
+  });
+
+  it("returns copies so mutating a snapshot does not affect later snapshots", () => {
+    recordOrgQuotaRejection("org-a");
+
+    const first = getOrgQuotaMetrics();
+    first.rejections["org-a"] = 999;
+    first.rejections["org-x"] = 1;
+    first.recentRejections.length = 0;
+
+    const second = getOrgQuotaMetrics();
+    expect(second.rejections).toEqual({ "org-a": 1 });
+    expect(second.recentRejections).toHaveLength(1);
+  });
+
+  it("resetOrgQuotaMetrics clears counters and events", () => {
+    recordOrgQuotaRejection("org-a");
+    recordOrgQuotaRejection("org-b");
+
+    resetOrgQuotaMetrics();
+
+    const { rejections, recentRejections } = getOrgQuotaMetrics();
+    expect(rejections).toEqual({});
+    expect(recentRejections).toEqual([]);
+  });
+
+  it("handles an empty-string org id", () => {
+    recordOrgQuotaRejection("");
+
+    const { rejections, recentRejections } = getOrgQuotaMetrics();
+    expect(rejections[""]).toBe(1);
+    expect(recentRejections[0].orgId).toBe("");
+  });
+
+  it("handles a unicode org id", () => {
+    const orgId = "组织-é-🚀";
+    recordOrgQuotaRejection(orgId);
+
+    const { rejections } = getOrgQuotaMetrics();
+    expect(rejections[orgId]).toBe(1);
+
+    const line = JSON.parse(warnSpy.mock.calls[0][0] as string);
+    expect(line.orgId).toBe(orgId);
+  });
+});

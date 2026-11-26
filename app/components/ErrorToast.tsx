@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import type { StreamPayError } from "@/app/lib/errors/types";
 import { isRetryableError } from "@/app/lib/errors/codes";
 import { formatErrorForDisplay } from "@/app/lib/errors/handler";
+import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
+import styles from "./ErrorToast.module.css";
 
 interface ErrorToastProps {
   error: StreamPayError;
@@ -49,35 +51,30 @@ export function ErrorToast({
   autoDismissDelayMs = 5000,
   showRequestId = false,
 }: ErrorToastProps) {
-  const [progress, setProgress] = useState(100);
   const [isPaused, setIsPaused] = useState(false);
+  const prefersReducedMotion = usePrefersReducedMotion();
   const formatted = formatErrorForDisplay(error);
   const canRetry = isRetryableError(error.code) && onRetry;
 
-  // Auto-dismiss with progress
-  useEffect(() => {
-    if (!autoDismiss) return;
+  /**
+   * The progress bar is a CSS animation; when it finishes the toast dismisses.
+   * Guard against child animations bubbling up before calling onDismiss.
+   */
+  const handleCountdownEnd = useCallback(
+    (event: React.AnimationEvent<HTMLDivElement>) => {
+      if (event.target !== event.currentTarget) return;
+      onDismiss();
+    },
+    [onDismiss],
+  );
 
-    const startTime = Date.now();
-    const duration = autoDismissDelayMs;
-
-    const updateProgress = () => {
-      if (isPaused) return;
-      
-      const elapsed = Date.now() - startTime;
-      const remaining = Math.max(0, duration - elapsed);
-      const newProgress = (remaining / duration) * 100;
-      
-      setProgress(newProgress);
-
-      if (remaining <= 0) {
-        onDismiss();
-      }
-    };
-
-    const interval = setInterval(updateProgress, 50);
-    return () => clearInterval(interval);
-  }, [autoDismiss, autoDismissDelayMs, isPaused, onDismiss]);
+  const handleBlur = useCallback((event: React.FocusEvent<HTMLDivElement>) => {
+    const nextFocus = event.relatedTarget;
+    if (nextFocus instanceof Node && event.currentTarget.contains(nextFocus)) {
+      return;
+    }
+    setIsPaused(false);
+  }, []);
 
   const handleRetry = useCallback(() => {
     onRetry?.();
@@ -91,9 +88,11 @@ export function ErrorToast({
     <div
       role="alert"
       aria-live="polite"
-      className={`${toastStyles.base} ${toastStyles.severity[severity]}`}
+      className={`${styles.root} ${toastStyles.base} ${toastStyles.severity[severity]}`}
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
+      onFocus={() => setIsPaused(true)}
+      onBlur={handleBlur}
       data-testid="error-toast"
       data-error-code={error.code}
     >
@@ -157,13 +156,20 @@ export function ErrorToast({
         </div>
       </div>
 
-      {/* Progress bar */}
+      {/* Progress bar — CSS-driven countdown, paused on hover/focus. */}
       {autoDismiss && (
-        <div className="h-1 bg-gray-200">
+        <div className={styles.bar}>
           <div
-            className="h-full bg-red-500 transition-all duration-100 ease-linear"
-            style={{ width: `${progress}%` }}
+            className={`${styles.barFill} ${isPaused ? styles.barFillPaused : ""} ${
+              prefersReducedMotion ? styles.barFillReduced : ""
+            }`.trim()}
+            style={{
+              animationDuration: `${autoDismissDelayMs}ms`,
+              animationPlayState: isPaused ? "paused" : "running",
+            }}
+            onAnimationEnd={handleCountdownEnd}
             aria-hidden="true"
+            data-testid="error-toast-progress"
           />
         </div>
       )}

@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { fetchWithIdempotency } from '../../../lib/apiClient';
 import { GasOnRecipientToggle } from '../../components/GasOnRecipientToggle';
 import { RecentRecipients } from './components/RecentRecipients';
 import { addRecentRecipient } from '../../state/recentRecipients';
@@ -40,6 +42,7 @@ function shortenAddress(address: string): string {
  * a bottom-sheet summary before final submission.
  */
 export default function NewStreamPage() {
+  const router = useRouter();
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -55,6 +58,8 @@ export default function NewStreamPage() {
   const [gasOnRecipient, setGasOnRecipient] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [createdStreamId, setCreatedStreamId] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const [isMobile, setIsMobile] = useState(false);
   const [isBottomSheetOpen, setIsBottomSheetOpen] = useState(false);
@@ -138,13 +143,35 @@ export default function NewStreamPage() {
   const performCreateStream = async () => {
     setIsSubmitting(true);
     setIsBottomSheetOpen(false);
-    // TODO: call stream creation API with { recipient, amount, token, gasOnRecipient }
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    addRecentRecipient(recipient);
-    // Clear the draft now that creation has succeeded
-    clearWizardDraft();
-    setIsSubmitting(false);
-    setSuccess(true);
+    setSubmitError(null);
+    try {
+      const payload = await fetchWithIdempotency<{ data?: { id?: string } }>(
+        '/api/streams',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': crypto.randomUUID(),
+          },
+          body: JSON.stringify({ recipient, rate: amount, schedule: 'month', token }),
+        },
+      );
+      if (typeof payload?.data?.id !== 'string') {
+        throw new Error('The stream API returned an invalid response.');
+      }
+
+      addRecentRecipient(recipient);
+      clearWizardDraft();
+      setCreatedStreamId(payload.data.id);
+      setSuccess(true);
+      void router.push(`/streams/${payload.data.id}`);
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error ? error.message : 'Unable to create stream. Please try again.',
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -176,11 +203,23 @@ export default function NewStreamPage() {
             <h1 className="page-hero__title">Stream Created</h1>
             <p className="page-hero__description">Your stream is live.</p>
           </div>
-          <Link href="/streams" className="button button--primary">View Streams</Link>
+            <Link
+              href={createdStreamId ? `/streams/${createdStreamId}` : '/streams'}
+              className="button button--primary"
+            >
+              View Stream
+            </Link>
         </section>
       </main>
     );
   }
+
+  const trimmedAmount = amount.trim();
+  const numericAmount = Number(trimmedAmount);
+  const hasValidAmount =
+    trimmedAmount.length > 0 &&
+    Number.isFinite(numericAmount) &&
+    numericAmount > 0;
 
   return (
     <main className="page-shell">
@@ -248,6 +287,7 @@ export default function NewStreamPage() {
           className="create-stream-form"
           style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}
         >
+          {submitError && <p role="alert">{submitError}</p>}
           {/* Recipient */}
           <div>
             <label
@@ -349,6 +389,15 @@ export default function NewStreamPage() {
         reducedMotion={prefersReducedMotion}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {hasValidAmount && (
+            <PayoutSummary
+              campaignName="Single-recipient stream"
+              totalAmount={trimmedAmount}
+              tokenSymbol={token}
+              recipientCount={1}
+            />
+          )}
+
           <p style={{ color: 'var(--muted-light)', fontSize: 'var(--text-sm, 0.875rem)', margin: 0 }}>
             Double-check the payment stream details below before finalizing.
           </p>

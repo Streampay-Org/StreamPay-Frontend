@@ -5,7 +5,8 @@
 //!
 //! ## What this covers
 //!
-//! - Every public entrypoint is exercised in a clean Soroban test host.
+//! - Every public entrypoint (standard, split, and recurring stream families)
+//!   is exercised in a clean Soroban test host.
 //! - Each call records:
 //!   - CPU instructions consumed (`env.host().cpu_instr_consumed()` delta)
 //!   - Memory bytes allocated (`env.host().mem_bytes_consumed()` delta)
@@ -1093,4 +1094,348 @@ fn gas_snap_withdraw_many() {
     }
 
     assert_budget_ceiling(&snap, 1_500_000, 250_000, 100, 5_000);
+}
+
+// ── Split stream entrypoint snapshots ─────────────────────────────────────────
+
+fn make_split_recipients(
+    env: &Env,
+    count: usize,
+) -> (soroban_sdk::Vec<Address>, soroban_sdk::Vec<u64>) {
+    let mut recipients = soroban_sdk::Vec::new(env);
+    let mut weights = soroban_sdk::Vec::new(env);
+    for _ in 0..count {
+        recipients.push_back(Address::generate(env));
+        weights.push_back(1u64);
+    }
+    (recipients, weights)
+}
+
+#[test]
+fn gas_snap_create_split_stream() {
+    let data = gas_setup();
+    let client = gas_initialized(&data);
+    let (recipients, weights) = make_split_recipients(&data.env, 2);
+
+    let (stream_id, snapshot) = measure_invocation(&data.env, || {
+        client.create_split_stream(
+            &data.sender,
+            &data.token,
+            &1_000i128,
+            &1_100u64,
+            &2_100u64,
+            &recipients,
+            &weights,
+        )
+    });
+
+    assert_eq!(stream_id, 1);
+    assert_budget_ceiling(&snapshot, 400_000, 75_000, 100, 1_800);
+}
+
+#[test]
+fn gas_snap_create_split_stream_five_recipients() {
+    let data = gas_setup();
+    let client = gas_initialized(&data);
+    let (recipients, weights) = make_split_recipients(&data.env, 5);
+
+    let (stream_id, snapshot) = measure_invocation(&data.env, || {
+        client.create_split_stream(
+            &data.sender,
+            &data.token,
+            &1_000i128,
+            &1_100u64,
+            &2_100u64,
+            &recipients,
+            &weights,
+        )
+    });
+
+    assert_eq!(stream_id, 1);
+    assert_budget_ceiling(&snapshot, 550_000, 95_000, 100, 2_400);
+}
+
+#[test]
+fn gas_snap_withdraw_split() {
+    let data = gas_setup();
+    let client = gas_initialized(&data);
+    let (recipients, weights) = make_split_recipients(&data.env, 2);
+    let first_recipient = recipients.get(0).unwrap();
+
+    let id = client.create_split_stream(
+        &data.sender,
+        &data.token,
+        &1_000i128,
+        &1_100u64,
+        &2_100u64,
+        &recipients,
+        &weights,
+    );
+    data.env.ledger().set_timestamp(1_600); // midpoint: 500 total vested, 250 per recipient
+
+    let (withdrawn, snapshot) =
+        measure_invocation(&data.env, || client.withdraw_split(&id, &first_recipient, &200i128));
+
+    assert_eq!(withdrawn, 200);
+    assert_budget_ceiling(&snapshot, 380_000, 65_000, 100, 1_500);
+}
+
+#[test]
+fn gas_snap_cancel_split_stream() {
+    let data = gas_setup();
+    let client = gas_initialized(&data);
+    let (recipients, weights) = make_split_recipients(&data.env, 2);
+
+    let id = client.create_split_stream(
+        &data.sender,
+        &data.token,
+        &1_000i128,
+        &1_100u64,
+        &2_100u64,
+        &recipients,
+        &weights,
+    );
+    data.env.ledger().set_timestamp(1_600);
+
+    let (stream, snapshot) =
+        measure_invocation(&data.env, || client.cancel_split_stream(&id));
+
+    assert_eq!(stream.status, streampay_stream::StreamStatus::Cancelled);
+    assert_budget_ceiling(&snapshot, 550_000, 95_000, 200, 2_400);
+}
+
+#[test]
+fn gas_snap_get_split_stream() {
+    let data = gas_setup();
+    let client = gas_initialized(&data);
+    let (recipients, weights) = make_split_recipients(&data.env, 2);
+
+    let id = client.create_split_stream(
+        &data.sender,
+        &data.token,
+        &1_000i128,
+        &1_100u64,
+        &2_100u64,
+        &recipients,
+        &weights,
+    );
+
+    let (stream, snapshot) = measure_invocation(&data.env, || client.get_split_stream(&id));
+
+    assert_eq!(stream.id, id);
+    assert_budget_ceiling(&snapshot, 180_000, 35_000, 100, 600);
+}
+
+#[test]
+fn gas_snap_split_withdrawable() {
+    let data = gas_setup();
+    let client = gas_initialized(&data);
+    let (recipients, weights) = make_split_recipients(&data.env, 2);
+    let first_recipient = recipients.get(0).unwrap();
+
+    let id = client.create_split_stream(
+        &data.sender,
+        &data.token,
+        &1_000i128,
+        &1_100u64,
+        &2_100u64,
+        &recipients,
+        &weights,
+    );
+    data.env.ledger().set_timestamp(1_600);
+
+    let (amount, snapshot) =
+        measure_invocation(&data.env, || client.split_withdrawable(&id, &first_recipient));
+
+    assert_eq!(amount, 250);
+    assert_budget_ceiling(&snapshot, 180_000, 35_000, 100, 600);
+}
+
+#[test]
+fn gas_snap_split_stream_balance() {
+    let data = gas_setup();
+    let client = gas_initialized(&data);
+    let (recipients, weights) = make_split_recipients(&data.env, 2);
+
+    let id = client.create_split_stream(
+        &data.sender,
+        &data.token,
+        &1_000i128,
+        &1_100u64,
+        &2_100u64,
+        &recipients,
+        &weights,
+    );
+    data.env.ledger().set_timestamp(1_600);
+
+    let (balance, snapshot) = measure_invocation(&data.env, || client.split_stream_balance(&id));
+
+    assert_eq!(balance, 500);
+    assert_budget_ceiling(&snapshot, 180_000, 35_000, 100, 600);
+}
+
+// ── Recurring stream entrypoint snapshots ─────────────────────────────────────
+
+#[test]
+fn gas_snap_create_recurring_stream() {
+    let data = gas_setup();
+    let client = gas_initialized(&data);
+
+    let (id, snapshot) = measure_invocation(&data.env, || {
+        client.create_recurring_stream(
+            &data.sender,
+            &data.recipient,
+            &data.token,
+            &250i128,
+            &100u64,
+            &4u64,
+            &1_100u64,
+            &0u32,
+        )
+    });
+
+    assert_eq!(id, 1);
+    assert_budget_ceiling(&snapshot, 330_000, 60_000, 100, 1_500);
+}
+
+#[test]
+fn gas_snap_process_recurring_stream() {
+    let data = gas_setup();
+    let client = gas_initialized(&data);
+
+    let id = client.create_recurring_stream(
+        &data.sender,
+        &data.recipient,
+        &data.token,
+        &250i128,
+        &100u64,
+        &4u64,
+        &1_100u64,
+        &0u32,
+    );
+    data.env.ledger().set_timestamp(1_300); // 2 cycles completed
+
+    let (stream, snapshot) =
+        measure_invocation(&data.env, || client.process_recurring_stream(&id));
+
+    assert_eq!(stream.completed_cycles, 2);
+    assert_budget_ceiling(&snapshot, 280_000, 55_000, 100, 1_200);
+}
+
+#[test]
+fn gas_snap_withdraw_recurring() {
+    let data = gas_setup();
+    let client = gas_initialized(&data);
+
+    let id = client.create_recurring_stream(
+        &data.sender,
+        &data.recipient,
+        &data.token,
+        &250i128,
+        &100u64,
+        &4u64,
+        &1_100u64,
+        &0u32,
+    );
+    data.env.ledger().set_timestamp(1_300); // 2 cycles completed -> 500 vested
+    client.process_recurring_stream(&id);
+
+    let (withdrawn, snapshot) =
+        measure_invocation(&data.env, || client.withdraw_recurring(&id, &data.recipient, &250i128));
+
+    assert_eq!(withdrawn, 250);
+    assert_budget_ceiling(&snapshot, 350_000, 60_000, 100, 1_400);
+}
+
+#[test]
+fn gas_snap_cancel_recurring_stream() {
+    let data = gas_setup();
+    let client = gas_initialized(&data);
+
+    let id = client.create_recurring_stream(
+        &data.sender,
+        &data.recipient,
+        &data.token,
+        &250i128,
+        &100u64,
+        &4u64,
+        &1_100u64,
+        &0u32,
+    );
+    data.env.ledger().set_timestamp(1_300); // 2 cycles completed
+
+    let (stream, snapshot) =
+        measure_invocation(&data.env, || client.cancel_recurring_stream(&id));
+
+    assert_eq!(stream.status, streampay_stream::StreamStatus::Cancelled);
+    assert_budget_ceiling(&snapshot, 380_000, 70_000, 200, 1_600);
+}
+
+#[test]
+fn gas_snap_get_recurring_stream() {
+    let data = gas_setup();
+    let client = gas_initialized(&data);
+
+    let id = client.create_recurring_stream(
+        &data.sender,
+        &data.recipient,
+        &data.token,
+        &250i128,
+        &100u64,
+        &4u64,
+        &1_100u64,
+        &0u32,
+    );
+
+    let (stream, snapshot) = measure_invocation(&data.env, || client.get_recurring_stream(&id));
+
+    assert_eq!(stream.id, id);
+    assert_budget_ceiling(&snapshot, 150_000, 30_000, 100, 600);
+}
+
+#[test]
+fn gas_snap_recurring_withdrawable() {
+    let data = gas_setup();
+    let client = gas_initialized(&data);
+
+    let id = client.create_recurring_stream(
+        &data.sender,
+        &data.recipient,
+        &data.token,
+        &250i128,
+        &100u64,
+        &4u64,
+        &1_100u64,
+        &0u32,
+    );
+    data.env.ledger().set_timestamp(1_300); // 2 cycles completed -> 500 withdrawable
+
+    let (amount, snapshot) =
+        measure_invocation(&data.env, || client.recurring_withdrawable(&id));
+
+    assert_eq!(amount, 500);
+    assert_budget_ceiling(&snapshot, 160_000, 35_000, 100, 600);
+}
+
+#[test]
+fn gas_snap_recurring_vested() {
+    let data = gas_setup();
+    let client = gas_initialized(&data);
+
+    let id = client.create_recurring_stream(
+        &data.sender,
+        &data.recipient,
+        &data.token,
+        &250i128,
+        &100u64,
+        &4u64,
+        &1_100u64,
+        &0u32,
+    );
+    data.env.ledger().set_timestamp(1_300); // 2 cycles completed -> 500 vested
+
+    let (vested, snapshot) = measure_invocation(&data.env, || client.recurring_vested(&id));
+
+    assert_eq!(vested, 500);
+    assert_budget_ceiling(&snapshot, 160_000, 35_000, 100, 600);
 }

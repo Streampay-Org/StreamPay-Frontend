@@ -1,5 +1,8 @@
 "use client";
 
+import { useState, type CSSProperties } from "react";
+import type { ReceiptTheme } from "../lib/receipt-theme";
+import styles from "./StreamReceipt.module.css";
 import type { Stream } from "../types/openapi";
 import { CopyAddress } from "./CopyAddress";
 
@@ -9,6 +12,7 @@ type StreamReceiptProps = {
   generatedAt?: string;
   note?: string;
   hideToolbar?: boolean;
+  theme?: ReceiptTheme;
 };
 
 function formatUtc(iso: string): string {
@@ -30,7 +34,10 @@ export function StreamReceipt({
   generatedAt,
   note,
   hideToolbar = false,
+  theme,
 }: StreamReceiptProps) {
+  const [failedLogo, setFailedLogo] = useState<string>();
+  const logoUrl = theme?.logoUrl;
   const generated = generatedAt ?? new Date().toISOString();
   const networkLabel = network === "mainnet" ? "Stellar Mainnet" : "Stellar Testnet";
   const statusLabel = STATUS_LABELS[stream.status] ?? stream.status;
@@ -49,12 +56,28 @@ export function StreamReceipt({
       )}
 
       {/* ── Receipt document ── */}
-      <article aria-label="Payment stream receipt" className="receipt-doc">
+      <article
+        aria-label="Payment stream receipt"
+        className={theme ? `receipt-doc ${styles.themed}` : "receipt-doc"}
+        style={theme ? ({ "--receipt-accent": theme.accentColor } as CSSProperties) : undefined}
+      >
 
         {/* Header */}
         <header className="receipt-header">
           <div className="receipt-brand">
-            <span className="receipt-brand__wordmark">StreamPay</span>
+            {logoUrl && logoUrl !== failedLogo ? (
+              // eslint-disable-next-line @next/next/no-img-element -- load approved URLs directly without server-side fetching
+              <img
+                key={logoUrl}
+                src={logoUrl}
+                alt="Organization logo"
+                referrerPolicy="no-referrer"
+                className={styles.logo}
+                onError={() => setFailedLogo(logoUrl)}
+              />
+            ) : (
+              <span className="receipt-brand__wordmark">StreamPay</span>
+            )}
             <span className="receipt-brand__tagline">Payment Stream Receipt</span>
           </div>
           <div className="receipt-header__meta">
@@ -216,6 +239,16 @@ export function StreamReceipt({
             )}
           </dl>
         </section>
+
+        {theme?.message && (
+          <>
+            <div className="receipt-divider" />
+            <section className="receipt-section">
+              <h2 className="receipt-h2">Message from the organization</h2>
+              <p className={`receipt-note-text ${styles.message}`}>{theme.message}</p>
+            </section>
+          </>
+        )}
 
         {note && (
           <>

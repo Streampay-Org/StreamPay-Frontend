@@ -9,6 +9,10 @@ import { withRouteTimeout } from "@/src/middleware/timeout";
 import { OrgRecord, OrgMember, DEFAULT_STREAM_POLICY } from "@/app/lib/org-types";
 import { tryAuthenticateRequest } from "@/app/lib/auth";
 import { orgCreateStore, withIdempotency } from "@/app/lib/idempotency";
+import {
+  paginateByKeyset,
+  parseOrgPaginationParams,
+} from "@/app/lib/org-pagination";
 
 const orgCreateLocks = new Map<string, Promise<void>>();
 
@@ -19,8 +23,29 @@ function errorResponse(code: string, message: string, status: number) {
   );
 }
 
-async function handleOrgsGet(_request: Request) {
-  const orgs = Array.from(orgDb.orgs.values()).map((org) => ({
+function getRequestUrl(request: Request, fallbackPath: string): URL {
+  try {
+    return request.url ? new URL(request.url) : new URL(`http://localhost${fallbackPath}`);
+  } catch {
+    return new URL(`http://localhost${fallbackPath}`);
+  }
+}
+
+async function handleOrgsGet(request: Request) {
+  const url = getRequestUrl(request, "/api/orgs");
+  const parsed = parseOrgPaginationParams(url.searchParams);
+  if (!parsed.ok) {
+    return errorResponse(parsed.code, parsed.message, 422);
+  }
+
+  const allOrgs = Array.from(orgDb.orgs.values());
+  const { page, hasNext, nextCursor } = paginateByKeyset(
+    allOrgs,
+    (org) => ({ timestamp: org.createdAt, id: org.id }),
+    parsed.value,
+  );
+
+  const orgs = page.map((org) => ({
     id: org.id,
     name: org.name,
     memberCount: org.members.length,
@@ -31,7 +56,7 @@ async function handleOrgsGet(_request: Request) {
 
   return NextResponse.json({
     data: orgs,
-    meta: { total: orgs.length },
+    meta: { total: allOrgs.length, hasNext, nextCursor },
   });
 }
 

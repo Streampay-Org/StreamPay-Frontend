@@ -3,6 +3,44 @@
 `lib/sdk` exports a small TypeScript client for partners that need REST helpers
 and live stream updates without importing Next.js route internals.
 
+## Package
+
+`lib/sdk` is buildable and versioned as the `@streampay/sdk` package (currently
+`0.1.0`). Release history and the semantic-versioning policy live in
+[`lib/sdk/CHANGELOG.md`](../lib/sdk/CHANGELOG.md).
+
+### Build
+
+```sh
+npm run sdk:build
+```
+
+This compiles the SDK to ESM JavaScript plus `.d.ts` declarations in
+`lib/sdk/dist` (git-ignored, never committed). The `exports` map resolves:
+
+- `@streampay/sdk` → `dist/index.js` and `dist/index.d.ts`
+- `@streampay/sdk/types` → `dist/types.js` and `dist/types.d.ts`
+
+`lib/sdk/consumer-smoke.test.ts` builds the package into a temporary directory
+and verifies that both entries resolve for a consumer at runtime and at the
+type level.
+
+### Install and import
+
+Once the package is published to the registry:
+
+```sh
+npm install @streampay/sdk
+```
+
+```ts
+import { createStreamPayClient } from "@streampay/sdk";
+import { SdkErrorCode } from "@streampay/sdk/types";
+```
+
+Inside this repository, keep using the relative import shown below; it points
+at the same entry points.
+
 ## OpenAPI Contract
 
 The canonical, hand-edited API specification is [`openapi.json`](../openapi.json).

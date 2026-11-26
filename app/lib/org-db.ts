@@ -11,6 +11,7 @@ import {
   ApprovalStatus,
   DEFAULT_STREAM_POLICY,
 } from "./org-types";
+import type { ReceiptTheme } from "./receipt-theme";
 import { normaliseToken } from "./token-allowlist";
 
 // ─── Seeded orgs ─────────────────────────────────────────────────────────────
@@ -105,6 +106,7 @@ function cloneSeedOrg(org: OrgRecord): OrgRecord {
       canWithdraw: [...org.policy.canWithdraw],
     },
     tokenAllowlist: org.tokenAllowlist ? [...org.tokenAllowlist] : undefined,
+    receiptTheme: org.receiptTheme && { ...org.receiptTheme },
   };
 }
 
@@ -125,6 +127,19 @@ export const orgDb = {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+export function getOrgReceiptTheme(orgId: string): ReceiptTheme | undefined {
+  return orgDb.orgs.get(orgId)?.receiptTheme;
+}
+
+export function setOrgReceiptTheme(orgId: string, theme: ReceiptTheme | undefined): void {
+  const org = orgDb.orgs.get(orgId);
+  if (!org) return;
+  const updated: OrgRecord = { ...org, updatedAt: new Date().toISOString() };
+  if (theme) updated.receiptTheme = { ...theme };
+  else delete updated.receiptTheme;
+  orgDb.orgs.set(orgId, updated);
+}
 
 /** Returns the org that owns `streamId`, or undefined if individually owned. */
 export function getStreamOrg(streamId: string): OrgRecord | undefined {
@@ -165,21 +180,10 @@ export function getActiveApprovalsForStream(streamId: string): PendingApproval[]
 export function _resetOrgDbForTesting(): void {
   orgDb.orgs.clear();
   for (const org of seedOrgs) {
-    orgDb.orgs.set(org.id, {
-      ...org,
-      members: org.members.map((m) => ({ ...m })),
-      policy: {
-        ...org.policy,
-        canStart: [...org.policy.canStart],
-        canPause: [...org.policy.canPause],
-        canResume: [...org.policy.canResume],
-        canSettle: [...org.policy.canSettle],
-        canStop: [...org.policy.canStop],
-        canWithdraw: [...org.policy.canWithdraw],
-      },
-      tokenAllowlist: org.tokenAllowlist ? [...org.tokenAllowlist] : undefined,
-    });
     orgDb.orgs.set(org.id, cloneSeedOrg(org));
+      members: org.members.map((member) => ({ ...member })),
+      },
+    });
   }
   orgDb.streamOwnership.clear();
   orgDb.streamOwnership.set("stream-ada", "org-acme");

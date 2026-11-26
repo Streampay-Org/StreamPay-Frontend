@@ -50,3 +50,27 @@ pub fn require_withdraw_auth(
         Err(Error::Unauthorized)
     }
 }
+
+
+/// Authorizes a pause or resume action by `caller` against `stream_id`.
+///
+/// The call succeeds if `caller` is the stream sender or is present in the
+/// per-stream operator list. `caller.require_auth()` is invoked so the
+/// Soroban host enforces a valid transaction signature.
+///
+/// # Errors
+/// - [`Error::Unauthorized`] if `caller` is neither the sender nor an
+///   authorized operator for `stream_id`.
+pub fn require_pause_auth(
+    env: &Env,
+    stream_id: u64,
+    caller: &Address,
+    sender: &Address,
+) -> Result<(), Error> {
+    if caller == sender || storage::is_operator(env, stream_id, caller) {
+        caller.require_auth();
+        Ok(())
+    } else {
+        Err(Error::Unauthorized)
+    }
+}

@@ -1,4 +1,4 @@
-# Stage 1: Dependencies
+# Stage 1: Dependencies (all — used by builder)
 FROM node:20-alpine AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
@@ -12,7 +12,18 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-# Stage 3: API Runner (Default target)
+# Stage 3: Worker dependencies
+# Install production deps, then layer in only the TypeScript tooling the
+# worker needs to run ts-node.  This avoids shipping the full devDependencies
+# tree while still being able to execute the worker's TypeScript source.
+FROM node:20-alpine AS worker-deps
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+RUN npm install --no-save ts-node typescript
+
+# Stage 4: API Runner (Default target)
 FROM node:20-alpine AS api-runner
 WORKDIR /app
 
@@ -40,22 +51,32 @@ HEALTHCHECK --interval=30s --timeout=3s \
 
 CMD ["node", "server.js"]
 
-# Stage 4: Worker Runner
+# Stage 5: Worker Runner
+# Only the worker's source files are copied — no COPY . . and no rm -rf workaround.
 FROM node:20-alpine AS worker-runner
 WORKDIR /app
 
 ENV NODE_ENV production
+ENV WORKER_HEARTBEAT_FILE=/tmp/worker-heartbeat
 
 # Hardening: Run as non-root
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 streampay
 
-# Hardening: Only include necessary files for worker
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-RUN rm -rf .next app public
+# Production + ts-node/typescript only (no other devDependencies)
+COPY --from=worker-deps /app/node_modules ./node_modules
+
+# Only the files the worker actually needs
+COPY package.json tsconfig.json ./
+COPY scripts/run-from-realpath.mjs ./scripts/run-from-realpath.mjs
+COPY scripts/reconcile-streams.ts ./scripts/reconcile-streams.ts
+COPY scripts/reconciliation/ ./scripts/reconciliation/
 
 USER streampay
 
-# Worker command
+# Check that the worker has made progress within the last five minutes.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD node -e "const fs = require('node:fs'); const file = process.env.WORKER_HEARTBEAT_FILE || '/tmp/worker-heartbeat'; try { process.exit(Date.now() - fs.statSync(file).mtimeMs <= 300000 ? 0 : 1); } catch { process.exit(1); }"
+
+# Worker command — behaviour unchanged
 CMD ["node", "scripts/run-from-realpath.mjs", "ts-node", "scripts/reconcile-streams.ts"]
