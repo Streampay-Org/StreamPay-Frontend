@@ -12,9 +12,152 @@ export interface RateLimitStore {
   check(identifier: string, limit: number, windowMs: number): Promise<RateLimitResult>;
 }
 
+/** Algorithm selector — defaults to token-bucket (unchanged behaviour). */
+export type RateLimitAlgorithm = "token-bucket" | "sliding-window";
+
+export function getRateLimitAlgorithm(): RateLimitAlgorithm {
+  const env = process.env.RATE_LIMIT_ALGORITHM;
+  if (env === "sliding-window") return "sliding-window";
+  return "token-bucket";
+}
+
 interface Bucket {
   tokens: number;
   lastRefill: number;
+}
+
+// ---------------------------------------------------------------------------
+// Sliding-window counter
+//
+// Uses the weighted two-window approach: the current window and the previous
+// window are tracked per identifier. The weighted count is:
+//
+//   weighted = prevCount * (1 - elapsedInCurrentWindow / windowMs) + currentCount
+//
+// This gives a smooth decay at the boundary so no more than `limit` requests
+// are allowed in any rolling windowMs — including across a boundary.
+// ---------------------------------------------------------------------------
+
+interface SlidingWindowBucket {
+  /** Count in the current window. */
+  currentCount: number;
+  /** Count in the previous window. */
+  prevCount: number;
+  /** Start timestamp (ms) of the current window. */
+  windowStart: number;
+}
+
+export class SlidingWindowRateLimitStore implements RateLimitStore {
+  private buckets = new Map<string, SlidingWindowBucket>();
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
+  private readonly maxBuckets: number;
+
+  constructor(options?: { maxBuckets?: number }) {
+    this.maxBuckets = options?.maxBuckets ?? 50_000;
+    if (process.env.NODE_ENV !== "test" && typeof setInterval !== "undefined") {
+      this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
+    }
+  }
+
+  getBucketCount(): number {
+    return this.buckets.size;
+  }
+
+  async check(identifier: string, limit: number, windowMs: number): Promise<RateLimitResult> {
+    const now = Date.now();
+    let bucket = this.buckets.get(identifier);
+
+    if (!bucket) {
+      if (this.buckets.size >= this.maxBuckets) {
+        const oldestKey = this.buckets.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.buckets.delete(oldestKey);
+          recordEviction();
+        }
+      }
+      // First request — start the window
+      bucket = {
+        currentCount: 1,
+        prevCount: 0,
+        windowStart: now,
+      };
+      this.buckets.set(identifier, bucket);
+      return {
+        allowed: true,
+        remaining: limit - 1,
+        resetAt: Math.floor((now + windowMs) / 1000),
+      };
+    }
+
+    // Move to LRU position
+    this.buckets.delete(identifier);
+    this.buckets.set(identifier, bucket);
+
+    // Check if we've moved into a new window
+    const elapsed = now - bucket.windowStart;
+    if (elapsed >= windowMs) {
+      // We've passed the current window — shift it to prev
+      // If more than 2 windows have passed, prev is effectively zero
+      if (elapsed >= 2 * windowMs) {
+        bucket.prevCount = 0;
+        bucket.currentCount = 0;
+      } else {
+        bucket.prevCount = bucket.currentCount;
+        bucket.currentCount = 0;
+      }
+      bucket.windowStart = now - (elapsed % windowMs);
+    }
+
+    // Compute weighted count
+    const elapsedInCurrent = now - bucket.windowStart;
+    const weightPrev = Math.max(0, 1 - elapsedInCurrent / windowMs);
+    const weightedCount = bucket.prevCount * weightPrev + bucket.currentCount;
+
+    if (weightedCount < limit) {
+      bucket.currentCount += 1;
+      const remaining = Math.max(0, Math.floor(limit - weightedCount - 1));
+      // resetAt = when the oldest request in the current window expires
+      const resetAtMs = bucket.windowStart + windowMs;
+      return {
+        allowed: true,
+        remaining,
+        resetAt: Math.floor(resetAtMs / 1000),
+      };
+    }
+
+    // Rate limited — compute retryAfter
+    const retryAfterMs = bucket.windowStart + windowMs - now;
+    const retryAfter = Math.max(1, Math.ceil(retryAfterMs / 1000));
+    return {
+      allowed: false,
+      remaining: 0,
+      resetAt: Math.floor((bucket.windowStart + windowMs) / 1000),
+      retryAfter,
+    };
+  }
+
+  cleanup(): void {
+    const now = Date.now();
+    // Keep buckets that had activity in the last 2 * windowMs (default 120s)
+    const windowSize = 120_000;
+    for (const [key, bucket] of this.buckets.entries()) {
+      if (now - bucket.windowStart > windowSize) {
+        this.buckets.delete(key);
+      }
+    }
+  }
+
+  stopCleanup(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+  }
+
+  destroy(): void {
+    this.stopCleanup();
+    this.buckets.clear();
+  }
 }
 
 export class InMemoryRateLimitStore implements RateLimitStore {
@@ -151,7 +294,12 @@ export function getRateLimitStore(): RateLimitStore {
 
       globalStore = new RedisRateLimitStore({ redisUrl, redisToken, failMode });
     } else {
-      globalStore = new InMemoryRateLimitStore();
+      const algorithm = getRateLimitAlgorithm();
+      if (algorithm === "sliding-window") {
+        globalStore = new SlidingWindowRateLimitStore();
+      } else {
+        globalStore = new InMemoryRateLimitStore();
+      }
       if (process.env.NODE_ENV === "test") {
         // Disable periodic cleanup during tests to avoid timeouts
         disableCleanupForTests();
