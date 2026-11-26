@@ -106,3 +106,67 @@ describe("Stellar address helpers", () => {
     );
   });
 });
+
+describe("base32, CRC-16 and public key validation", () => {
+  it("crc16Xmodem matches the standard check value", () => {
+    const bytes = new TextEncoder().encode("123456789");
+    expect(crc16Xmodem(bytes)).toBe(0x31c3);
+  });
+
+  it("base32Encode and base32Decode round-trip arbitrary byte arrays", () => {
+    const samples = [
+      Uint8Array.from([0, 1, 2, 3, 4]),
+      Uint8Array.from([255, 254, 253, 252, 251, 250, 249, 248, 247, 246]),
+      Uint8Array.from({ length: 35 }, (_, i) => (i * 37 + 11) % 256),
+    ];
+    for (const bytes of samples) {
+      const decoded = base32Decode(base32Encode(bytes));
+      expect(decoded).not.toBeNull();
+      expect(Array.from(decoded!)).toEqual(Array.from(bytes));
+    }
+  });
+
+  it("base32Decode returns null for an invalid character", () => {
+    expect(base32Decode(`${ACCOUNT.slice(0, 10)}0${ACCOUNT.slice(11)}`)).toBeNull();
+  });
+
+  it("encodeStellarPublicKey and decodeStellarPublicKey round-trip 32 bytes", () => {
+    const original = decodeStellarPublicKey(ACCOUNT);
+    expect(original).not.toBeNull();
+    expect(original!.length).toBe(32);
+
+    const encoded = encodeStellarPublicKey(original!);
+    expect(encoded).toBe(ACCOUNT);
+
+    const custom = Uint8Array.from({ length: 32 }, (_, i) => (i * 7 + 1) % 256);
+    const roundTrip = decodeStellarPublicKey(encodeStellarPublicKey(custom));
+    expect(Array.from(roundTrip!)).toEqual(Array.from(custom));
+  });
+
+  it("accepts a known-valid public key", () => {
+    expect(isValidStellarPublicKey(ACCOUNT)).toBe(true);
+    expect(decodeStellarPublicKey(ACCOUNT)).not.toBeNull();
+  });
+
+  it.each([
+    ["a flipped checksum character", `${ACCOUNT.slice(0, -1)}A`],
+    ["a 55-character key", ACCOUNT.slice(0, -1)],
+    ["a 57-character key", `${ACCOUNT}A`],
+    ["lowercase input", ACCOUNT.toLowerCase()],
+    ["invalid base32 character 0", `${ACCOUNT.slice(0, 10)}0${ACCOUNT.slice(11)}`],
+    ["invalid base32 character 1", `${ACCOUNT.slice(0, 10)}1${ACCOUNT.slice(11)}`],
+    ["invalid base32 character 8", `${ACCOUNT.slice(0, 10)}8${ACCOUNT.slice(11)}`],
+    ["invalid base32 character 9", `${ACCOUNT.slice(0, 10)}9${ACCOUNT.slice(11)}`],
+    ["an S prefix", `S${ACCOUNT.slice(1)}`],
+    ["an M prefix", `M${ACCOUNT.slice(1)}`],
+    ["an empty string", ""],
+  ])("isValidStellarPublicKey rejects %s", (_description, value) => {
+    expect(isValidStellarPublicKey(value)).toBe(false);
+    expect(decodeStellarPublicKey(value)).toBeNull();
+  });
+
+  it("encodeStellarPublicKey throws for 31- and 33-byte input", () => {
+    expect(() => encodeStellarPublicKey(new Uint8Array(31))).toThrow();
+    expect(() => encodeStellarPublicKey(new Uint8Array(33))).toThrow();
+  });
+});
