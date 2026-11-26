@@ -14,6 +14,20 @@ type PushAvailability =
   | "denied"
   | "enabled";
 
+const SUBSCRIPTION_URL = "/api/notifications/push/subscribe";
+
+function readCsrfToken(): string | null {
+  if (typeof document === "undefined") return null;
+
+  for (const cookieName of ["__Host-csrf-token", "csrf-token"]) {
+    const match = document.cookie.match(
+      new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`),
+    );
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
 function detectAvailability(): PushAvailability {
   if (typeof window === "undefined") return "checking";
   if (!window.isSecureContext) return "unsupported";
@@ -23,6 +37,23 @@ function detectAvailability(): PushAvailability {
   if (Notification.permission === "granted") return "enabled";
   if (Notification.permission === "denied") return "denied";
   return "supported";
+}
+
+function decodeVapidPublicKey(publicKey: string): ArrayBuffer {
+  const base64 = publicKey.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+  const decoded = window.atob(padded);
+  const bytes = new Uint8Array(decoded.length);
+  for (let index = 0; index < decoded.length; index += 1) {
+    bytes[index] = decoded.charCodeAt(index);
+  }
+  return bytes.buffer;
+}
+
+async function requireSuccess(response: Response, action: string): Promise<void> {
+  if (!response.ok) {
+    throw new Error(`${action} failed (HTTP ${response.status}).`);
+  }
 }
 
 export function PushOptIn({
@@ -91,6 +122,45 @@ export function PushOptIn({
       const permission = await Notification.requestPermission();
 
       if (permission === "granted") {
+        const keyResponse = await fetch(SUBSCRIPTION_URL, {
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
+        await requireSuccess(keyResponse, "Push configuration request");
+        const keyBody = (await keyResponse.json()) as {
+          data?: { publicKey?: unknown };
+        };
+        if (typeof keyBody.data?.publicKey !== "string") {
+          throw new Error("The server returned an invalid VAPID public key.");
+        }
+
+        const registration = await navigator.serviceWorker.register("/sw.js");
+        let subscription = await registration.pushManager.getSubscription();
+        let createdSubscription = false;
+        if (!subscription) {
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: decodeVapidPublicKey(keyBody.data.publicKey),
+          });
+          createdSubscription = true;
+        }
+
+        const csrfToken = readCsrfToken();
+        const subscribeResponse = await fetch(SUBSCRIPTION_URL, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            ...(csrfToken ? { "x-csrf-token": csrfToken } : {}),
+          },
+          body: JSON.stringify(subscription.toJSON()),
+        });
+        if (!subscribeResponse.ok) {
+          if (createdSubscription) await subscription.unsubscribe();
+          await requireSuccess(subscribeResponse, "Push subscription");
+        }
+
         setAvailability("enabled");
         setMessage("Push notifications enabled for this browser.");
         return;
@@ -104,6 +174,48 @@ export function PushOptIn({
       }
 
       setMessage("Push setup was skipped. You can keep email fallback on for critical alerts.");
+    } catch (error) {
+      setAvailability("supported");
+      onEmailFallbackChange(true);
+      const reason = error instanceof Error ? error.message : "The browser or server rejected setup.";
+      setMessage(`Push setup failed: ${reason} Email fallback has been enabled.`);
+    } finally {
+      setIsRequesting(false);
+    }
+  };
+
+  const turnOffPush = async () => {
+    setIsRequesting(true);
+    setMessage(null);
+
+    try {
+      const registration = await navigator.serviceWorker.getRegistration("/");
+      const subscription = registration
+        ? await registration.pushManager.getSubscription()
+        : null;
+
+      if (subscription) {
+        const csrfToken = readCsrfToken();
+        const response = await fetch(SUBSCRIPTION_URL, {
+          method: "DELETE",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            ...(csrfToken ? { "x-csrf-token": csrfToken } : {}),
+          },
+          body: JSON.stringify({ endpoint: subscription.endpoint }),
+        });
+        await requireSuccess(response, "Push unsubscribe request");
+        await subscription.unsubscribe();
+      }
+
+      setAvailability("supported");
+      setMessage("Push notifications turned off for this browser.");
+    } catch (error) {
+      onEmailFallbackChange(true);
+      const reason = error instanceof Error ? error.message : "The browser or server rejected the request.";
+      setMessage(`Could not turn off push notifications: ${reason} Email fallback has been enabled.`);
     } finally {
       setIsRequesting(false);
     }
@@ -136,6 +248,17 @@ export function PushOptIn({
             type="button"
           >
             {isRequesting ? "Requesting permission..." : details.cta}
+          </button>
+        )}
+
+        {availability === "enabled" && (
+          <button
+            className="button button--secondary"
+            disabled={isRequesting}
+            onClick={turnOffPush}
+            type="button"
+          >
+            {isRequesting ? "Turning off push..." : "Turn off push notifications"}
           </button>
         )}
 
