@@ -5,7 +5,7 @@ members = [
 ]
 
 [workspace.dependencies]
-soroban-sdk = "23"
+soroban-sdk = "29"
 # Criterion is a dev-only dep used only by the benchmark binary.
 # We pin a minor version so CI results are reproducible; bump
 # deliberately when upgrading.
