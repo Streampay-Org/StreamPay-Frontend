@@ -454,7 +454,7 @@ pub fn clear_accumulated_fees(env: &Env, stream_id: u64) {
 mod tests {
     use super::*;
     use crate::Contract;
-    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::{Address as _, Ledger as _};
     use soroban_sdk::{Address, Env};
 
     // ── Helpers ───────────────────────────────────────────────────────────────

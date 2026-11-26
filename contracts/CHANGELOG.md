@@ -69,8 +69,36 @@ and must never be reused — see the module rustdoc for details.
   and emits `split_pa` / `split_re` events. Both require sender authorisation,
   honour the contract-wide pause flag, and reject invalid transitions with
   `InvalidState`.
+- **Optional bounded stream memo (#1983).** New `create_stream_with_memo`
+  entrypoint stores an optional `Bytes` memo of at most 64 bytes
+  (`storage::MAX_MEMO_BYTES`) in a dedicated persistent `DataKey::StreamMemo(id)`
+  entry, so existing `Stream` records stay decodable and `create_stream` is
+  unchanged. Oversized memos are rejected with the new
+  `Error::MemoTooLong = 30` before any token transfer, read back through the new
+  `get_stream_memo(stream_id) -> Option<Bytes>` view, and are announced in a
+  `("stream", "created_memo")` event so indexers can correlate a stream with an
+  off-chain reference such as an invoice id.
+- **Admin-configurable minimum duration and amount (#1982).** New
+  `set_min_stream_params(admin, min_duration, min_amount)` /
+  `get_min_stream_params()` configure instance-storage minima (`0` disables
+  either check) and `limits::check_min_stream_params` enforces them in
+  `create_stream`, `create_stream_with_cliff`, `create_stream_with_milestones`,
+  `create_draft_stream` and `create_split_stream` (plus `create_stream_for_org`,
+  which delegates to `create_stream`) before any token transfer.
+  Violations return the new `Error::InvalidDuration = 28` and
+  `Error::AmountTooSmall = 29`.
 
 ### Changed
+- **`create_split_stream` now honours sender limits and cooloff (#1967).** Split
+  streams previously bypassed the per-sender active-stream limit and the
+  creation cooloff. `create_split_stream` now calls `limits::check_sender_limit`
+  (error `StreamLimitExceeded`), `cooloff::check_and_update_cooloff` (error
+  `CooloffActive`) and `limits::check_min_stream_params`, increments the shared
+  per-sender counter on creation, and decrements it when the split settles in
+  `withdraw_split` or is `Cancelled` by `cancel_split_stream`. A split stream
+  therefore occupies exactly one sender slot, and the global token block list
+  (`TokenNotAllowed`) still applies. Org-scoped allowlists remain out of scope
+  because the entrypoint has no `org` argument.
 - **Protocol fee on `withdraw_split` (#1966).** `SplitStream` now snapshots
   `default_fee_bps` into a new `fee_bps` field at creation time (validated by
   `fees::validate_fee_bps`). Each `withdraw_split` call applies floor-rounded

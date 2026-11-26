@@ -6,7 +6,7 @@
 //! Failed calls (returning Err) emit no events.
 //! `settled` is emitted in addition to `withdrawn` when a withdrawal fully drains the stream.
 
-use soroban_sdk::{contractevent, symbol_short, Address, BytesN, Env, Symbol};
+use soroban_sdk::{contractevent, symbol_short, Address, Bytes, BytesN, Env, Symbol};
 
 /// Emitted when a new stream is created (topic: `"stream"`, sub-topic: `"created"`).
 ///
@@ -195,11 +195,27 @@ pub struct RecipientTransferCancelled {
     pub new_recipient: Address,
     pub timestamp: u64,
 }
-
+/// Emitted by `create_stream_with_memo` (topic: `"stream"`, sub-topic:
+/// `"created_memo"`).
+///
+/// Carries the optional on-chain memo alongside the stream id so indexers can
+/// correlate a stream with an off-chain reference such as an invoice id.
+/// [`StreamCreated`] is left untouched for ABI compatibility.
+#[contractevent(topics = ["stream", "created_memo"], data_format = "vec")]
+pub struct StreamCreatedWithMemo {
+    pub stream_id: u64,
+    pub memo: Bytes,
+    pub timestamp: u64,
 }
 
-}
-
+/// Publishes a [`StreamCreatedWithMemo`] event.
+pub fn created_with_memo(env: &Env, stream_id: u64, memo: &Bytes, timestamp: u64) {
+    StreamCreatedWithMemo {
+        stream_id,
+        memo: memo.clone(),
+        timestamp,
+    }
+    .publish(env);
 }
 
 pub fn created(

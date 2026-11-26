@@ -48,7 +48,7 @@ pub use multi::{RecipientAllocation, SplitStream};
 pub use recurring::RecurringStream;
 pub use snapshot_diff::{SnapshotDiff, StreamSnapshot};
 use soroban_sdk::contracttype;
-use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env};
+use soroban_sdk::{contract, contractimpl, token, Address, Bytes, BytesN, Env};
 pub(crate) use storage::DataKey;
 pub use storage::{Milestone, ReleaseCurve, Stream, StreamStatus, MAX_MILESTONES, MAX_OPERATORS};
 pub use views::{RecurringStreamPage, SplitStreamPage};
@@ -696,6 +696,45 @@ impl Contract {
         limits::remaining_sender_capacity(&env, &sender)
     }
 
+    /// Sets the minimum stream duration (seconds) and minimum `total_amount`
+    /// that new streams must satisfy.
+    ///
+    /// A value of `0` disables the corresponding check. Streams that fall
+    /// below either minimum are rejected before any token transfer:
+    /// [`Error::InvalidDuration`] for `duration < min_duration` and
+    /// [`Error::AmountTooSmall`] for `total_amount < min_amount`.
+    ///
+    /// @param `admin` — Must match the admin set at initialisation.
+    /// @param `min_duration` — Minimum stream duration in seconds (`0` = disabled).
+    /// @param `min_amount` — Minimum stream `total_amount` (`0` = disabled).
+    ///
+    /// @custom:error [`Error::Unauthorized`] if `admin` is not the initialised admin.
+    ///
+    /// @custom:auth Requires authorisation from `admin`.
+    pub fn set_min_stream_params(
+        env: Env,
+        admin: Address,
+        min_duration: u64,
+        min_amount: i128,
+    ) -> Result<(), Error> {
+        require_admin(&env, &admin)?;
+        limits::set_min_stream_params(&env, min_duration, min_amount);
+        Ok(())
+    }
+
+    /// Returns the configured minimum stream duration and minimum amount.
+    ///
+    /// @return A `(min_duration, min_amount)` tuple; `0` means the
+    /// corresponding check is disabled.
+    ///
+    /// @custom:error This entrypoint is read-only and never returns an error.
+    pub fn get_min_stream_params(env: Env) -> (u64, i128) {
+        (
+            limits::get_min_duration(&env),
+            limits::get_min_amount(&env),
+        )
+    }
+
     /// Sets the per-user cooloff duration (in seconds) between stream creations.
     ///
     /// After creating a stream, the sender must wait `duration` seconds before
@@ -1105,6 +1144,7 @@ impl Contract {
         let duration = end_time
             .checked_sub(start_time)
             .ok_or(Error::InvalidTimeRange)?;
+        limits::check_min_stream_params(&env, total_amount, duration)?;
         let id = storage::next_stream_id(&env);
         let contract_address = env.current_contract_address();
 
@@ -1130,6 +1170,7 @@ impl Contract {
         };
 
         storage::set_stream(&env, id, &stream);
+        limits::increment_sender_stream_count(&env, &stream.sender);
         // Only an explicit non-zero fee is persisted as a per-stream override.
         // A zero fee means "no per-stream fee", so the stream follows the
         // per-token override and then the global default.
@@ -1148,6 +1189,58 @@ impl Contract {
             cliff_time,
             now,
         );
+
+        Ok(id)
+    }
+
+    /// Creates a funded stream that also stores an optional `memo`.
+    ///
+    /// Behaves exactly like [`Contract::create_stream`] (i.e.
+    /// [`Contract::create_stream_with_cliff`] with `cliff_time = 0`), with the
+    /// addition that `memo` is persisted for the new stream and emitted in a
+    /// [`events::StreamCreatedWithMemo`] event.
+    ///
+    /// The memo is capped at [`storage::MAX_MEMO_BYTES`] bytes and is rejected
+    /// before any token transfer, so a rejected memo never moves funds. An
+    /// empty memo is allowed and reads back as an empty value.
+    ///
+    /// @param `memo` — Arbitrary bytes (e.g. an invoice id) of at most 64 bytes.
+    ///
+    /// @custom:error Every error documented on [`Contract::create_stream`].
+    /// @custom:error [`Error::MemoTooLong`] if `memo` is longer than 64 bytes.
+    ///
+    /// @custom:auth Requires authorisation from `sender`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_stream_with_memo(
+        env: Env,
+        sender: Address,
+        recipient: Address,
+        token: Address,
+        total_amount: i128,
+        start_time: u64,
+        end_time: u64,
+        fee_bps: u32,
+        memo: Bytes,
+    ) -> Result<u64, Error> {
+        if memo.len() > storage::MAX_MEMO_BYTES {
+            return Err(Error::MemoTooLong);
+        }
+
+        let timestamp = env.ledger().timestamp();
+        let id = Self::create_stream_with_cliff(
+            env.clone(),
+            sender,
+            recipient,
+            token,
+            total_amount,
+            start_time,
+            end_time,
+            fee_bps,
+            0,
+        )?;
+
+        storage::set_stream_memo(&env, id, &memo);
+        events::created_with_memo(&env, id, &memo, timestamp);
 
         Ok(id)
     }
@@ -1212,6 +1305,7 @@ impl Contract {
         let duration = end_time
             .checked_sub(start_time)
             .ok_or(Error::InvalidTimeRange)?;
+        limits::check_min_stream_params(&env, total_amount, duration)?;
         let id = storage::next_stream_id(&env);
         let contract_address = env.current_contract_address();
 
@@ -1232,6 +1326,7 @@ impl Contract {
             paused_at: 0,
             total_paused_duration: 0,
             fee_bps,
+            cliff_time: 0,
             curve: ReleaseCurve::Milestones(milestones),
         };
 
@@ -1248,6 +1343,7 @@ impl Contract {
             stream.total_amount,
             fee_bps,
             duration,
+            0,
             now,
         );
 
@@ -1301,6 +1397,8 @@ impl Contract {
         if duration == 0 {
             return Err(Error::InvalidTimeRange);
         }
+
+        limits::check_min_stream_params(&env, total_amount, duration)?;
 
         let now = env.ledger().timestamp();
         let id = storage::next_stream_id(&env);
@@ -1401,6 +1499,19 @@ impl Contract {
     /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
     pub fn get_stream(env: Env, stream_id: u64) -> Result<Stream, Error> {
         get_existing_stream(&env, stream_id)
+    }
+
+    /// Returns the memo stored for `stream_id`.
+    ///
+    /// @param `stream_id` — Numeric ID of the stream to query.
+    ///
+    /// @return `Some(memo)` when the stream was created via
+    /// [`Contract::create_stream_with_memo`], otherwise `None`.
+    ///
+    /// @custom:error [`Error::NotFound`] if `stream_id` does not exist.
+    pub fn get_stream_memo(env: Env, stream_id: u64) -> Result<Option<Bytes>, Error> {
+        get_existing_stream(&env, stream_id)?;
+        Ok(storage::get_stream_memo(&env, stream_id))
     }
 
     /// Returns the token amount currently accrued and available for withdrawal.
@@ -2711,6 +2822,18 @@ impl Contract {
     /// @custom:error [`Error::TokenNotAllowed`] if the token has been blocked.
     /// @custom:error [`Error::InvalidTimeRange`] if `end_time <= start_time` or
     /// @custom:error `start_time < now`.
+    /// @custom:error [`Error::StreamLimitExceeded`] if `sender` already has
+    /// @custom:error [`Contract::max_streams_per_sender`] non-terminal streams.
+    /// @custom:error [`Error::CooloffActive`] if `sender` is inside the configured
+    /// @custom:error creation cooloff window.
+    /// @custom:error [`Error::InvalidDuration`] if the stream duration is below the
+    /// @custom:error admin-configured minimum ([`Contract::set_min_stream_params`]).
+    /// @custom:error [`Error::AmountTooSmall`] if `total_amount` is below the
+    /// @custom:error admin-configured minimum.
+    ///
+    /// The new split stream counts against the sender's per-stream limit until
+    /// it settles or is cancelled, so split and single-recipient streams share
+    /// the same counter.
     ///
     /// @custom:auth Requires authorisation from `sender`.
     #[allow(clippy::too_many_arguments)]

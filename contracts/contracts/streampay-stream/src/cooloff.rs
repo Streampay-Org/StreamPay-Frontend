@@ -193,6 +193,7 @@ pub fn check_and_update_cooloff(env: &Env, sender: &Address) -> Result<(), Error
 mod tests {
     use super::*;
     use crate::Contract;
+    use soroban_sdk::testutils::storage::{Instance as _, Persistent as _};
     use soroban_sdk::testutils::{Address as _, Ledger as _};
 
     struct TestData {

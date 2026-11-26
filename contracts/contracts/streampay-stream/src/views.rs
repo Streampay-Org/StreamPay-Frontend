@@ -464,14 +464,14 @@ pub fn list_recurring_by_sender(
 ) -> RecurringStreamPage {
     let effective_limit = limit.min(MAX_PAGE_SIZE);
     let start_id = start_after.unwrap_or(0).saturating_add(1);
-    let max_id = recurring::peek_next_recurring_id(env);
+    let max_id = recurring::next_recurring_id(env);
 
     let mut streams = Vec::new(env);
     let mut current_id = start_id;
     let mut collected = 0u64;
 
     while current_id < max_id && collected < effective_limit {
-        if let Some(stream) = recurring::peek_recurring_stream(env, current_id) {
+        if let Ok(stream) = recurring::get(env.clone(), current_id) {
             if stream.sender == *sender {
                 streams.push_back(stream);
                 collected = collected.saturating_add(1);

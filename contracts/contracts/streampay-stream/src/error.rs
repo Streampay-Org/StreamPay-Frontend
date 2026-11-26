@@ -75,10 +75,14 @@ pub enum Error {
     DormancyDisabled = 25,
     /// 26: No pending recipient transfer proposal exists for the stream.
     NoPendingTransfer = 26,
-    /// 24: No pending recipient transfer proposal exists for the stream.
-    NoPendingTransfer = 24,
-    /// 24: Milestone release schedule is empty, exceeds the maximum length,
+    /// 27: Milestone release schedule is empty, exceeds the maximum length,
     ///     has unsorted or out-of-window timestamps, or invalid cumulative
     ///     basis points.
-    InvalidSchedule = 24,
+    InvalidSchedule = 27,
+    /// 28: Stream duration is below the admin-configured minimum.
+    InvalidDuration = 28,
+    /// 29: Stream `total_amount` is below the admin-configured minimum.
+    AmountTooSmall = 29,
+    /// 30: Stream memo exceeds the maximum length of 64 bytes.
+    MemoTooLong = 30,
 }

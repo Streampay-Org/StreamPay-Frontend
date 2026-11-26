@@ -34,6 +34,8 @@ enum LimitDataKey {
     MaxStreamsPerSender,
     SenderStreamCount(Address),
     MaxStreamAmount(Address),
+    MinDuration,
+    MinAmount,
 }
 
 fn ttl_target(env: &Env, extra: u32) -> u32 {
@@ -224,6 +226,54 @@ pub fn check_max_stream_amount(
         if total_amount > cap {
             return Err(Error::AmountTooLarge);
         }
+    }
+    Ok(())
+}
+
+/// Returns the admin-configured minimum stream duration in seconds.
+///
+/// `0` means the check is disabled (default).
+pub fn get_min_duration(env: &Env) -> u64 {
+    let stored: Option<u64> = env.storage().instance().get(&LimitDataKey::MinDuration);
+    if stored.is_some() {
+        extend_instance_ttl(env);
+    }
+    stored.unwrap_or(0)
+}
+
+/// Returns the admin-configured minimum stream `total_amount`.
+///
+/// `0` means the check is disabled (default).
+pub fn get_min_amount(env: &Env) -> i128 {
+    let stored: Option<i128> = env.storage().instance().get(&LimitDataKey::MinAmount);
+    if stored.is_some() {
+        extend_instance_ttl(env);
+    }
+    stored.unwrap_or(0)
+}
+
+/// Persists the minimum stream duration and amount, extending the instance TTL.
+pub fn set_min_stream_params(env: &Env, min_duration: u64, min_amount: i128) {
+    env.storage()
+        .instance()
+        .set(&LimitDataKey::MinDuration, &min_duration);
+    env.storage()
+        .instance()
+        .set(&LimitDataKey::MinAmount, &min_amount);
+    extend_instance_ttl(env);
+}
+
+/// Verifies a stream's `amount` and `duration` against the configured minima.
+///
+/// Returns [`Error::InvalidDuration`] when `duration < min_duration` and
+/// [`Error::AmountTooSmall`] when `amount < min_amount`. Both checks are
+/// skipped while their configured minimum is `0`.
+pub fn check_min_stream_params(env: &Env, amount: i128, duration: u64) -> Result<(), Error> {
+    if duration < get_min_duration(env) {
+        return Err(Error::InvalidDuration);
+    }
+    if amount < get_min_amount(env) {
+        return Err(Error::AmountTooSmall);
     }
     Ok(())
 }

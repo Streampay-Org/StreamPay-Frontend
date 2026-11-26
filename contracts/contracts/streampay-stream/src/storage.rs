@@ -15,7 +15,7 @@
 //! plus a generous recovery buffer; keep them in sync with the
 //! operational runbook.
 
-use soroban_sdk::{contracttype, Address, Env, Vec};
+use soroban_sdk::{contracttype, Address, Bytes, Env, Vec};
 
 /// Lifecycle status of a [`Stream`] stored on-chain.
 ///
@@ -43,6 +43,9 @@ pub const MAX_MILESTONES: u32 = 32;
 
 /// Maximum number of pause/resume operators allowed per stream.
 pub const MAX_OPERATORS: u32 = 16;
+
+/// Maximum length of a stream memo in bytes.
+pub const MAX_MEMO_BYTES: u32 = 64;
 
 /// A single stepped release checkpoint in a milestone schedule.
 ///
@@ -138,6 +141,11 @@ pub(crate) enum DataKey {
     DormancyGrace,
     /// Per-stream timestamp of the most recent recipient withdrawal (persistent storage).
     LastWithdrawTime(u64),
+    /// Optional per-stream memo (persistent storage).
+    ///
+    /// Kept in a separate entry rather than on [`Stream`] so records written
+    /// before the memo feature remain decodable.
+    StreamMemo(u64),
 }
 
 /// Threshold and absolute target values are expressed in ledger sequences.
@@ -704,14 +712,25 @@ pub fn set_last_withdraw_time(env: &Env, stream_id: u64, timestamp: u64) {
     extend_persistent_ttl(env, &key);
 }
 
+/// Stores an optional memo for `stream_id`.
+///
+/// The memo lives in its own persistent entry so the [`Stream`] layout is
+/// unchanged and pre-existing records stay decodable.
+pub fn set_stream_memo(env: &Env, stream_id: u64, memo: &Bytes) {
+    let key = DataKey::StreamMemo(stream_id);
+    env.storage().persistent().set(&key, memo);
+    extend_persistent_ttl(env, &key);
 }
 
-
-}
-
+/// Returns the memo stored for `stream_id`, or `None` when the stream has no
+/// memo. Extends the entry's TTL on read.
+pub fn get_stream_memo(env: &Env, stream_id: u64) -> Option<Bytes> {
+    let key = DataKey::StreamMemo(stream_id);
+    let stored: Option<Bytes> = env.storage().persistent().get(&key);
+    if stored.is_some() {
+        extend_persistent_ttl(env, &key);
     }
-}
-
+    stored
 }
 
 #[cfg(test)]
