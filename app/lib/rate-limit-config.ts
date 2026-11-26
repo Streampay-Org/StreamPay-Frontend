@@ -62,6 +62,7 @@ export const ROUTE_LIMITS: Record<string, LimitType> = {
   "POST:/api/streams/*/resume": "write",
   "POST:/api/streams/*/settle": "write",
   "POST:/api/streams/*/withdraw": "write",
+  "POST:/api/streams/*/amend": "write",
   "POST:/api/streams/*/webhooks/test": "write",
   "POST:/api/exports": "export",
   "GET:/api/exports": "export",

@@ -131,6 +131,7 @@ export function createIdempotencyStore(namespace: string): IdempotencyStore {
 
 // Default route-scoped stores exported for callers to import.
 export const orgCreateStore = createNamespacedStore("orgs.create");
+export const amendStore = createNamespacedStore("amend");
 export const settleStore = createIdempotencyStore("settle");
 export const withdrawStore = createIdempotencyStore("withdraw");
 

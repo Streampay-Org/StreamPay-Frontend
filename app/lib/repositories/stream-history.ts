@@ -20,7 +20,8 @@ export type StreamHistoryEventType =
   | "stopped"
   | "withdrawn"
   | "settled"
-  | "cancelled";
+  | "cancelled"
+  | "amended";
 
 /** A single immutable lifecycle event entry. */
 export interface StreamHistoryEntry {

@@ -83,6 +83,7 @@ All API endpoints are rate limited:
 | POST | `/api/streams/{id}/resume` | Write |
 | POST | `/api/streams/{id}/settle` | Write |
 | POST | `/api/streams/{id}/withdraw` | Write |
+| POST | `/api/streams/{id}/amend` | Write |
 | POST | `/api/streams/{id}/webhooks/test` | Write |
 | GET | `/api/v2/streams` and `/api/v2/streams/{id}[/*]` | Read |
 | POST | `/api/v2/streams[/*]` | Write |
